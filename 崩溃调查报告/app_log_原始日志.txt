@@ -1,0 +1,419 @@
+ï»¿
+=== SESSION 2026-08-09 22:42:06 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-09 22:42:37 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-09 22:43:02 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-09 22:43:34 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-09 22:44:01 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-09 22:44:36 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-09 22:46:10 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-09 23:40:26 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-09 23:49:41 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-09 23:50:56 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-09 23:54:06 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:01:59 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:03:23 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:12:25 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:25:16 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:26:55 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:28:37 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:29:32 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:32:06 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:34:23 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:39:31 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:54:34 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 00:57:24 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 01:01:36 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 01:38:29 ===
+[LOG] redirectStdioToFile OK
+[FATAL] UnhandledExceptionFilter code=0xC0000005 addr=00007FF7194F8E20
+
+=== SESSION 2026-08-10 01:44:53 ===
+[LOG] redirectStdioToFile OK
+[FATAL] UnhandledExceptionFilter code=0xC0000005 addr=00007FF7194F8E20
+
+=== SESSION 2026-08-10 01:45:52 ===
+[LOG] redirectStdioToFile OK
+[FATAL] UnhandledExceptionFilter code=0xC0000005 addr=00007FF7194F8E20
+
+=== SESSION 2026-08-10 01:48:37 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 01:51:18 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 01:53:52 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 02:00:11 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 02:11:49 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 02:13:54 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 02:19:53 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 02:25:22 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 02:35:11 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 02:53:05 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 02:55:25 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 03:10:12 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 03:20:13 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 03:21:25 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 03:24:14 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 03:37:41 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 03:40:00 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 03:42:04 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 10:18:02 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 10:43:56 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 10:55:17 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 11:02:16 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 11:20:09 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 11:30:06 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 11:38:42 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 11:46:38 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 11:51:23 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:05:57 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:10:12 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:12:57 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:15:33 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:19:45 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:22:36 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:25:50 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:28:51 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:32:43 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:34:44 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:38:14 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:42:19 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:52:57 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:56:40 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 12:59:07 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:01:07 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:04:56 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:11:07 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:14:43 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:18:44 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:23:27 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:29:00 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:31:05 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:32:26 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:39:11 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:42:23 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:47:33 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 14:53:24 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 15:07:44 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 15:33:53 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 15:48:03 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 15:58:51 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 16:24:15 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 16:53:50 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 17:18:48 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 17:26:48 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 17:28:37 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 17:41:51 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 17:44:10 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 17:53:15 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 17:55:07 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 18:10:38 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 18:17:33 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 18:27:35 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 18:30:51 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 18:32:57 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 18:41:17 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 18:43:15 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 18:44:38 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 19:07:37 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 19:09:54 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 19:11:36 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 19:11:38 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 19:14:49 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 19:28:14 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 19:54:40 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 19:55:14 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 19:57:08 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 19:58:03 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 20:00:27 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 20:22:27 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 20:28:11 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 20:31:20 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 20:33:09 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 20:36:44 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 20:54:22 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 21:06:26 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 21:15:49 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 21:43:25 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 22:33:32 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 23:03:52 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-10 23:28:22 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-11 00:00:17 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-11 00:02:04 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-11 00:06:49 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-11 00:33:48 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-11 00:35:36 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-11 00:51:21 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-11 00:53:07 ===
+[LOG] redirectStdioToFile OK
+[CRASH] VectoredHandler code=0xC0000005 addr=00007FF7FAD2DE4C thread=19924
+
+=== SESSION 2026-08-11 01:06:07 ===
+[LOG] redirectStdioToFile OK
+
+=== SESSION 2026-08-11 01:15:25 ===
+[LOG] redirectStdioToFile OK
+[QT:WARN] QString::arg: Argument missing: ²É¼¯¿¨ÊýÁ¿: 4
+  ×¢²á±í¼ü: HKCU\Software\MC410T\MC410T_Receiver\AcquisitionParams\NCards
+¿ØÖÆ°ü±¾µØ°ó¶¨IP: Î´ÉèÖÃ£¨INADDR_ANY£©¡ª Ë«¿ÚÍø¿¨Çë±ØÐëÉèÖÃ!
+  ×¢²á±í¼ü: ...\NetworkParams\LocalBindIP
+  Ë«¿ÚÍø¿¨Ö»½ÓÒ»¿ÚÊ±±ØÐëÌîÒÑÁ¬½Ó¿ÚµÄ±¾µØIP£¨Èç 192.168.0.100£©
+  ·ñÔò¿ØÖÆ°ü¿ÉÄÜ´Ó´íÎóÍø¿Ú·¢³ö£¬²É¼¯¿¨ÊÕ²»µ½Ö¸Áî
+½ÓÊÕÂ·Ïß: WinSock, Â·ÏßA WinSock (?:0)
+[CRASH] VectoredHandler code=0xC0000005 addr=00007FF732E074A5 thread=38668
+[CRASH] MiniDumpWriteDump ok=1 err=6 path=C:\Users\yyps\Documents\ChatGPT\realtime_imaging_migration\MC_410T_MultiCard\delivery\build\mingw_debug\bin\crashdumps\MC410T_Receiver_20260811_011716.dmp
+[FATAL] UnhandledExceptionFilter code=0xC0000005 addr=00007FF732E074A5

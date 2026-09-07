@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/">
+        <file>resources/styles.qss</file>
+        <file>resources/icons/arrow_up.svg</file>
+        <file>resources/icons/arrow_down.svg</file>
+        <file>resources/icons/arrow_up_hover.svg</file>
+        <file>resources/icons/arrow_down_hover.svg</file>
+        <file>resources/icons/arrow_combobox.svg</file>
+        <file>resources/icons/arrow_combobox_hover.svg</file>
+        <file>resources/icons/check.svg</file>
+    </qresource>
+</RCC>

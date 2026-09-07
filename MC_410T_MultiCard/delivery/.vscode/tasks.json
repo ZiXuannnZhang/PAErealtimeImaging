@@ -1,0 +1,66 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "configure_delivery_debug",
+      "type": "shell",
+      "command": "cmd.exe",
+      "args": [
+        "/c",
+        "call build_mingw_debug.cmd configure"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/MC_410T_MultiCard/delivery"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "build_delivery_debug",
+      "type": "shell",
+      "command": "cmd.exe",
+      "args": [
+        "/c",
+        "call build_mingw_debug.cmd build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/MC_410T_MultiCard/delivery"
+      },
+      "dependsOn": [
+        "configure_delivery_debug"
+      ],
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "build_ring_recon_view",
+      "type": "shell",
+      "command": "cmd.exe",
+      "args": [
+        "/c",
+        "call build_ring_recon_view.cmd"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/MC_410T_MultiCard/delivery"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "build_ring_recon_debug",
+      "type": "shell",
+      "command": "cmd.exe",
+      "args": [
+        "/c",
+        "call build_ring_recon_debug.cmd"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/MC_410T_MultiCard/delivery"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    }
+  ]
+}
