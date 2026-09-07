@@ -19,6 +19,12 @@
 // ============================================================
 class PacketAssemblyBuffer {
 public:
+    enum class InsertResult {
+        Accepted,
+        Duplicate,
+        OffsetOutOfRange
+    };
+
     PacketAssemblyBuffer(int maxPackets = MAX_PKTS_PER_TRIG)
         : m_maxPackets(maxPackets)
         , m_receivedMask32(static_cast<size_t>((maxPackets + 31) / 32), 0)
@@ -31,7 +37,7 @@ public:
     // 插入一个数据包
     // pkt.packetSeq 是 FPGA 的全局包计数器（大端序 uint16）
     // 内部减 m_basePacketSeq 得到触发内连续序号（0, 1, 2, ...）
-    void insertPacket(const DataPacket& pkt) {
+    InsertResult insertPacket(const DataPacket& pkt) {
         // 第一包：记录触发序号、基序号、时间戳
         if (m_receivedCount == 0) {
             m_triggerSeq     = pkt.triggerSeq;
@@ -42,13 +48,14 @@ public:
         // 计算触发内偏移序号（全局计数器 - 触发首包基序号 = 包内顺序号）
         int seqOffset = static_cast<int>(static_cast<uint16_t>(
             pkt.packetSeq - m_basePacketSeq));
-        if (seqOffset < 0 || seqOffset >= m_maxPackets) return;
+        if (seqOffset < 0 || seqOffset >= m_maxPackets)
+            return InsertResult::OffsetOutOfRange;
 
         // 位图去重
         size_t slot = static_cast<size_t>(seqOffset) >> 5;
         uint32_t bit = 1u << (seqOffset & 31);
-        if (slot >= m_receivedMask32.size()) return;
-        if (m_receivedMask32[slot] & bit) return;  // 重复包
+        if (slot >= m_receivedMask32.size()) return InsertResult::OffsetOutOfRange;
+        if (m_receivedMask32[slot] & bit) return InsertResult::Duplicate;  // 重复包
         m_receivedMask32[slot] |= bit;
 
         uint16_t sz = (pkt.dataSize > UDP_PAYLOAD_BYTES) ? UDP_PAYLOAD_BYTES : pkt.dataSize;
@@ -56,6 +63,7 @@ public:
         std::memcpy(dest, pkt.data, sz);
         m_dataSizes[seqOffset] = sz;
         ++m_receivedCount;
+        return InsertResult::Accepted;
     }
 
     bool isComplete(int expectedPackets) const {

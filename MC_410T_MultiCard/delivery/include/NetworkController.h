@@ -21,6 +21,7 @@
 #include "FramePublisher.h"
 #include "DisplayBuffer.h"
 #include "DiagnosticRecorder.h"
+#include "NetworkDiagnostics.h"
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -167,6 +168,7 @@ private:
     void scheduleNetworkSnapshot(const QString& reason,
                                  const QString& phase = QString(),
                                  const QString& configId = QString());
+    void recordIngressSnapshot(const QString& reason = QStringLiteral("runtime"));
     void recordCardSnapshots(const QString& stateOverride = QString());
     QString cardDiagnosticState(int cardIdx) const;
     void recordDiagnosticEvent(const QString& category,
@@ -289,4 +291,6 @@ private:
     std::vector<uint64_t> m_lastTrigsComplete;
     uint64_t              m_lastStatsMs = 0;
     uint64_t              m_lastRuntimeSnapshotMs = 0;
+    uint64_t              m_lastIngressSnapshotMs = 0;
+    NetworkDiagnostics::IngressSampler m_ingressSampler;
 };

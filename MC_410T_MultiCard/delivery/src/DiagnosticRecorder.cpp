@@ -227,6 +227,61 @@ QByteArray summaryBytes(const QString &runId,
     if (!note.isEmpty()) lines << QStringLiteral("现场说明：%1").arg(note);
     if (!truncationReasons.isEmpty()) lines << QStringLiteral("截断说明：%1").arg(truncationReasons.join(QStringLiteral("；")));
 
+    lines << QString() << QStringLiteral("网络入口观测汇总（完整历史见 network.json）：");
+    QJsonObject latestIngress;
+    const QJsonArray networkSnapshots = network.value(QStringLiteral("snapshots")).toArray();
+    for (const QJsonValue &value : networkSnapshots) {
+        const QJsonObject wrapper = value.toObject();
+        const QJsonObject data = wrapper.value(QStringLiteral("data")).toObject();
+        if (data.value(QStringLiteral("kind")).toString() == QStringLiteral("runtime_ingress"))
+            latestIngress = data;
+    }
+    if (latestIngress.isEmpty()) {
+        lines << QStringLiteral("暂无 runtime_ingress 快照。");
+    } else {
+        const QJsonArray interfaces = latestIngress.value(QStringLiteral("relevantInterfaces")).toArray();
+        if (interfaces.isEmpty()) {
+            lines << QStringLiteral("采集接口：未解析（详见 network.json 的 targetMappings/errors）。");
+        } else {
+            for (const QJsonValue &value : interfaces) {
+                const QJsonObject interfaceObject = value.toObject();
+                const QJsonObject counters = interfaceObject.value(QStringLiteral("counters")).toObject();
+                const QJsonObject inDiscards = counters.value(QStringLiteral("InDiscards")).toObject();
+                const QJsonObject inErrors = counters.value(QStringLiteral("InErrors")).toObject();
+                lines << QStringLiteral("Windows interface：%1 (index=%2) InDiscards delta=%3，InErrors delta=%4")
+                             .arg(interfaceObject.value(QStringLiteral("friendlyName")).toString(QStringLiteral("未记录")))
+                             .arg(interfaceObject.value(QStringLiteral("interfaceIndex")).toInt())
+                             .arg(inDiscards.value(QStringLiteral("delta")).toString(QStringLiteral("未记录")))
+                             .arg(inErrors.value(QStringLiteral("delta")).toString(QStringLiteral("未记录")));
+            }
+        }
+        const QJsonObject udp = latestIngress.value(QStringLiteral("systemUdpCounters")).toObject();
+        const QJsonObject udpInErrors = udp.value(QStringLiteral("InErrors")).toObject();
+        lines << QStringLiteral("system IPv4/UDP InErrors delta=%1（scope=system_ipv4）")
+                     .arg(udpInErrors.value(QStringLiteral("delta")).toString(QStringLiteral("未记录")));
+        lines << QStringLiteral("以上 Windows interface/system counters 用于定位 ingress 层级，不等同于具体 NIC hardware 丢包。");
+    }
+
+    QHash<int, QJsonObject> latestCards;
+    for (const QJsonValue &value : network.value(QStringLiteral("cards")).toArray()) {
+        const QJsonObject card = value.toObject();
+        const int cardNo = cardField(card, QStringLiteral("card")).toInt(
+            cardField(card, QStringLiteral("cardIndex")).toInt());
+        if (cardNo > 0) latestCards.insert(cardNo, card);
+    }
+    for (auto it = latestCards.constBegin(); it != latestCards.constEnd(); ++it) {
+        const QJsonObject &card = it.value();
+        lines << QStringLiteral("卡%1 socket=%2 dequeued=%3 rawGapEvents=%4 rawGapPackets=%5 stale=%6 assemblyDuplicate=%7 assemblyOffsetOutOfRange=%8")
+                     .arg(it.key())
+                     .arg(cardFieldText(card, {QStringLiteral("socketPacketsReceived")}))
+                     .arg(cardFieldText(card, {QStringLiteral("processorPacketsDequeued")}))
+                     .arg(cardFieldText(card, {QStringLiteral("sameTriggerForwardGapEvents")}))
+                     .arg(cardFieldText(card, {QStringLiteral("sameTriggerForwardGapPackets")}))
+                     .arg(cardFieldText(card, {QStringLiteral("staleTriggerPacketsDiscarded")}))
+                     .arg(cardFieldText(card, {QStringLiteral("assemblyDuplicatePackets")}))
+                     .arg(cardFieldText(card, {QStringLiteral("assemblyOffsetOutOfRangePackets")}));
+    }
+
     lines << QString() << QStringLiteral("逐卡状态（按监听ID/配置ID分组；最终状态与失败请求均保留）：");
     const QJsonArray cards = network.value(QStringLiteral("cards")).toArray();
     QHash<QString, QVector<QJsonObject>> groups;

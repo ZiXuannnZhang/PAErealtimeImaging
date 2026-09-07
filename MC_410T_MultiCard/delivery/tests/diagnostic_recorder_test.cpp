@@ -138,10 +138,31 @@ bool testRuntimeCardCountersExport()
     QTemporaryDir temp;
     if (!check(temp.isValid(), QStringLiteral("temporary directory unavailable"))) return false;
     DiagnosticRecorder recorder(optionsFor(temp.path()));
+    recorder.recordNetworkSnapshot(QJsonObject{
+        {QStringLiteral("kind"), QStringLiteral("runtime_ingress")},
+        {QStringLiteral("relevantInterfaces"), QJsonArray{
+            QJsonObject{{QStringLiteral("interfaceIndex"), 7},
+                        {QStringLiteral("friendlyName"), QStringLiteral("capture")},
+                        {QStringLiteral("counters"), QJsonObject{
+                            {QStringLiteral("InDiscards"), QJsonObject{{QStringLiteral("absolute"), QStringLiteral("100")}, {QStringLiteral("delta"), QStringLiteral("3")}}},
+                            {QStringLiteral("InErrors"), QJsonObject{{QStringLiteral("absolute"), QStringLiteral("4")}, {QStringLiteral("delta"), QStringLiteral("1")}}}}}}}},
+        {QStringLiteral("systemUdpCounters"), QJsonObject{
+            {QStringLiteral("scope"), QStringLiteral("system_ipv4")},
+            {QStringLiteral("InErrors"), QJsonObject{{QStringLiteral("absolute"), QStringLiteral("2")}, {QStringLiteral("delta"), QStringLiteral("1")}}}}},
+        {QStringLiteral("receiverGroups"), QJsonArray{QJsonObject{{QStringLiteral("maxDrainPackets"), 8}}}}
+    });
     const QJsonObject fields{
         {QStringLiteral("socketPacketsReceived"), 1000},
         {QStringLiteral("processorPacketsDequeued"), 900},
         {QStringLiteral("batchBoundaryDiscards"), 0},
+        {QStringLiteral("sameTriggerForwardGapEvents"), 2},
+        {QStringLiteral("sameTriggerForwardGapPackets"), 4},
+        {QStringLiteral("sameTriggerBackstepEvents"), 1},
+        {QStringLiteral("sameTriggerDuplicateSeqEvents"), 3},
+        {QStringLiteral("crossTriggerLateArrivalEvents"), 1},
+        {QStringLiteral("staleTriggerPacketsDiscarded"), 5},
+        {QStringLiteral("assemblyDuplicatePackets"), 6},
+        {QStringLiteral("assemblyOffsetOutOfRangePackets"), 7},
         {QStringLiteral("packetsDropped"), 7},
         {QStringLiteral("triggersPartial"), 3},
         {QStringLiteral("inputQueueDepth"), 100},
@@ -155,16 +176,40 @@ bool testRuntimeCardCountersExport()
     const QHash<QString, QByteArray> files = readStoredZip(zipPath, &error);
     if (!check(error.isEmpty(), error)) return false;
     const QJsonObject network = QJsonDocument::fromJson(files.value(QStringLiteral("network.json"))).object();
+    bool ingressFound = false;
+    for (const QJsonValue &value : network.value(QStringLiteral("snapshots")).toArray()) {
+        const QJsonObject data = value.toObject().value(QStringLiteral("data")).toObject();
+        if (data.value(QStringLiteral("kind")).toString() == QStringLiteral("runtime_ingress")) {
+            ingressFound = data.value(QStringLiteral("relevantInterfaces")).toArray().size() == 1
+                && data.value(QStringLiteral("systemUdpCounters")).toObject()
+                       .value(QStringLiteral("scope")).toString() == QStringLiteral("system_ipv4")
+                && data.value(QStringLiteral("receiverGroups")).toArray().size() == 1;
+        }
+    }
+    bool ok = check(ingressFound, QStringLiteral("runtime ingress snapshot not exported"));
+    const QString summary = QString::fromUtf8(files.value(QStringLiteral("summary.txt")));
+    ok = check(summary.contains(QStringLiteral("网络入口观测汇总"))
+                   && summary.contains(QStringLiteral("scope=system_ipv4")),
+               QStringLiteral("network ingress summary not exported")) && ok;
     const QJsonArray cards = network.value(QStringLiteral("cards")).toArray();
     if (!check(cards.size() == 1, QStringLiteral("runtime card snapshot missing"))) return false;
     const QJsonObject card = cards.first().toObject();
     const QJsonObject cardFields = card.value(QStringLiteral("fields")).toObject();
-    bool ok = check(cardFields.value(QStringLiteral("socketPacketsReceived")).toDouble() == 1000,
+    ok = check(cardFields.value(QStringLiteral("socketPacketsReceived")).toDouble() == 1000,
                     QStringLiteral("socket counter not exported"));
     ok = check(cardFields.value(QStringLiteral("processorPacketsDequeued")).toDouble() == 900,
                QStringLiteral("processor counter not exported")) && ok;
     ok = check(cardFields.value(QStringLiteral("batchBoundaryDiscards")).toDouble() == 0,
                QStringLiteral("batch boundary counter not exported")) && ok;
+    ok = check(cardFields.value(QStringLiteral("sameTriggerForwardGapEvents")).toDouble() == 2
+                   && cardFields.value(QStringLiteral("sameTriggerForwardGapPackets")).toDouble() == 4
+                   && cardFields.value(QStringLiteral("sameTriggerBackstepEvents")).toDouble() == 1
+                   && cardFields.value(QStringLiteral("sameTriggerDuplicateSeqEvents")).toDouble() == 3
+                   && cardFields.value(QStringLiteral("crossTriggerLateArrivalEvents")).toDouble() == 1
+                   && cardFields.value(QStringLiteral("staleTriggerPacketsDiscarded")).toDouble() == 5
+                   && cardFields.value(QStringLiteral("assemblyDuplicatePackets")).toDouble() == 6
+                   && cardFields.value(QStringLiteral("assemblyOffsetOutOfRangePackets")).toDouble() == 7,
+               QStringLiteral("new ingress/rejection fields not exported")) && ok;
     ok = check(cardFields.value(QStringLiteral("packetsDropped")).toDouble() == 7
                    && cardFields.value(QStringLiteral("triggersPartial")).toDouble() == 3
                    && cardFields.value(QStringLiteral("inputQueueDepth")).toDouble() == 100

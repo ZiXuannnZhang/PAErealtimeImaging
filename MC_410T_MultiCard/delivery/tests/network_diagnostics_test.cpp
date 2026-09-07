@@ -72,6 +72,17 @@ bool runtimeStatsFieldMapping()
     stats.socketPacketsReceived = 1000;
     stats.processorPacketsDequeued = 900;
     stats.batchBoundaryDiscards = 0;
+    stats.sameTriggerForwardGapEvents = 2;
+    stats.sameTriggerForwardGapPackets = 5;
+    stats.sameTriggerBackstepEvents = 1;
+    stats.sameTriggerDuplicateSeqEvents = 3;
+    stats.crossTriggerLateArrivalEvents = 4;
+    stats.staleTriggerPacketsDiscarded = 6;
+    stats.assemblyDuplicatePackets = 7;
+    stats.assemblyOffsetOutOfRangePackets = 8;
+    stats.lastTriggerSeq = 12;
+    stats.lastPacketSeq = 34;
+    stats.rawSequenceInitialized = true;
     const QJsonObject fields = NetworkController::runtimeStatsFields(stats);
     bool ok = require(fields.value("socketPacketsReceived").toDouble() == 1000,
                       "runtime socket counter mapping");
@@ -79,6 +90,11 @@ bool runtimeStatsFieldMapping()
                  "runtime processor counter mapping") && ok;
     ok = require(fields.value("batchBoundaryDiscards").toDouble() == 0,
                  "runtime batch boundary mapping") && ok;
+    ok = require(fields.value("sameTriggerForwardGapEvents").toDouble() == 2
+                     && fields.value("sameTriggerForwardGapPackets").toDouble() == 5
+                     && fields.value("staleTriggerPacketsDiscarded").toDouble() == 6
+                     && fields.value("assemblyOffsetOutOfRangePackets").toDouble() == 8,
+                 "runtime ingress/rejection field mapping") && ok;
     ok = require(fields.value("packetsDropped").toDouble() == 7
                      && fields.value("triggersPartial").toDouble() == 3
                      && fields.value("inputQueueDepth").toInt() == 100

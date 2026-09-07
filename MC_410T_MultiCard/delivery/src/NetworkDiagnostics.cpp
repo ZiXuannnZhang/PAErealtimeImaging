@@ -2,11 +2,14 @@
 
 #include <QDateTime>
 #include <QHash>
+#include <QList>
+#include <QSet>
 #include <QJsonArray>
 #include <QJsonValue>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <vector>
 
@@ -329,6 +332,280 @@ QJsonObject collectSnapshot(const QStringList &targetIPs)
                                ? QStringLiteral("ok")
                                : unknownText()));
     snapshot.insert(QStringLiteral("targetRelations"), relations);
+    snapshot.insert(QStringLiteral("errors"), errors);
+    snapshot.insert(QStringLiteral("status"), errors.isEmpty() ? QStringLiteral("ok") : unknownText());
+    return snapshot;
+}
+
+quint64 counterDelta(quint64 previous, quint64 current, bool hasPrevious, bool *resetDetected)
+{
+    if (resetDetected) *resetDetected = false;
+    if (!hasPrevious) return 0;
+    if (current < previous) {
+        if (resetDetected) *resetDetected = true;
+        return 0;
+    }
+    return current - previous;
+}
+
+QString counterString(quint64 value)
+{
+    return QString::number(static_cast<qulonglong>(value));
+}
+
+void IngressSampler::reset()
+{
+    m_previousCounters.clear();
+    m_seenCounters.clear();
+    m_startedMonotonicMs = -1;
+}
+
+QJsonObject IngressSampler::sample(const QStringList &targetIPs)
+{
+    QJsonObject snapshot;
+    snapshot.insert(QStringLiteral("formatVersion"), 1);
+    snapshot.insert(QStringLiteral("kind"), QStringLiteral("runtime_ingress"));
+    snapshot.insert(QStringLiteral("scope"), QStringLiteral("windows_ingress_observability"));
+    snapshot.insert(QStringLiteral("capturedAt"), isoNow());
+    const qint64 monotonicMs = static_cast<qint64>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    if (m_startedMonotonicMs < 0) m_startedMonotonicMs = monotonicMs;
+    snapshot.insert(QStringLiteral("monotonicMs"),
+                    static_cast<double>(monotonicMs - m_startedMonotonicMs));
+
+    QJsonArray errors;
+    QJsonArray targetMappings;
+    QJsonArray relevantInterfaces;
+    QJsonObject ipv4Counters;
+    QJsonObject udpCounters;
+
+#ifdef _WIN32
+    struct AdapterMetadata {
+        QJsonObject object;
+        quint64 luid = 0;
+    };
+    QHash<ULONG, AdapterMetadata> adapters;
+
+    ULONG addressBufferSize = 16 * 1024;
+    std::vector<BYTE> addressBuffer(addressBufferSize);
+    ULONG addressResult = ERROR_BUFFER_OVERFLOW;
+    for (int attempt = 0; attempt < 3 && addressResult == ERROR_BUFFER_OVERFLOW; ++attempt) {
+        addressBuffer.resize(addressBufferSize);
+        addressResult = GetAdaptersAddresses(AF_INET,
+                                             GAA_FLAG_INCLUDE_PREFIX | GAA_FLAG_INCLUDE_GATEWAYS,
+                                             nullptr,
+                                             reinterpret_cast<PIP_ADAPTER_ADDRESSES>(addressBuffer.data()),
+                                             &addressBufferSize);
+    }
+    if (addressResult == NO_ERROR) {
+        for (PIP_ADAPTER_ADDRESSES adapter =
+                 reinterpret_cast<PIP_ADAPTER_ADDRESSES>(addressBuffer.data());
+             adapter != nullptr;
+             adapter = adapter->Next) {
+            AdapterMetadata metadata;
+            metadata.luid = static_cast<quint64>(adapter->Luid.Value);
+            metadata.object.insert(QStringLiteral("interfaceIndex"),
+                                   static_cast<double>(adapter->IfIndex));
+            metadata.object.insert(QStringLiteral("interfaceLuid"),
+                                   counterString(metadata.luid));
+            metadata.object.insert(QStringLiteral("friendlyName"),
+                                   adapter->FriendlyName
+                                       ? QString::fromWCharArray(adapter->FriendlyName)
+                                       : unknownText());
+            metadata.object.insert(QStringLiteral("description"),
+                                   adapter->Description
+                                       ? QString::fromWCharArray(adapter->Description)
+                                       : unknownText());
+            metadata.object.insert(QStringLiteral("operationalStatus"),
+                                   operationalStatus(adapter->OperStatus));
+            metadata.object.insert(QStringLiteral("mtu"),
+                                   static_cast<double>(adapter->Mtu));
+            metadata.object.insert(QStringLiteral("receiveLinkSpeed"),
+                                   counterString(static_cast<quint64>(adapter->ReceiveLinkSpeed)));
+            metadata.object.insert(QStringLiteral("transmitLinkSpeed"),
+                                   counterString(static_cast<quint64>(adapter->TransmitLinkSpeed)));
+            QJsonArray localIPv4;
+            for (const IP_ADAPTER_UNICAST_ADDRESS *unicast = adapter->FirstUnicastAddress;
+                 unicast != nullptr;
+                 unicast = unicast->Next) {
+                const QString address = ipv4Text(unicast->Address.lpSockaddr);
+                if (address != unknownText()) localIPv4.append(address);
+            }
+            metadata.object.insert(QStringLiteral("localIPv4"), localIPv4);
+            adapters.insert(adapter->IfIndex, metadata);
+        }
+    } else {
+        errors.append(unknownFailure(QStringLiteral("GetAdaptersAddresses"), addressResult));
+    }
+
+    QHash<ULONG, QSet<QString>> targetsByInterface;
+    QHash<ULONG, quint64> routeLuidByInterface;
+    for (const QString &target : targetIPs) {
+        QJsonObject mapping;
+        mapping.insert(QStringLiteral("targetIP"), target);
+        SOCKADDR_INET destination{};
+        destination.si_family = AF_INET;
+        const QByteArray targetBytes = target.toLatin1();
+        const int parsed = InetPtonA(AF_INET, targetBytes.constData(),
+                                     &destination.Ipv4.sin_addr);
+        if (parsed != 1) {
+            mapping.insert(QStringLiteral("status"), unknownText());
+            mapping.insert(QStringLiteral("error"), QStringLiteral("invalid_ipv4"));
+            targetMappings.append(mapping);
+            continue;
+        }
+
+        MIB_IPFORWARD_ROW2 route{};
+        SOCKADDR_INET bestSource{};
+        const ULONG routeResult = GetBestRoute2(nullptr, 0, nullptr, &destination,
+                                                0, &route, &bestSource);
+        if (routeResult != NO_ERROR) {
+            mapping.insert(QStringLiteral("status"), unknownText());
+            mapping.insert(QStringLiteral("api"), QStringLiteral("GetBestRoute2"));
+            mapping.insert(QStringLiteral("errorCode"), static_cast<double>(routeResult));
+            targetMappings.append(mapping);
+            errors.append(unknownFailure(QStringLiteral("GetBestRoute2"), routeResult));
+            continue;
+        }
+
+        const ULONG interfaceIndex = route.InterfaceIndex;
+        const quint64 interfaceLuid = static_cast<quint64>(route.InterfaceLuid.Value);
+        mapping.insert(QStringLiteral("status"), QStringLiteral("ok"));
+        mapping.insert(QStringLiteral("interfaceIndex"), static_cast<double>(interfaceIndex));
+        mapping.insert(QStringLiteral("interfaceLuid"), counterString(interfaceLuid));
+        targetMappings.append(mapping);
+        targetsByInterface[interfaceIndex].insert(target);
+        routeLuidByInterface.insert(interfaceIndex, interfaceLuid);
+    }
+
+    auto addCounter = [this](QJsonObject *target,
+                             const QString &scope,
+                             const QString &name,
+                             quint64 absolute) {
+        if (!target) return;
+        const QString key = scope + QLatin1Char('/') + name;
+        const bool hasPrevious = m_seenCounters.value(key, false);
+        bool resetDetected = false;
+        const quint64 delta = counterDelta(m_previousCounters.value(key), absolute,
+                                           hasPrevious, &resetDetected);
+        m_previousCounters.insert(key, absolute);
+        m_seenCounters.insert(key, true);
+        QJsonObject pair;
+        pair.insert(QStringLiteral("absolute"), counterString(absolute));
+        pair.insert(QStringLiteral("delta"), counterString(delta));
+        pair.insert(QStringLiteral("deltaStatus"),
+                    !hasPrevious ? QStringLiteral("unavailable")
+                                  : (resetDetected ? QStringLiteral("reset")
+                                                    : QStringLiteral("ok")));
+        pair.insert(QStringLiteral("deltaAvailable"), hasPrevious && !resetDetected);
+        target->insert(name, pair);
+    };
+
+    QList<ULONG> interfaceIndices = targetsByInterface.keys();
+    std::sort(interfaceIndices.begin(), interfaceIndices.end());
+    for (const ULONG interfaceIndex : interfaceIndices) {
+        QJsonObject interfaceObject = adapters.value(interfaceIndex).object;
+        if (interfaceObject.isEmpty()) {
+            interfaceObject.insert(QStringLiteral("interfaceIndex"),
+                                   static_cast<double>(interfaceIndex));
+            interfaceObject.insert(QStringLiteral("interfaceLuid"),
+                                   counterString(routeLuidByInterface.value(interfaceIndex)));
+            interfaceObject.insert(QStringLiteral("friendlyName"), unknownText());
+            interfaceObject.insert(QStringLiteral("description"), unknownText());
+            interfaceObject.insert(QStringLiteral("localIPv4"), QJsonArray());
+            interfaceObject.insert(QStringLiteral("operationalStatus"), unknownText());
+        }
+        QJsonArray sharedTargets;
+        QStringList orderedTargets = targetsByInterface.value(interfaceIndex).values();
+        orderedTargets.sort();
+        for (const QString &target : orderedTargets) sharedTargets.append(target);
+        interfaceObject.insert(QStringLiteral("sharedByTargets"), sharedTargets);
+
+        MIB_IF_ROW2 row{};
+        row.InterfaceIndex = interfaceIndex;
+        const ULONG rowResult = GetIfEntry2(&row);
+        QJsonObject counters;
+        if (rowResult == NO_ERROR) {
+            interfaceObject.insert(QStringLiteral("counterStatus"), QStringLiteral("ok"));
+            const QString interfaceScope = QStringLiteral("interface:")
+                + interfaceObject.value(QStringLiteral("interfaceLuid")).toString();
+            addCounter(&counters, interfaceScope, QStringLiteral("InOctets"), row.InOctets);
+            addCounter(&counters, interfaceScope, QStringLiteral("InUcastPkts"), row.InUcastPkts);
+            addCounter(&counters, interfaceScope, QStringLiteral("InNUcastPkts"), row.InNUcastPkts);
+            addCounter(&counters, interfaceScope, QStringLiteral("InDiscards"), row.InDiscards);
+            addCounter(&counters, interfaceScope, QStringLiteral("InErrors"), row.InErrors);
+            addCounter(&counters, interfaceScope, QStringLiteral("InUnknownProtos"), row.InUnknownProtos);
+            addCounter(&counters, interfaceScope, QStringLiteral("OutOctets"), row.OutOctets);
+            addCounter(&counters, interfaceScope, QStringLiteral("OutUcastPkts"), row.OutUcastPkts);
+            addCounter(&counters, interfaceScope, QStringLiteral("OutNUcastPkts"), row.OutNUcastPkts);
+            addCounter(&counters, interfaceScope, QStringLiteral("OutDiscards"), row.OutDiscards);
+            addCounter(&counters, interfaceScope, QStringLiteral("OutErrors"), row.OutErrors);
+        } else {
+            interfaceObject.insert(QStringLiteral("counterStatus"), unknownText());
+            interfaceObject.insert(QStringLiteral("counterApi"), QStringLiteral("GetIfEntry2"));
+            interfaceObject.insert(QStringLiteral("counterErrorCode"), static_cast<double>(rowResult));
+            errors.append(unknownFailure(QStringLiteral("GetIfEntry2"), rowResult));
+        }
+        interfaceObject.insert(QStringLiteral("counters"), counters);
+        relevantInterfaces.append(interfaceObject);
+    }
+
+    MIB_IPSTATS ipStats{};
+    const ULONG ipResult = GetIpStatisticsEx(&ipStats, AF_INET);
+    if (ipResult == NO_ERROR) {
+        ipv4Counters.insert(QStringLiteral("scope"), QStringLiteral("system_ipv4"));
+        ipv4Counters.insert(QStringLiteral("status"), QStringLiteral("ok"));
+        addCounter(&ipv4Counters, QStringLiteral("system_ipv4"), QStringLiteral("InReceives"), ipStats.dwInReceives);
+        addCounter(&ipv4Counters, QStringLiteral("system_ipv4"), QStringLiteral("InHdrErrors"), ipStats.dwInHdrErrors);
+        addCounter(&ipv4Counters, QStringLiteral("system_ipv4"), QStringLiteral("InAddrErrors"), ipStats.dwInAddrErrors);
+        addCounter(&ipv4Counters, QStringLiteral("system_ipv4"), QStringLiteral("InUnknownProtos"), ipStats.dwInUnknownProtos);
+        addCounter(&ipv4Counters, QStringLiteral("system_ipv4"), QStringLiteral("InDiscards"), ipStats.dwInDiscards);
+        addCounter(&ipv4Counters, QStringLiteral("system_ipv4"), QStringLiteral("InDelivers"), ipStats.dwInDelivers);
+    } else {
+        ipv4Counters.insert(QStringLiteral("scope"), QStringLiteral("system_ipv4"));
+        ipv4Counters.insert(QStringLiteral("status"), unknownText());
+        ipv4Counters.insert(QStringLiteral("api"), QStringLiteral("GetIpStatisticsEx"));
+        ipv4Counters.insert(QStringLiteral("errorCode"), static_cast<double>(ipResult));
+        errors.append(unknownFailure(QStringLiteral("GetIpStatisticsEx"), ipResult));
+    }
+
+    MIB_UDPSTATS udpStats{};
+    const ULONG udpResult = GetUdpStatisticsEx(&udpStats, AF_INET);
+    if (udpResult == NO_ERROR) {
+        udpCounters.insert(QStringLiteral("scope"), QStringLiteral("system_ipv4"));
+        udpCounters.insert(QStringLiteral("status"), QStringLiteral("ok"));
+        addCounter(&udpCounters, QStringLiteral("system_udp_ipv4"), QStringLiteral("InDatagrams"), udpStats.dwInDatagrams);
+        addCounter(&udpCounters, QStringLiteral("system_udp_ipv4"), QStringLiteral("NoPorts"), udpStats.dwNoPorts);
+        addCounter(&udpCounters, QStringLiteral("system_udp_ipv4"), QStringLiteral("InErrors"), udpStats.dwInErrors);
+        addCounter(&udpCounters, QStringLiteral("system_udp_ipv4"), QStringLiteral("OutDatagrams"), udpStats.dwOutDatagrams);
+    } else {
+        udpCounters.insert(QStringLiteral("scope"), QStringLiteral("system_ipv4"));
+        udpCounters.insert(QStringLiteral("status"), unknownText());
+        udpCounters.insert(QStringLiteral("api"), QStringLiteral("GetUdpStatisticsEx"));
+        udpCounters.insert(QStringLiteral("errorCode"), static_cast<double>(udpResult));
+        errors.append(unknownFailure(QStringLiteral("GetUdpStatisticsEx"), udpResult));
+    }
+#else
+    Q_UNUSED(targetIPs);
+    QJsonObject unavailable;
+    unavailable.insert(QStringLiteral("status"), unknownText());
+    unavailable.insert(QStringLiteral("reason"), QStringLiteral("Windows APIs unavailable"));
+    errors.append(unavailable);
+    ipv4Counters.insert(QStringLiteral("scope"), QStringLiteral("system_ipv4"));
+    ipv4Counters.insert(QStringLiteral("status"), unknownText());
+    udpCounters.insert(QStringLiteral("scope"), QStringLiteral("system_ipv4"));
+    udpCounters.insert(QStringLiteral("status"), unknownText());
+#endif
+
+    snapshot.insert(QStringLiteral("targetMappings"), targetMappings);
+    snapshot.insert(QStringLiteral("relevantInterfaces"), relevantInterfaces);
+    snapshot.insert(QStringLiteral("interfaceStatus"),
+                    relevantInterfaces.isEmpty() && targetIPs.isEmpty()
+                        ? QStringLiteral("notRequested")
+                        : (relevantInterfaces.isEmpty() ? unknownText() : QStringLiteral("ok")));
+    snapshot.insert(QStringLiteral("systemIpv4Counters"), ipv4Counters);
+    snapshot.insert(QStringLiteral("systemUdpCounters"), udpCounters);
     snapshot.insert(QStringLiteral("errors"), errors);
     snapshot.insert(QStringLiteral("status"), errors.isEmpty() ? QStringLiteral("ok") : unknownText());
     return snapshot;

@@ -37,6 +37,14 @@ add_test(NAME diagnostic_dialog_test COMMAND diagnostic_dialog_test)
 set_tests_properties(diagnostic_dialog_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 if(WIN32)
+    add_executable(network_ingress_observability_test
+        network_ingress_observability_test.cpp
+        ../src/NetworkDiagnostics.cpp)
+    target_include_directories(network_ingress_observability_test PRIVATE ../include)
+    target_compile_definitions(network_ingress_observability_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(network_ingress_observability_test PRIVATE Qt6::Core ws2_32 iphlpapi)
+    add_test(NAME network_ingress_observability_test COMMAND network_ingress_observability_test)
+
     add_executable(network_snapshot_test network_snapshot_test.cpp ../src/NetworkDiagnostics.cpp)
     target_include_directories(network_snapshot_test PRIVATE ../include)
     target_compile_definitions(network_snapshot_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)

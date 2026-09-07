@@ -138,6 +138,7 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
                         assemblyBuf.reset();
                         // fall through：把当前包当作第一个新包处理
                     } else {
+                        m_stats.staleTriggerPacketsDiscarded.fetch_add(1, std::memory_order_relaxed);
                         continue;
                     }
                 }
@@ -147,7 +148,10 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
         } else if (assemblyBuf.receivedCount() > 0) {
             // flush前（启动期）：seqDiff<0 → 属于比当前更旧的触发，丢弃
             if (static_cast<int16_t>(pkt.triggerSeq - assemblyBuf.triggerSeq()) < 0)
+            {
+                m_stats.staleTriggerPacketsDiscarded.fetch_add(1, std::memory_order_relaxed);
                 continue;
+            }
         }
 
         // ══ 步骤2：触发切换 + 精确丢包统计 ─────────────────────────────────────
@@ -201,7 +205,12 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
         }
 
         // ══ 步骤4：插入包（bitmask去重 + 直接索引，乱序/重复均安全）───────────
-        assemblyBuf.insertPacket(pkt);
+        const PacketAssemblyBuffer::InsertResult insertResult = assemblyBuf.insertPacket(pkt);
+        if (insertResult == PacketAssemblyBuffer::InsertResult::Duplicate) {
+            m_stats.assemblyDuplicatePackets.fetch_add(1, std::memory_order_relaxed);
+        } else if (insertResult == PacketAssemblyBuffer::InsertResult::OffsetOutOfRange) {
+            m_stats.assemblyOffsetOutOfRangePackets.fetch_add(1, std::memory_order_relaxed);
+        }
 
         // ══ 步骤5：触发完成（所有期望包均已到达，含乱序）────────────────────────
         if (assemblyBuf.isComplete(m_expectedPackets)) {
