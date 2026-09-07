@@ -49,6 +49,7 @@ set(HEADERS
     include/NetworkDiagnostics.h
     include/AcqConfig.h
     include/DataTypes.h
+    include/CardStatusFormatting.h
     include/ObjectPool.h
     include/PacketAssemblyBuffer.h
     include/DisplayBuffer.h

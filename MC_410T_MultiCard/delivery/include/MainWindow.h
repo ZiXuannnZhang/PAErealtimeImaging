@@ -22,6 +22,7 @@
 #include <cmath>
 #include "qcustomplot.h"
 #include "DataTypes.h"
+#include "CardStatusFormatting.h"
 #include "AcqConfig.h"
 #include "Constants.h"
 #include "ImagingParams.h"
@@ -59,6 +60,11 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
+
+    // 逐卡状态栏的稳定文本/tooltip 格式，UI 与无窗口单元测试共用。
+    static QString formatCardStatusText(int cardNumber,
+                                        const CardStats::Snapshot& stats);
+    static QString formatCardStatusTooltip(const CardStats::Snapshot& stats);
 
 protected:
     void closeEvent(QCloseEvent *event) override;

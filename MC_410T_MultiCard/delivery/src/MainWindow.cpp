@@ -2613,6 +2613,17 @@ void MainWindow::updateSpectrumPlot(int cardId, int channel,
 // =====================================================================
 // 统计更新（1Hz/2Hz）
 // =====================================================================
+QString MainWindow::formatCardStatusText(int cardNumber,
+                                         const CardStats::Snapshot& stats)
+{
+    return CardStatusFormatting::text(cardNumber, stats);
+}
+
+QString MainWindow::formatCardStatusTooltip(const CardStats::Snapshot& stats)
+{
+    return CardStatusFormatting::tooltip(stats);
+}
+
 void MainWindow::onUpdateStatistics()
 {
     // 告警冷却递减（每 2s timer tick 减 1）
@@ -2645,6 +2656,7 @@ void MainWindow::onUpdateStatistics()
                 m_lblStats[i]->setText(QString("卡%1: 等待连接...").arg(virtualCardNum));
             else
                 m_lblStats[i]->setText(QString("--"));
+            m_lblStats[i]->setToolTip(QString());
         }
         return;
     }
@@ -2658,6 +2670,7 @@ void MainWindow::onUpdateStatistics()
 
         if (i >= cardsInGroup) {
             m_lblStats[i]->setText(QString("--"));
+            m_lblStats[i]->setToolTip(QString());
             continue;
         }
 
@@ -2666,26 +2679,10 @@ void MainWindow::onUpdateStatistics()
             const auto &s = statsOpt.value();
             if (s.recvMbps > HIGH_RATE_THRESHOLD) anyExceeds = true;
 
-            // 状态栏：两行显示，避免长文本把布局撑宽或互相重叠；
-            // 第一行：卡号/触发/丢失/速率，第二行：处队/存队
-            QString statusText = QString("卡%1 | 触发: %2 | 丢失: %3 | 速率: %4 Mb/s\n处队: %5 | 存队: %6")
-                .arg(virtualCardNum)
-                .arg(s.triggersComplete)
-                .arg(s.triggersPartial)
-                .arg(s.recvMbps, 0, 'f', 2)
-                .arg(s.inputQueueDepth)
-                .arg(s.saveQueueDepth);
-            if (s.packetsDropped > 0)
-                statusText += QString(" | 丢弃: %1").arg(s.packetsDropped);
-            // 存储队列满丢弃（磁盘跟不上）
-            if (s.saveQueueDiscards > 0)
-                statusText += QString(" | 存丢: %1").arg(s.saveQueueDiscards);
-            // 其他原因跳帧（内存不足、序列号复位恢复期）
-            const uint64_t otherDiscards = (s.triggersDiscarded > s.saveQueueDiscards)
-                ? s.triggersDiscarded - s.saveQueueDiscards : 0;
-            if (otherDiscards > 0)
-                statusText += QString(" | 跳帧: %1").arg(otherDiscards);
-            m_lblStats[i]->setText(statusText);
+            // 常驻栏只显示“丢失”；详细采集统计集中放入 tooltip，避免
+            // 状态栏文本随计数增长而撑宽布局或掩盖关键信息。
+            m_lblStats[i]->setText(formatCardStatusText(virtualCardNum, s));
+            m_lblStats[i]->setToolTip(formatCardStatusTooltip(s));
 
             // 存储队列满 → 非阻塞告警（冷却期内不重复）
             uint64_t newDisc = s.saveQueueDiscards;
@@ -2703,6 +2700,7 @@ void MainWindow::onUpdateStatistics()
             }
         } else {
             m_lblStats[i]->setText(QString("卡%1: 等待连接...").arg(virtualCardNum));
+            m_lblStats[i]->setToolTip(QString());
         }
     }
 

@@ -125,6 +125,9 @@ public:
     std::optional<CardStats::Snapshot> getCardStats(int cardIdx) const;
     std::vector<CardStats::Snapshot>   getAllCardStats() const;
 
+    // 运行统计的稳定 machine-readable 字段，供诊断快照和单元测试共用。
+    static QJsonObject runtimeStatsFields(const CardStats::Snapshot& stats);
+
     // DisplayBuffer 访问（MainWindow pull 模式）
     DisplayBuffer* displayBuffer(int cardIdx) const;
 
@@ -285,4 +288,5 @@ private:
     std::vector<uint64_t> m_lastPktsDropped;
     std::vector<uint64_t> m_lastTrigsComplete;
     uint64_t              m_lastStatsMs = 0;
+    uint64_t              m_lastRuntimeSnapshotMs = 0;
 };
