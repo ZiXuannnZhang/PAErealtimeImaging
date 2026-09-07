@@ -1,270 +1,253 @@
 # ChatGPT 网页端 + Codex Desktop GitHub 双端联动快速上手
 
-## 结论
+## 目标
 
-本次已验证以下链路可用：
+本仓库采用 GitHub 作为 ChatGPT 与 Codex Desktop 之间的共享状态总线：
 
-~~~
-网页端 ChatGPT
-  → GitHub 连接
-  → 读取 ZiXuannnZhang/PAErealtimeImaging 私有仓库
+- `main`：唯一 canonical branch，保存正式源码与正式文档基线。
+- `codex/task-docs`：仅用于 ChatGPT 发布任务文档，不承载实现代码。
+- `codex/<task-name>-<timestamp>` 或其他明确命名的任务分支：由 Codex Desktop 从最新 `main` 创建，用于具体实现。
 
-Codex Desktop
-  → Windows PowerShell
-  → Git for Windows
-  → 仓库级 SSH Deploy Key
-  → GitHub SSH over 443
-  → 本地 commit
-  → 推送测试分支
-~~~
+ChatGPT 负责方案设计、任务规格、代码审查与验收；Codex Desktop 负责具体代码修改、本地构建、测试、提交与推送。
 
-验证时间：2026-09-07。
+## 已验证的连接方式
 
-目标仓库：ZiXuannnZhang/PAErealtimeImaging
+目标仓库：`ZiXuannnZhang/PAErealtimeImaging`
 
-默认分支：main
+默认分支：`main`
 
-README 已确认完整内容为：
+Codex Desktop 已验证可以通过仓库级 SSH Deploy Key，经 `ssh.github.com:443` 进行无人值守 fetch/push。
 
-~~~
-# PAErealtimeImaging
-~~~
+推荐工作区：
 
-## 已完成的端到端验证
-
-桌面端 Codex 使用身份：
-
-~~~
-laptop-buqlmv81\codexsandboxonline
-~~~
-
-工具版本：
-
-~~~
-Git 2.55.0.windows.5
-OpenSSH_for_Windows_9.5p2
-Git Credential Manager 2.9.1
-~~~
-
-由于 Codex sandbox 与真实 Windows 用户隔离，GCM/Windows Credential Manager 不适合作为无人值守认证方式。本次改用目标仓库专用 Deploy Key，并通过 GitHub 官方 SSH 443 端口连接：
-
-~~~
-ssh.github.com:443
-~~~
-
-测试分支：
-
-~~~
-codex/ssh-unattended-test
-~~~
-
-测试文件：
-
-~~~
-codex-git-push-test.txt
-~~~
-
-文件完整内容：
-
-~~~
-双端联动测试696202
-~~~
-
-本地 commit SHA：
-
-~~~
-7e53d33bb50e160862eac91e08a45799f7c33d6d
-~~~
-
-远端测试分支 SHA 与本地 SHA 一致，比较结果为 True。测试分支已成功推送，main 未修改、未 merge。
-
-## 持久化 SSH 配置
-
-仓库专用 SSH 文件目录：
-
-~~~
-C:\Users\yyps\.codex\ssh\PAErealtimeImaging
-~~~
-
-文件用途：
-
-~~~
-deploy_ed25519       私钥，禁止显示、复制、提交或发送
-deploy_ed25519.pub   公钥
-github_known_hosts   固定的 GitHub host key
-~~~
-
-公钥已经添加到：
-
-~~~
-ZiXuannnZhang/PAErealtimeImaging
-  → Settings
-  → Deploy keys
-~~~
-
-并已开启 Allow write access。这是仓库级权限，不是账号级 SSH key。
-
-github_known_hosts 使用固定 host key，指纹为：
-
-~~~
-SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU
-~~~
-
-测试仓库的 .git/config 已保存 repository-local core.sshCommand，包括：
-
-~~~
--i C:/Users/yyps/.codex/ssh/PAErealtimeImaging/deploy_ed25519
--o IdentitiesOnly=yes
--o UserKnownHostsFile=C:/Users/yyps/.codex/ssh/PAErealtimeImaging/github_known_hosts
--o StrictHostKeyChecking=yes
--o HostName=ssh.github.com
--p 443
--o KexAlgorithms=curve25519-sha256
-~~~
-
-因此后续在同一 checkout 中不需要设置临时 GIT_SSH_COMMAND。
-
-## 其他工作会话快速接入
-
-目标工作区是：
-
-~~~
+```text
 D:\ChatGPT\PAERealtimeImaging
-~~~
+```
 
-本次验证使用的临时测试 checkout 是：
+仓库专用 SSH 文件位于：
 
-~~~
-C:\Users\yyps\Documents\Codex\2026-09-06\yue\PAErealtimeImaging
-~~~
+```text
+C:\Users\yyps\.codex\ssh\PAErealtimeImaging
+```
 
-两者是不同的本地 checkout。其他工作会话若使用 D:\ChatGPT\PAERealtimeImaging，首次在该仓库执行以下配置：
+其中私钥禁止显示、复制、提交或发送。
 
-先确认当前环境与 remote：
+## 分支治理
 
-~~~powershell
+### main
+
+`main` 是唯一正式基线。
+
+任何实现任务必须先同步 `origin/main`，然后从本地 `main` 创建独立任务分支。不得从历史诊断分支、迁移分支、快照分支或 `codex/task-docs` 创建实现分支。
+
+### codex/task-docs
+
+该分支只用于任务文档通信。
+
+任务文档统一放在：
+
+```text
+TASKS/
+```
+
+任务文件命名规则：
+
+```text
+<简要任务说明>_YYYYMMDD-HHMMSS.md
+```
+
+示例：
+
+```text
+TASKS/RingBlockAssembler安全加固_20260907-153012.md
+```
+
+时间戳使用任务发布时的本地时间，精确到秒，用于唯一标识和排序。
+
+`TASKS/README.md` 是长期规范文件，不受上述单次任务命名规则约束。
+
+## 标准任务流程
+
+### 1. ChatGPT 发布任务
+
+ChatGPT 在 `codex/task-docs` 的 `TASKS/` 目录新增任务文档。任务文档至少应包含：
+
+1. Objective
+2. Baseline commit / baseline branch
+3. Problem and evidence
+4. Invariants
+5. Prohibited scope
+6. Recommended design
+7. Implementation freedom
+8. Expected changed files
+9. Required tests
+10. Regression baseline
+11. Build/test commands
+12. Acceptance criteria
+13. Required execution report
+
+任务文档必须明确以 `main` 为实现基线，而不是以任务文档分支为实现基线。
+
+### 2. Codex Desktop 获取任务
+
+```powershell
+Set-Location "D:\ChatGPT\PAERealtimeImaging"
+git fetch origin
+
+git show origin/codex/task-docs:TASKS/<任务文件名>
+```
+
+也可以临时查看任务文档分支，但不要在该分支上写实现代码。
+
+### 3. Codex Desktop 同步正式基线
+
+```powershell
+git switch main
+git merge --ff-only origin/main
+git status
+```
+
+若 `--ff-only` 失败，立即停止，不要 reset、rebase 或 force；先报告本地与远端分叉情况。
+
+### 4. Codex Desktop 创建实现分支
+
+从最新 `main` 创建：
+
+```powershell
+git switch -c codex/<task-name>-<timestamp>
+```
+
+任务分支名应简短、可识别，并避免与 `codex/task-docs` 混淆。
+
+### 5. 实施与验证
+
+提交前必须检查：
+
+```powershell
+git status
+git diff
+git add -- <明确的文件路径>
+git status
+git diff --cached
+```
+
+只允许提交任务范围内的修改。
+
+执行任务文档要求的构建、测试和回归验证，并记录实际命令和结果。
+
+### 6. 提交与推送
+
+```powershell
+git commit -m "<commit message>"
+git push -u origin <task-branch>
+```
+
+推送后核验：
+
+```powershell
+$LocalSha = git rev-parse HEAD
+$RemoteSha = (git ls-remote origin "refs/heads/<task-branch>").Split()[0]
+$LocalSha
+$RemoteSha
+$LocalSha -eq $RemoteSha
+```
+
+必须确认结果为 `True`。
+
+### 7. Codex Desktop 返回执行报告
+
+至少报告：
+
+- 任务文档文件名
+- 实现分支名
+- commit SHA
+- 改动文件列表
+- 实际执行的构建命令
+- 实际执行的测试命令
+- 测试结果
+- 回归结果
+- 已知限制或未验证项
+
+不能只报告“测试通过”。
+
+### 8. ChatGPT 审查
+
+ChatGPT 从 GitHub 重新读取实现分支或 PR 的最新 HEAD 和 diff，并对照任务文档逐项检查。
+
+审查结论使用：
+
+- `APPROVE`
+- `REQUEST_CHANGES`
+
+默认情况下，最终 merge 由用户决定；除非用户明确授权，ChatGPT 不自动合并实现分支到 `main`。
+
+## Codex Desktop 仓库接入
+
+确认当前环境与 remote：
+
+```powershell
 whoami
 git --version
 ssh -V
 git remote -v
 git status
-~~~
+```
 
-正常情况下，whoami 应为 laptop-buqlmv81\codexsandboxonline。
+目标 remote：
 
-先读取 origin：
-
-~~~powershell
-git remote get-url origin
-~~~
-
-origin 应为：
-
-~~~
+```text
 git@github.com:ZiXuannnZhang/PAErealtimeImaging.git
-~~~
+```
 
-如果当前 origin 不是该 SSH URL，而是 HTTPS 或其他地址，则先改为：
+若当前 origin 不是该 SSH URL：
 
-~~~powershell
+```powershell
 git remote set-url origin git@github.com:ZiXuannnZhang/PAErealtimeImaging.git
-~~~
+```
 
-然后配置 repository-local SSH：
+配置 repository-local SSH：
 
-~~~powershell
+```powershell
 $SshDir = "C:\Users\yyps\.codex\ssh\PAErealtimeImaging"
 $KeyPosix = (Join-Path $SshDir "deploy_ed25519").Replace("\","/")
 $KnownHostsPosix = (Join-Path $SshDir "github_known_hosts").Replace("\","/")
 $SshCommand = "ssh -i $KeyPosix -o IdentitiesOnly=yes -o UserKnownHostsFile=$KnownHostsPosix -o StrictHostKeyChecking=yes -o HostName=ssh.github.com -p 443 -o KexAlgorithms=curve25519-sha256"
 git config --local core.sshCommand $SshCommand
 git fetch origin
-~~~
+```
 
 检查 repository-local commit identity：
 
-~~~powershell
+```powershell
 git config --local user.name
 git config --local user.email
-~~~
+```
 
-如果任一项为空，则只在当前仓库设置：
+若任一项为空，只在当前仓库设置：
 
-~~~powershell
+```powershell
 git config --local user.name "Codex Desktop"
 git config --local user.email "codex-desktop@local.invalid"
-~~~
+```
 
 不要修改全局 Git identity。
 
-## 推荐的无人值守工作流
+## 禁止事项
 
-每次开始工作：
+1. 不要直接在 `main` 上实施任务代码。
+2. 不要从 `codex/task-docs` 创建实现分支。
+3. 不要把实现代码提交到 `codex/task-docs`。
+4. 不要从历史快照、诊断或迁移分支作为新任务基线。
+5. 不要执行 `git push --force` 或 `git push -f`。
+6. 不要在同步失败时自动 `reset --hard`、自动 rebase 或改写历史。
+7. 不要提交 SSH 私钥、凭据、PAT 或敏感配置。
+8. 不要依赖“测试通过”这一结论；必须记录具体命令、输出结论和未覆盖项。
 
-~~~powershell
-Set-Location "D:\ChatGPT\PAERealtimeImaging"
-git fetch origin
-git switch main
-git merge --ff-only origin/main
-git status
-~~~
+## 当前正式状态
 
-如果 `git merge --ff-only origin/main` 失败，停止并检查本地 main 与远端 main 的分叉原因，不要自动 reset 或 force。
-
-新任务使用独立分支，并明确从最新 main 创建，不直接修改 main：
-
-~~~powershell
-git switch -c <task-branch>
-~~~
-
-提交前必须检查：
-
-~~~powershell
-git status
-git diff
-git add -- <明确的文件路径>
-git status
-git diff --cached
-~~~
-
-确认 staged diff 只有预期文件后：
-
-~~~powershell
-git commit -m "<commit message>"
-git push -u origin <task-branch>
-~~~
-
-推送后核验：
-
-~~~powershell
-$LocalSha = git rev-parse HEAD
-$RemoteSha = (git ls-remote origin "refs/heads/<task-branch>").Split()[0]
-$LocalSha
-$RemoteSha
-$LocalSha -eq $RemoteSha
-~~~
-
-## 不要重复踩的坑
-
-1. 不要依赖 GCM、Windows Credential Manager、PAT 或 git credential-manager github login。
-2. 不要把私钥放进仓库、临时目录或 .cache\codex-runtimes。
-3. 不要使用 StrictHostKeyChecking=accept-new。
-4. SSH 22 端口在本环境 TCP 探测虽然可连，但 SSH 握手会被关闭；固定使用 ssh.github.com:443。
-5. 不要把公钥添加到个人账号的 SSH and GPG keys；必须使用目标仓库的 Deploy keys。
-6. 不要执行 git push --force、git push -f，也不要直接 push main。
-7. 提权 shell 的身份可能是 yyps，不能用它代替 codexsandboxonline 验证无人值守链路；最终 fetch/push 应在普通 Codex sandbox 身份下验证。
-8. 如果出现 UNPROTECTED PRIVATE KEY FILE，先检查私钥所有者和 ACL，不要重新生成 key。
-
-## 当前验收状态
-
-~~~
-Deploy Key auth: 成功
-SSH over 443: 成功
-SSH clone: 成功
-Repository-local SSH config: 成功
-git fetch: 成功
-Local commit: 成功
-git push: 成功
-Local SHA = Remote SHA: True
-main: 未修改
-~~~
+- GitHub 双端链路：已验证。
+- `main`：唯一 canonical branch。
+- `codex/task-docs`：任务文档专用分支。
+- 新实现任务：必须从最新 `main` 创建独立分支。
+- ChatGPT：设计与审查。
+- Codex Desktop：实现与本地验证。
