@@ -1,0 +1,167 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug MC410T_Receiver (MinGW)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/mingw_debug/bin/MC410T_Receiver.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/mingw_debug/bin",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gdb.exe",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build_delivery_debug"
+    },
+    {
+      "name": "Debug ImagingSvc (MinGW)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/mingw_debug/bin/ImagingSvc.exe",
+      "args": [],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/mingw_debug/bin",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gdb.exe",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build_delivery_debug"
+    },
+    {
+      "type": "cppdbg",
+      "request": "launch",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/ring_recon_release/bin",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gdb.exe",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build_ring_recon_view",
+      "name": "Run RingRecon View (11.dat)",
+      "program": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/ring_recon_release/bin/ring_recon_view.exe",
+      "args": [
+        "--data",
+        "D:\\zzx\\data\\20260716\\11.dat",
+        "--id",
+        "11",
+        "--grid-mm",
+        "0.1",
+        "--block",
+        "200"
+      ]
+    },
+    {
+      "type": "cppdbg",
+      "request": "launch",
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/ring_recon_release/bin",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gdb.exe",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build_ring_recon_view",
+      "name": "Run RingRecon View (14.dat)",
+      "program": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/ring_recon_release/bin/ring_recon_view.exe",
+      "args": [
+        "--data",
+        "D:\\zzx\\data\\20260519\\14.dat",
+        "--id",
+        "14",
+        "--grid-mm",
+        "0.1",
+        "--block",
+        "200"
+      ]
+    },
+    {
+      "name": "Debug RingRecon View (11.dat)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/ring_recon_debug/bin/ring_recon_view.exe",
+      "args": [
+        "--data",
+        "D:\\zzx\\data\\20260716\\11.dat",
+        "--id",
+        "11",
+        "--grid-mm",
+        "0.1",
+        "--block",
+        "200"
+      ],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/ring_recon_debug/bin",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gdb.exe",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build_ring_recon_debug"
+    },
+    {
+      "name": "Debug RingRecon View (14.dat)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/ring_recon_debug/bin/ring_recon_view.exe",
+      "args": [
+        "--data",
+        "D:\\zzx\\data\\20260519\\14.dat",
+        "--id",
+        "14",
+        "--grid-mm",
+        "0.1",
+        "--block",
+        "200"
+      ],
+      "stopAtEntry": false,
+      "cwd": "${workspaceFolder}/MC_410T_MultiCard/delivery/build/ring_recon_debug/bin",
+      "environment": [],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gdb.exe",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ],
+      "preLaunchTask": "build_ring_recon_debug"
+    }
+  ]
+}
