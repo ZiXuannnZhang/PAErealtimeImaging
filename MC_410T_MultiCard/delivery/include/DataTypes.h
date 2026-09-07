@@ -90,6 +90,61 @@ struct CardStats {
     std::atomic<uint64_t> processorPacketsDequeued{0};
     std::atomic<uint64_t> batchBoundaryDiscards{0};
 
+    // 网络入口/组包观测字段。它们只记录既有控制流已经做出的判断，
+    // 不参与接收、排队、组包或丢包决策。
+    std::atomic<uint64_t> sameTriggerForwardGapEvents{0};
+    std::atomic<uint64_t> sameTriggerForwardGapPackets{0};
+    std::atomic<uint64_t> sameTriggerBackstepEvents{0};
+    std::atomic<uint64_t> sameTriggerDuplicateSeqEvents{0};
+    std::atomic<uint64_t> crossTriggerLateArrivalEvents{0};
+    std::atomic<uint64_t> staleTriggerPacketsDiscarded{0};
+    std::atomic<uint64_t> assemblyDuplicatePackets{0};
+    std::atomic<uint64_t> assemblyOffsetOutOfRangePackets{0};
+    std::atomic<uint16_t> rawLastTriggerSeq{0};
+    std::atomic<uint16_t> rawLastPacketSeq{0};
+    std::atomic<bool> rawSequenceInitialized{false};
+
+    // 由 MultiPortReceiver 在解析完包头后调用；该函数只做整数比较和
+    // relaxed atomic 累计，不调用系统 API、不格式化字符串、不写磁盘。
+    void observeRawReceive(uint16_t triggerSeq, uint16_t packetSeq) {
+        if (!rawSequenceInitialized.load(std::memory_order_relaxed)) {
+            rawLastTriggerSeq.store(triggerSeq, std::memory_order_relaxed);
+            rawLastPacketSeq.store(packetSeq, std::memory_order_relaxed);
+            rawSequenceInitialized.store(true, std::memory_order_relaxed);
+            return;
+        }
+
+        const uint16_t latestTrigger = rawLastTriggerSeq.load(std::memory_order_relaxed);
+        const uint16_t latestPacket = rawLastPacketSeq.load(std::memory_order_relaxed);
+        const int16_t triggerDelta = static_cast<int16_t>(triggerSeq - latestTrigger);
+        if (triggerDelta < 0) {
+            crossTriggerLateArrivalEvents.fetch_add(1, std::memory_order_relaxed);
+            return;
+        }
+
+        if (triggerDelta == 0) {
+            const uint16_t packetDelta = static_cast<uint16_t>(packetSeq - latestPacket);
+            if (packetDelta == 0) {
+                sameTriggerDuplicateSeqEvents.fetch_add(1, std::memory_order_relaxed);
+            } else if (packetDelta < 0x8000U) {
+                if (packetDelta > 1U) {
+                    sameTriggerForwardGapEvents.fetch_add(1, std::memory_order_relaxed);
+                    sameTriggerForwardGapPackets.fetch_add(
+                        static_cast<uint64_t>(packetDelta - 1U), std::memory_order_relaxed);
+                }
+            } else {
+                sameTriggerBackstepEvents.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+
+        // 只把当前最新 trigger 的最后一个包序号作为下一次同 trigger
+        // 比较锚点；旧 trigger 迟到包不会污染后续判断。
+        if (triggerDelta >= 0) {
+            rawLastTriggerSeq.store(triggerSeq, std::memory_order_relaxed);
+            rawLastPacketSeq.store(packetSeq, std::memory_order_relaxed);
+        }
+    }
+
     //  速率字段（由主线程 1Hz 采样更新，无需 atomic）
     double recvMbps        = 0.0;
     double triggerHz       = 0.0;
@@ -117,6 +172,17 @@ struct CardStats {
         uint64_t socketPacketsReceived = 0;
         uint64_t processorPacketsDequeued = 0;
         uint64_t batchBoundaryDiscards = 0;
+        uint64_t sameTriggerForwardGapEvents = 0;
+        uint64_t sameTriggerForwardGapPackets = 0;
+        uint64_t sameTriggerBackstepEvents = 0;
+        uint64_t sameTriggerDuplicateSeqEvents = 0;
+        uint64_t crossTriggerLateArrivalEvents = 0;
+        uint64_t staleTriggerPacketsDiscarded = 0;
+        uint64_t assemblyDuplicatePackets = 0;
+        uint64_t assemblyOffsetOutOfRangePackets = 0;
+        uint16_t lastTriggerSeq = 0;
+        uint16_t lastPacketSeq = 0;
+        bool rawSequenceInitialized = false;
     };
 
     Snapshot snapshot() const {
@@ -136,6 +202,17 @@ struct CardStats {
         s.socketPacketsReceived = socketPacketsReceived.load(std::memory_order_relaxed);
         s.processorPacketsDequeued = processorPacketsDequeued.load(std::memory_order_relaxed);
         s.batchBoundaryDiscards = batchBoundaryDiscards.load(std::memory_order_relaxed);
+        s.sameTriggerForwardGapEvents = sameTriggerForwardGapEvents.load(std::memory_order_relaxed);
+        s.sameTriggerForwardGapPackets = sameTriggerForwardGapPackets.load(std::memory_order_relaxed);
+        s.sameTriggerBackstepEvents = sameTriggerBackstepEvents.load(std::memory_order_relaxed);
+        s.sameTriggerDuplicateSeqEvents = sameTriggerDuplicateSeqEvents.load(std::memory_order_relaxed);
+        s.crossTriggerLateArrivalEvents = crossTriggerLateArrivalEvents.load(std::memory_order_relaxed);
+        s.staleTriggerPacketsDiscarded = staleTriggerPacketsDiscarded.load(std::memory_order_relaxed);
+        s.assemblyDuplicatePackets = assemblyDuplicatePackets.load(std::memory_order_relaxed);
+        s.assemblyOffsetOutOfRangePackets = assemblyOffsetOutOfRangePackets.load(std::memory_order_relaxed);
+        s.lastTriggerSeq = rawLastTriggerSeq.load(std::memory_order_relaxed);
+        s.lastPacketSeq = rawLastPacketSeq.load(std::memory_order_relaxed);
+        s.rawSequenceInitialized = rawSequenceInitialized.load(std::memory_order_relaxed);
         return s;
     }
 

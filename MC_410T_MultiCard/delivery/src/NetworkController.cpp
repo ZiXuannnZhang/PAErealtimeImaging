@@ -125,6 +125,25 @@ QJsonObject NetworkController::runtimeStatsFields(const CardStats::Snapshot& sta
                   static_cast<double>(stats.processorPacketsDequeued));
     fields.insert(QStringLiteral("batchBoundaryDiscards"),
                   static_cast<double>(stats.batchBoundaryDiscards));
+    fields.insert(QStringLiteral("sameTriggerForwardGapEvents"),
+                  static_cast<double>(stats.sameTriggerForwardGapEvents));
+    fields.insert(QStringLiteral("sameTriggerForwardGapPackets"),
+                  static_cast<double>(stats.sameTriggerForwardGapPackets));
+    fields.insert(QStringLiteral("sameTriggerBackstepEvents"),
+                  static_cast<double>(stats.sameTriggerBackstepEvents));
+    fields.insert(QStringLiteral("sameTriggerDuplicateSeqEvents"),
+                  static_cast<double>(stats.sameTriggerDuplicateSeqEvents));
+    fields.insert(QStringLiteral("crossTriggerLateArrivalEvents"),
+                  static_cast<double>(stats.crossTriggerLateArrivalEvents));
+    fields.insert(QStringLiteral("staleTriggerPacketsDiscarded"),
+                  static_cast<double>(stats.staleTriggerPacketsDiscarded));
+    fields.insert(QStringLiteral("assemblyDuplicatePackets"),
+                  static_cast<double>(stats.assemblyDuplicatePackets));
+    fields.insert(QStringLiteral("assemblyOffsetOutOfRangePackets"),
+                  static_cast<double>(stats.assemblyOffsetOutOfRangePackets));
+    fields.insert(QStringLiteral("lastTriggerSeq"), static_cast<int>(stats.lastTriggerSeq));
+    fields.insert(QStringLiteral("lastPacketSeq"), static_cast<int>(stats.lastPacketSeq));
+    fields.insert(QStringLiteral("rawSequenceInitialized"), stats.rawSequenceInitialized);
     return fields;
 }
 
@@ -216,12 +235,58 @@ void NetworkController::scheduleNetworkSnapshot(const QString& reason,
     });
 }
 
+void NetworkController::recordIngressSnapshot(const QString& reason)
+{
+    DiagnosticRecorder *recorder = diagnosticRecorder();
+    if (!recorder) return;
+
+    QJsonObject snapshot = m_ingressSampler.sample(m_targetIPs.toList());
+    snapshot.insert(QStringLiteral("listenId"), m_diagnosticListenId);
+    snapshot.insert(QStringLiteral("source"), m_diagnosticSource);
+    snapshot.insert(QStringLiteral("reason"), reason);
+    snapshot.insert(QStringLiteral("configId"), m_currentConfigId);
+    snapshot.insert(QStringLiteral("targetIPs"), QJsonArray::fromStringList(m_targetIPs.toList()));
+
+    QJsonArray receiverGroups;
+    for (const auto& receiver : m_receivers) {
+        if (!receiver) continue;
+        const auto stats = receiver->observabilitySnapshot();
+        QJsonObject group;
+        QJsonArray cards;
+        for (const int card : stats.cardIndices) cards.append(card);
+        group.insert(QStringLiteral("cardIndices"), cards);
+        group.insert(QStringLiteral("selectWakeups"), static_cast<double>(stats.selectWakeups));
+        group.insert(QStringLiteral("selectTimeouts"), static_cast<double>(stats.selectTimeouts));
+        group.insert(QStringLiteral("selectErrors"), static_cast<double>(stats.selectErrors));
+        group.insert(QStringLiteral("recvHardErrors"), static_cast<double>(stats.recvHardErrors));
+        group.insert(QStringLiteral("recvWouldBlockTerminations"),
+                     static_cast<double>(stats.recvWouldBlockTerminations));
+        group.insert(QStringLiteral("maxDrainPackets"), static_cast<double>(stats.maxDrainPackets));
+        group.insert(QStringLiteral("maxDrainDurationUs"), static_cast<double>(stats.maxDrainDurationUs));
+        group.insert(QStringLiteral("maxReceiverLoopGapUs"),
+                     static_cast<double>(stats.maxReceiverLoopGapUs));
+        QJsonArray socketStats;
+        for (const auto& socket : stats.sockets) {
+            QJsonObject socketObject;
+            socketObject.insert(QStringLiteral("cardIndex"), socket.cardIndex);
+            socketObject.insert(QStringLiteral("maxDrainPackets"),
+                                static_cast<double>(socket.maxDrainPackets));
+            socketStats.append(socketObject);
+        }
+        group.insert(QStringLiteral("sockets"), socketStats);
+        receiverGroups.append(group);
+    }
+    snapshot.insert(QStringLiteral("receiverGroups"), receiverGroups);
+    recorder->recordNetworkSnapshot(snapshot);
+}
+
 NetworkController::~NetworkController() {
     // 析构时需要同步等待后台停止线程（不能留 this 指针悬空）
     if (m_running) {
         // 析构路径不会经过 stop()，因此这里也要先留存一次接近关闭时刻的
         // 逐卡运行快照，确保窗口关闭/异常退出不会丢掉最后一段统计。
         updateAllStats();
+        recordIngressSnapshot(QStringLiteral("destructor"));
         recordCardSnapshots(QStringLiteral("idle"));
         // 直接同步停止所有子线程（析构路径允许短暂阻塞）
         m_running = false;
@@ -284,6 +349,8 @@ bool NetworkController::start(const AcqConfig& config, std::function<void()> onS
     m_currentConfigTrigger = QStringLiteral("api");
     m_feedbackSequence.store(0, std::memory_order_relaxed);
     m_feedbackTimeoutCount.store(0, std::memory_order_relaxed);
+    m_ingressSampler.reset();
+    m_lastIngressSnapshotMs = 0;
 
     // 初始化卡就绪状态
     m_cardsReady.assign(config.nCards, false);
@@ -406,6 +473,7 @@ bool NetworkController::start(const AcqConfig& config, std::function<void()> onS
     //  统计定时器 
     m_lastStatsMs = nowMs();
     m_lastRuntimeSnapshotMs = 0;
+    m_lastIngressSnapshotMs = 0;
     m_statsTimer = new QTimer(this);
     connect(m_statsTimer, &QTimer::timeout, this, &NetworkController::onStatsTimer);
     m_statsTimer->start(STATS_UPDATE_MS);
@@ -500,6 +568,7 @@ void NetworkController::stop() {
     // 停止前先刷新一次差分统计和队列深度，保证导出时至少有接近停止时刻的
     // 最终逐卡运行快照；计数器本身仍由各线程原子维护。
     updateAllStats();
+    recordIngressSnapshot(QStringLiteral("stop"));
     recordCardSnapshots(QStringLiteral("idle"));
 
     // 发出所有停止信号（非阻塞，立即返回）
@@ -673,6 +742,11 @@ void NetworkController::updateAllStats() {
         now - m_lastRuntimeSnapshotMs >= 2000) {
         m_lastRuntimeSnapshotMs = now;
         recordCardSnapshots(QStringLiteral("runtime"));
+    }
+    if (m_lastIngressSnapshotMs == 0 ||
+        now - m_lastIngressSnapshotMs >= 2000) {
+        m_lastIngressSnapshotMs = now;
+        recordIngressSnapshot(QStringLiteral("runtime"));
     }
 }
 
