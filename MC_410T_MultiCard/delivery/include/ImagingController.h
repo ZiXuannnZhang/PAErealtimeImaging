@@ -14,6 +14,7 @@
 #include <QTimer>
 #include <vector>
 #include "ImagingParams.h"
+#include "RingShmObservability.h"
 #include "ring_recon_cuda.h"
 
 namespace zmq { class context_t; class socket_t; }
@@ -140,6 +141,7 @@ private:
     int                 m_ringDisplayNx = 0;        // 显示网格 dn
     int                 m_ringDisplayStep = 0;      // 显示降采样步长
     int                 m_ringDisplayFrameSize = 0; // dn*dn
+    ring_shm_obs::Tracker m_ringObs;
 
     QVector<float> m_latestFrame;
     mutable QMutex m_frameMutex;

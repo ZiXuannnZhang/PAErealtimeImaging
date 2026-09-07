@@ -23,6 +23,11 @@ target_link_libraries(diagnostic_recorder_test PRIVATE Qt6::Core)
 
 add_test(NAME diagnostic_recorder_test COMMAND diagnostic_recorder_test)
 
+add_executable(ring_shm_observability_test ring_shm_observability_test.cpp)
+target_include_directories(ring_shm_observability_test PRIVATE ../include)
+target_link_libraries(ring_shm_observability_test PRIVATE Qt6::Core)
+add_test(NAME ring_shm_observability_test COMMAND ring_shm_observability_test)
+
 add_executable(diagnostic_dialog_test diagnostic_dialog_test.cpp
     ../src/DiagnosticExportDialog.cpp ../src/DiagnosticRecorder.cpp)
 target_include_directories(diagnostic_dialog_test PRIVATE ../include)
