@@ -84,6 +84,12 @@ public:
     int   inputQueueDepth() const;
     int   cardId()          const { return m_cardId; }
 
+#ifdef DATA_PROCESSOR_TEST_SEAM
+    // 仅供确定性边界测试：执行一轮与生产线程完全相同的 queue drain，
+    // 不启动 QThread，便于断言 513 个包时第 513 个仍留在队列中。
+    int drainBatchForTest();
+#endif
+
 signals:
     // 诊断：某触发未收齐全部包即被切换（缺包数 = 期望包数 - 实收包数）
     void partialTrigger(int cardId, uint16_t triggerSeq, int missingPackets);
@@ -101,6 +107,10 @@ private:
 
     // 将 assemblyBuf 当前内容 export → compute → 分发（供正常完成和强制 flush 共用）
     void flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf);
+
+    // 执行一轮有上限的输入队列 drain。生产线程和测试 seam 共用此路径，
+    // 保证 batch 边界回归测试不会只验证独立条件表达式。
+    int processInputBatch(PacketAssemblyBuffer& assemblyBuf);
 
     //  成员 
     int              m_cardId;

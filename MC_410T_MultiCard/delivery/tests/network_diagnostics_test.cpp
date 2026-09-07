@@ -54,6 +54,39 @@ bool require(bool yes, const QString &text) {
     if(!yes) QTextStream(stderr) << "FAIL " << text << Qt::endl;
     return yes;
 }
+
+bool runtimeStatsFieldMapping()
+{
+    CardStats::Snapshot stats;
+    stats.packetsReceived = 900;
+    stats.packetsDropped = 7;
+    stats.triggersComplete = 12;
+    stats.triggersPartial = 3;
+    stats.triggersDiscarded = 2;
+    stats.saveQueueDiscards = 1;
+    stats.inputQueueDepth = 100;
+    stats.saveQueueDepth = 5;
+    stats.recvMbps = 123.45;
+    stats.triggerHz = 99.5;
+    stats.packetLossRate = 0.007;
+    stats.socketPacketsReceived = 1000;
+    stats.processorPacketsDequeued = 900;
+    stats.batchBoundaryDiscards = 0;
+    const QJsonObject fields = NetworkController::runtimeStatsFields(stats);
+    bool ok = require(fields.value("socketPacketsReceived").toDouble() == 1000,
+                      "runtime socket counter mapping");
+    ok = require(fields.value("processorPacketsDequeued").toDouble() == 900,
+                 "runtime processor counter mapping") && ok;
+    ok = require(fields.value("batchBoundaryDiscards").toDouble() == 0,
+                 "runtime batch boundary mapping") && ok;
+    ok = require(fields.value("packetsDropped").toDouble() == 7
+                     && fields.value("triggersPartial").toDouble() == 3
+                     && fields.value("inputQueueDepth").toInt() == 100
+                     && fields.value("saveQueueDepth").toInt() == 5,
+                 "legacy runtime field mapping") && ok;
+    return ok;
+}
+
 bool receptionDuringExport(bool withExport, const QString &output)
 {
     NetworkController controller;
@@ -94,13 +127,39 @@ bool receptionDuringExport(bool withExport, const QString &output)
     while(settle.elapsed()<400) { QCoreApplication::processEvents(); QThread::msleep(2); }
     const auto stats=controller.getAllCardStats();
     bool ok=stats.size()==4;
+    quint64 totalSocket = 0;
+    quint64 totalDequeued = 0;
+    quint64 totalBoundaryDiscards = 0;
+    int finalQueueDepth = 0;
+    quint64 totalDropped = 0;
+    quint64 totalPartial = 0;
     for(const auto &card:stats) {
         ok=require(card.triggersComplete==triggers && card.packetsDropped==0 && card.triggersPartial==0,
             QString("replay card=%1 triggers=%2 dropped=%3 partial=%4")
                 .arg(card.cardId).arg(card.triggersComplete).arg(card.packetsDropped).arg(card.triggersPartial)) && ok;
+        ok=require(card.socketPacketsReceived >= card.processorPacketsDequeued
+                       && card.batchBoundaryDiscards == 0,
+                   QString("replay card=%1 socket=%2 dequeued=%3 boundary=%4")
+                       .arg(card.cardId)
+                       .arg(card.socketPacketsReceived)
+                       .arg(card.processorPacketsDequeued)
+                       .arg(card.batchBoundaryDiscards)) && ok;
+        totalSocket += card.socketPacketsReceived;
+        totalDequeued += card.processorPacketsDequeued;
+        totalBoundaryDiscards += card.batchBoundaryDiscards;
+        finalQueueDepth += card.inputQueueDepth;
+        totalDropped += card.packetsDropped;
+        totalPartial += card.triggersPartial;
     }
     if(withExport) ok=require(job.get().success,"export during reception") && ok;
-    if (ok) QTextStream(stdout) << "PASS replay " << (withExport?"with export":"baseline") << ": 4 cards x 80 triggers, 40Hz" << Qt::endl;
+    if (ok) QTextStream(stdout) << "PASS replay " << (withExport?"with export":"baseline")
+                               << ": 4 cards x 80 triggers, 40Hz"
+                               << " socketPacketsReceived=" << totalSocket
+                               << " processorPacketsDequeued=" << totalDequeued
+                               << " batchBoundaryDiscards=" << totalBoundaryDiscards
+                               << " inputQueueDepth=" << finalQueueDepth
+                               << " packetsDropped=" << totalDropped
+                               << " triggersPartial=" << totalPartial << Qt::endl;
     return ok;
 }
 }
@@ -154,7 +213,8 @@ int main(int argc, char **argv) {
     DiagnosticRecorder::Options options;
     options.rootDirectory=temporary.path(); options.noiseBurst=0;
     auto *recorder=DiagnosticRecorder::initialize(options);
-    const bool ok=NetworkDiagnosticTestAccess::exercise(4) && NetworkDiagnosticTestAccess::exercise(5)
+    const bool ok=runtimeStatsFieldMapping()
+        && NetworkDiagnosticTestAccess::exercise(4) && NetworkDiagnosticTestAccess::exercise(5)
         && receptionDuringExport(false,QString())
         && receptionDuringExport(true,QDir(temporary.path()).filePath("during-reception.zip"));
     QThreadPool::globalInstance()->waitForDone();

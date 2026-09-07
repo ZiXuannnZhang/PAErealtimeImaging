@@ -84,6 +84,11 @@ struct CardStats {
     std::atomic<uint64_t> triggersPartial{0};
     std::atomic<uint64_t> triggersDiscarded{0};
     std::atomic<uint64_t> saveQueueDiscards{0};  // 存储队列满导致的丢弃（triggersDiscarded 子集）
+    // 分层采集计数：socket 成功接收、processor 成功出队，以及
+    // batch quota 边界哨兵。最后一个计数在修复后的正常路径应始终为 0。
+    std::atomic<uint64_t> socketPacketsReceived{0};
+    std::atomic<uint64_t> processorPacketsDequeued{0};
+    std::atomic<uint64_t> batchBoundaryDiscards{0};
 
     //  速率字段（由主线程 1Hz 采样更新，无需 atomic）
     double recvMbps        = 0.0;
@@ -109,6 +114,9 @@ struct CardStats {
         int      saveQueueDepth   = 0;
         uint64_t triggersDiscarded = 0;
         uint64_t saveQueueDiscards = 0;  // 存储队列满丢弃（可与 triggersDiscarded 对比诊断根因）
+        uint64_t socketPacketsReceived = 0;
+        uint64_t processorPacketsDequeued = 0;
+        uint64_t batchBoundaryDiscards = 0;
     };
 
     Snapshot snapshot() const {
@@ -125,6 +133,9 @@ struct CardStats {
         s.saveQueueDepth   = saveQueueDepth;
         s.triggersDiscarded = triggersDiscarded.load(std::memory_order_relaxed);
         s.saveQueueDiscards = saveQueueDiscards.load(std::memory_order_relaxed);
+        s.socketPacketsReceived = socketPacketsReceived.load(std::memory_order_relaxed);
+        s.processorPacketsDequeued = processorPacketsDequeued.load(std::memory_order_relaxed);
+        s.batchBoundaryDiscards = batchBoundaryDiscards.load(std::memory_order_relaxed);
         return s;
     }
 

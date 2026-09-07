@@ -55,4 +55,23 @@ if(WIN32)
     target_compile_definitions(network_diagnostics_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(network_diagnostics_test PRIVATE Qt6::Core Qt6::Concurrent ws2_32 iphlpapi)
     add_test(NAME network_diagnostics_test COMMAND network_diagnostics_test)
+
+    add_executable(data_processor_batch_test
+        data_processor_batch_test.cpp
+        ../src/DataProcessor.cpp
+        ../include/DataProcessor.h
+        ../src/FramePublisher.cpp
+        ../include/FramePublisher.h
+        ../src/MultiPortReceiver.cpp
+        ../include/MultiPortReceiver.h)
+    target_include_directories(data_processor_batch_test PRIVATE ../include)
+    target_compile_definitions(data_processor_batch_test PRIVATE
+        DATA_PROCESSOR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(data_processor_batch_test PRIVATE Qt6::Core ws2_32)
+    add_test(NAME data_processor_batch_test COMMAND data_processor_batch_test)
+
+    add_executable(card_status_formatting_test card_status_formatting_test.cpp)
+    target_include_directories(card_status_formatting_test PRIVATE ../include)
+    target_link_libraries(card_status_formatting_test PRIVATE Qt6::Core)
+    add_test(NAME card_status_formatting_test COMMAND card_status_formatting_test)
 endif()

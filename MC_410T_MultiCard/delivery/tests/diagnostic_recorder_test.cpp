@@ -133,6 +133,51 @@ bool testZipBoundaryAndSummary()
                      && summary.contains(QStringLiteral("现场说明")), QStringLiteral("summary grouping or failure history missing"));
 }
 
+bool testRuntimeCardCountersExport()
+{
+    QTemporaryDir temp;
+    if (!check(temp.isValid(), QStringLiteral("temporary directory unavailable"))) return false;
+    DiagnosticRecorder recorder(optionsFor(temp.path()));
+    const QJsonObject fields{
+        {QStringLiteral("socketPacketsReceived"), 1000},
+        {QStringLiteral("processorPacketsDequeued"), 900},
+        {QStringLiteral("batchBoundaryDiscards"), 0},
+        {QStringLiteral("packetsDropped"), 7},
+        {QStringLiteral("triggersPartial"), 3},
+        {QStringLiteral("inputQueueDepth"), 100},
+        {QStringLiteral("saveQueueDepth"), 5}
+    };
+    recorder.setCardSnapshot(1, QStringLiteral("127.0.0.2"), QStringLiteral("runtime"), fields);
+    const QString zipPath = QDir(temp.path()).filePath(QStringLiteral("runtime-counters.zip"));
+    const DiagnosticRecorder::ExportResult result = recorder.exportRun(zipPath);
+    if (!check(result.success, QStringLiteral("runtime counter export failed: %1").arg(result.error))) return false;
+    QString error;
+    const QHash<QString, QByteArray> files = readStoredZip(zipPath, &error);
+    if (!check(error.isEmpty(), error)) return false;
+    const QJsonObject network = QJsonDocument::fromJson(files.value(QStringLiteral("network.json"))).object();
+    const QJsonArray cards = network.value(QStringLiteral("cards")).toArray();
+    if (!check(cards.size() == 1, QStringLiteral("runtime card snapshot missing"))) return false;
+    const QJsonObject card = cards.first().toObject();
+    const QJsonObject cardFields = card.value(QStringLiteral("fields")).toObject();
+    bool ok = check(cardFields.value(QStringLiteral("socketPacketsReceived")).toDouble() == 1000,
+                    QStringLiteral("socket counter not exported"));
+    ok = check(cardFields.value(QStringLiteral("processorPacketsDequeued")).toDouble() == 900,
+               QStringLiteral("processor counter not exported")) && ok;
+    ok = check(cardFields.value(QStringLiteral("batchBoundaryDiscards")).toDouble() == 0,
+               QStringLiteral("batch boundary counter not exported")) && ok;
+    ok = check(cardFields.value(QStringLiteral("packetsDropped")).toDouble() == 7
+                   && cardFields.value(QStringLiteral("triggersPartial")).toDouble() == 3
+                   && cardFields.value(QStringLiteral("inputQueueDepth")).toDouble() == 100
+                   && cardFields.value(QStringLiteral("saveQueueDepth")).toDouble() == 5,
+               QStringLiteral("legacy runtime fields not exported")) && ok;
+    const QJsonObject manifest = QJsonDocument::fromJson(files.value(QStringLiteral("manifest.json"))).object();
+    ok = check(!manifest.value(QStringLiteral("dropCounters")).toObject().contains(QStringLiteral("socketPacketsReceived"))
+                   && !manifest.value(QStringLiteral("dropCounters")).toObject().contains(QStringLiteral("processorPacketsDequeued"))
+                   && !manifest.value(QStringLiteral("dropCounters")).toObject().contains(QStringLiteral("batchBoundaryDiscards")),
+               QStringLiteral("recorder drop counters were not polluted")) && ok;
+    return ok;
+}
+
 bool testDiskHistoryAndWriteFallback()
 {
     QTemporaryDir temp;
@@ -316,6 +361,7 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     bool ok = true;
     ok = testZipBoundaryAndSummary() && ok;
+    ok = testRuntimeCardCountersExport() && ok;
     ok = testDiskHistoryAndWriteFallback() && ok;
     ok = testQueueRetention() && ok;
     ok = testStaticHistoricalExportAndProducers() && ok;

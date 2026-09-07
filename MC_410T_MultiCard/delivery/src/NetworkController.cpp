@@ -99,6 +99,35 @@ QString NetworkController::cardDiagnosticState(int cardIdx) const
     return QStringLiteral("idle");
 }
 
+QJsonObject NetworkController::runtimeStatsFields(const CardStats::Snapshot& stats)
+{
+    QJsonObject fields;
+    fields.insert(QStringLiteral("packetsReceived"),
+                  static_cast<double>(stats.packetsReceived));
+    fields.insert(QStringLiteral("packetsDropped"),
+                  static_cast<double>(stats.packetsDropped));
+    fields.insert(QStringLiteral("triggersComplete"),
+                  static_cast<double>(stats.triggersComplete));
+    fields.insert(QStringLiteral("triggersPartial"),
+                  static_cast<double>(stats.triggersPartial));
+    fields.insert(QStringLiteral("triggersDiscarded"),
+                  static_cast<double>(stats.triggersDiscarded));
+    fields.insert(QStringLiteral("saveQueueDiscards"),
+                  static_cast<double>(stats.saveQueueDiscards));
+    fields.insert(QStringLiteral("inputQueueDepth"), stats.inputQueueDepth);
+    fields.insert(QStringLiteral("saveQueueDepth"), stats.saveQueueDepth);
+    fields.insert(QStringLiteral("recvMbps"), stats.recvMbps);
+    fields.insert(QStringLiteral("triggerHz"), stats.triggerHz);
+    fields.insert(QStringLiteral("packetLossRate"), stats.packetLossRate);
+    fields.insert(QStringLiteral("socketPacketsReceived"),
+                  static_cast<double>(stats.socketPacketsReceived));
+    fields.insert(QStringLiteral("processorPacketsDequeued"),
+                  static_cast<double>(stats.processorPacketsDequeued));
+    fields.insert(QStringLiteral("batchBoundaryDiscards"),
+                  static_cast<double>(stats.batchBoundaryDiscards));
+    return fields;
+}
+
 void NetworkController::recordCardSnapshots(const QString& stateOverride)
 {
     DiagnosticRecorder *recorder = diagnosticRecorder();
@@ -136,6 +165,12 @@ void NetworkController::recordCardSnapshots(const QString& stateOverride)
         fields.insert(QStringLiteral("retryResetCount"),
                       static_cast<double>(card.retryResetCount));
         fields.insert(QStringLiteral("cardIndex"), i + 1);
+
+        if (const auto stats = getCardStats(i)) {
+            const QJsonObject runtimeFields = runtimeStatsFields(*stats);
+            for (auto it = runtimeFields.constBegin(); it != runtimeFields.constEnd(); ++it)
+                fields.insert(it.key(), it.value());
+        }
 
         const QString state = stateOverride.isEmpty()
             ? cardDiagnosticState(i)
@@ -184,6 +219,10 @@ void NetworkController::scheduleNetworkSnapshot(const QString& reason,
 NetworkController::~NetworkController() {
     // 析构时需要同步等待后台停止线程（不能留 this 指针悬空）
     if (m_running) {
+        // 析构路径不会经过 stop()，因此这里也要先留存一次接近关闭时刻的
+        // 逐卡运行快照，确保窗口关闭/异常退出不会丢掉最后一段统计。
+        updateAllStats();
+        recordCardSnapshots(QStringLiteral("idle"));
         // 直接同步停止所有子线程（析构路径允许短暂阻塞）
         m_running = false;
         if (m_statsTimer) { m_statsTimer->stop(); delete m_statsTimer; m_statsTimer = nullptr; }
@@ -366,6 +405,7 @@ bool NetworkController::start(const AcqConfig& config, std::function<void()> onS
 
     //  统计定时器 
     m_lastStatsMs = nowMs();
+    m_lastRuntimeSnapshotMs = 0;
     m_statsTimer = new QTimer(this);
     connect(m_statsTimer, &QTimer::timeout, this, &NetworkController::onStatsTimer);
     m_statsTimer->start(STATS_UPDATE_MS);
@@ -457,6 +497,9 @@ void NetworkController::stop() {
     m_configAck.clear();
     m_configRetry.clear();
     m_configSentMs.clear();
+    // 停止前先刷新一次差分统计和队列深度，保证导出时至少有接近停止时刻的
+    // 最终逐卡运行快照；计数器本身仍由各线程原子维护。
+    updateAllStats();
     recordCardSnapshots(QStringLiteral("idle"));
 
     // 发出所有停止信号（非阻塞，立即返回）
@@ -622,6 +665,14 @@ void NetworkController::updateAllStats() {
         stats.lastUpdateMs   = m_lastStatsMs;
         // 队列深度（供 UI 监控积压情况）
         stats.inputQueueDepth = proc.inputQueueDepth();
+    }
+
+    // 运行期间每约 2 秒写入一次逐卡采集快照，避免高频刷爆诊断记录器；
+    // stop() 还会额外写入一次最终快照。
+    if (m_lastRuntimeSnapshotMs == 0 ||
+        now - m_lastRuntimeSnapshotMs >= 2000) {
+        m_lastRuntimeSnapshotMs = now;
+        recordCardSnapshots(QStringLiteral("runtime"));
     }
 }
 

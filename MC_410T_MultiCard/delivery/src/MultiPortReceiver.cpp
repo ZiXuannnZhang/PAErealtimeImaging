@@ -197,9 +197,13 @@ void MultiPortReceiver::run() {
                     std::min(recvd - UDP_HEADER_BYTES, UDP_PAYLOAD_BYTES));
                 std::memcpy(pkt.data, m_recvBuf.data() + UDP_HEADER_BYTES, pkt.dataSize);
 
-                // 交给对应的 DataProcessor
-                if (i < static_cast<int>(m_processors.size()) && m_processors[i])
+                // 只有已经解析且确实存在对应 processor 时，才计入 socket 层；
+                // 短包、停止唤醒包和无 processor 的数据都不冒充有效采集包。
+                if (i < static_cast<int>(m_processors.size()) && m_processors[i]) {
+                    m_processors[i]->stats().socketPacketsReceived.fetch_add(
+                        1, std::memory_order_relaxed);
                     m_processors[i]->enqueuePacket(pkt);
+                }
             }
         }
     }
