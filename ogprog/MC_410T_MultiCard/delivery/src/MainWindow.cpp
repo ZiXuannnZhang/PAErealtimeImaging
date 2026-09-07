@@ -1,0 +1,3320 @@
+﻿#include "MainWindow.h"
+#include "ui_MainWindow.h"
+#include "NetworkController.h"
+#include "ImagingController.h"
+#include "Constants.h"
+#include "AcqConfig.h"
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QMenu>
+#include <QApplication>
+#include <QDir>
+#include <QDateTime>
+#include <QMessageBox>
+#include <QDialog>
+#include <QGridLayout>
+#include <QVBoxLayout>
+#include <QFormLayout>
+#include <QDialogButtonBox>
+#include <QLineEdit>
+#include <QLabel>
+#include <QTimer>
+#include <QProgressDialog>
+#include <QCloseEvent>
+#include <QApplication>
+#include <thread>
+#include <cmath>
+#include <numeric>
+#include <chrono>
+#include <algorithm>
+#include <fstream>
+
+// ══ 成像测试数据参数（文件路径运行时拼接 exe 目录）══
+static constexpr int kTestCardNum = 8;   // F8 模式 bin 文件固定有 8 路逻辑卡
+static constexpr int kTestDepth = 12500; // 示例程序 F8 depth=12500（250M v3）
+
+// 读取二进制 float 文件到 vector
+// ══ 辅助：QVector<int> ↔ 逗号分隔字符串（用于 QSettings 持久化）══
+static QVector<int> strToVec(const QString &s) {
+    QVector<int> v;
+    for (const QString &tok : s.split(',', Qt::SkipEmptyParts))
+        v.append(tok.trimmed().toInt());
+    return v;
+}
+static QString vecToStr(const QVector<int> &v) {
+    QStringList sl; for (int x : v) sl.append(QString::number(x));
+    return sl.join(",");
+}
+
+static bool readBinaryFloats(const char *path, std::vector<float> &data)
+{
+    std::ifstream ifs(path, std::ios::binary | std::ios::ate);
+    if (!ifs.is_open()) return false;
+    std::streamsize bytes = ifs.tellg();
+    if (bytes < 0 || (bytes % static_cast<std::streamsize>(sizeof(float))) != 0)
+        return false;
+    ifs.seekg(0, std::ios::beg);
+    data.resize(static_cast<size_t>(bytes) / sizeof(float));
+    if (!data.empty())
+        ifs.read(reinterpret_cast<char *>(data.data()), bytes);
+    return ifs.good() || ifs.eof();
+}
+
+// ══ 辅助：设置按钮文本时同步更新 Accessibility 名称（供 windows-mcp UIA 识别）══
+static void setBtnText(QPushButton *btn, const QString &text)
+{
+    btn->setText(text);
+    btn->setAccessibleName(text);
+}
+
+MainWindow::MainWindow(QWidget *parent)
+    : QMainWindow(parent)
+    , ui(new Ui::MainWindow)
+    , m_nCards(4)
+    , m_netController(nullptr)
+    , m_statsTimer(new QTimer(this))
+    , m_displayTimer(new QTimer(this))
+    , m_isListening(false)
+    , m_isMeasuring(false)
+    , m_highDataRateWarningShown(false)
+        , m_pendingAutoSave(false)
+    , m_saveWarnCooldown(0)
+    , m_displayEnabled(true)
+    , m_enableDownsampling(false)
+    , m_autoRescaleAxes(true)
+    , m_autoRescalePlot{}
+    , m_displayInterval(10)
+    , m_openglInitialized(false)
+    , m_isTileView(false)
+    , m_groupTabBar(nullptr)
+    , m_placeholderPage(nullptr)
+    , m_currentGroup(0)
+    , m_numGroups(1)
+    , m_refreshCounter(0)
+    , m_loadingSettings(false)
+    , m_useTestImagingData(false)
+    , m_imagingController(nullptr)
+    , m_imagingConfigDialog(nullptr)
+    , m_imagingEnabled(false)
+    , m_imagingPulseCount(0)
+    , m_imagingFrameCount(0)
+    , m_freqColorRange(0, 500)
+    , m_pixelColorRange(0, 500)
+    , m_freqColorInited(false)
+    , m_pixelColorInited(false)
+    , m_btnImagingConfig(nullptr)
+    , m_btnImagingStart(nullptr)
+    , m_grpImaging(nullptr)
+{
+    for (int i = 0; i < MAX_CARDS; ++i) m_lastFeedSeq[i] = 0;
+    for (int c = 0; c < CARDS_PER_DISPLAY_GROUP; ++c)
+        for (int h = 0; h < 2; ++h)
+            m_autoRescalePlot[c][h] = true;
+
+    ui->setupUi(this);
+
+    // 重设显示类型：差分相位(0) / 瞬时频率(1) / 扫描图像(2)
+    ui->cmbDisplayType->clear();
+    ui->cmbDisplayType->addItem("  差分相位");
+    ui->cmbDisplayType->addItem("  瞬时频率");
+    ui->cmbDisplayType->addItem("  扫描图像");
+
+    // ══ 为所有控件设置 Accessibility 名称（供 windows-mcp UIA 识别）══
+    // 注意：btnStartListen / btnStartMeasure / btnToggleSave 的 accessible name
+    // 通过 setBtnText() 随按钮文字自动同步，此处不再硬编码。
+    ui->btnConfig->setAccessibleName("配置参数");
+    ui->edtDataTime->setAccessibleName("采集时间(ns)");
+    ui->edtADelay->setAccessibleName("A延时(ns)");
+    ui->edtBDelay->setAccessibleName("B延时(ns)");
+    // 显示控制组
+    ui->chkEnableDisplay->setAccessibleName("启用实时显示");
+    ui->chkTileView->setAccessibleName("平铺显示");
+    ui->cmbDisplayType->setAccessibleName("显示类型");
+    ui->spnRefreshRate->setAccessibleName("刷新间隔");
+    ui->spnDownsampleRatio->setAccessibleName("显示最大点数");
+    ui->edtPkStart->setAccessibleName("峰峰值统计起点");
+    ui->edtPkEnd->setAccessibleName("峰峰值统计终点");
+    // 数据保存组
+    ui->btnSelectDir->setAccessibleName("选择目录");
+    ui->edtSaveDir->setAccessibleName("保存目录");
+    ui->edtTriggersPerFile->setAccessibleName("每文件触发数");
+    ui->edtFileSuffix->setAccessibleName("文件后缀");
+
+    m_lblStats[0] = ui->lblStats1;
+    m_lblStats[1] = ui->lblStats2;
+    m_lblStats[2] = ui->lblStats3;
+    m_lblStats[3] = ui->lblStats4;
+
+    m_colorMapPlot = nullptr;
+    m_colorMap     = nullptr;
+
+    memset(m_prevSaveDiscards, 0, sizeof(m_prevSaveDiscards));
+    memset(m_displayCounter,   0, sizeof(m_displayCounter));
+    m_colorScale   = nullptr;
+
+    for (int i = 0; i < MAX_CARDS; ++i) {
+        m_displayCounter[i] = 0;
+        for (int j = 0; j < 2; ++j) {
+            m_stackedWidgets[i][j] = nullptr;
+            m_plotsPhase[i][j]     = nullptr;
+            m_plotsFrequency[i][j] = nullptr;
+            m_pkpkLabels[i][j]     = nullptr;
+            m_tileContainers[i][j] = nullptr;
+            m_firstPlot[i][j]      = true;
+        }
+    }
+
+    setupUI();        // 创建 groupTabBar、colorMapPlot 等静态部件
+    createConnections();
+    loadStyleSheet();
+    loadSettings();   // 会读取 nCards 并触发 rebuildDynamicUI()
+
+    // ══ 成像控制器初始化 ════════════════════════════════════════
+    m_peizhunLoaded = false;
+    m_peizhunFilePath.clear();
+
+    m_imagingController = new ImagingController(this);
+    connect(m_imagingController, &ImagingController::imageReady,
+            this, &MainWindow::onImagingImageReady);
+    connect(m_imagingController, &ImagingController::svcError,
+            this, &MainWindow::onImagingError);
+    connect(m_imagingController, &ImagingController::svcStatus,
+            this, [this](const QString &status, float fps) {
+        if (status == "running") {
+            // 更新进度指示显示帧率
+            if (m_lblImagingStatus && m_imagingEnabled) {
+                int moveAline = m_imagingScanParams.move_aline;
+                int progress  = m_imagingPulseCount % moveAline;
+                if (progress == 0) progress = moveAline;
+                m_lblImagingStatus->setText(
+                    QString("采集脉冲 %1/%2 · 输出 %3 帧 · %4 fps")
+                    .arg(progress).arg(moveAline)
+                    .arg(m_imagingFrameCount)
+                    .arg(fps, 0, 'f', 1));
+            }
+        } else {
+            logMessage(QString("[成像] %1").arg(status));
+        }
+    });
+
+    connect(m_statsTimer, &QTimer::timeout, this, &MainWindow::onUpdateStatistics);
+    m_statsTimer->start(2000);
+
+    // ══ 成像馈送定时器（5ms，独立于 33ms 显示刷新，确保捕获 100Hz 触发）══
+    m_imagingTimer = new QTimer(this);
+    m_imagingTimer->setInterval(5);
+    connect(m_imagingTimer, &QTimer::timeout, this, &MainWindow::feedImagingPulse);
+
+    connect(m_displayTimer, &QTimer::timeout, this, &MainWindow::onDisplayRefresh);
+    // displayTimer 延迟到 showEvent 中启动，确保OpenGL初始化完成后再开始数据刷新
+
+    logMessage("系统初始化完成");
+
+    // 窗口几何尺寸恢复
+    {
+        QSettings s("MC410T", "MC410T_Receiver");
+        if (s.contains("Window/X")) {
+            int wx = s.value("Window/X", 100).toInt();
+            int wy = s.value("Window/Y", 100).toInt();
+            int ww = s.value("Window/W", 1600).toInt();
+            int wh = s.value("Window/H", 900).toInt();
+            setGeometry(wx, wy, ww, wh);
+            logMessage(QString("恢复窗口几何: %1,%2 %3x%4").arg(wx).arg(wy).arg(ww).arg(wh));
+        } else {
+            resize(1600, 900);
+            logMessage("首次运行，使用默认窗口尺寸 1600x900");
+        }
+    }
+}
+
+MainWindow::~MainWindow()
+{
+    // 关闭成像子进程
+    if (m_imagingController) {
+        m_imagingController->stopSvc();
+        delete m_imagingController;
+        m_imagingController = nullptr;
+    }
+
+    // saveSettings() 已在 closeEvent 中调用，析构时不重复保存
+    if (m_netController) {
+        m_netController->setParent(nullptr);
+        m_netController->deleteLater();
+        m_netController = nullptr;
+    }
+    delete ui;
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+
+    // 使用100ms延迟确保窗口完全布局后再初始化OpenGL
+    QTimer::singleShot(100, this, [this]() {
+        QApplication::processEvents(QEventLoop::AllEvents);
+        
+        // 同步所有图表的视口尺寸，布局完成后首次开启 OpenGL
+        auto syncPlotViewport = [](QCustomPlot *plot) {
+            if (!plot) return;
+            plot->ensurePolished();
+            plot->updateGeometry();
+            QApplication::processEvents(QEventLoop::AllEvents);
+            QSize sz = plot->size();
+            if (sz.width() < 10 || sz.height() < 10) {
+                QThread::msleep(50);
+                QApplication::processEvents(QEventLoop::AllEvents);
+                sz = plot->size();
+            }
+            // 仅设置视口，不开启 OpenGL（延迟到 updatePlot 首次调用时，尺寸已稳定）
+            plot->setViewport(QRect(0, 0, sz.width(), sz.height()));
+            plot->replot(QCustomPlot::rpImmediateRefresh);
+        };
+        
+        for (int card = 0; card < CARDS_PER_DISPLAY_GROUP; ++card) {
+            for (int ch = 0; ch < 2; ++ch) {
+                syncPlotViewport(m_plotsPhase[card][ch]);
+                syncPlotViewport(m_plotsFrequency[card][ch]);
+            }
+        }
+        syncPlotViewport(m_colorMapPlot);
+        
+        // 只在第一次显示时启动定时器
+        if (!m_openglInitialized) {
+            m_openglInitialized = true;
+            m_displayTimer->start(DISPLAY_REFRESH_MS);
+        }
+    });
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+    // 窗口大小变化时同步图表几何布局，确保OpenGL视口正确更新
+    QTimer::singleShot(0, this, [this]() {
+        syncVisiblePlotsGeometry();
+    });
+}
+
+void MainWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+    
+    // 处理窗口状态变化（最小化/恢复）
+    if (event->type() == QEvent::WindowStateChange) {
+        QWindowStateChangeEvent *stateEvent = static_cast<QWindowStateChangeEvent*>(event);
+        
+        // 如果窗口从最小化恢复
+        if (!(stateEvent->oldState() & Qt::WindowMinimized) && 
+            (windowState() & Qt::WindowMinimized)) {
+            // 窗口正在最小化，不需要处理
+        } else if ((stateEvent->oldState() & Qt::WindowMinimized) && 
+                   !(windowState() & Qt::WindowMinimized)) {
+            // 窗口从最小化恢复，强制同步所有图表的几何布局
+            QTimer::singleShot(0, this, [this]() {
+                QTimer::singleShot(0, this, [this]() {
+                    syncVisiblePlotsGeometry();
+                });
+            });
+        }
+    }
+}
+
+// =====================================================================
+// setupUI — 只负责不随 nCards 变化的静态部件（GroupTabBar、colorMap容器等）
+// =====================================================================
+void MainWindow::setupUI()
+{
+    // 颜色图页
+    m_colorMapPlot = new QCustomPlot();
+    m_colorMapPlot->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    m_colorMapPlot->setMinimumSize(0, 0);
+    ui->pageColorMap->layout()->addWidget(m_colorMapPlot);
+
+    // ══ 成像控制：两个独立按钮 + 状态 label，各占一行 ════════════════
+    m_btnImagingConfig = new QPushButton("成像参数");
+    m_btnImagingConfig->setObjectName("btnImagingConfig");
+    m_btnImagingConfig->setMinimumWidth(100);
+    m_btnImagingConfig->setAccessibleName("成像参数");
+
+    m_btnImagingStart = new QPushButton();
+    m_btnImagingStart->setObjectName("btnImagingStart");
+    m_btnImagingStart->setMinimumWidth(100);
+    m_btnImagingStart->setEnabled(false);
+    setBtnText(m_btnImagingStart, "启动成像");
+
+    m_lblImagingStatus = new QLabel("成像就绪");
+    m_lblImagingStatus->setObjectName("lblImagingStatus");
+    m_lblImagingStatus->setAccessibleName("成像状态");
+    m_lblImagingStatus->setStyleSheet(
+        "color: #888888; background: transparent; padding: 2px 8px;"
+        "font-size: 12px;");
+
+    // 默认隐藏（扫描图像模式才显示）
+    m_btnImagingConfig->setVisible(false);
+    m_btnImagingStart->setVisible(false);
+    m_lblImagingStatus->setVisible(false);
+
+    // 将成像控件加入显示控制分组框的最后三行
+    if (ui->grpDisplay) {
+        QGridLayout *gl = qobject_cast<QGridLayout*>(ui->grpDisplay->layout());
+        if (gl) {
+            int nextRow = gl->rowCount();
+            gl->addWidget(m_btnImagingConfig, nextRow,     0, 1, 2);
+            gl->addWidget(m_btnImagingStart,  nextRow + 1, 0, 1, 2);
+            gl->addWidget(m_lblImagingStatus, nextRow + 2, 0, 1, 2);
+        }
+    }
+    m_grpImaging = nullptr;
+
+    // 连接按钮信号
+    connect(m_btnImagingConfig, &QPushButton::clicked,
+            this, &MainWindow::onImagingConfigClicked);
+    connect(m_btnImagingStart, &QPushButton::clicked, this, [this]() {
+        if (m_imagingEnabled) {
+            // 停止
+            setBtnText(m_btnImagingStart, "正在停止…");
+            m_btnImagingStart->setEnabled(false);
+            auto conn = std::make_shared<QMetaObject::Connection>();
+            *conn = connect(m_imagingController, &ImagingController::svcStopped,
+                            this, [this, conn]() {
+                disconnect(*conn);
+                m_imagingTimer->stop();
+                m_imagingEnabled = false;
+                setBtnText(m_btnImagingStart, "启动成像");
+                m_btnImagingStart->setEnabled(true);
+                m_btnImagingStart->setProperty("imagingRunning", false);
+                m_btnImagingStart->style()->unpolish(m_btnImagingStart);
+                m_btnImagingStart->style()->polish(m_btnImagingStart);
+                onImagingStopped();
+            });
+            m_imagingController->stopSvc();
+        } else {
+            // 启动
+            setBtnText(m_btnImagingStart, "正在启动…");
+            m_btnImagingStart->setEnabled(false);
+            if (m_imagingController->startSvc()) {
+                auto conn = std::make_shared<QMetaObject::Connection>();
+                *conn = connect(m_imagingController, &ImagingController::svcReady,
+                                this, [this, conn]() {
+                    disconnect(*conn);
+                    m_imagingEnabled = true;
+                    m_imagingTimer->start();
+                    setBtnText(m_btnImagingStart, "停止成像");
+                    m_btnImagingStart->setEnabled(true);
+                    m_btnImagingStart->setProperty("imagingRunning", true);
+                    m_btnImagingStart->style()->unpolish(m_btnImagingStart);
+                    m_btnImagingStart->style()->polish(m_btnImagingStart);
+                    onImagingStarted();
+                });
+                QTimer::singleShot(5000, this, [this, conn]() {
+                    if (m_btnImagingStart && !m_btnImagingStart->isEnabled()) {
+                        disconnect(*conn);
+                        m_imagingEnabled = m_imagingController->isRunning();
+                        setBtnText(m_btnImagingStart,
+                            m_imagingEnabled ? "停止成像" : "启动成像");
+                        m_btnImagingStart->setEnabled(true);
+                    }
+                });
+            } else {
+                setBtnText(m_btnImagingStart, "启动成像");
+                m_btnImagingStart->setEnabled(true);
+            }
+        }
+    });
+
+    // 日志分组设置拉伸因子，最大化时占满左下角
+    if (ui->leftPanelLayout) {
+        int logIdx = ui->leftPanelLayout->indexOf(ui->grpLog);
+        if (logIdx >= 0) {
+            ui->leftPanelLayout->setStretchFactor(ui->grpLog, 1);
+        }
+    }
+    // 日志区域最小高度：确保默认显示至少6行日志
+    if (ui->grpLog) {
+        ui->grpLog->setMinimumHeight(160);
+    }
+
+    ui->spnRefreshRate->setAlignment(Qt::AlignLeft);
+    ui->spnDownsampleRatio->setAlignment(Qt::AlignLeft);
+
+    // GroupTabBar 占位（rebuildDynamicUI 会重建 tab 数量）
+    m_groupTabBar = new QTabBar();
+    m_groupTabBar->setExpanding(false);
+    m_groupTabBar->setDrawBase(false);
+    m_groupTabBar->setMinimumHeight(28);  // QTabBar 默认高度约 28-30px
+    QHBoxLayout *groupBarLayout = qobject_cast<QHBoxLayout*>(ui->groupTabBarContainer->layout());
+    if (groupBarLayout) {
+        groupBarLayout->addWidget(m_groupTabBar);
+    }
+    m_placeholderPage = nullptr;
+}
+
+// =====================================================================
+// rebuildDynamicUI — 根据 m_nCards 重建分组 Tab、图表、统计栏
+// 监听期间不允许调用（isListening 时 spnNCards 已被禁用）
+// =====================================================================
+void MainWindow::rebuildDynamicUI()
+{
+    // ── 1. 清理旧的 Tab 和图表 ────────────────────────────────
+    while (ui->tabWidget->count() > 0)
+        ui->tabWidget->removeTab(0);
+
+    // 清理旧 tile containers（从 grid 布局移除）
+    for (int i = 0; i < MAX_CARDS; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            if (m_tileContainers[i][j]) {
+                ui->gridTileLayout->removeWidget(m_tileContainers[i][j]);
+                m_tileContainers[i][j]->deleteLater();
+                m_tileContainers[i][j] = nullptr;
+            }
+            // StackedWidget 若还在 tabWidget 里会被 removeTab 删除，这里只重置指针
+            m_stackedWidgets[i][j] = nullptr;
+            m_plotsPhase[i][j]     = nullptr;
+            m_plotsFrequency[i][j] = nullptr;
+            m_pkpkLabels[i][j]     = nullptr;
+        }
+    }
+
+    // ── 2. 清理旧的 GroupTabBar ────────────────────────────────
+    while (m_groupTabBar->count() > 0)
+        m_groupTabBar->removeTab(0);
+
+    // ── 3. 计算分组参数 ────────────────────────────────────────
+    m_numGroups = (m_nCards + CARDS_PER_DISPLAY_GROUP - 1) / CARDS_PER_DISPLAY_GROUP;
+
+    // 只有超过 1 个分组时才显示分组 Tab 栏
+    if (ui->groupTabBarContainer) {
+        bool showGroups = (m_numGroups > 1);
+        ui->groupTabBarContainer->setVisible(showGroups);
+        // 显式调用 show/hide 确保布局立即生效（setVisible 可能被布局缓存延迟应用）
+        if (showGroups) {
+            ui->groupTabBarContainer->show();
+            m_groupTabBar->show();
+        } else {
+            ui->groupTabBarContainer->hide();
+        }
+        logMessage(QString("[分组] nCards=%1 groups=%2 show=%3")
+                   .arg(m_nCards).arg(m_numGroups).arg(showGroups));
+    }
+
+    // ── 4. 为当前组的 4 张（或更少）卡创建 Tab + 图表 ────────────
+    // 这里只为当前可见组（m_currentGroup）创建 Tab 和图表
+    // 切组时由 updateGroupDisplay() 重新绑定（复用同一批图表，只更新标题）
+    // 注意：为了简化内存管理，始终为最多 CARDS_PER_DISPLAY_GROUP 张卡创建图表槽位
+    for (int card = 0; card < CARDS_PER_DISPLAY_GROUP; ++card) {
+        for (int ch = 0; ch < 2; ++ch) {
+            int globalCard = m_currentGroup * CARDS_PER_DISPLAY_GROUP + card;
+            bool cardExists = (globalCard < m_nCards);
+            QString tabName = cardExists
+                ? QString("卡%1-通道%2").arg(globalCard + 1).arg(ch == 0 ? 'A' : 'B')
+                : QString("--");
+
+            // Tab 页
+            QWidget *tabPage = new QWidget();
+            QVBoxLayout *tabLayout = new QVBoxLayout(tabPage);
+            tabLayout->setContentsMargins(0, 0, 0, 0);
+
+            QStackedWidget *stack = new QStackedWidget();
+            stack->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            m_stackedWidgets[card][ch] = stack;
+
+            // pk-pk 标签（放 stacked 外部，相位/频率模式均可见）
+            m_pkpkLabels[card][ch] = new QLabel(QString("峰峰值: --"));
+            m_pkpkLabels[card][ch]->setAlignment(Qt::AlignCenter);
+            m_pkpkLabels[card][ch]->setFixedHeight(24);
+            m_pkpkLabels[card][ch]->setProperty("pkpkLabel", true);
+
+            // 第0页：相位图
+            m_plotsPhase[card][ch] = new QCustomPlot();
+            stack->addWidget(m_plotsPhase[card][ch]);
+
+            // 第1页：瞬时频率
+            QWidget *freqPage = new QWidget();
+            freqPage->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            QVBoxLayout *freqLayout = new QVBoxLayout(freqPage);
+            freqLayout->setContentsMargins(2, 2, 2, 2);
+            freqLayout->setSpacing(2);
+            m_plotsFrequency[card][ch] = new QCustomPlot();
+            freqLayout->addWidget(m_plotsFrequency[card][ch], 1);
+            stack->addWidget(freqPage);
+
+            tabLayout->addWidget(m_pkpkLabels[card][ch]);
+            tabLayout->addWidget(stack, 1);
+            ui->tabWidget->addTab(tabPage, tabName);
+
+            // 平铺容器
+            QWidget *tileContainer = new QWidget();
+            QVBoxLayout *tileLayout = new QVBoxLayout(tileContainer);
+            tileLayout->setSpacing(0);
+            tileLayout->setContentsMargins(1, 1, 1, 1);
+
+            QLabel *titleLabel = new QLabel(tabName);
+            titleLabel->setAlignment(Qt::AlignCenter);
+            titleLabel->setProperty("tileTitle", true);
+            tileLayout->addWidget(titleLabel);
+            tileLayout->addStretch();
+
+            int row = (card * 2 + ch) / 4;
+            int col = (card * 2 + ch) % 4;
+            ui->gridTileLayout->addWidget(tileContainer, row, col);
+            m_tileContainers[card][ch] = tileContainer;
+
+            // 若该卡不存在（当前组不足4张），隐藏 Tab
+            if (!cardExists) {
+                ui->tabWidget->setTabVisible(card * 2 + ch, false);
+                tileContainer->setVisible(false);
+            }
+
+            m_firstPlot[card][ch] = true;
+        }
+    }
+
+    // ── 5. 重建 GroupTabBar ──────────────────────────────────
+    for (int g = 0; g < m_numGroups; ++g) {
+        int firstCard = g * CARDS_PER_DISPLAY_GROUP + 1;
+        int lastCard  = std::min(firstCard + CARDS_PER_DISPLAY_GROUP - 1, m_nCards);
+        m_groupTabBar->addTab(QString("第%1组").arg(g + 1));
+        m_groupTabBar->setTabToolTip(g,
+            QString("第%1组：卡%2 ~ 卡%3").arg(g + 1).arg(firstCard).arg(lastCard));
+    }
+    // 确保 GroupTabBar 本身可见
+    m_groupTabBar->setVisible(m_numGroups > 0);
+
+    // 窗口显示后修复 QTabBar 高度（容器可见但 tab 栏可能高度为 0）
+    if (m_numGroups > 1 && ui->groupTabBarContainer) {
+        QTimer::singleShot(100, this, [this]() {
+            if (m_groupTabBar->height() < 10) {
+                m_groupTabBar->setMinimumHeight(28);
+                m_groupTabBar->updateGeometry();
+                m_groupTabBar->adjustSize();
+            }
+            ui->groupTabBarContainer->setVisible(true);
+        });
+    }
+
+    // ── 6. 初始化图表样式（添加 graph、设置右键菜单等）──────────
+    setupPlots();
+
+    // ── 7. 重置当前组（防越界）并刷新显示 ──────────────────────
+    if (m_currentGroup >= m_numGroups) m_currentGroup = 0;
+    m_groupTabBar->setCurrentIndex(m_currentGroup);
+    updateGroupDisplay(m_currentGroup);
+
+    // ── 7.5 同步当前显示模式到新建的 stackedWidget ──────────────
+    // loadSettings() 调用 onDisplayTypeChanged() 时 stackedWidget 还未创建，
+    // 重建 UI 后必须重新应用一次，否则频率模式下 stack 停在相位页导致图表不可见
+    onDisplayTypeChanged(ui->cmbDisplayType->currentIndex());
+
+    // ── 8. 更新网络信息标签 ────────────────────────────────────
+    updateNetworkInfoLabels();
+
+    // ── 9. 重置显示计数器 ─────────────────────────────────────
+    for (int i = 0; i < MAX_CARDS; ++i) {
+        m_displayCounter[i] = 0;
+        for (int j = 0; j < 2; ++j)
+            m_firstPlot[i][j] = true;
+    }
+}
+
+// =====================================================================
+// setupPlots — 初始化当前可见的 CARDS_PER_DISPLAY_GROUP 个图表样式
+// =====================================================================
+void MainWindow::setupPlots()
+{
+    // 应用当前图表的轴范围到所有同类图表，同时同步自适应坐标轴标志
+    auto applyRangeToAll = [this](QCustomPlot *src, bool isFreq) {
+        if (!src || !src->xAxis || !src->yAxis) return;
+        QCPRange xr = src->xAxis->range();
+        QCPRange yr = src->yAxis->range();
+        // 查找当前图的 card/ch 索引
+        int srcCard = -1, srcCh = -1;
+        for (int c = 0; c < CARDS_PER_DISPLAY_GROUP && srcCard < 0; ++c) {
+            for (int h = 0; h < 2; ++h) {
+                QCustomPlot *p = isFreq ? m_plotsFrequency[c][h] : m_plotsPhase[c][h];
+                if (p == src) { srcCard = c; srcCh = h; break; }
+            }
+        }
+        for (int c = 0; c < CARDS_PER_DISPLAY_GROUP; ++c) {
+            for (int h = 0; h < 2; ++h) {
+                QCustomPlot *p = isFreq ? m_plotsFrequency[c][h] : m_plotsPhase[c][h];
+                if (p && p != src && p->xAxis && p->yAxis) {
+                    p->xAxis->setRange(xr);
+                    p->yAxis->setRange(yr);
+                    // 同步自适应坐标轴标志
+                    if (srcCard >= 0 && srcCh >= 0)
+                        m_autoRescalePlot[c][h] = m_autoRescalePlot[srcCard][srcCh];
+                    p->replot(QCustomPlot::rpQueuedReplot);
+                }
+            }
+        }
+    };
+
+    for (int card = 0; card < CARDS_PER_DISPLAY_GROUP; ++card) {
+        for (int ch = 0; ch < 2; ++ch) {
+            if (!m_plotsPhase[card][ch] || !m_plotsFrequency[card][ch]) continue;
+
+            // 相位图 — Keysight 风格：深色背景 + 亮青色曲线
+            QCustomPlot *phasePlot = m_plotsPhase[card][ch];
+            phasePlot->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            phasePlot->setMinimumSize(0, 0);
+            phasePlot->setOpenGl(false);
+            phasePlot->addGraph();
+            phasePlot->graph(0)->setPen(QPen(QColor(0, 188, 255), 2.0));    // 亮青色 2px
+            phasePlot->graph(0)->setAdaptiveSampling(false);
+            phasePlot->graph(0)->setAntialiased(true);
+            phasePlot->setNotAntialiasedElements(QCP::aeNone);
+            phasePlot->xAxis->setLabel("采样点");
+            phasePlot->yAxis->setLabel("相位 (rad)");
+            phasePlot->xAxis->setLabelColor(QColor(180, 180, 180));
+            phasePlot->yAxis->setLabelColor(QColor(180, 180, 180));
+            phasePlot->xAxis->setTickLabelColor(QColor(160, 160, 160));
+            phasePlot->yAxis->setTickLabelColor(QColor(160, 160, 160));
+            phasePlot->xAxis->setBasePen(QPen(QColor(80, 80, 80)));
+            phasePlot->yAxis->setBasePen(QPen(QColor(80, 80, 80)));
+            phasePlot->xAxis->setTickPen(QPen(QColor(60, 60, 60)));
+            phasePlot->yAxis->setTickPen(QPen(QColor(60, 60, 60)));
+            phasePlot->xAxis->setSubTickPen(QPen(QColor(90, 90, 90)));
+            phasePlot->yAxis->setSubTickPen(QPen(QColor(90, 90, 90)));
+            phasePlot->xAxis->setRange(0, 1024);
+            phasePlot->yAxis->setRange(-M_PI, M_PI);
+            phasePlot->setBackground(QBrush(QColor(30, 30, 30)));
+            phasePlot->axisRect()->setBackground(QBrush(QColor(38, 38, 38)));
+            // 多层次网格 —— Keysight/R&S 风格
+            phasePlot->xAxis->grid()->setVisible(true);
+            phasePlot->yAxis->grid()->setVisible(true);
+            phasePlot->xAxis->grid()->setPen(QPen(QColor(85, 85, 85), 0.5, Qt::SolidLine));
+            phasePlot->yAxis->grid()->setPen(QPen(QColor(85, 85, 85), 0.5, Qt::SolidLine));
+            phasePlot->xAxis->grid()->setSubGridVisible(true);
+            phasePlot->yAxis->grid()->setSubGridVisible(true);
+            phasePlot->xAxis->grid()->setSubGridPen(QPen(QColor(68, 68, 68), 0.5, Qt::DotLine));
+            phasePlot->yAxis->grid()->setSubGridPen(QPen(QColor(68, 68, 68), 0.5, Qt::DotLine));
+            phasePlot->xAxis->grid()->setZeroLinePen(QPen(QColor(140, 140, 140), 1.0, Qt::DashLine));
+            phasePlot->yAxis->grid()->setZeroLinePen(QPen(QColor(140, 140, 140), 1.0, Qt::DashLine));
+            phasePlot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
+            phasePlot->setContextMenuPolicy(Qt::CustomContextMenu);
+            connect(phasePlot, &QWidget::customContextMenuRequested, this, [this, phasePlot, card, ch, applyRangeToAll](const QPoint &pos) {
+                QMenu menu(phasePlot);
+                QAction *actRestore = menu.addAction("还原视图");
+                QAction *actAutoRescale = menu.addAction("自适应坐标轴");
+                actAutoRescale->setCheckable(true);
+                actAutoRescale->setChecked(m_autoRescalePlot[card][ch]);
+                menu.addSeparator();
+                QAction *actSetRange = menu.addAction("设置坐标范围...");
+                menu.addSeparator();
+                QAction *actCopyClip = menu.addAction("复制到剪贴板");
+                menu.addSeparator();
+                QAction *actApplyAll = menu.addAction("应用到所有相位图");
+                QAction *selected = menu.exec(phasePlot->mapToGlobal(pos));
+                if (selected == actRestore) { phasePlot->rescaleAxes(); phasePlot->replot(); }
+                else if (selected == actAutoRescale) {
+                    bool wasAuto = m_autoRescalePlot[card][ch];
+                    m_autoRescalePlot[card][ch] = actAutoRescale->isChecked();
+                    if (m_autoRescalePlot[card][ch]) {
+                        phasePlot->rescaleAxes(); phasePlot->replot();
+                    } else if (wasAuto) {
+                        phasePlot->xAxis->setRange(m_savedXRange[card][ch]);
+                        phasePlot->yAxis->setRange(m_savedYRange[card][ch]);
+                        phasePlot->replot();
+                    }
+                }
+                else if (selected == actCopyClip) { QApplication::clipboard()->setPixmap(phasePlot->toPixmap()); }
+                else if (selected == actSetRange) {
+                    // 自动取消自适应（如果开启），一步弹出对话框
+                    if (m_autoRescalePlot[card][ch]) {
+                        m_autoRescalePlot[card][ch] = false;
+                        actAutoRescale->setChecked(false);
+                    }
+                    // 设置坐标范围对话框（同时设 X/Y）
+                    QDialog dlg(phasePlot);
+                    dlg.setWindowTitle("设置坐标范围");
+                    QFormLayout *fl = new QFormLayout(&dlg);
+                    QDoubleSpinBox *xMin = new QDoubleSpinBox(); xMin->setRange(-1e9, 1e9);
+                    xMin->setValue(phasePlot->xAxis->range().lower);
+                    QDoubleSpinBox *xMax = new QDoubleSpinBox(); xMax->setRange(-1e9, 1e9);
+                    xMax->setValue(phasePlot->xAxis->range().upper);
+                    QDoubleSpinBox *yMin = new QDoubleSpinBox(); yMin->setRange(-1e9, 1e9);
+                    yMin->setValue(phasePlot->yAxis->range().lower);
+                    QDoubleSpinBox *yMax = new QDoubleSpinBox(); yMax->setRange(-1e9, 1e9);
+                    yMax->setValue(phasePlot->yAxis->range().upper);
+                    fl->addRow("X 轴最小值:", xMin);
+                    fl->addRow("X 轴最大值:", xMax);
+                    fl->addRow("Y 轴最小值:", yMin);
+                    fl->addRow("Y 轴最大值:", yMax);
+                    QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+                    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+                    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+                    fl->addRow(bb);
+                    if (dlg.exec() == QDialog::Accepted) {
+                        phasePlot->xAxis->setRange(xMin->value(), xMax->value());
+                        phasePlot->yAxis->setRange(yMin->value(), yMax->value());
+                        phasePlot->replot();
+                        m_savedXRange[card][ch] = phasePlot->xAxis->range();
+                        m_savedYRange[card][ch] = phasePlot->yAxis->range();
+                    }
+                }
+                else if (selected == actApplyAll) {
+                    if (QMessageBox::question(phasePlot, "确认",
+                        "将当前 X/Y 范围应用到当前组的所有相位图，是否继续？",
+                        QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes) {
+                        applyRangeToAll(phasePlot, false);
+                    }
+                }
+            });
+            phasePlot->replot();
+
+            // 频率图 — Keysight 风格：深色背景 + 暖橙色曲线
+
+            // 频率图 — Keysight 风格：深色背景 + 暖橙色曲线
+            QCustomPlot *freqPlot = m_plotsFrequency[card][ch];
+            freqPlot->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            freqPlot->setMinimumSize(0, 0);
+            freqPlot->setOpenGl(false);
+            freqPlot->addGraph();
+            freqPlot->graph(0)->setPen(QPen(QColor(255, 170, 0), 2.0));     // 暖橙 2px
+            freqPlot->graph(0)->setAdaptiveSampling(false);
+            freqPlot->graph(0)->setAntialiased(true);
+            freqPlot->setNotAntialiasedElements(QCP::aeNone);
+            freqPlot->xAxis->setLabel("采样点");
+            freqPlot->yAxis->setLabel("瞬时频率 (kHz)");
+            freqPlot->xAxis->setLabelColor(QColor(180, 180, 180));
+            freqPlot->yAxis->setLabelColor(QColor(180, 180, 180));
+            freqPlot->xAxis->setTickLabelColor(QColor(160, 160, 160));
+            freqPlot->yAxis->setTickLabelColor(QColor(160, 160, 160));
+            freqPlot->xAxis->setBasePen(QPen(QColor(80, 80, 80)));
+            freqPlot->yAxis->setBasePen(QPen(QColor(80, 80, 80)));
+            freqPlot->xAxis->setTickPen(QPen(QColor(60, 60, 60)));
+            freqPlot->yAxis->setTickPen(QPen(QColor(60, 60, 60)));
+            freqPlot->xAxis->setSubTickPen(QPen(QColor(90, 90, 90)));
+            freqPlot->yAxis->setSubTickPen(QPen(QColor(90, 90, 90)));
+            freqPlot->xAxis->setRange(0, 1024);
+            freqPlot->yAxis->setRange(0, 500);
+            freqPlot->setBackground(QBrush(QColor(30, 30, 30)));
+            freqPlot->axisRect()->setBackground(QBrush(QColor(38, 38, 38)));
+            // 多层次网格 —— Keysight/R&S 风格
+            freqPlot->xAxis->grid()->setVisible(true);
+            freqPlot->yAxis->grid()->setVisible(true);
+            freqPlot->xAxis->grid()->setPen(QPen(QColor(85, 85, 85), 0.5, Qt::SolidLine));
+            freqPlot->yAxis->grid()->setPen(QPen(QColor(85, 85, 85), 0.5, Qt::SolidLine));
+            freqPlot->xAxis->grid()->setSubGridVisible(true);
+            freqPlot->yAxis->grid()->setSubGridVisible(true);
+            freqPlot->xAxis->grid()->setSubGridPen(QPen(QColor(68, 68, 68), 0.5, Qt::DotLine));
+            freqPlot->yAxis->grid()->setSubGridPen(QPen(QColor(68, 68, 68), 0.5, Qt::DotLine));
+            freqPlot->xAxis->grid()->setZeroLinePen(QPen(QColor(140, 140, 140), 1.0, Qt::DashLine));
+            freqPlot->yAxis->grid()->setZeroLinePen(QPen(QColor(140, 140, 140), 1.0, Qt::DashLine));
+            freqPlot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
+            freqPlot->setContextMenuPolicy(Qt::CustomContextMenu);
+            connect(freqPlot, &QWidget::customContextMenuRequested, this, [this, freqPlot, card, ch, applyRangeToAll](const QPoint &pos) {
+                QMenu menu(freqPlot);
+                QAction *actRestore = menu.addAction("还原视图");
+                QAction *actAutoRescale = menu.addAction("自适应坐标轴");
+                actAutoRescale->setCheckable(true);
+                actAutoRescale->setChecked(m_autoRescalePlot[card][ch]);
+                menu.addSeparator();
+                QAction *actSetRange = menu.addAction("设置坐标范围...");
+                menu.addSeparator();
+                QAction *actCopyClip = menu.addAction("复制到剪贴板");
+                menu.addSeparator();
+                QAction *actApplyAll = menu.addAction("应用到所有频率图");
+                QAction *selected = menu.exec(freqPlot->mapToGlobal(pos));
+                if (selected == actRestore) { freqPlot->rescaleAxes(); freqPlot->replot(); }
+                else if (selected == actAutoRescale) {
+                    bool wasAuto = m_autoRescalePlot[card][ch];
+                    m_autoRescalePlot[card][ch] = actAutoRescale->isChecked();
+                    if (m_autoRescalePlot[card][ch]) {
+                        freqPlot->rescaleAxes(); freqPlot->replot();
+                    } else if (wasAuto) {
+                        freqPlot->xAxis->setRange(m_savedXRange[card][ch]);
+                        freqPlot->yAxis->setRange(m_savedYRange[card][ch]);
+                        freqPlot->replot();
+                    }
+                }
+                else if (selected == actCopyClip) { QApplication::clipboard()->setPixmap(freqPlot->toPixmap()); }
+                else if (selected == actSetRange) {
+                    if (m_autoRescalePlot[card][ch]) {
+                        m_autoRescalePlot[card][ch] = false;
+                        actAutoRescale->setChecked(false);
+                    }
+                    QDialog dlg(freqPlot);
+                    dlg.setWindowTitle("设置坐标范围");
+                    QFormLayout *fl = new QFormLayout(&dlg);
+                    QDoubleSpinBox *xMin = new QDoubleSpinBox(); xMin->setRange(-1e9, 1e9);
+                    xMin->setValue(freqPlot->xAxis->range().lower);
+                    QDoubleSpinBox *xMax = new QDoubleSpinBox(); xMax->setRange(-1e9, 1e9);
+                    xMax->setValue(freqPlot->xAxis->range().upper);
+                    QDoubleSpinBox *yMin = new QDoubleSpinBox(); yMin->setRange(-1e9, 1e9);
+                    yMin->setValue(freqPlot->yAxis->range().lower);
+                    QDoubleSpinBox *yMax = new QDoubleSpinBox(); yMax->setRange(-1e9, 1e9);
+                    yMax->setValue(freqPlot->yAxis->range().upper);
+                    fl->addRow("X 轴最小值:", xMin);
+                    fl->addRow("X 轴最大值:", xMax);
+                    fl->addRow("Y 轴最小值:", yMin);
+                    fl->addRow("Y 轴最大值:", yMax);
+                    QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+                    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+                    connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+                    fl->addRow(bb);
+                    if (dlg.exec() == QDialog::Accepted) {
+                        freqPlot->xAxis->setRange(xMin->value(), xMax->value());
+                        freqPlot->yAxis->setRange(yMin->value(), yMax->value());
+                        freqPlot->replot();
+                        m_savedXRange[card][ch] = freqPlot->xAxis->range();
+                        m_savedYRange[card][ch] = freqPlot->yAxis->range();
+                    }
+                }
+                else if (selected == actApplyAll) {
+                    if (QMessageBox::question(freqPlot, "确认",
+                        "将当前 X/Y 范围应用到当前组的所有频率图，是否继续？",
+                        QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes) {
+                        applyRangeToAll(freqPlot, true);
+                    }
+                }
+            });
+            freqPlot->replot();
+        }
+    }
+
+    // 颜色图（通道数随 nCards 变化）
+    int numChannels = m_nCards * 2;  // 每卡2通道
+    int numSamples  = 1024;
+    m_colorMapPlot->setOpenGl(false); // 延迟到 showEvent 布局完成后开启
+    m_colorMapPlot->setNotAntialiasedElements(QCP::aeAll);
+    if (!m_colorMap) {
+        m_colorMap = new QCPColorMap(m_colorMapPlot->xAxis, m_colorMapPlot->yAxis);
+    }
+    m_colorMap->data()->setSize(numSamples, numChannels);
+    m_colorMap->data()->setRange(QCPRange(0, numSamples-1), QCPRange(0, numChannels-1));
+    for (int x = 0; x < numSamples; ++x)
+        for (int y = 0; y < numChannels; ++y)
+            m_colorMap->data()->setCell(x, y, 0.0);
+    QCPColorGradient gradient;
+    gradient.setColorStopAt(0.0, QColor(0, 0, 0));
+    gradient.setColorStopAt(1.0, QColor(255, 255, 255));
+    m_colorMap->setGradient(gradient);
+    m_settingColorRange = true;
+    m_colorMap->setDataRange(QCPRange(0, 500));
+    m_settingColorRange = false;
+    m_colorMap->setInterpolate(true);
+    m_colorMap->setTightBoundary(false);
+    if (!m_colorScale) {
+        m_colorScale = new QCPColorScale(m_colorMapPlot);
+        m_colorMapPlot->plotLayout()->addElement(0, 1, m_colorScale);
+        m_colorScale->setType(QCPAxis::atRight);
+        m_colorScale->setLabel("频率 (kHz)");
+        m_colorMap->setColorScale(m_colorScale);
+        // 用户拖拽色条后自动持久化
+        connect(m_colorScale->axis(), qOverload<const QCPRange &>(&QCPAxis::rangeChanged),
+                this, [this](const QCPRange &newRange) {
+            if (m_settingColorRange) return;  // 程序设置，忽略
+            if (m_imagingEnabled) {
+                m_pixelColorRange = newRange;
+            } else {
+                m_freqColorRange = newRange;
+            }
+            saveSettings();
+        });
+    }
+    m_colorMapPlot->xAxis->setLabel("采样点");
+    m_colorMapPlot->yAxis->setLabel("通道编号");
+    m_colorMapPlot->xAxis->setLabelColor(QColor(180, 180, 180));
+    m_colorMapPlot->yAxis->setLabelColor(QColor(180, 180, 180));
+    m_colorMapPlot->xAxis->setTickLabelColor(QColor(160, 160, 160));
+    m_colorMapPlot->yAxis->setTickLabelColor(QColor(160, 160, 160));
+    m_colorMapPlot->xAxis->setBasePen(QPen(QColor(80, 80, 80)));
+    m_colorMapPlot->yAxis->setBasePen(QPen(QColor(80, 80, 80)));
+    m_colorMapPlot->xAxis->setTickPen(QPen(QColor(60, 60, 60)));
+    m_colorMapPlot->yAxis->setTickPen(QPen(QColor(60, 60, 60)));
+    m_colorMapPlot->xAxis->setRange(0, numSamples-1);
+    m_colorMapPlot->yAxis->setRange(-0.5, numChannels-0.5);
+    m_colorScale->axis()->setTickLabelColor(QColor(180, 180, 180));
+    m_colorScale->axis()->setBasePen(QPen(QColor(80, 80, 80)));
+    m_colorScale->axis()->setLabelColor(QColor(180, 180, 180));
+    QVector<double> yTicks;
+    QVector<QString> yLabels;
+    for (int i = 0; i < numChannels; ++i) {
+        yTicks << i;
+        yLabels << QString("卡%1-%2").arg(i/2+1).arg(i%2==0?'A':'B');
+    }
+    QSharedPointer<QCPAxisTickerText> textTicker(new QCPAxisTickerText);
+    textTicker->addTicks(yTicks, yLabels);
+    m_colorMapPlot->yAxis->setTicker(textTicker);
+    m_colorMapPlot->setBackground(QBrush(QColor(30, 30, 30)));
+    // 颜色图多层次网格
+    m_colorMapPlot->xAxis->grid()->setVisible(true);
+    m_colorMapPlot->yAxis->grid()->setVisible(true);
+    m_colorMapPlot->xAxis->grid()->setPen(QPen(QColor(85, 85, 85), 0.5, Qt::SolidLine));
+    m_colorMapPlot->yAxis->grid()->setPen(QPen(QColor(85, 85, 85), 0.5, Qt::SolidLine));
+    m_colorMapPlot->xAxis->grid()->setSubGridVisible(true);
+    m_colorMapPlot->yAxis->grid()->setSubGridVisible(true);
+    m_colorMapPlot->xAxis->grid()->setSubGridPen(QPen(QColor(68, 68, 68), 0.5, Qt::DotLine));
+    m_colorMapPlot->yAxis->grid()->setSubGridPen(QPen(QColor(68, 68, 68), 0.5, Qt::DotLine));
+    m_colorMapPlot->setInteractions(QCP::iRangeDrag | QCP::iRangeZoom);
+
+    // ══ 颜色图右键菜单（Keysight/R&S 风格）══════════════════════════
+    m_colorMapPlot->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_colorMapPlot, &QWidget::customContextMenuRequested,
+            this, [this](const QPoint &pos) {
+        QMenu menu(m_colorMapPlot);
+
+        QAction *actSave = menu.addAction("保存图片...");
+        menu.addSeparator();
+        QAction *actCopyClip = menu.addAction("复制到剪贴板");
+        menu.addSeparator();
+        QAction *actSetColorRange = menu.addAction("设置色条范围...");
+        QAction *actAutoRange = menu.addAction("自适应数据范围");
+        QAction *actResetView = menu.addAction("还原视图");
+
+        QAction *selected = menu.exec(m_colorMapPlot->mapToGlobal(pos));
+        if (selected == actSave) {
+            QString fn = QFileDialog::getSaveFileName(m_colorMapPlot, "保存图片",
+                "imaging.png", "PNG (*.png);;BMP (*.bmp);;JPG (*.jpg)");
+            if (!fn.isEmpty()) {
+                if (fn.endsWith(".png", Qt::CaseInsensitive)) m_colorMapPlot->savePng(fn);
+                else if (fn.endsWith(".bmp", Qt::CaseInsensitive)) m_colorMapPlot->saveBmp(fn);
+                else if (fn.endsWith(".jpg", Qt::CaseInsensitive)) m_colorMapPlot->saveJpg(fn);
+            }
+        } else if (selected == actCopyClip) {
+            QApplication::clipboard()->setPixmap(m_colorMapPlot->toPixmap());
+        } else if (selected == actSetColorRange) {
+            // 设置色条范围对话框
+            QDialog dlg(m_colorMapPlot);
+            dlg.setWindowTitle("设置色条范围");
+            QFormLayout *fl = new QFormLayout(&dlg);
+            QDoubleSpinBox *minSp = new QDoubleSpinBox(); minSp->setRange(-1e9, 1e9);
+            minSp->setValue(m_colorMap->dataRange().lower);
+            QDoubleSpinBox *maxSp = new QDoubleSpinBox(); maxSp->setRange(-1e9, 1e9);
+            maxSp->setValue(m_colorMap->dataRange().upper);
+            fl->addRow("最小值:", minSp);
+            fl->addRow("最大值:", maxSp);
+            QDialogButtonBox *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+            connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+            connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+            fl->addRow(bb);
+            if (dlg.exec() == QDialog::Accepted) {
+                QCPRange manualRng(minSp->value(), maxSp->value());
+                m_settingColorRange = true;
+                m_colorMap->setDataRange(manualRng);
+                m_colorScale->axis()->setRange(manualRng);
+                m_settingColorRange = false;
+                m_colorMapPlot->replot(QCustomPlot::rpQueuedReplot);
+                // 按实际数据显示类型保存（成像中=像素，停止=频率）
+                if (m_imagingEnabled) {
+                    m_pixelColorRange = manualRng;
+                } else {
+                    m_freqColorRange = manualRng;
+                }
+                saveSettings();
+            }
+        } else if (selected == actAutoRange) {
+            if (m_colorMap && m_colorMap->data()) {
+                double minVal = std::numeric_limits<double>::max();
+                double maxVal = std::numeric_limits<double>::lowest();
+                int ksz = m_colorMap->data()->keySize();
+                int vsz = m_colorMap->data()->valueSize();
+                bool hasFinite = false;
+                for (int ky = 0; ky < ksz; ++ky)
+                    for (int vz = 0; vz < vsz; ++vz) {
+                        double v = m_colorMap->data()->cell(ky, vz);
+                        if (std::isfinite(v)) {
+                            if (v < minVal) minVal = v;
+                            if (v > maxVal) maxVal = v;
+                            hasFinite = true;
+                        }
+                    }
+                if (hasFinite && maxVal > minVal) {
+                    QCPRange autoRng(minVal, maxVal);
+                    m_settingColorRange = true;
+                    m_colorMap->setDataRange(autoRng);
+                    m_colorScale->axis()->setRange(autoRng);
+                    m_settingColorRange = false;
+                    m_colorMapPlot->replot(QCustomPlot::rpQueuedReplot);
+                    // 按实际数据显示类型保存（成像中=像素，停止=频率）
+                    if (m_imagingEnabled) {
+                        m_pixelColorRange = autoRng;
+                    } else {
+                        m_freqColorRange = autoRng;
+                    }
+                    saveSettings();
+                } else {
+                    logMessage(QString("[色条] 自适应跳过: hasFinite=%1 min=%2 max=%3")
+                               .arg(hasFinite).arg(minVal, 0, 'g', 4).arg(maxVal, 0, 'g', 4));
+                }
+            }
+        } else if (selected == actResetView) {
+            if (m_colorMap) {
+                int w = m_colorMap->data()->keySize();
+                int h = m_colorMap->data()->valueSize();
+                m_colorMapPlot->xAxis->setRange(0, w - 1);
+                m_colorMapPlot->yAxis->setRange(-0.5, h - 0.5);
+                m_colorMapPlot->replot(QCustomPlot::rpQueuedReplot);
+            }
+        }
+    });
+
+    m_colorMapPlot->replot();
+
+    syncVisiblePlotsGeometry();
+}
+
+void MainWindow::recreatePlots()
+{
+    // 删除所有现有的图表
+    for (int card = 0; card < CARDS_PER_DISPLAY_GROUP; ++card) {
+        for (int ch = 0; ch < 2; ++ch) {
+            if (m_plotsPhase[card][ch]) {
+                delete m_plotsPhase[card][ch];
+                m_plotsPhase[card][ch] = nullptr;
+            }
+            if (m_plotsFrequency[card][ch]) {
+                delete m_plotsFrequency[card][ch];
+                m_plotsFrequency[card][ch] = nullptr;
+            }
+        }
+    }
+    
+    // 删除颜色图
+    if (m_colorMapPlot) {
+        delete m_colorMapPlot;
+        m_colorMapPlot = nullptr;
+    }
+    
+    // 重新创建所有图表
+    setupPlots();
+    
+    // 同步几何布局
+    syncVisiblePlotsGeometry();
+}
+
+void MainWindow::syncVisiblePlotsGeometry()
+{
+    auto syncPlot = [](QCustomPlot *plot) {
+        if (!plot) return;
+        
+        // 确保widget已完成布局
+        plot->ensurePolished();
+        plot->updateGeometry();
+        
+        // 获取当前widget的实际大小
+        QSize currentSize = plot->size();
+        
+        // 如果是OpenGL模式，强制设置正确的viewport大小
+        if (plot->openGl()) {
+            // 强制设置viewport为当前widget大小
+            plot->setViewport(QRect(0, 0, currentSize.width(), currentSize.height()));
+            // 使用立即刷新确保OpenGL缓冲区正确更新
+            plot->replot(QCustomPlot::rpImmediateRefresh);
+        } else {
+            plot->replot();
+        }
+    };
+
+    syncPlot(m_colorMapPlot);
+    for (int card = 0; card < CARDS_PER_DISPLAY_GROUP; ++card) {
+        for (int ch = 0; ch < 2; ++ch) {
+            syncPlot(m_plotsPhase[card][ch]);
+            syncPlot(m_plotsFrequency[card][ch]);
+        }
+    }
+}
+
+// =====================================================================
+// createConnections
+// =====================================================================
+void MainWindow::createConnections()
+{
+    connect(ui->btnStartListen,  &QPushButton::clicked, this, &MainWindow::onStartListenClicked);
+    connect(ui->btnConfig,       &QPushButton::clicked, this, &MainWindow::onConfigParamsClicked);
+    connect(ui->btnStartMeasure, &QPushButton::clicked, this, &MainWindow::onStartMeasureClicked);
+    connect(ui->btnSelectDir,    &QPushButton::clicked, this, &MainWindow::onSelectDirClicked);
+    connect(ui->btnToggleSave,   &QPushButton::clicked, this, &MainWindow::onToggleSaveClicked);
+    connect(ui->chkEnableDisplay, &QCheckBox::toggled,  this, &MainWindow::onEnableDisplayToggled);
+    QCheckBox *chkTileView = ui->grpDisplay->findChild<QCheckBox*>("chkTileView");
+    if (chkTileView)
+        connect(chkTileView, &QCheckBox::toggled, this, &MainWindow::onTileViewToggled);
+    connect(ui->cmbDisplayType, static_cast<void(QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onDisplayTypeChanged);
+    connect(ui->spnRefreshRate, static_cast<void(QSpinBox::*)(int)>(&QSpinBox::valueChanged),
+            this, [this](int value) {
+                onRefreshRateChanged(value);
+                saveSettings();
+            });
+    connect(ui->spnDownsampleRatio, static_cast<void(QSpinBox::*)(int)>(&QSpinBox::valueChanged),
+            this, [this](int value) {
+                saveSettings();
+                logMessage(QString("显示最大点数已设置为 %1 点").arg(value));
+                if (m_netController) m_netController->setDisplayPoints(value);
+            });
+    connect(m_groupTabBar, &QTabBar::currentChanged, this, &MainWindow::onGroupTabChanged);
+}
+
+// =====================================================================
+// 开始 / 停止监听
+// =====================================================================
+void MainWindow::onStartListenClicked()
+{
+    if (!m_isListening) {
+        // 扫描进行中，忽略重复点击
+        if (m_scanning) return;
+        logMessage("开始网络监听...");
+
+        // ══ 网段扫描自动识别（后台线程异步执行，避免阻塞 UI）══
+        logMessage(QString("正在扫描设备（%1 起 %2 个IP，后台进行，请稍候...）")
+                   .arg(m_scanBaseIP).arg(m_scanIPCount));
+        m_scanning = true;
+        ui->btnStartListen->setEnabled(false);
+        setBtnText(ui->btnStartListen, "正在扫描...");
+
+        const QString scanBase = m_scanBaseIP;
+        const int    scanCount = m_scanIPCount;
+
+        // 后台扫描线程：只做 ARP 探测，不触碰 UI；完成后切回主线程继续启动监听
+        std::thread([this, scanBase, scanCount]() {
+            const QVector<QString> onlineIPs =
+                NetworkController::scanReachableIPs(scanBase, scanCount);
+            QMetaObject::invokeMethod(this, [this, onlineIPs]() {
+                m_scanning = false;
+                if (onlineIPs.isEmpty()) {
+                    logMessage("❌ 未扫描到任何在线采集卡，请检查网线/交换机/采集卡上电状态");
+                    setBtnText(ui->btnStartListen, "开始监听");
+                    ui->btnStartListen->setProperty("state", QVariant());
+                    ui->btnStartListen->style()->unpolish(ui->btnStartListen);
+                    ui->btnStartListen->style()->polish(ui->btnStartListen);
+                    ui->btnStartListen->setEnabled(true);
+                    return;
+                }
+                logMessage(QString("✅ 扫描到 %1 张在线采集卡：%2 ~ %3")
+                           .arg(onlineIPs.size()).arg(onlineIPs.first()).arg(onlineIPs.last()));
+                startListeningWithIPs(onlineIPs);
+            }, Qt::QueuedConnection);
+        }).detach();
+
+    } else {
+        logMessage("正在停止网络监听...");
+        ui->btnStartListen->setEnabled(false);
+        setBtnText(ui->btnStartListen, "正在停止...");
+
+        // 简洁的停止提示标签（不用模态弹窗，避免潜在事件循环问题）
+        QLabel *stopLabel = new QLabel("⏳ 正在停止所有模块，请稍候...", this);
+        stopLabel->setAlignment(Qt::AlignCenter);
+        stopLabel->setStyleSheet("QLabel { background: #2c3e50; color: white; "
+                                 "padding: 8px 20px; border-radius: 6px; font-size: 13px; }");
+        stopLabel->adjustSize();
+        stopLabel->move((width() - stopLabel->width()) / 2,
+                        (height() - stopLabel->height()) / 2);
+        stopLabel->show();
+        stopLabel->raise();
+
+        if (m_isMeasuring) onStartMeasureClicked();
+
+        // 记录是否在保存中，重新监听后自动恢复
+        m_pendingAutoSave = m_netController && m_netController->isSaving();
+        if (m_netController) {
+            auto conn = std::make_shared<QMetaObject::Connection>();
+            *conn = connect(m_netController, &NetworkController::stopped, this,
+                            [this, conn, stopLabel]() {
+                disconnect(*conn);
+                stopLabel->hide();
+                stopLabel->deleteLater();
+
+                // 先更新 UI，再异步删除 controller（避免在 slot 里同步 delete QObject）
+                m_isListening = false;
+                setBtnText(ui->btnStartListen, "开始监听");
+                ui->btnStartListen->setProperty("state", QVariant());
+                ui->btnStartListen->style()->unpolish(ui->btnStartListen);
+                ui->btnStartListen->style()->polish(ui->btnStartListen);
+                ui->btnStartListen->setEnabled(true);
+                ui->btnConfig->setEnabled(false);
+                ui->btnStartMeasure->setEnabled(false);
+                ui->btnToggleSave->setEnabled(false);
+                logMessage("网络监听已停止");
+
+                // 同步保存按钮状态：停止监听时一定停止了保存，无论按钮之前是什么状态
+                setBtnText(ui->btnToggleSave, "开始保存");
+                ui->btnToggleSave->setProperty("state", QVariant());
+                ui->btnToggleSave->style()->unpolish(ui->btnToggleSave);
+                ui->btnToggleSave->style()->polish(ui->btnToggleSave);
+
+                if (m_netController) {
+                    m_netController->setParent(nullptr);
+                    m_netController->deleteLater();
+                    m_netController = nullptr;
+                }
+            }, Qt::QueuedConnection);
+
+            m_netController->stop();
+        }
+    }
+}
+
+// =====================================================================
+// startListeningWithIPs — 网段扫描完成后：创建 controller 并启动监听
+// 仅在主线程（异步扫描完成回调）调用；onlineIPs 为按序排列的在线卡 IP
+// =====================================================================
+void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
+{
+    if (onlineIPs.size() != m_nCards) {
+        // 自动识别卡数并重建动态 UI（监听前，符合"监听期间禁止调用"约束）
+        m_nCards = static_cast<int>(onlineIPs.size());
+        rebuildDynamicUI();
+    }
+    m_targetIPRangeText = QString("%1 ~ %2").arg(onlineIPs.first()).arg(onlineIPs.last());
+    saveSettings();  // 持久化自动识别的卡数
+
+    m_netController = new NetworkController(this);
+    connect(m_netController, &NetworkController::statusMessage, this, &MainWindow::logMessage);
+    connect(m_netController, &NetworkController::errorOccurred, this, &MainWindow::logMessage);
+    // ══ 卡片就绪信号：更新网络信息标签 ════════════════════════════
+    connect(m_netController, &NetworkController::cardReady, this, [this](int cardIdx) {
+        int ready = m_netController ? m_netController->readyCardCount() : 0;
+        int total = m_nCards;
+        ui->lblTargetIPs->setText(
+            QString("目标IP: %1  [%2/%3 卡就绪]")
+            .arg(m_targetIPRangeText).arg(ready).arg(total));
+        ui->lblTargetIPs->setStyleSheet(
+            ready == total ? "color: #00FF88;" : "color: #FFAA00;");
+    });
+    connect(m_netController, &NetworkController::allCardsReady, this, [this]() {
+        logMessage("✅ 所有采集卡均已就绪，可以发送控制命令");
+        ui->lblTargetIPs->setText(
+            QString("目标IP: %1  [全部%2卡就绪 ✓]")
+            .arg(m_targetIPRangeText).arg(m_nCards));
+        ui->lblTargetIPs->setStyleSheet("color: #00FF88;");
+    });
+    // 配置参数确认（60 字节反馈）信号
+    connect(m_netController, &NetworkController::configConfirmed, this, [this]() {
+        logMessage("✅ 所有采集卡配置参数均已确认，可以开始测量");
+    });
+    connect(m_netController, &NetworkController::configAckFailed, this, [this](int cardIdx) {
+        logMessage(QString("⚠️ 卡%1 配置确认失败，请检查链路后重新下发配置").arg(cardIdx + 1));
+    });
+
+    // 初始状态：等待卡片就绪
+    ui->lblTargetIPs->setText(
+        QString("目标IP: %1  [等待%2卡就绪...]")
+        .arg(m_targetIPRangeText).arg(m_nCards));
+    ui->lblTargetIPs->setStyleSheet("color: #FFAA00;");
+
+    AcqConfig cfg;
+    cfg.nCards        = onlineIPs.size();
+    cfg.localBindIP   = m_localBindIP.toStdString();  // 控制 socket 绑定到指定本地接口
+    cfg.targetIPs.clear();
+    for (const QString& ip : onlineIPs)
+        cfg.targetIPs.push_back(ip.toStdString());    // 网段扫描识别到的目标卡 IP
+    cfg.acqTimeNs     = ui->edtDataTime->text().toInt();
+    cfg.delayA        = ui->edtADelay->text().toInt();
+    cfg.delayB        = ui->edtBDelay->text().toInt();
+    cfg.displayPoints = ui->spnDownsampleRatio->value();
+    // 数据格式参数（根据 FPGA 固件配置）
+    //   16bit+8ns = 2抽1 125MSa/s，int16 Q0.15（旧版）
+    //   32bit+4ns = 满速率 250MSa/s，int32 Q2.29（新版）
+    cfg.bitsPerChannel = m_bitsPerChannel;
+    cfg.sampleIntervalNs = m_sampleIntervalNs;
+
+    // ── 路线A（WinSock）：start() 同步完成，直接在调用后更新按钮 ──
+    m_netController->start(cfg);
+
+    // start() 已完全返回，所有线程已启动，直接设置状态
+    m_isListening = true;
+    setBtnText(ui->btnStartListen, "停止监听");
+    ui->btnStartListen->setProperty("state", "stopping");
+    ui->btnStartListen->style()->unpolish(ui->btnStartListen);
+    ui->btnStartListen->style()->polish(ui->btnStartListen);
+    ui->btnStartListen->setEnabled(true);
+    ui->btnConfig->setEnabled(true);
+    ui->btnStartMeasure->setEnabled(true);
+    ui->btnToggleSave->setEnabled(true);
+    logMessage(QString("网络监听已启动，共 %1 张卡，端口 %2~%3")
+               .arg(m_nCards).arg(BASE_PORT).arg(BASE_PORT + m_nCards - 1));
+
+    // 若之前处于保存状态，自动恢复保存
+    if (m_pendingAutoSave) {
+        m_pendingAutoSave = false;
+        onToggleSaveClicked();  // 重新调用开始保存逻辑
+    }
+
+    // 重置首次绘图标志
+    for (int i = 0; i < CARDS_PER_DISPLAY_GROUP; ++i) {
+        m_displayCounter[i] = 0;
+        m_firstPlot[i][0] = true;
+        m_firstPlot[i][1] = true;
+    }
+}
+
+// =====================================================================
+// 配置参数
+// =====================================================================
+void MainWindow::onConfigParamsClicked()
+{
+    int dataTime = ui->edtDataTime->text().toInt();
+    int aDelay   = ui->edtADelay->text().toInt();
+    int bDelay   = ui->edtBDelay->text().toInt();
+    saveSettings();
+    logMessage(QString("发送配置: 采集=%1ns, A延时=%2ns, B延时=%3ns").arg(dataTime).arg(aDelay).arg(bDelay));
+    if (m_netController) {
+        if (m_netController->sendConfigCommand(dataTime, aDelay, bDelay)) {
+            // 同步更新 DataProcessor 的采集参数（包数、采样点数等）
+            AcqConfig cfg = m_netController->config();
+            cfg.acqTimeNs = dataTime;
+            cfg.delayA    = aDelay;
+            cfg.delayB    = bDelay;
+            cfg.displayPoints = ui->spnDownsampleRatio->value();
+            m_netController->reconfigure(cfg);
+            logMessage("配置命令发送成功");
+        } else {
+            logMessage("配置命令发送失败，请检查网络连接和采集卡 IP");
+        }
+    }
+}
+
+// =====================================================================
+// 开始 / 停止测量
+// =====================================================================
+void MainWindow::onStartMeasureClicked()
+{
+    if (!m_isMeasuring) {
+        if (m_netController) {
+            if (m_netController->sendStartMeasure()) {
+                logMessage("开始测量命令发送成功");
+            } else {
+                logMessage("开始测量命令发送失败");
+            }
+        }
+        m_isMeasuring = true;
+        setBtnText(ui->btnStartMeasure, "停止测量");
+        ui->btnStartMeasure->setProperty("state", "measuring");
+        ui->btnStartMeasure->style()->unpolish(ui->btnStartMeasure);
+        ui->btnStartMeasure->style()->polish(ui->btnStartMeasure);
+        m_highDataRateWarningShown = false;
+        logMessage("开始测量");
+    } else {
+        if (m_netController) {
+            if (m_netController->sendStopMeasure()) {
+                logMessage("停止测量命令发送成功");
+            } else {
+                logMessage("停止测量命令发送失败");
+            }
+        }
+        m_isMeasuring = false;
+        setBtnText(ui->btnStartMeasure, "开始测量");
+        ui->btnStartMeasure->setProperty("state", QVariant());
+        ui->btnStartMeasure->style()->unpolish(ui->btnStartMeasure);
+        ui->btnStartMeasure->style()->polish(ui->btnStartMeasure);
+        logMessage("停止测量");
+    }
+}
+
+// =====================================================================
+// 选择目录
+// =====================================================================
+void MainWindow::onSelectDirClicked()
+{
+    QString dir = QFileDialog::getExistingDirectory(this, "选择保存目录",
+                                                     ui->edtSaveDir->text(),
+                                                     QFileDialog::ShowDirsOnly);
+    if (!dir.isEmpty()) {
+        ui->edtSaveDir->setText(dir);
+        logMessage(QString("保存目录设置为: %1").arg(dir));
+    }
+}
+
+// =====================================================================
+// 开始 / 停止保存
+// =====================================================================
+void MainWindow::onToggleSaveClicked()
+{
+    if (m_netController && m_netController->isSaving()) {
+        // ── 停止保存 ──
+        m_netController->stopSaving();
+        setBtnText(ui->btnToggleSave, "开始保存");
+        ui->btnToggleSave->setProperty("state", QVariant());
+        ui->btnToggleSave->style()->unpolish(ui->btnToggleSave);
+        ui->btnToggleSave->style()->polish(ui->btnToggleSave);
+        // 解锁保存参数
+        ui->edtSaveDir->setEnabled(true);
+        ui->btnSelectDir->setEnabled(true);
+        ui->edtTriggersPerFile->setEnabled(true);
+        ui->edtFileSuffix->setEnabled(true);
+        logMessage("停止保存数据");
+    } else {
+        // ── 开始保存 ──
+        QString saveDir = ui->edtSaveDir->text();
+        QDir dir(saveDir);
+        if (!dir.exists() && !dir.mkpath(".")) {
+            logMessage(QString("错误: 无法创建目录 %1").arg(saveDir));
+            return;
+        }
+        bool ok;
+        int triggersPerFile = ui->edtTriggersPerFile->text().toInt(&ok);
+        if (!ok || triggersPerFile <= 0) {
+            logMessage("错误: 每文件触发数必须是大于0的整数");
+            return;
+        }
+        QString fileSuffix = ui->edtFileSuffix->text().trimmed();
+        if (m_netController) {
+            m_netController->startSaving(saveDir, triggersPerFile, fileSuffix);
+        }
+        // 锁定保存参数（主流仪表设计：采集/保存中不可修改配置）
+        ui->edtSaveDir->setEnabled(false);
+        ui->btnSelectDir->setEnabled(false);
+        ui->edtTriggersPerFile->setEnabled(false);
+        ui->edtFileSuffix->setEnabled(false);
+
+        setBtnText(ui->btnToggleSave, "停止保存");
+        ui->btnToggleSave->setProperty("state", "saving");
+        ui->btnToggleSave->style()->unpolish(ui->btnToggleSave);
+        ui->btnToggleSave->style()->polish(ui->btnToggleSave);
+        QString suffixInfo = fileSuffix.isEmpty() ? "(none)" : fileSuffix;
+        logMessage(QString("开始保存到: %1 (每文件%2触发, 后缀: %3)").arg(saveDir).arg(triggersPerFile).arg(suffixInfo));
+    }
+}
+
+// =====================================================================
+// 显示控制
+// =====================================================================
+void MainWindow::onEnableDisplayToggled(bool checked)
+{
+    m_displayEnabled = checked;
+    logMessage(checked ? "实时显示已启用" : "实时显示已禁用");
+}
+
+void MainWindow::onDisplayTypeChanged(int index)
+{
+    if (index == 2) {
+        // 扫描图像
+        ui->stackedMainDisplay->setCurrentIndex(1);
+        // 切换时保证色图为灰度（与成像像素图一致）
+        if (m_colorMap) {
+            QCPColorGradient grayGrad;
+            grayGrad.setColorStopAt(0.0, QColor(0, 0, 0));
+            grayGrad.setColorStopAt(1.0, QColor(255, 255, 255));
+            m_colorMap->setGradient(grayGrad);
+            m_colorMapPlot->replot(QCustomPlot::rpQueuedReplot);
+        }
+        logMessage("切换到扫描图像显示");
+    } else {
+        ui->stackedMainDisplay->setCurrentIndex(0);
+        logMessage(index == 0 ? "切换到差分相位显示" : "切换到瞬时频率显示");
+        for (int i = 0; i < CARDS_PER_DISPLAY_GROUP; ++i)
+            for (int j = 0; j < 2; ++j)
+                if (m_stackedWidgets[i][j])
+                    m_stackedWidgets[i][j]->setCurrentIndex(index);
+    }
+
+    // 扫描图像模式：显示成像控件，隐藏频率相关控件
+    bool isScanImg = (index == 2);
+    bool isWaveMode = (index == 0 || index == 1);
+    // 峰峰值统计：差分相位和瞬时频率均显示
+    bool isPkMode  = (index == 0 || index == 1);
+
+    // 成像控件显隐
+    if (m_btnImagingConfig) m_btnImagingConfig->setVisible(isScanImg);
+    if (m_btnImagingStart) m_btnImagingStart->setVisible(isScanImg);
+    if (m_lblImagingStatus) m_lblImagingStatus->setVisible(isScanImg);
+
+    // 刷新间隔、显示最大点数 — 相位/频率模式显示，扫描图像隐藏
+    ui->spnRefreshRate->setVisible(isWaveMode);
+    ui->spnDownsampleRatio->setVisible(isWaveMode);
+
+    // 峰峰值统计
+    ui->edtPkStart->setVisible(isPkMode);
+    ui->edtPkEnd->setVisible(isPkMode);
+
+    // 隐藏/显示相关 label
+    if (ui->grpDisplay) {
+        const auto labels = ui->grpDisplay->findChildren<QLabel*>();
+        for (QLabel *lbl : labels) {
+            QString t = lbl->text();
+            if (t.contains("峰峰值")) lbl->setVisible(isPkMode);
+            else if (t.contains("刷新间隔")) lbl->setVisible(isWaveMode);
+            else if (t.contains("显示最大点数")) lbl->setVisible(isWaveMode);
+        }
+        // 峰峰值范围中间的 "-" label（label_7）
+        QLabel *dash = ui->grpDisplay->findChild<QLabel*>("label_7");
+        if (dash) dash->setVisible(isPkMode);
+    }
+
+    // 扫描图像时确保成像控件启用（仅在算法 DLL 实例已创建后）
+    if (isScanImg && m_imagingController) {
+        m_btnImagingStart->setEnabled(m_imagingController->isRunning());
+    }
+
+    if (!m_loadingSettings) {
+        saveSettings();
+    }
+}
+
+void MainWindow::onRefreshRateChanged(int value)
+{
+    m_displayInterval = value;
+    logMessage(QString("显示刷新间隔已设置为每 %1 个触发更新一次").arg(value));
+}
+
+// =====================================================================
+// 30fps pull 模式刷新（替代旧项目的 push 信号）
+// =====================================================================
+void MainWindow::onDisplayRefresh()
+{
+    if (!m_displayEnabled || !m_netController) return;
+
+    ++m_refreshCounter;
+    if (m_refreshCounter % m_displayInterval != 0) return;
+
+    const int displayMode = ui->cmbDisplayType->currentIndex();
+
+    if (displayMode == 2) {
+        // 扫描图像模式：仅显示成像重建结果，由 onImagingImageReady 驱动
+        if (m_imagingEnabled) {
+            return;
+        }
+        // 未成像时使用全分辨率频率数据显示颜色图（不降采样，保留全部细节）
+        bool anyUpdated = false;
+        const int expectedVals = m_nCards * 2;
+        // 先遍历所有卡，确定最大采样点数，统一调整颜色图尺寸
+        int maxCols = 0;
+        for (int globalCard = 0; globalCard < m_nCards; ++globalCard) {
+            DisplayBuffer *db = m_netController->displayBuffer(globalCard);
+            if (!db) continue;
+            DisplayBuffer::FullResSnapshot snap;
+            if (db->peekLatestFull(snap) && snap.valid)
+                maxCols = std::max(maxCols, static_cast<int>(snap.freqA.size()));
+        }
+        if (maxCols > 0) {
+            m_colorMap->data()->setSize(maxCols, expectedVals);
+            m_colorMap->data()->setRange(QCPRange(0, maxCols-1), QCPRange(0, expectedVals-1));
+            // 同步更新坐标轴可视范围以显示全部数据点（不限于初始 1024 列）
+            m_colorMapPlot->xAxis->setRange(0, maxCols - 1);
+            m_colorMapPlot->yAxis->setRange(-0.5, expectedVals - 0.5);
+        }
+        for (int globalCard = 0; globalCard < m_nCards; ++globalCard) {
+            DisplayBuffer *db = m_netController->displayBuffer(globalCard);
+            if (!db) continue;
+            DisplayBuffer::FullResSnapshot snap;
+            if (!db->peekLatestFull(snap) || !snap.valid) continue;
+
+            int cols = static_cast<int>(snap.freqA.size());
+            if (cols <= 0 || !m_colorMapPlot->isVisible()) continue;
+
+            int chIdxA = globalCard * 2;
+            int chIdxB = globalCard * 2 + 1;
+            for (int k = 0; k < cols; ++k) {
+                m_colorMap->data()->setCell(k, chIdxA, static_cast<double>(snap.freqA[k]));
+                if (k < static_cast<int>(snap.freqB.size()))
+                    m_colorMap->data()->setCell(k, chIdxB, static_cast<double>(snap.freqB[k]));
+            }
+            anyUpdated = true;
+        }
+        if (anyUpdated) {
+            // 色条范围由 QCPColorMap 自然保持（用户拖拽/右键设置后持久）
+            m_colorMapPlot->replot(QCustomPlot::rpImmediateRefresh);
+        }
+        return;
+    }
+
+    // 相位 / 频率模式
+    const bool isTileView = m_isTileView;
+
+    // Tab 模式：预先确定要刷新的槽位和通道（不对其他卡调用 tryRead，保留 m_hasNew）
+    int tabSlot = -1, tabCh = -1;
+    if (!isTileView) {
+        int tabIdx = ui->tabWidget->currentIndex();
+        tabSlot = tabIdx / 2;
+        tabCh   = tabIdx % 2;
+    }
+
+    auto toQVec = [](const std::vector<double> &v) {
+        QVector<double> r(static_cast<int>(v.size()));
+        for (int k = 0; k < static_cast<int>(v.size()); ++k) r[k] = v[k];
+        return r;
+    };
+
+    bool anyUpdated = false;
+
+    for (int slotIdx = 0; slotIdx < CARDS_PER_DISPLAY_GROUP; ++slotIdx) {
+        int globalCard = m_currentGroup * CARDS_PER_DISPLAY_GROUP + slotIdx;
+        if (globalCard >= m_nCards) break;
+
+        // Tab 模式：只处理当前显示的卡，跳过其他卡（不消耗其 m_hasNew 标志）
+        if (!isTileView && slotIdx != tabSlot) continue;
+
+        DisplayBuffer *db = m_netController->displayBuffer(globalCard);
+        if (!db) continue;
+        DisplayBuffer::Snapshot snap;
+        if (!db->tryRead(snap) || !snap.valid) continue;
+
+        // 诊断：打印首次读到数据的信息
+        if (slotIdx == 0) {
+            static int diagCount = 0;
+            if (++diagCount <= 5) {
+                logMessage(QString("[显示] 卡%1 读到%2点 phaseA[0]=%3 freqA[0]=%4")
+                    .arg(globalCard).arg(snap.freqA.size())
+                    .arg(snap.phaseA.empty() ? 0 : snap.phaseA[0], 0, 'f', 2)
+                    .arg(snap.freqA.empty() ? 0 : snap.freqA[0], 0, 'f', 2));
+            }
+        }
+
+        QVector<double> freqA  = toQVec(snap.freqA);
+        QVector<double> freqB  = toQVec(snap.freqB);
+        QVector<double> phaseA = toQVec(snap.phaseA);
+        QVector<double> phaseB = toQVec(snap.phaseB);
+
+        // x 轴以频率数组长度为准（phaseA/freqA 在 downsample 中同步 resize，通常相同）
+        const int nPts = freqA.size();
+        QVector<double> xAxis(nPts);
+        for (int k = 0; k < nPts; ++k) xAxis[k] = k;
+
+        if (!isTileView) {
+            // Tab 单通道模式
+            if (tabCh == 0)
+                updatePlot(slotIdx, 0, displayMode == 0 ? phaseA : freqA, freqA, xAxis);
+            else
+                updatePlot(slotIdx, 1, displayMode == 0 ? phaseB : freqB, freqB, xAxis);
+            anyUpdated = true;
+        } else {
+            // 平铺模式：写数据，延迟 replot（统一批量）
+            updatePlot(slotIdx, 0, displayMode == 0 ? phaseA : freqA, freqA, xAxis, false);
+            updatePlot(slotIdx, 1, displayMode == 0 ? phaseB : freqB, freqB, xAxis, false);
+            anyUpdated = true;
+        }
+    }
+
+    // 平铺模式：统一触发全部图表重绘（无可见性过滤，确保隐藏态下数据也就绪）
+    if (isTileView && anyUpdated) {
+        for (int s = 0; s < CARDS_PER_DISPLAY_GROUP; ++s) {
+            int gc = m_currentGroup * CARDS_PER_DISPLAY_GROUP + s;
+            if (gc >= m_nCards) break;
+            QCustomPlot *plt0 = (displayMode == 0) ? m_plotsPhase[s][0] : m_plotsFrequency[s][0];
+            QCustomPlot *plt1 = (displayMode == 0) ? m_plotsPhase[s][1] : m_plotsFrequency[s][1];
+            if (plt0) plt0->replot(QCustomPlot::rpQueuedReplot);
+            if (plt1) plt1->replot(QCustomPlot::rpQueuedReplot);
+        }
+    }
+}
+
+// =====================================================================
+// updatePlot（完整保留旧项目逻辑）
+// =====================================================================
+void MainWindow::updatePlot(int cardId, int channel,
+                             const QVector<double> &data,
+                             const QVector<double> &frequency,
+                             const QVector<double> &xAxis,
+                             bool doReplot)
+{
+    if (cardId < 0 || cardId >= CARDS_PER_DISPLAY_GROUP || channel < 0 || channel >= 2) return;
+    if (data.isEmpty()) return;
+
+    // 确保视口与控件尺寸同步，首次调用时开启 OpenGL（此时控件尺寸已稳定）
+    auto syncViewport = [](QCustomPlot *plot) {
+        if (!plot) return;
+        // 首次有数据刷新时开启 OpenGL（延迟初始化，此时尺寸已绝对稳定）
+        if (!plot->openGl()) {
+            plot->setOpenGl(true);
+        }
+        QSize ws = plot->size();
+        QRect vr = plot->viewport();
+        if (vr.width() != ws.width() || vr.height() != ws.height())
+            plot->setViewport(QRect(0, 0, ws.width(), ws.height()));
+    };
+
+    try {
+        int displayMode = ui->cmbDisplayType->currentIndex();
+        QVector<double> x;
+        if (!xAxis.isEmpty()) {
+            x = xAxis;
+        } else {
+            x.resize(data.size());
+            for (int i = 0; i < data.size(); ++i) x[i] = i;
+        }
+
+        if (displayMode == 0) {
+            QCustomPlot *plotPhase = m_plotsPhase[cardId][channel];
+            if (!plotPhase || plotPhase->graphCount() == 0) return;
+            
+            syncViewport(plotPhase);
+            
+            plotPhase->graph(0)->setData(x, data);
+            if (m_firstPlot[cardId][channel]) { plotPhase->rescaleAxes(); m_firstPlot[cardId][channel] = false; }
+            else if (m_autoRescalePlot[cardId][channel]) plotPhase->rescaleAxes();
+
+            // 相位图也显示峰峰值
+            if (m_pkpkLabels[cardId][channel]) {
+                double mn = data[0], mx = data[0];
+                for (int i = 1; i < data.size(); ++i) {
+                    if (data[i] < mn) mn = data[i];
+                    if (data[i] > mx) mx = data[i];
+                }
+                m_pkpkLabels[cardId][channel]->setText(
+                    QString("峰峰值: %1 rad").arg(mx - mn, 0, 'f', 3));
+            }
+
+            if (doReplot) plotPhase->replot(QCustomPlot::rpQueuedReplot);
+        }
+        else if (displayMode == 1) {
+            QCustomPlot *plotFreq = m_plotsFrequency[cardId][channel];
+            if (!plotFreq || plotFreq->graphCount() == 0) return;
+            if (frequency.isEmpty()) return;
+            
+            syncViewport(plotFreq);
+
+            int pkStartInput = ui->edtPkStart->text().toInt();
+            int pkEndInput   = ui->edtPkEnd->text().toInt();
+            int pkStart = 0, pkEnd = frequency.size();
+            if (!x.isEmpty() && x.size() == frequency.size()) {
+                for (int i = 0; i < x.size(); ++i) if (x[i] >= pkStartInput) { pkStart = i; break; }
+                for (int i = pkStart; i < x.size(); ++i) if (pkEndInput > 0 && x[i] >= pkEndInput) { pkEnd = i; break; }
+            }
+            if (pkStart < 0) pkStart = 0;
+            if (pkEnd > frequency.size()) pkEnd = frequency.size();
+            if (pkStart >= frequency.size()) pkStart = 0;
+            if (pkEnd <= pkStart) pkEnd = frequency.size();
+
+            double minFreq = frequency[pkStart], maxFreq = frequency[pkStart];
+            for (int i = pkStart; i < pkEnd; ++i) {
+                if (frequency[i] < minFreq) minFreq = frequency[i];
+                if (frequency[i] > maxFreq) maxFreq = frequency[i];
+            }
+            m_pkpkLabels[cardId][channel]->setText(
+                QString("峰峰值: %1 kHz").arg(maxFreq - minFreq, 0, 'f', 2));
+
+            plotFreq->graph(0)->setData(x, frequency);
+            if (m_firstPlot[cardId][channel]) { plotFreq->rescaleAxes(); m_firstPlot[cardId][channel] = false; }
+            else if (m_autoRescalePlot[cardId][channel]) plotFreq->rescaleAxes();
+            if (doReplot) plotFreq->replot(QCustomPlot::rpQueuedReplot);
+        }
+    } catch (...) {}
+}
+
+// =====================================================================
+// 统计更新（1Hz/2Hz）
+// =====================================================================
+void MainWindow::onUpdateStatistics()
+{
+    // 告警冷却递减（每 2s timer tick 减 1）
+    if (m_saveWarnCooldown > 0) --m_saveWarnCooldown;
+
+    // 检测保存状态意外停止（如磁盘满）并同步 UI
+    if (m_netController && m_isListening) {
+        bool isSavingNow = m_netController->isSaving();
+        bool uiShowsSaving = (ui->btnToggleSave->text() == "停止保存");
+        if (uiShowsSaving && !isSavingNow) {
+            // 保存意外停止（如磁盘满），同步按钮状态
+            setBtnText(ui->btnToggleSave, "开始保存");
+            ui->btnToggleSave->setProperty("state", QVariant());
+            ui->btnToggleSave->style()->unpolish(ui->btnToggleSave);
+            ui->btnToggleSave->style()->polish(ui->btnToggleSave);
+            logMessage("警告：数据保存已意外停止，请检查磁盘空间");
+        }
+    }
+
+    // 计算当前组实际包含的卡数（最后一组可能不足4张）
+    int firstGlobal = m_currentGroup * CARDS_PER_DISPLAY_GROUP;
+    int cardsInGroup = std::min(CARDS_PER_DISPLAY_GROUP, m_nCards - firstGlobal);
+    if (cardsInGroup < 0) cardsInGroup = 0;
+
+    if (!m_netController) {
+        for (int i = 0; i < CARDS_PER_DISPLAY_GROUP; ++i) {
+            int virtualCardNum = firstGlobal + i + 1;
+            if (i < cardsInGroup)
+                m_lblStats[i]->setText(QString("卡%1: 等待连接...").arg(virtualCardNum));
+            else
+                m_lblStats[i]->setText(QString("--"));
+        }
+        return;
+    }
+
+    const double HIGH_RATE_THRESHOLD = 800.0;
+    bool anyExceeds = false;
+
+    for (int i = 0; i < CARDS_PER_DISPLAY_GROUP; ++i) {
+        int globalCard = firstGlobal + i;
+        int virtualCardNum = globalCard + 1;
+
+        if (i >= cardsInGroup) {
+            m_lblStats[i]->setText(QString("--"));
+            continue;
+        }
+
+        auto statsOpt = m_netController->getCardStats(globalCard);
+        if (statsOpt.has_value()) {
+            const auto &s = statsOpt.value();
+            if (s.recvMbps > HIGH_RATE_THRESHOLD) anyExceeds = true;
+
+            // 状态栏：区分显示两个队列深度
+            QString statusText = QString("卡%1 | 触发: %2 | 丢失: %3 | 速率: %4 Mb/s | 处队: %5 | 存队: %6")
+                .arg(virtualCardNum)
+                .arg(s.triggersComplete)
+                .arg(s.triggersPartial)
+                .arg(s.recvMbps, 0, 'f', 2)
+                .arg(s.inputQueueDepth)
+                .arg(s.saveQueueDepth);
+            if (s.packetsDropped > 0)
+                statusText += QString(" | 丢弃: %1").arg(s.packetsDropped);
+            // 存储队列满丢弃（磁盘跟不上）
+            if (s.saveQueueDiscards > 0)
+                statusText += QString(" | 存丢: %1").arg(s.saveQueueDiscards);
+            // 其他原因跳帧（内存不足、序列号复位恢复期）
+            const uint64_t otherDiscards = (s.triggersDiscarded > s.saveQueueDiscards)
+                ? s.triggersDiscarded - s.saveQueueDiscards : 0;
+            if (otherDiscards > 0)
+                statusText += QString(" | 跳帧: %1").arg(otherDiscards);
+            m_lblStats[i]->setText(statusText);
+
+            // 存储队列满 → 非阻塞告警（冷却期内不重复）
+            uint64_t newDisc = s.saveQueueDiscards;
+            if (newDisc < m_prevSaveDiscards[globalCard])
+                m_prevSaveDiscards[globalCard] = newDisc;  // 控制器重建后重置
+            const uint64_t delta = newDisc - m_prevSaveDiscards[globalCard];
+            m_prevSaveDiscards[globalCard] = newDisc;
+            if (delta > 0 && m_saveWarnCooldown == 0) {
+                logMessage(QString("⚠ 卡%1: 存储队列已满（存队: %2/400），本周期丢失 %3 帧。"
+                    "请将存储目录改到更快的磁盘，或减少同时存储的卡数")
+                    .arg(virtualCardNum)
+                    .arg(s.saveQueueDepth)
+                    .arg(delta));
+                m_saveWarnCooldown = 5;  // ~10秒不重复告警（2s定时器 × 5）
+            }
+        } else {
+            m_lblStats[i]->setText(QString("卡%1: 等待连接...").arg(virtualCardNum));
+        }
+    }
+
+    if (anyExceeds && !m_highDataRateWarningShown && m_isMeasuring) {
+        m_highDataRateWarningShown = true;
+        QMessageBox::warning(this, "数据吞吐量警告",
+            QString("当前数据吞吐量较大（>%1 Mb/s），可能导致丢包或控制失效。\n"
+                    "建议降低采集时间或触发频率。").arg(HIGH_RATE_THRESHOLD));
+        logMessage(QString(" 警告：检测到高数据速率（>%1 Mb/s）").arg(HIGH_RATE_THRESHOLD));
+    }
+}
+
+// =====================================================================
+// 日志
+// =====================================================================
+void MainWindow::logMessage(const QString &message)
+{
+    QString timestamp = QDateTime::currentDateTime().toString("hh:mm:ss");
+    ui->txtLog->append(QString("[%1] %2").arg(timestamp).arg(message));
+    QTextCursor cursor = ui->txtLog->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    ui->txtLog->setTextCursor(cursor);
+    ui->txtLog->ensureCursorVisible();
+}
+
+// =====================================================================
+// 样式表加载
+// =====================================================================
+void MainWindow::loadStyleSheet()
+{
+    QFile styleFile(":/resources/styles.qss");
+    if (!styleFile.exists())
+        styleFile.setFileName("resources/styles.qss");
+    if (styleFile.open(QFile::ReadOnly | QFile::Text)) {
+        qApp->setStyleSheet(QLatin1String(styleFile.readAll()));
+        styleFile.close();
+        logMessage("样式表加载成功");
+    } else {
+        logMessage(QString("警告：无法加载样式表 - %1").arg(styleFile.fileName()));
+    }
+}
+
+// =====================================================================
+// 设置保存 / 加载
+// =====================================================================
+void MainWindow::loadSettings()
+{
+    QSettings settings("MC410T", "MC410T_Receiver");
+
+    // 阻塞信号，防止 setValue 触发 saveSettings 覆写未加载的参数
+    ui->spnRefreshRate->blockSignals(true);
+    ui->spnDownsampleRatio->blockSignals(true);
+    ui->cmbDisplayType->blockSignals(true);
+
+    // ── 注册表专属配置（无 UI 接口）────────────────────────────────────
+    // 采集卡数量：AcquisitionParams/NCards（默认4，有效范围1~MAX_CARDS）
+    // 修改方式：regedit → HKCU\Software\MC410T\MC410T_Receiver
+    int savedNCards = settings.value("AcquisitionParams/NCards", 4).toInt();
+    m_nCards = qBound(1, savedNCards, MAX_CARDS);
+    // 控制 socket 本地绑定 IP：NetworkParams/LocalBindIP（默认空，即 INADDR_ANY）
+    // 双口网卡（如 ConnectX-5 MCX512A-ACAT）只接一个口时必须填写已连接口的本地IP
+    // 修改方式：reg add "HKCU\Software\MC410T\MC410T_Receiver\NetworkParams" /v LocalBindIP /t REG_SZ /d "192.168.0.100" /f
+    m_localBindIP = settings.value("NetworkParams/LocalBindIP", "").toString();
+    // 网段扫描范围（自动识别采集卡用）：ScanBaseIP 默认 192.168.0.2，ScanIPCount 默认 32
+    m_scanBaseIP  = settings.value("NetworkParams/ScanBaseIP", QString(DEFAULT_SCAN_BASE_IP)).toString();
+    m_scanIPCount = qBound(1, settings.value("NetworkParams/ScanIPCount", DEFAULT_SCAN_IP_COUNT).toInt(), MAX_CARDS);
+    m_targetIPRangeText.clear();  // 尚未识别
+
+    // ══ 数据格式参数（必须在 onDisplayTypeChanged 之前读取，否则 saveSettings 会覆写默认值）══
+    //   BitsPerChannel: 16(Q0.15) 或 32(Q0.31)
+    //   SampleIntervalNs: 采样间隔 ns（8.0=125MHz 2抽1, 4.0=250MHz 满速率）
+    // 修改：reg add "HKCU\Software\MC410T\MC410T_Receiver\AcquisitionParams" /v BitsPerChannel /t REG_DWORD /d 32 /f
+    //       reg add "HKCU\Software\MC410T\MC410T_Receiver\AcquisitionParams" /v SampleIntervalNs /t REG_SZ /d "4.0" /f
+    m_bitsPerChannel = settings.value("AcquisitionParams/BitsPerChannel", 32).toInt();
+    if (m_bitsPerChannel != 16 && m_bitsPerChannel != 32) m_bitsPerChannel = 32;
+    m_sampleIntervalNs = settings.value("AcquisitionParams/SampleIntervalNs", 4.0).toDouble();
+    if (m_sampleIntervalNs <= 0) m_sampleIntervalNs = 4.0;
+
+    ui->edtDataTime->setText(settings.value("AcquisitionParams/DataTime", "40000").toString());
+    ui->edtADelay->setText(settings.value("AcquisitionParams/ADelay", "1000").toString());
+    ui->edtBDelay->setText(settings.value("AcquisitionParams/BDelay", "1000").toString());
+    QString defaultDir = QDir::currentPath() + "/data";
+    ui->edtSaveDir->setText(settings.value("SaveParams/Directory", defaultDir).toString());
+    ui->edtTriggersPerFile->setText(settings.value("SaveParams/TriggersPerFile", "1000").toString());
+    ui->edtFileSuffix->setText(settings.value("SaveParams/FileSuffix", "").toString());
+    ui->chkEnableDisplay->setChecked(settings.value("DisplayParams/Enabled", true).toBool());
+    // ═══ 所有 DisplayParams 必须在 onDisplayTypeChanged 前读取 ═══
+    ui->spnDownsampleRatio->setValue(settings.value("DisplayParams/DownsampleRatio", 1000).toInt());
+    ui->spnRefreshRate->setValue(settings.value("DisplayParams/RefreshRate", 10).toInt());
+    ui->edtPkStart->setText(settings.value("DisplayParams/PkStart", "0").toString());
+    ui->edtPkEnd->setText(settings.value("DisplayParams/PkEnd", "10000").toString());
+    m_enableDownsampling = settings.value("DisplayParams/EnableDownsampling", false).toBool();
+    m_autoRescaleAxes    = settings.value("DisplayParams/AutoRescaleAxes", true).toBool();
+    int displayType = settings.value("DisplayParams/Type", 1).toInt();
+    ui->cmbDisplayType->setCurrentIndex(displayType);
+    // 解除信号阻塞
+    ui->spnRefreshRate->blockSignals(false);
+    ui->spnDownsampleRatio->blockSignals(false);
+    ui->cmbDisplayType->blockSignals(false);
+
+    // 设置加载标志，阻止 onDisplayTypeChanged 中 saveSettings 覆盖默认值
+    m_loadingSettings = true;
+    onRefreshRateChanged(ui->spnRefreshRate->value());
+    onDisplayTypeChanged(displayType);
+
+    rebuildDynamicUI();
+
+    // rebuildDynamicUI 内部也会调用 onDisplayTypeChanged，此时必须仍持有标志
+    m_loadingSettings = false;
+
+    QString fmtDesc = (m_bitsPerChannel == 32)
+        ? QString("250MSa/s Q16.16（满速率 %1ns/点）").arg(m_sampleIntervalNs, 0, 'f', 1)
+        : QString("125MSa/s Q0.15（2抽1 %1ns/点）").arg(m_sampleIntervalNs, 0, 'f', 1);
+
+    // ══ 测试模式开关 ════════════════════════════════════════════
+    m_useTestImagingData = settings.value("TestMode/Enabled", false).toBool();
+
+    // ══ 加载成像参数 ════════════════════════════════════════════
+    m_imagingGeneralParams.daq_hz      = settings.value("ImagingParams/General/DaqHz", 250e6f).toFloat();
+    m_imagingGeneralParams.depth       = settings.value("ImagingParams/General/Depth", 50000).toInt();
+    m_imagingGeneralParams.isMultiFiber= settings.value("ImagingParams/General/IsMultiFiber", true).toBool();
+    m_imagingGeneralParams.cardNum    = settings.value("ImagingParams/General/CardNum", 4).toInt();
+    m_imagingGeneralParams.physicalChannels = settings.value("ImagingParams/General/PhysicalChannels", 8).toInt();
+    m_imagingGeneralParams.channelNum = settings.value("ImagingParams/General/ChannelNum", 64).toInt();
+    m_imagingScanParams.stepsize_um    = settings.value("ImagingParams/Scan/StepsizeUm", 10.0f).toFloat();
+    m_imagingScanParams.move_aline     = settings.value("ImagingParams/Scan/MoveAline", 100).toInt();
+    m_imagingScanParams.channel_aline  = settings.value("ImagingParams/Scan/ChannelAline", 50).toInt();
+    m_imagingScanParams.nx             = settings.value("ImagingParams/Scan/Nx", 1200).toInt();
+    m_imagingScanParams.ny             = settings.value("ImagingParams/Scan/Ny", 800).toInt();
+    m_imagingScanParams.dx_um          = settings.value("ImagingParams/Scan/DxUm", 10.0f).toFloat();
+    m_imagingScanParams.dy_um          = settings.value("ImagingParams/Scan/DyUm", 10.0f).toFloat();
+    m_imagingScanParams.x0_m           = settings.value("ImagingParams/Scan/X0M", -6e-3f).toFloat();
+    m_imagingScanParams.y0_m           = settings.value("ImagingParams/Scan/Y0M", 4e-3f).toFloat();
+    m_imagingReconParams.delay          = settings.value("ImagingParams/Recon/Delay", 141).toInt();
+    m_imagingReconParams.sos1_mps       = settings.value("ImagingParams/Recon/Sos1Mps", 1500.0f).toFloat();
+    m_imagingReconParams.sos2_mps       = settings.value("ImagingParams/Recon/Sos2Mps", 1560.0f).toFloat();
+    m_imagingReconParams.isDualSoS      = settings.value("ImagingParams/Recon/IsDualSoS", false).toBool();
+    m_imagingReconParams.filterType     = settings.value("ImagingParams/Recon/FilterType", "Bandpass").toString();
+    m_imagingReconParams.filterFreqLow_Hz  = settings.value("ImagingParams/Recon/FilterFreqLowHz", 1e6f).toFloat();
+    m_imagingReconParams.filterFreqHigh_Hz = settings.value("ImagingParams/Recon/FilterFreqHighHz", 40e6f).toFloat();
+    m_imagingReconParams.threshold      = settings.value("ImagingParams/Recon/Threshold", 1000.0f).toFloat();
+    m_imagingReconParams.dynRange_db    = settings.value("ImagingParams/Recon/DynRangeDb", 50.0f).toFloat();
+    m_imagingReconParams.outputType     = settings.value("ImagingParams/Recon/OutputType", "RF").toString();
+    // ══ 新参数持久化加载 ════════════════════════════════════════════
+    m_imagingReconParams.delayTimePoint = settings.value("ImagingParams/Recon/DelayTimePoint", 1601).toInt();
+    m_imagingReconParams.caliCardDelay  = strToVec(settings.value("ImagingParams/Recon/CaliCardDelay",
+        "0,2,2,2,4,6,6,8").toString());
+    m_imagingReconParams.caliFiberDelay = strToVec(settings.value("ImagingParams/Recon/CaliFiberDelay",
+        "534,484,428,372,322,264,282,202").toString());
+    m_imagingReconParams.s1Period       = settings.value("ImagingParams/Recon/S1Period", 2500).toInt();
+    m_imagingReconParams.isCutoffLoc    = settings.value("ImagingParams/Recon/IsCutoffLoc", false).toBool();
+    m_imagingReconParams.cutoffLoc      = settings.value("ImagingParams/Recon/CutoffLoc", 2501).toInt();
+    m_imagingReconParams.isCenterAlign  = settings.value("ImagingParams/Recon/IsCenterAlign", true).toBool();
+
+    // ══ 色条范围持久化加载 ════════════════════════════════════════
+    m_freqColorRange.lower = settings.value("DisplayParams/FreqColorRangeLow", 0.0).toDouble();
+    m_freqColorRange.upper = settings.value("DisplayParams/FreqColorRangeHigh", 500.0).toDouble();
+    m_pixelColorRange.lower = settings.value("DisplayParams/PixelColorRangeLow", 0.0).toDouble();
+    m_pixelColorRange.upper = settings.value("DisplayParams/PixelColorRangeHigh", 500.0).toDouble();
+    m_freqColorInited  = settings.value("DisplayParams/FreqColorInited", false).toBool();
+    m_pixelColorInited = settings.value("DisplayParams/PixelColorInited", false).toBool();
+
+    // 色条范围首次初始化：setupPlots 在 rebuildDynamicUI 中调用，色条已创建
+    // 用延迟确保在 setupPlots 之后恢复范围
+    QTimer::singleShot(300, this, [this]() {
+        if (m_colorMap && m_colorScale) {
+            m_settingColorRange = true;
+            m_colorMap->setDataRange(m_freqColorRange);
+            m_colorScale->axis()->setRange(m_freqColorRange);
+            m_settingColorRange = false;
+        }
+    });
+
+    logMessage(QString("已加载参数配置（卡数=%1，路线A WinSock，%2）").arg(m_nCards).arg(fmtDesc));
+}
+
+void MainWindow::saveSettings()
+{
+    QSettings settings("MC410T", "MC410T_Receiver");
+    settings.setValue("AcquisitionParams/NCards",   m_nCards);
+    settings.setValue("NetworkParams/LocalBindIP",   m_localBindIP);
+    settings.setValue("NetworkParams/ScanBaseIP",    m_scanBaseIP);
+    settings.setValue("NetworkParams/ScanIPCount",   m_scanIPCount);
+    settings.setValue("AcquisitionParams/DataTime", ui->edtDataTime->text());
+    settings.setValue("AcquisitionParams/ADelay",   ui->edtADelay->text());
+    settings.setValue("AcquisitionParams/BDelay",   ui->edtBDelay->text());
+    settings.setValue("SaveParams/Directory",       ui->edtSaveDir->text());
+    settings.setValue("SaveParams/TriggersPerFile", ui->edtTriggersPerFile->text());
+    settings.setValue("SaveParams/FileSuffix",      ui->edtFileSuffix->text());
+    settings.setValue("DisplayParams/Enabled",      ui->chkEnableDisplay->isChecked());
+    settings.setValue("DisplayParams/Type",         ui->cmbDisplayType->currentIndex());
+    settings.setValue("DisplayParams/RefreshRate",  ui->spnRefreshRate->value());
+    settings.setValue("DisplayParams/PkStart",      ui->edtPkStart->text());
+    settings.setValue("DisplayParams/PkEnd",        ui->edtPkEnd->text());
+    settings.setValue("DisplayParams/DownsampleRatio", ui->spnDownsampleRatio->value());
+    settings.setValue("DisplayParams/EnableDownsampling", m_enableDownsampling);
+    settings.setValue("DisplayParams/AutoRescaleAxes",    m_autoRescaleAxes);
+    // 数据格式参数
+    settings.setValue("AcquisitionParams/BitsPerChannel",   m_bitsPerChannel);
+    settings.setValue("AcquisitionParams/SampleIntervalNs", m_sampleIntervalNs);
+
+    // ══ 保存成像参数 ════════════════════════════════════════════
+    settings.setValue("ImagingParams/General/DaqHz",           m_imagingGeneralParams.daq_hz);
+    settings.setValue("ImagingParams/General/Depth",           m_imagingGeneralParams.depth);
+    settings.setValue("ImagingParams/General/ChannelNum",      m_imagingGeneralParams.channelNum);
+    settings.setValue("ImagingParams/General/CardNum",         m_imagingGeneralParams.cardNum);
+    settings.setValue("ImagingParams/General/IsFullScan",      m_imagingGeneralParams.isFullScan);
+    settings.setValue("ImagingParams/General/IsFastScan",      m_imagingGeneralParams.isFastScan);
+    settings.setValue("ImagingParams/General/IsMultiFiber",    m_imagingGeneralParams.isMultiFiber);
+    settings.setValue("ImagingParams/General/PhysicalChannels", m_imagingGeneralParams.physicalChannels);
+    settings.setValue("ImagingParams/General/ChannelNum",      m_imagingGeneralParams.channelNum);
+    settings.setValue("ImagingParams/General/IsSaveReconData", m_imagingGeneralParams.isSaveReconData);
+    settings.setValue("TestMode/Enabled",                      m_useTestImagingData);
+    settings.setValue("ImagingParams/Scan/StepsizeUm",         m_imagingScanParams.stepsize_um);
+    settings.setValue("ImagingParams/Scan/MoveAline",          m_imagingScanParams.move_aline);
+    settings.setValue("ImagingParams/Scan/ChannelAline",       m_imagingScanParams.channel_aline);
+    settings.setValue("ImagingParams/Scan/Nx",                 m_imagingScanParams.nx);
+    settings.setValue("ImagingParams/Scan/Ny",                 m_imagingScanParams.ny);
+    settings.setValue("ImagingParams/Scan/DxUm",               m_imagingScanParams.dx_um);
+    settings.setValue("ImagingParams/Scan/DyUm",               m_imagingScanParams.dy_um);
+    settings.setValue("ImagingParams/Scan/X0M",                m_imagingScanParams.x0_m);
+    settings.setValue("ImagingParams/Scan/Y0M",                m_imagingScanParams.y0_m);
+    settings.setValue("ImagingParams/Recon/Delay",             m_imagingReconParams.delay);
+    settings.setValue("ImagingParams/Recon/Sos1Mps",           m_imagingReconParams.sos1_mps);
+    settings.setValue("ImagingParams/Recon/Sos2Mps",           m_imagingReconParams.sos2_mps);
+    settings.setValue("ImagingParams/Recon/IsDualSoS",         m_imagingReconParams.isDualSoS);
+    settings.setValue("ImagingParams/Recon/FilterType",        m_imagingReconParams.filterType);
+    settings.setValue("ImagingParams/Recon/FilterFreqLowHz",   m_imagingReconParams.filterFreqLow_Hz);
+    settings.setValue("ImagingParams/Recon/FilterFreqHighHz",  m_imagingReconParams.filterFreqHigh_Hz);
+    settings.setValue("ImagingParams/Recon/Threshold",         m_imagingReconParams.threshold);
+    settings.setValue("ImagingParams/Recon/DynRangeDb",        m_imagingReconParams.dynRange_db);
+    settings.setValue("ImagingParams/Recon/OutputType",        m_imagingReconParams.outputType);
+    // ══ 新参数持久化保存 ════════════════════════════════════════════
+    settings.setValue("ImagingParams/Recon/DelayTimePoint",    m_imagingReconParams.delayTimePoint);
+    settings.setValue("ImagingParams/Recon/CaliCardDelay",     vecToStr(m_imagingReconParams.caliCardDelay));
+    settings.setValue("ImagingParams/Recon/CaliFiberDelay",    vecToStr(m_imagingReconParams.caliFiberDelay));
+    settings.setValue("ImagingParams/Recon/S1Period",          m_imagingReconParams.s1Period);
+    settings.setValue("ImagingParams/Recon/IsCutoffLoc",       m_imagingReconParams.isCutoffLoc);
+    settings.setValue("ImagingParams/Recon/CutoffLoc",         m_imagingReconParams.cutoffLoc);
+    settings.setValue("ImagingParams/Recon/IsCenterAlign",     m_imagingReconParams.isCenterAlign);
+
+    // ══ 色条范围持久化保存 ════════════════════════════════════════
+    settings.setValue("DisplayParams/FreqColorRangeLow",  m_freqColorRange.lower);
+    settings.setValue("DisplayParams/FreqColorRangeHigh", m_freqColorRange.upper);
+    settings.setValue("DisplayParams/PixelColorRangeLow",  m_pixelColorRange.lower);
+    settings.setValue("DisplayParams/PixelColorRangeHigh", m_pixelColorRange.upper);
+    settings.setValue("DisplayParams/FreqColorInited",  m_freqColorInited);
+    settings.setValue("DisplayParams/PixelColorInited", m_pixelColorInited);
+
+    // 窗口几何尺寸（使用独立字段）
+    {
+        QRect g = geometry();
+        settings.setValue("Window/X", g.x());
+        settings.setValue("Window/Y", g.y());
+        settings.setValue("Window/W", g.width());
+        settings.setValue("Window/H", g.height());
+        logMessage(QString("保存窗口几何: %1,%2 %3x%4").arg(g.x()).arg(g.y()).arg(g.width()).arg(g.height()));
+    }
+
+    settings.sync();
+}
+
+// =====================================================================
+// 平铺视图切换
+// =====================================================================
+void MainWindow::onTileViewToggled(bool checked)
+{
+    m_isTileView = checked;
+    if (checked) {
+        logMessage("切换到平铺视图模式");
+        // 先切到 tile 页，使 tile 容器获得正确尺寸
+        ui->stackedDisplayMode->setCurrentIndex(1);
+        QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        // 再将 stacked widget 移入已可见的 tile 容器
+        for (int card = 0; card < CARDS_PER_DISPLAY_GROUP; ++card) {
+            for (int ch = 0; ch < 2; ++ch) {
+                if (!m_stackedWidgets[card][ch]) continue;
+                QStackedWidget *stack = m_stackedWidgets[card][ch];
+                QWidget *tileContainer = m_tileContainers[card][ch];
+                if (!tileContainer) continue;
+                if (stack->parentWidget()) {
+                    QLayout *oldLayout = stack->parentWidget()->layout();
+                    if (oldLayout) oldLayout->removeWidget(stack);
+                }
+                // 同时将 pkpk 标签从标签页迁移到平铺容器
+                QLabel *pkpk = m_pkpkLabels[card][ch];
+                if (pkpk && pkpk->parentWidget()) {
+                    QLayout *pkLayout = pkpk->parentWidget()->layout();
+                    if (pkLayout) pkLayout->removeWidget(pkpk);
+                }
+                QVBoxLayout *tileLayout = qobject_cast<QVBoxLayout*>(tileContainer->layout());
+                if (tileLayout) {
+                    while (tileLayout->count() > 1) { QLayoutItem *item = tileLayout->takeAt(1); delete item; }
+                    if (pkpk) tileLayout->addWidget(pkpk);
+                    tileLayout->addWidget(stack, 1);
+                }
+                stack->show();
+                stack->updateGeometry();
+                stack->update();
+            }
+        }
+        syncVisiblePlotsGeometry();
+    } else {
+        logMessage("切换回标签页视图模式");
+        for (int card = 0; card < CARDS_PER_DISPLAY_GROUP; ++card) {
+            for (int ch = 0; ch < 2; ++ch) {
+                if (!m_stackedWidgets[card][ch]) continue;
+                int tabIndex = card * 2 + ch;
+                QStackedWidget *stack = m_stackedWidgets[card][ch];
+                QWidget *tabPage = ui->tabWidget->widget(tabIndex);
+                if (tabPage) {
+                    QVBoxLayout *tabLayout = qobject_cast<QVBoxLayout*>(tabPage->layout());
+                    // 先将 pkpk 标签从平铺容器移回，防止被平铺清理循环 delete
+                    QLabel *pkpk = m_pkpkLabels[card][ch];
+                    if (pkpk) {
+                        QWidget *pw = pkpk->parentWidget();
+                        if (pw && pw != tabPage) {
+                            QLayout *pl = pw->layout();
+                            if (pl) pl->removeWidget(pkpk);
+                        }
+                    }
+                    if (tabLayout) {
+                        tabLayout->addWidget(stack, 1);
+                        if (pkpk) tabLayout->insertWidget(0, pkpk);
+                    }
+                }
+                QWidget *tileContainer = m_tileContainers[card][ch];
+                if (!tileContainer) continue;
+                QVBoxLayout *tileLayout = qobject_cast<QVBoxLayout*>(tileContainer->layout());
+                if (tileLayout) {
+                    while (tileLayout->count() > 1) { QLayoutItem *item = tileLayout->takeAt(1); delete item; }
+                    tileLayout->addStretch();
+                }
+            }
+        }
+        ui->stackedDisplayMode->setCurrentIndex(0);
+    }
+}
+
+// =====================================================================
+// 分组导航
+// =====================================================================
+void MainWindow::onGroupTabChanged(int groupIndex)
+{
+    if (groupIndex < 0 || groupIndex >= m_numGroups) return;
+    m_currentGroup = groupIndex;
+    updateGroupDisplay(groupIndex);
+}
+
+void MainWindow::updateGroupDisplay(int groupIndex)
+{
+    if (groupIndex < 0 || groupIndex >= m_numGroups) return;
+    m_currentGroup = groupIndex;
+
+    int firstGlobal = groupIndex * CARDS_PER_DISPLAY_GROUP;
+    int lastGlobal  = std::min(firstGlobal + CARDS_PER_DISPLAY_GROUP - 1, m_nCards - 1);
+    ui->lblGroupInfo->setText(
+        QString("第%1组 (卡%2-%3)").arg(groupIndex + 1).arg(firstGlobal + 1).arg(lastGlobal + 1));
+
+    int displayMode = ui->cmbDisplayType->currentIndex();
+    if (displayMode == 2) {
+        ui->stackedMainDisplay->setCurrentIndex(1);
+    } else {
+        ui->stackedMainDisplay->setCurrentIndex(0);
+        ui->stackedDisplayMode->setCurrentIndex(m_isTileView ? 1 : 0);
+    }
+
+    // 更新 Tab 标题、平铺标题，并显示/隐藏超出实际卡数的槽位
+    for (int slot = 0; slot < CARDS_PER_DISPLAY_GROUP; ++slot) {
+        int globalCard = firstGlobal + slot;
+        bool cardExists = (globalCard < m_nCards);
+
+        for (int ch = 0; ch < 2; ++ch) {
+            int tabIdx = slot * 2 + ch;
+            QString chName = cardExists
+                ? QString("卡%1-通道%2").arg(globalCard + 1).arg(ch == 0 ? 'A' : 'B')
+                : QString("--");
+
+            ui->tabWidget->setTabText(tabIdx, chName);
+            ui->tabWidget->setTabVisible(tabIdx, cardExists);
+
+            if (m_pkpkLabels[slot][ch])
+                m_pkpkLabels[slot][ch]->setText(QString("峰峰值: -- kHz"));
+
+            QWidget *tileContainer = m_tileContainers[slot][ch];
+            if (tileContainer) {
+                tileContainer->setVisible(cardExists);
+                const auto labels = tileContainer->findChildren<QLabel*>(QString(), Qt::FindDirectChildrenOnly);
+                for (QLabel *lbl : labels) {
+                    if (lbl->property("tileTitle").toBool()) { lbl->setText(chName); break; }
+                }
+            }
+        }
+        m_firstPlot[slot][0] = true;
+        m_firstPlot[slot][1] = true;
+
+        // 清空图表旧数据：切换分组后，新组的图表应显示空白，
+        // 而不是残留上一组（或上一次使用该槽位时）的曲线。
+        // 无数据的卡在下一次 onDisplayRefresh 的 tryRead 返回 false 时会保持空白。
+        for (int ch = 0; ch < 2; ++ch) {
+            if (m_plotsPhase[slot][ch] && m_plotsPhase[slot][ch]->graphCount() > 0) {
+                m_plotsPhase[slot][ch]->graph(0)->data()->clear();
+                m_plotsPhase[slot][ch]->replot(QCustomPlot::rpQueuedReplot);
+            }
+            if (m_plotsFrequency[slot][ch] && m_plotsFrequency[slot][ch]->graphCount() > 0) {
+                m_plotsFrequency[slot][ch]->graph(0)->data()->clear();
+                m_plotsFrequency[slot][ch]->replot(QCustomPlot::rpQueuedReplot);
+            }
+            if (m_pkpkLabels[slot][ch])
+                m_pkpkLabels[slot][ch]->setText(QString("峰峰值: -- kHz"));
+        }
+    }
+
+    // 重置统计栏
+    int cardsInGroup = std::min(CARDS_PER_DISPLAY_GROUP, m_nCards - firstGlobal);
+    for (int i = 0; i < CARDS_PER_DISPLAY_GROUP; ++i) {
+        int virtualCardNum = firstGlobal + i + 1;
+        if (i < cardsInGroup)
+            m_lblStats[i]->setText(QString("卡%1: 等待数据...").arg(virtualCardNum));
+        else
+            m_lblStats[i]->setText(QString("--"));
+    }
+    QTimer::singleShot(0, this, [this]() {
+        syncVisiblePlotsGeometry();
+    });
+    logMessage(QString("切换到第%1组（卡%2~卡%3）").arg(groupIndex + 1).arg(firstGlobal + 1).arg(lastGlobal + 1));
+}
+
+// =====================================================================
+// 坐标轴范围设置对话框
+// =====================================================================
+void MainWindow::setAxisRange(QCustomPlot *plot, bool isXAxis)
+{
+    if (!plot) return;
+    QCPAxis *axis = isXAxis ? plot->xAxis : plot->yAxis;
+    QString axisName = isXAxis ? "X轴" : "Y轴";
+    double currentMin = axis->range().lower;
+    double currentMax = axis->range().upper;
+    QDialog dialog(this);
+    dialog.setWindowTitle(QString("设置%1范围").arg(axisName));
+    dialog.setMinimumWidth(300);
+    QFormLayout *layout = new QFormLayout(&dialog);
+    QLineEdit *editMin = new QLineEdit(QString::number(currentMin, 'g', 10));
+    QLineEdit *editMax = new QLineEdit(QString::number(currentMax, 'g', 10));
+    layout->addRow(QString("%1最小值:").arg(axisName), editMin);
+    layout->addRow(QString("%1最大值:").arg(axisName), editMax);
+    QDialogButtonBox *buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    connect(buttonBox, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttonBox, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addRow(buttonBox);
+    if (dialog.exec() == QDialog::Accepted) {
+        bool okMin, okMax;
+        double newMin = editMin->text().toDouble(&okMin);
+        double newMax = editMax->text().toDouble(&okMax);
+        if (okMin && okMax && newMin < newMax) {
+            if (m_autoRescaleAxes) { m_autoRescaleAxes = false; saveSettings(); logMessage("已自动关闭自适应坐标轴"); }
+            axis->setRange(newMin, newMax);
+            plot->replot();
+            logMessage(QString("%1范围已设置: [%2, %3]").arg(axisName).arg(newMin, 0, 'g', 6).arg(newMax, 0, 'g', 6));
+        }
+    }
+}
+
+// =====================================================================
+// calculateFrequency（兼容备用）
+// =====================================================================
+QVector<double> MainWindow::calculateFrequency(const QVector<double> &phaseData)
+{
+    if (phaseData.size() < 2) return {};
+    const int size = phaseData.size();
+    QVector<double> frequency(size - 1);
+    const double twoPi = 2.0 * M_PI;
+    const double freqScale = DIFF_SAMPLE_RATE_HZ / twoPi;
+    double cumulative = 0.0, prevPhaseUnwrapped = phaseData[0];
+    for (int i = 1; i < size; ++i) {
+        double dp = phaseData[i] - phaseData[i - 1];
+        double dpMod = std::fmod(dp + M_PI, twoPi);
+        if (dpMod < 0) dpMod += twoPi;
+        double dpCorr = dpMod - M_PI;
+        if (dpCorr == -M_PI && dp > 0) dpCorr = M_PI;
+        cumulative += (dpCorr - dp);
+        double curr = phaseData[i] + cumulative;
+        frequency[i - 1] = (curr - prevPhaseUnwrapped) * freqScale;
+        prevPhaseUnwrapped = curr;
+    }
+    return frequency;
+}
+
+// =====================================================================
+// updateNetworkInfoLabels — 根据 m_nCards 更新网络控制面板标签
+// =====================================================================
+void MainWindow::updateNetworkInfoLabels()
+{
+    // 目标IP范围：优先使用自动识别结果；否则按扫描起始 IP + 卡数推算
+    QString ipText;
+    if (!m_targetIPRangeText.isEmpty()) {
+        ipText = QString("目标IP: %1").arg(m_targetIPRangeText);
+    } else {
+        QStringList parts = m_scanBaseIP.split('.');
+        int startIpLast = (parts.size() == 4) ? parts[3].toInt() : 2;
+        int endIpLast   = startIpLast + m_nCards - 1;
+        QString prefix  = (parts.size() == 4)
+                          ? QString("%1.%2.%3").arg(parts[0]).arg(parts[1]).arg(parts[2])
+                          : QString("192.168.0");
+        if (m_nCards == 1)
+            ipText = QString("目标IP: %1.%2").arg(prefix).arg(startIpLast);
+        else
+            ipText = QString("目标IP: %1.%2-%3").arg(prefix).arg(startIpLast).arg(endIpLast);
+    }
+    ui->lblTargetIPs->setText(ipText);
+
+    // MAC 范围（最后一字节）
+    QString macText;
+    if (m_nCards == 1)
+        macText = QString("MAC: 00.0A.35.01.FE.C0");
+    else
+        macText = QString("MAC: 00.0A.35.01.FE.C0-%1")
+                  .arg(0xC0 + m_nCards - 1, 2, 16, QChar('0')).toUpper();
+    ui->lblMACs->setText(macText);
+
+    // 数据端口范围
+    int portStart = BASE_PORT;
+    int portEnd   = BASE_PORT + m_nCards - 1;
+    QString portText;
+    if (m_nCards == 1)
+        portText = QString("数据端口: %1").arg(portStart);
+    else
+        portText = QString("数据端口: %1-%2").arg(portStart).arg(portEnd);
+    ui->lblDataPorts->setText(portText);
+
+    // tooltip 提示管理员如何修改（注册表）
+    QString bindIPInfo = m_localBindIP.isEmpty()
+        ? QString("未设置（INADDR_ANY）— 双口网卡请必须设置!")
+        : m_localBindIP;
+    ui->lblTargetIPs->setToolTip(
+        QString("采集卡数量: %1\n"
+                "  注册表键: HKCU\\Software\\MC410T\\MC410T_Receiver\\AcquisitionParams\\NCards\n"
+                "控制包本地绑定IP: %2\n"
+                "  注册表键: ...\\NetworkParams\\LocalBindIP\n"
+                "  双口网卡只接一口时必须填已连接口的本地IP（如 192.168.0.100）\n"
+                "  否则控制包可能从错误网口发出，采集卡收不到指令\n"
+                "接收路线: WinSock")
+        .arg(m_nCards)
+        .arg(bindIPInfo)
+        .arg("路线A WinSock")
+    );
+}
+
+// =====================================================================
+// closeEvent
+// =====================================================================
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    saveSettings();
+
+    if (!m_netController) {
+        event->accept();
+        return;
+    }
+
+    // 忽略本次关闭事件，等后台停止完成后再真正退出
+    event->ignore();
+    setEnabled(false);
+
+    // 用 lambda 连接 stopped() 信号，确保只触发一次后就 quit
+    // 使用 Qt::SingleShotConnection（Qt6）或手动 disconnect
+    auto conn = std::make_shared<QMetaObject::Connection>();
+    *conn = connect(m_netController, &NetworkController::stopped, this, [this, conn]() {
+        disconnect(*conn);   // 单次触发后立即断开
+        // 删除 controller（已完全停止，安全删除）
+        if (m_netController) {
+            m_netController->setParent(nullptr);
+            delete m_netController;
+            m_netController = nullptr;
+        }
+        QApplication::quit();
+    }, Qt::QueuedConnection);
+
+    // 超时兜底：最多 4s 后强制退出（防止某线程卡死无法正常退出）
+    QTimer::singleShot(4000, this, [this]() {
+        if (m_netController) {
+            m_netController->setParent(nullptr);
+            delete m_netController;
+            m_netController = nullptr;
+        }
+        QApplication::quit();
+    });
+
+    m_netController->stop();
+}
+
+// =====================================================================
+// 成像相关槽函数
+// =====================================================================
+
+void MainWindow::onImagingConfigClicked()
+{
+    if (m_imagingConfigDialog) {
+        delete m_imagingConfigDialog;
+    }
+    m_imagingConfigDialog = new QDialog(this);
+    m_imagingConfigDialog->setWindowTitle("成像参数配置");
+    m_imagingConfigDialog->setMinimumSize(500, 450);
+
+    QTabWidget *tabs = new QTabWidget(m_imagingConfigDialog);
+    QVBoxLayout *mainLayout = new QVBoxLayout(m_imagingConfigDialog);
+    mainLayout->addWidget(tabs);
+
+    // ---- 通用参数页 ----
+    QWidget *generalPage = new QWidget();
+    QFormLayout *generalLayout = new QFormLayout(generalPage);
+
+    // 只读参数
+    QLabel *lblDaqHz  = new QLabel(QString("%1 MSa/s").arg(m_imagingGeneralParams.daq_hz / 1e6f, 0, 'f', 1));
+    lblDaqHz->setStyleSheet("color: #AAAAAA; background: #2A2A2A; padding: 4px 8px; border: 1px solid #3C3C3C; border-radius: 3px;");
+
+    // 采集深度 = 采集时间(ns) / 采样间隔(ns/点)，来自左侧采集控制参数
+    int acqTimeNs = ui->edtDataTime->text().toInt();
+    int computedDepth = (m_sampleIntervalNs > 0)
+        ? static_cast<int>(acqTimeNs / m_sampleIntervalNs)
+        : 50000;
+    QLabel *lblDepth = new QLabel(QString("%1 pts").arg(computedDepth));
+    lblDepth->setStyleSheet("color: #AAAAAA; background: #2A2A2A; padding: 4px 8px; border: 1px solid #3C3C3C; border-radius: 3px;");
+
+    // 可编辑参数
+    QSpinBox *spnPhysicalCh = new QSpinBox();
+    spnPhysicalCh->setRange(1, 64);
+    spnPhysicalCh->setValue(m_imagingGeneralParams.physicalChannels);
+    spnPhysicalCh->setToolTip("物理通道数（算法 card_num），4张卡×2通道=8");
+
+    QSpinBox *spnChannelNum = new QSpinBox();
+    spnChannelNum->setRange(1, 128);
+    spnChannelNum->setValue(m_imagingGeneralParams.channelNum);
+    spnChannelNum->setToolTip("光纤通道总数（算法 channel_num），多纤→64，单纤→8");
+
+    // 扫描模式：全扫描 / 快速扫描（互斥单选，底层用 bool 保证互斥）
+    QRadioButton *radioFull = new QRadioButton("全扫描");
+    QRadioButton *radioFast = new QRadioButton("快速扫描");
+    radioFull->setChecked(m_imagingGeneralParams.isFullScan);
+    radioFast->setChecked(m_imagingGeneralParams.isFastScan);
+    QButtonGroup *scanGroup = new QButtonGroup(generalPage);
+    scanGroup->addButton(radioFull, 0);
+    scanGroup->addButton(radioFast, 1);
+    QObject::connect(radioFull, &QRadioButton::toggled, generalPage, [radioFast](bool checked) {
+        if (checked) radioFast->setChecked(false);
+    });
+    QObject::connect(radioFast, &QRadioButton::toggled, generalPage, [radioFull](bool checked) {
+        if (checked) radioFull->setChecked(false);
+    });
+
+    // 光纤复用模式：多光纤复用 / 单光纤直连（互斥单选）
+    // 多光纤复用：4卡×8通道×8光纤/通道，depth=50000，200μs
+    // 单光纤直连：4卡×8通道×1光纤/通道，depth=12500，50μs
+    QRadioButton *radioMulti = new QRadioButton("多光纤复用（4卡×8通道×8光纤/通道→64纤）");
+    QRadioButton *radioDirect = new QRadioButton("单光纤直连（4卡×8通道×1光纤/通道→8纤）");
+    radioMulti->setChecked(m_imagingGeneralParams.isMultiFiber);
+    radioDirect->setChecked(!m_imagingGeneralParams.isMultiFiber);
+    QButtonGroup *fiberGroup = new QButtonGroup(generalPage);
+    fiberGroup->addButton(radioMulti, 0);
+    fiberGroup->addButton(radioDirect, 1);
+
+    // 光纤模式切换时联动 channelNum（cardNum 固定为 4）
+    QObject::connect(radioMulti, &QRadioButton::toggled, generalPage, [spnChannelNum, radioDirect](bool checked) {
+        if (checked) {
+            radioDirect->setChecked(false);
+            spnChannelNum->setValue(64);
+        }
+    });
+    QObject::connect(radioDirect, &QRadioButton::toggled, generalPage, [spnChannelNum, radioMulti](bool checked) {
+        if (checked) {
+            radioMulti->setChecked(false);
+            spnChannelNum->setValue(8);
+        } else {
+            spnChannelNum->setValue(64);
+        }
+    });
+
+    QCheckBox *isSaveRecon = new QCheckBox("存储重建数据");
+    isSaveRecon->setChecked(m_imagingGeneralParams.isSaveReconData);
+
+    QHBoxLayout *scanRadioLayout = new QHBoxLayout();
+    scanRadioLayout->addWidget(radioFull);
+    scanRadioLayout->addWidget(radioFast);
+    scanRadioLayout->addStretch();
+
+    QHBoxLayout *fiberRadioLayout = new QHBoxLayout();
+    fiberRadioLayout->addWidget(radioMulti);
+    fiberRadioLayout->addWidget(radioDirect);
+    fiberRadioLayout->addStretch();
+
+    // 配准文件加载（放在通用参数页，属于系统校准类参数）
+    QHBoxLayout *peizhunLayout = new QHBoxLayout();
+    QPushButton *btnLoadPeizhun = new QPushButton("加载配准文件...");
+    btnLoadPeizhun->setProperty("isLoadPeizhun", true);
+    btnLoadPeizhun->style()->unpolish(btnLoadPeizhun);
+    btnLoadPeizhun->style()->polish(btnLoadPeizhun);
+    QLabel *lblPeizhunStatus = new QLabel(
+        m_peizhunLoaded ?
+        QString("已加载: %1").arg(QFileInfo(m_peizhunFilePath).fileName()) :
+        "未加载");
+    lblPeizhunStatus->setObjectName("lblPeizhunStatus");
+    peizhunLayout->addWidget(btnLoadPeizhun);
+    peizhunLayout->addWidget(lblPeizhunStatus);
+    peizhunLayout->addStretch();
+
+    generalLayout->addRow("采样率:", lblDaqHz);
+    generalLayout->addRow("采集长度:", lblDepth);
+    generalLayout->addRow("物理通道数:", spnPhysicalCh);
+    generalLayout->addRow("光纤通道数:", spnChannelNum);
+    generalLayout->addRow("扫描模式:", scanRadioLayout);
+    generalLayout->addRow("光纤复用:", fiberRadioLayout);
+    generalLayout->addRow("配准校准:", peizhunLayout);
+    generalLayout->addRow(isSaveRecon);
+    tabs->addTab(generalPage, "通用参数");
+
+    // ---- 扫描参数页 ----
+    QWidget *scanPage = new QWidget();
+    QFormLayout *scanLayout = new QFormLayout(scanPage);
+
+    QDoubleSpinBox *stepsize = new QDoubleSpinBox();
+    stepsize->setRange(0.1, 1000); stepsize->setSuffix(" um");
+    stepsize->setValue(m_imagingScanParams.stepsize_um);
+    QSpinBox *moveAline = new QSpinBox();
+    moveAline->setRange(1, 10000); moveAline->setValue(m_imagingScanParams.move_aline);
+    QSpinBox *channelAline = new QSpinBox();
+    channelAline->setRange(1, 1000); channelAline->setValue(m_imagingScanParams.channel_aline);
+    QSpinBox *nx = new QSpinBox();
+    nx->setRange(100, 4000); nx->setValue(m_imagingScanParams.nx);
+    QSpinBox *ny = new QSpinBox();
+    ny->setRange(100, 4000); ny->setValue(m_imagingScanParams.ny);
+    QDoubleSpinBox *dx = new QDoubleSpinBox();
+    dx->setRange(0.1, 1000); dx->setSuffix(" um");
+    dx->setValue(m_imagingScanParams.dx_um);
+    QDoubleSpinBox *dy = new QDoubleSpinBox();
+    dy->setRange(0.1, 1000); dy->setSuffix(" um");
+    dy->setValue(m_imagingScanParams.dy_um);
+    QDoubleSpinBox *x0 = new QDoubleSpinBox();
+    x0->setRange(-100, 100); x0->setSuffix(" mm"); x0->setDecimals(3);
+    x0->setValue(m_imagingScanParams.x0_m * 1e3f);
+    QDoubleSpinBox *y0 = new QDoubleSpinBox();
+    y0->setRange(-100, 100); y0->setSuffix(" mm"); y0->setDecimals(3);
+    y0->setValue(m_imagingScanParams.y0_m * 1e3f);
+
+    scanLayout->addRow("电机步长:", stepsize);
+    scanLayout->addRow("单帧脉冲数:", moveAline);
+    scanLayout->addRow("通道覆盖步数:", channelAline);
+    scanLayout->addRow("图像宽度(nx):", nx);
+    scanLayout->addRow("图像高度(ny):", ny);
+    scanLayout->addRow("X像素间距:", dx);
+    scanLayout->addRow("Y像素间距:", dy);
+    scanLayout->addRow("原点X:", x0);
+    scanLayout->addRow("原点Y:", y0);
+    tabs->addTab(scanPage, "扫描参数");
+
+    // ---- 重建参数页 ----
+    QWidget *reconPage = new QWidget();
+    QFormLayout *reconLayout = new QFormLayout(reconPage);
+
+    QSpinBox *delay = new QSpinBox();
+    delay->setRange(0, 10000); delay->setValue(m_imagingReconParams.delay);
+    QDoubleSpinBox *sos1 = new QDoubleSpinBox();
+    sos1->setRange(100, 10000); sos1->setSuffix(" m/s");
+    sos1->setValue(m_imagingReconParams.sos1_mps);
+    QDoubleSpinBox *sos2 = new QDoubleSpinBox();
+    sos2->setRange(100, 10000); sos2->setSuffix(" m/s");
+    sos2->setValue(m_imagingReconParams.sos2_mps);
+    QCheckBox *isDualSoS = new QCheckBox("双声速模型");
+    isDualSoS->setChecked(m_imagingReconParams.isDualSoS);
+    QComboBox *filterType = new QComboBox();
+    filterType->addItems({"Bandpass", "Highpass", "Lowpass", "None"});
+    filterType->setCurrentText(m_imagingReconParams.filterType);
+    QDoubleSpinBox *freqLow = new QDoubleSpinBox();
+    freqLow->setRange(0, 1000); freqLow->setSuffix(" MHz");
+    freqLow->setValue(m_imagingReconParams.filterFreqLow_Hz / 1e6f);
+    QDoubleSpinBox *freqHigh = new QDoubleSpinBox();
+    freqHigh->setRange(0, 1000); freqHigh->setSuffix(" MHz");
+    freqHigh->setValue(m_imagingReconParams.filterFreqHigh_Hz / 1e6f);
+    QDoubleSpinBox *threshold = new QDoubleSpinBox();
+    threshold->setRange(0, 100000); threshold->setValue(m_imagingReconParams.threshold);
+    QDoubleSpinBox *dynRange = new QDoubleSpinBox();
+    dynRange->setRange(1, 120); dynRange->setSuffix(" dB");
+    dynRange->setValue(m_imagingReconParams.dynRange_db);
+    QComboBox *outputType = new QComboBox();
+    outputType->addItems({"RF", "ENV", "DB"});
+    outputType->setCurrentText(m_imagingReconParams.outputType);
+
+    // ══ 新参数：时延/周期/衰减 ════════════════════════════════════
+    QSpinBox *spnDelayTimePoint = new QSpinBox();
+    spnDelayTimePoint->setRange(0, 50000);
+    spnDelayTimePoint->setValue(m_imagingReconParams.delayTimePoint);
+    spnDelayTimePoint->setToolTip("时延补偿点，单位采样点（默认 1601）");
+
+    QSpinBox *spnS1Period = new QSpinBox();
+    spnS1Period->setRange(0, 50000);
+    spnS1Period->setValue(m_imagingReconParams.s1Period);
+    spnS1Period->setToolTip("S1 周期，单位采样点（默认 2500）");
+
+    QCheckBox *chkCutoff = new QCheckBox("启用末尾衰减");
+    chkCutoff->setChecked(m_imagingReconParams.isCutoffLoc);
+    chkCutoff->setToolTip("对末尾干扰段进行衰减处理（对应 C 接口 is_cutoff_loc）");
+
+    QSpinBox *spnCutoffPoint = new QSpinBox();
+    spnCutoffPoint->setRange(0, 50000);
+    spnCutoffPoint->setValue(m_imagingReconParams.cutoffLoc);
+    spnCutoffPoint->setToolTip("衰减起始采样点（默认 2501）");
+
+    QCheckBox *chkCenterAlign = new QCheckBox("中心对齐");
+    chkCenterAlign->setChecked(m_imagingReconParams.isCenterAlign);
+    chkCenterAlign->setToolTip("中心对齐后边界清零");
+
+    // ══ 采集卡/光纤标定时延（逗号分隔的整数数组）══════════════════
+    QLineEdit *editCaliCardDelay = new QLineEdit(vecToStr(m_imagingReconParams.caliCardDelay));
+    editCaliCardDelay->setToolTip("采集卡标定时延，逗号分隔（如 0,2,2,2,4,6,6,8）");
+    QLineEdit *editCaliFiberDelay = new QLineEdit(vecToStr(m_imagingReconParams.caliFiberDelay));
+    editCaliFiberDelay->setToolTip("光纤标定时延，逗号分隔（如 534,484,428,372,322,264,282,202）");
+
+    reconLayout->addRow("自激发起始(delay):", delay);
+    reconLayout->addRow("一级声速:", sos1);
+    reconLayout->addRow("二级声速:", sos2);
+    reconLayout->addRow(isDualSoS);
+    reconLayout->addRow("滤波器类型:", filterType);
+    reconLayout->addRow("低频截止:", freqLow);
+    reconLayout->addRow("高频截止:", freqHigh);
+    reconLayout->addRow("数据阈值:", threshold);
+    reconLayout->addRow("动态范围:", dynRange);
+    reconLayout->addRow("输出类型:", outputType);
+    reconLayout->addRow("时延补偿点:", spnDelayTimePoint);
+    reconLayout->addRow("S1 周期:", spnS1Period);
+    reconLayout->addRow(chkCutoff);
+    reconLayout->addRow("衰减起始采样点:", spnCutoffPoint);
+    reconLayout->addRow(chkCenterAlign);
+    reconLayout->addRow("采集卡标定时延:", editCaliCardDelay);
+    reconLayout->addRow("光纤标定时延:", editCaliFiberDelay);
+    tabs->addTab(reconPage, "重建参数");
+
+    // 按钮 —— 使用自定义布局确保顺序：恢复默认 | 应用 | 取消 | 确定
+    QWidget *btnWidget = new QWidget();
+    QHBoxLayout *btnLayout = new QHBoxLayout(btnWidget);
+    btnLayout->setContentsMargins(0, 6, 0, 0);
+    btnLayout->setSpacing(8);
+
+    QPushButton *btnRestore  = new QPushButton("恢复默认");
+    QPushButton *btnApply    = new QPushButton("应用");
+    QPushButton *btnCancel   = new QPushButton("取消");
+    QPushButton *btnOk       = new QPushButton("确定");
+
+    btnRestore->setProperty("isDefaultRestore", true);
+    btnRestore->style()->unpolish(btnRestore);
+    btnRestore->style()->polish(btnRestore);
+
+    btnLayout->addWidget(btnRestore);
+    btnLayout->addStretch();
+    btnLayout->addWidget(btnApply);
+    btnLayout->addWidget(btnCancel);
+    btnLayout->addWidget(btnOk);
+
+    mainLayout->addWidget(btnWidget);
+
+    // 收集参数的 lambda，供 确定/应用 复用
+    auto collectParams = [this, radioFull, radioFast, radioMulti, radioDirect, isSaveRecon,
+                          spnPhysicalCh, spnChannelNum,
+                          stepsize, moveAline, channelAline, nx, ny, dx, dy, x0, y0,
+                          delay, sos1, sos2, isDualSoS, filterType,
+                          freqLow, freqHigh, threshold, dynRange, outputType,
+                          spnDelayTimePoint, spnS1Period, chkCutoff, spnCutoffPoint, chkCenterAlign,
+                          editCaliCardDelay, editCaliFiberDelay]()
+    {
+        GeneralParams general;
+        general.daq_hz = m_imagingGeneralParams.daq_hz;
+        int acqTimeNs = ui->edtDataTime->text().toInt();
+        general.depth  = (m_sampleIntervalNs > 0)
+            ? static_cast<int>(acqTimeNs / m_sampleIntervalNs)
+            : 50000;
+        general.isFullScan = radioFull->isChecked();
+        general.isFastScan = radioFast->isChecked();
+        general.isMultiFiber = radioMulti->isChecked();
+        general.cardNum           = m_imagingGeneralParams.cardNum;  // 内部固定
+        general.physicalChannels  = spnPhysicalCh->value();
+        general.channelNum        = spnChannelNum->value();
+        general.isSaveReconData = isSaveRecon->isChecked();
+
+        ScanParams scan;
+        scan.stepsize_um = static_cast<float>(stepsize->value());
+        scan.move_aline = moveAline->value();
+        scan.channel_aline = channelAline->value();
+        scan.nx = nx->value();
+        scan.ny = ny->value();
+        scan.dx_um = static_cast<float>(dx->value());
+        scan.dy_um = static_cast<float>(dy->value());
+        scan.x0_m = static_cast<float>(x0->value() * 1e-3);
+        scan.y0_m = static_cast<float>(y0->value() * 1e-3);
+
+        ReconParams recon;
+        recon.delay = delay->value();
+        recon.sos1_mps = static_cast<float>(sos1->value());
+        recon.sos2_mps = static_cast<float>(sos2->value());
+        recon.isDualSoS = isDualSoS->isChecked();
+        recon.filterType = filterType->currentText();
+        recon.filterFreqLow_Hz = freqLow->value() * 1e6f;
+        recon.filterFreqHigh_Hz = freqHigh->value() * 1e6f;
+        recon.threshold = static_cast<float>(threshold->value());
+        recon.dynRange_db = static_cast<float>(dynRange->value());
+        recon.outputType = outputType->currentText();
+
+        // ══ 新字段映射 ═══════════════════════════════════════════
+        recon.delayTimePoint = spnDelayTimePoint->value();
+        recon.s1Period       = spnS1Period->value();
+        recon.isCutoffLoc    = chkCutoff->isChecked();
+        recon.cutoffLoc      = spnCutoffPoint->value();
+        recon.isCenterAlign  = chkCenterAlign->isChecked();
+
+        // 采集卡/光纤标定时延（从逗号分隔文本读取）
+        recon.caliCardDelay  = strToVec(editCaliCardDelay->text());
+        recon.caliFiberDelay = strToVec(editCaliFiberDelay->text());
+
+        // ══ 声速参数保护（C 库无条件要求 lower_sos > 0）══════════
+        if (recon.sos1_mps <= 0) { recon.sos1_mps = 1500.0f; }
+        if (recon.isDualSoS && recon.sos2_mps <= 0) {
+            recon.sos2_mps = recon.sos1_mps;
+        }
+
+        // 配准数据（由加载的 peizhun 文件填充）
+        recon.xPeizhun     = m_imagingReconParams.xPeizhun;
+        recon.yPeizhun     = m_imagingReconParams.yPeizhun;
+
+        // 存储重建数据提示目录位置
+        if (general.isSaveReconData) {
+            logMessage(QString("[存储] 重建数据将保存至: %1/frame_data/")
+                       .arg(QCoreApplication::applicationDirPath()));
+        }
+
+        // 测试数据模式：自动覆盖参数为 F8 示例值，无需手动修改 UI
+        if (m_useTestImagingData) {
+            general.cardNum = kTestCardNum;           // 8
+            general.depth = kTestDepth;               // 12500
+            general.channelNum = 8;
+            general.physicalChannels = 8;
+            general.isMultiFiber = false;
+            scan.move_aline = 200;
+            scan.channel_aline = 175;
+            scan.nx = 800;
+            scan.ny = 500;
+            scan.stepsize_um = 20.0f;
+            scan.dx_um = 20.0f;
+            scan.dy_um = 20.0f;
+            scan.x0_m = -8e-3f;
+            scan.y0_m = 3e-3f;
+            recon.delay = 536;
+            recon.sos1_mps = 1500.0f;
+            recon.sos2_mps = 1500.0f;
+            recon.isDualSoS = false;
+            recon.filterType = "None";
+            recon.threshold = 2000.0f;
+            recon.dynRange_db = 50.0f;
+            recon.outputType = "RF";
+            logMessage(QString("[成像测试] 使用 F8 测试参数: depth=%1 card=%2 nx=%3 ny=%4 moveAline=%5")
+                       .arg(general.depth).arg(general.cardNum)
+                       .arg(scan.nx).arg(scan.ny).arg(scan.move_aline));
+        }
+
+        m_imagingController->configure(general, scan, recon);
+        m_btnImagingStart->setEnabled(true);
+
+        // 持久化保存
+        m_imagingGeneralParams = general;
+        m_imagingScanParams = scan;
+        m_imagingReconParams = recon;
+        saveSettings();
+
+        logMessage("成像参数已配置");
+    };
+
+    // 按钮信号连接
+    connect(btnOk, &QPushButton::clicked, this, [collectParams, this]() {
+        collectParams();
+        m_imagingConfigDialog->accept();
+    });
+    // 配准文件加载（按钮在通用参数页 -> "配准校准"行）
+    QString *lastPeizhunPath = new QString;  // 堆分配，跨 lambda 持久
+    connect(btnLoadPeizhun, &QPushButton::clicked, this, [this, lblPeizhunStatus, lastPeizhunPath,
+                                                          editCaliCardDelay, editCaliFiberDelay]() {
+        QString path = QFileDialog::getOpenFileName(m_imagingConfigDialog,
+            "选择配准文件", *lastPeizhunPath, "配准文件 (*.bin);;所有文件 (*)");
+        if (path.isEmpty()) return;
+
+        QFile f(path);
+        if (!f.open(QIODevice::ReadOnly)) {
+            logMessage(QString("无法打开配准文件: %1").arg(path));
+            return;
+        }
+        QDataStream ds(&f);
+        ds.setByteOrder(QDataStream::LittleEndian);
+
+        int32_t count = 0;
+        ds >> count;
+        if (count <= 0 || count > 1024) {
+            logMessage(QString("配准文件格式错误: count=%1").arg(count));
+            return;
+        }
+
+        QVector<int> xPeizhun(count), yPeizhun(count);
+        for (int i = 0; i < count; ++i) ds >> xPeizhun[i];
+        for (int i = 0; i < count; ++i) ds >> yPeizhun[i];
+
+        if (ds.status() != QDataStream::Ok) {
+            logMessage("配准文件读取错误");
+            return;
+        }
+
+        m_imagingReconParams.xPeizhun = xPeizhun;
+        m_imagingReconParams.yPeizhun = yPeizhun;
+        // 注意：配准文件只包含 x/y_peizhun，不包含标定时延
+        // 标定时延由 UI 中的 editCaliCardDelay/editCaliFiberDelay 提供
+        m_peizhunLoaded = true;
+        m_peizhunFilePath = path;
+        *lastPeizhunPath = path;
+        lblPeizhunStatus->setText(QString("已加载: %1").arg(QFileInfo(path).fileName()));
+        logMessage(QString("配准文件已加载: %1 (%2 通道)").arg(path).arg(count));
+    });
+
+    connect(btnCancel, &QPushButton::clicked, m_imagingConfigDialog, &QDialog::reject);
+    connect(btnApply, &QPushButton::clicked, this, [collectParams]() {
+        collectParams();
+    });
+    connect(btnRestore, &QPushButton::clicked, this, [=]() {
+        radioFull->setChecked(false); radioFast->setChecked(true);
+        radioMulti->setChecked(false); radioDirect->setChecked(true);
+        isSaveRecon->setChecked(false);
+        spnPhysicalCh->setValue(8);
+        spnChannelNum->setValue(64);
+        stepsize->setValue(10); moveAline->setValue(100);
+        channelAline->setValue(50); nx->setValue(1200); ny->setValue(800);
+        dx->setValue(10); dy->setValue(10); x0->setValue(-6); y0->setValue(4);
+        delay->setValue(141); sos1->setValue(1500); sos2->setValue(1560);
+        isDualSoS->setChecked(false);
+        filterType->setCurrentText("Bandpass");
+        freqLow->setValue(1); freqHigh->setValue(40);
+        threshold->setValue(1000); dynRange->setValue(50);
+        outputType->setCurrentText("RF");
+        spnDelayTimePoint->setValue(1601);
+        spnS1Period->setValue(2500);
+        chkCutoff->setChecked(false);
+        spnCutoffPoint->setValue(2501);
+        chkCenterAlign->setChecked(true);
+        editCaliCardDelay->setText("0,2,2,2,4,6,6,8");
+        editCaliFiberDelay->setText("534,484,428,372,322,264,282,202");
+    });
+
+    if (m_imagingConfigDialog->exec() == QDialog::Accepted) {
+        // 参数已通过 accepted/apply 信号收集，只需关闭
+        logMessage("成像参数配置完成");
+    }
+}
+
+void MainWindow::onImagingStarted()
+{
+    m_imagingPulseCount = 0;
+    m_imagingFrameCount = 0;
+    // 保存当前频率颜色图色条范围（切到像素图前）并持久化
+    if (m_colorMap) {
+        m_freqColorRange = m_colorMap->dataRange();
+        saveSettings();
+    }
+    m_lblImagingStatus->setText("正在启动…");
+    m_lblImagingStatus->setStyleSheet(
+        "color: #FFAA00; background: transparent; padding: 2px 8px;"
+        "font-size: 12px;");
+    logMessage("成像重建已启动");
+}
+
+void MainWindow::onImagingStopped()
+{
+    // 保存当前像素图色条范围（切回频率颜色图前）并持久化
+    if (m_colorMap) {
+        m_pixelColorRange = m_colorMap->dataRange();
+        saveSettings();
+    }
+
+    m_lblImagingStatus->setText("成像已停止");
+    m_lblImagingStatus->setStyleSheet(
+        "color: #888888; background: transparent; padding: 2px 8px;"
+        "font-size: 12px;");
+    logMessage("成像重建已停止");
+
+    // 恢复各通道瞬时频率热图（横轴=采样点，纵轴=通道编号）
+    if (m_colorMap) {
+        int numChannels = m_nCards * 2;
+        int numSamples  = 1024;
+        m_colorMap->data()->setSize(numSamples, numChannels);
+        m_colorMap->data()->setRange(QCPRange(0, numSamples-1), QCPRange(0, numChannels-1));
+        m_colorMapPlot->xAxis->setLabel("采样点");
+        m_colorMapPlot->yAxis->setLabel("通道编号");
+        m_colorMapPlot->xAxis->setRange(0, numSamples-1);
+        m_colorMapPlot->yAxis->setRange(-0.5, numChannels-0.5);
+        QVector<double> yTicks;
+        QVector<QString> yLabels;
+        for (int i = 0; i < numChannels; ++i) {
+            yTicks << i;
+            yLabels << QString("卡%1-%2").arg(i/2+1).arg(i%2==0?'A':'B');
+        }
+        QSharedPointer<QCPAxisTickerText> textTicker(new QCPAxisTickerText);
+        textTicker->addTicks(yTicks, yLabels);
+        m_colorMapPlot->yAxis->setTicker(textTicker);
+        m_colorScale->setLabel("频率 (kHz)");
+        m_colorScale->axis()->setLabelColor(QColor(180, 180, 180));
+        m_colorMapPlot->replot(QCustomPlot::rpQueuedReplot);
+    }
+
+    // 恢复保存的频率颜色图色条范围
+    if (m_colorMap) {
+        m_settingColorRange = true;
+        m_colorMap->setDataRange(m_freqColorRange);
+        m_colorScale->axis()->setRange(m_freqColorRange);
+        m_colorMapPlot->replot(QCustomPlot::rpQueuedReplot);
+        m_settingColorRange = false;
+    }
+
+    // 确保显示模式是扫描图像
+    if (ui->cmbDisplayType->currentIndex() != 2) {
+        ui->cmbDisplayType->setCurrentIndex(2);
+    }
+
+    // ══ 确保底部信息栏始终可见（扫描图像模式下 statsLayout 可能被挤压）══
+    for (int i = 0; i < CARDS_PER_DISPLAY_GROUP; ++i) {
+        if (m_lblStats[i]) {
+            m_lblStats[i]->setVisible(true);
+            m_lblStats[i]->setMinimumHeight(20);
+        }
+    }
+    if (ui->lblGroupInfo) {
+        ui->lblGroupInfo->setVisible(true);
+        ui->lblGroupInfo->setMinimumHeight(20);
+    }
+}
+
+void MainWindow::onImagingImageReady(const QImage &image, int seq)
+{
+    Q_UNUSED(seq);
+    if (image.isNull()) return;
+    m_imagingFrameCount++;
+
+    // 从 ImagingController 获取原始 float 帧数据
+    QVector<float> frameData = m_imagingController->getLatestFrameData();
+    int w = m_imagingController->frameWidth();
+    int h = m_imagingController->frameHeight();
+
+    if (frameData.isEmpty() || w <= 0 || h <= 0) return;
+
+    // 仅在扫描图像模式下自动切到颜色图页，不覆盖用户的显示类型选择
+    if (ui->cmbDisplayType->currentIndex() == 2) {
+        if (m_colorMapPlot && !m_colorMapPlot->isVisible()) {
+            ui->stackedMainDisplay->setCurrentIndex(1);
+        }
+    }
+
+    // 动态调整颜色图尺寸
+    // 算法输出为列主序：reshape(nx, ny) 再转置 → reshape(800, 500).T = 500×800
+    // QCPColorMap::setSize(keys, values) = setSize(宽=800, 高=500)
+    m_colorMap->data()->setSize(w, h);  // w=nx=800, h=ny=500
+    m_colorMap->data()->setRange(QCPRange(0, w - 1), QCPRange(0, h - 1));
+
+    // 列主序填充：frameData[col * ny + row]（先填满一列的所有行，再下一列）
+    for (int col = 0; col < w; ++col) {
+        for (int row = 0; row < h; ++row) {
+            float val = frameData[col * h + row];
+            m_colorMap->data()->setCell(col, row, static_cast<double>(val));
+        }
+    }
+
+    // 像素图使用灰度色图（MATLAB gray 风格）
+    {
+        QCPColorGradient grayGrad;
+        grayGrad.setColorStopAt(0.0, QColor(0, 0, 0));
+        grayGrad.setColorStopAt(1.0, QColor(255, 255, 255));
+        m_colorMap->setGradient(grayGrad);
+        m_colorMap->setInterpolate(true);
+    }
+
+    // 首帧恢复像素图色条范围（后续帧由 QCPColorMap 保持 + 用户交互更新）
+    if (m_imagingFrameCount == 1) {
+        m_settingColorRange = true;
+        m_colorMap->setDataRange(m_pixelColorRange);
+        m_colorScale->axis()->setRange(m_pixelColorRange);
+        m_settingColorRange = false;
+    }
+    m_colorScale->setLabel("重建幅值 (dB)");
+    m_colorScale->axis()->setLabelColor(QColor(180, 180, 180));
+    m_colorMapPlot->xAxis->setLabel("像素 X");
+    m_colorMapPlot->yAxis->setLabel("像素 Y");
+    // 首次有效帧时初始化坐标轴范围
+    if (m_imagingFrameCount == 1) {
+        m_colorMapPlot->xAxis->setRange(0, w - 1);
+        m_colorMapPlot->yAxis->setRange(0, h - 1);
+        m_colorMapPlot->yAxis->setRangeReversed(true); // 图像坐标系：Y=0 在顶部，向下递增
+        // 替换 Y 轴刻度为数值刻度（替换之前频率颜色图的通道名称刻度）
+        m_colorMapPlot->yAxis->setTicker(QSharedPointer<QCPAxisTicker>(new QCPAxisTicker));
+        // 强制刷新轴层，清除旧时刻度残留
+        m_colorMapPlot->xAxis->ticker()->setTickCount(5);
+        m_colorMapPlot->yAxis->ticker()->setTickCount(5);
+        m_colorMapPlot->axisRect()->setupFullAxesBox();
+    }
+    m_colorMapPlot->yAxis->setTickLabelColor(QColor(160, 160, 160));
+    m_colorMapPlot->yAxis->setBasePen(QPen(QColor(80, 80, 80)));
+
+    // 使用即时重绘而非队列重绘，避免旧时刻度残留导致重影
+    m_colorMapPlot->replot(QCustomPlot::rpImmediateRefresh);
+
+    // ══ 帧管线耗时统计 ════════════════════════════════════════
+    static uint64_t lastFrameUs = 0;
+    uint64_t nowUs = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count());
+    if (lastFrameUs != 0) {
+        uint64_t totalUs = nowUs - lastFrameUs;
+        // 每 30 帧输出一次平均耗时，避免刷屏
+        static int frameCount = 0;
+        static uint64_t accumUs = 0;
+        ++frameCount;
+        accumUs += totalUs;
+        if (frameCount >= 30) {
+            uint64_t avgUs = accumUs / frameCount;
+            logMessage(QString("[成像帧耗时] %1 帧平均 %2 ms（约 %3 FPS）")
+                       .arg(frameCount)
+                       .arg(avgUs / 1000.0, 0, 'f', 1)
+                       .arg(1000000.0 / avgUs, 0, 'f', 1));
+            frameCount = 0;
+            accumUs = 0;
+        }
+    }
+    lastFrameUs = nowUs;
+}
+
+void MainWindow::onImagingError(const QString &error)
+{
+    logMessage(QString("成像错误: %1").arg(error));
+    m_imagingTimer->stop();
+    m_imagingEnabled = false;
+    if (m_btnImagingStart) {
+        setBtnText(m_btnImagingStart, "启动成像");
+        m_btnImagingStart->setProperty("imagingRunning", false);
+        m_btnImagingStart->style()->unpolish(m_btnImagingStart);
+        m_btnImagingStart->style()->polish(m_btnImagingStart);
+    }
+    if (m_lblImagingStatus) {
+        m_lblImagingStatus->setText("成像错误");
+        m_lblImagingStatus->setStyleSheet(
+            "color: #FF4444; background: transparent; padding: 2px 8px;"
+            "font-size: 12px;");
+    }
+}
+
+// =====================================================================
+// 加载测试数据 bin 文件
+// =====================================================================
+bool MainWindow::loadTestImagingData()
+{
+    QString exeDir = QCoreApplication::applicationDirPath();
+    QString dataPath = exeDir + "/all_frames_f8_cpp_float_v2.bin";
+
+    if (!readBinaryFloats(dataPath.toUtf8().constData(), m_testImagingData)) {
+        logMessage(QString("[成像测试] 无法打开数据文件: %1").arg(dataPath));
+        return false;
+    }
+    m_testImagingPulseIndex = 0;
+
+    // 测试数据使用固定已知参数，不依赖 UI 持久化值
+    int onePulse  = kTestCardNum * kTestDepth; // 8 * 12500 = 100000
+    int totalPulses = static_cast<int>(m_testImagingData.size()) / onePulse;
+
+    if (totalPulses == 0) {
+        logMessage(QString("[成像测试] 数据文件过小: %1 floats, 每脉冲需 %2")
+                   .arg(m_testImagingData.size()).arg(onePulse));
+        return false;
+    }
+
+    logMessage(QString("[成像测试] 加载 %1: %2 floats, %3 脉冲")
+               .arg(dataPath)
+               .arg(m_testImagingData.size())
+               .arg(totalPulses));
+    return true;
+}
+
+// =====================================================================
+// 成像脉冲馈送（独立 5ms 定时器，独立于 33ms 显示刷新）
+// 每 tick 馈送一个脉冲给 ImagingSvc
+// kUseTestImagingData=true 时从 bin 文件读取，否则从 DisplayBuffer 实时读取
+// =====================================================================
+void MainWindow::feedImagingPulse()
+{
+    if (!m_imagingEnabled || !m_imagingController || !m_imagingController->isRunning())
+        return;
+
+    // ══ 馈送阶段计时 ════════════════════════════════════════════
+    uint64_t tFeedStart = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+
+    if (m_useTestImagingData) {
+        // ── 测试数据模式：从预加载的 bin 文件中逐脉冲馈送 ──
+        if (m_testImagingData.empty() && !loadTestImagingData())
+            return;
+
+        // 使用测试数据固定深度，不依赖 UI 持久化值
+        int depth     = kTestDepth;     // 12500
+        int onePulse  = kTestCardNum * depth; // 8 * 12500 = 100000
+
+        // 检查是否所有脉冲馈送完毕，循环从头开始
+        if (static_cast<size_t>(m_testImagingPulseIndex * onePulse) >= m_testImagingData.size()) {
+            m_testImagingPulseIndex = 0;
+            m_imagingPulseCount = 0;
+            logMessage("[成像测试] 数据循环，重新开始馈送");
+        }
+
+        const float *pulseBase = m_testImagingData.data() +
+                                 m_testImagingPulseIndex * onePulse;
+        static uint16_t testSeq = 0;
+        ++testSeq;
+
+        // 映射：bin卡 [0,1]→our卡0, [2,3]→卡1, [4,5]→卡2, [6,7]→卡3
+        for (int card = 0; card < 4; ++card) {
+            int testA = card * 2;
+            int testB = card * 2 + 1;
+            if (testB >= kTestCardNum) break;
+
+            const float *srcA = pulseBase + testA * depth;
+            const float *srcB = pulseBase + testB * depth;
+
+            QVector<float> freqA(depth);
+            QVector<float> freqB(depth);
+            memcpy(freqA.data(), srcA, depth * sizeof(float));
+            memcpy(freqB.data(), srcB, depth * sizeof(float));
+
+            m_imagingController->feedPulseData(card, testSeq, freqA, freqB);
+        }
+
+        m_imagingController->flushPulseData();
+
+        // ══ 馈送阶段计时 ════════════════════════════════════
+        uint64_t tFeedEnd = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        static uint64_t accumFeed = 0;
+        static int feedCount = 0;
+        accumFeed += (tFeedEnd - tFeedStart);
+        if (++feedCount >= 200) {
+            logMessage(QString("[成像馈送耗时] %1 次平均 %2 us/脉冲")
+                       .arg(feedCount).arg(accumFeed / feedCount));
+            feedCount = 0; accumFeed = 0;
+        }
+
+        m_imagingPulseCount++;
+        m_testImagingPulseIndex++;
+
+        // 存储重建数据：按帧保存（每 move_aline 个脉冲合并为一个文件）
+        if (m_imagingGeneralParams.isSaveReconData) {
+            static QByteArray frameBuf;
+            static int savedPulseCount = 0;
+            static int frameFileIndex = 0;
+            if (savedPulseCount == 0) {
+                frameBuf.clear();
+                frameBuf.reserve(onePulse * m_imagingScanParams.move_aline * 4);
+            }
+            frameBuf.append(reinterpret_cast<const char*>(pulseBase),
+                            onePulse * sizeof(float));
+            savedPulseCount++;
+            if (savedPulseCount >= m_imagingScanParams.move_aline) {
+                QString frameDir = QApplication::applicationDirPath() + "/frame_data";
+                QDir().mkpath(frameDir);
+                QString fname = QString("%1/frame_%2.bin")
+                    .arg(frameDir).arg(++frameFileIndex, 3, 10, QChar('0'));
+                QFile pf(fname);
+                if (pf.open(QIODevice::WriteOnly)) {
+                    pf.write(frameBuf);
+                    pf.close();
+                }
+                savedPulseCount = 0;
+                frameBuf.clear();
+            }
+        }
+
+        int moveAline = m_imagingScanParams.move_aline;
+        int progress = m_imagingPulseCount % moveAline;
+        if (progress == 0) progress = moveAline;
+        m_lblImagingStatus->setText(
+            QString("测试脉冲 %1/%2 · 输出 %3 帧")
+            .arg(progress).arg(moveAline).arg(m_imagingFrameCount));
+        return;
+    }
+
+    // ── 实时数据模式：从 DisplayBuffer 读取采集卡数据 ──
+    if (!m_netController) return;
+
+    static int64_t feedCounter = 0;
+    feedCounter++;
+
+    bool hasNewData = false;
+    for (int globalCard = 0; globalCard < m_nCards; ++globalCard) {
+        DisplayBuffer *db = m_netController->displayBuffer(globalCard);
+        if (!db) continue;
+        DisplayBuffer::FullResSnapshot snap;
+        if (db->peekLatestFull(snap) && snap.valid) {
+            // 跳过触发序号未变的数据（停止测量后 DisplayBuffer 保留旧快照）
+            if (snap.triggerSeq == m_lastFeedSeq[globalCard]) continue;
+            m_lastFeedSeq[globalCard] = snap.triggerSeq;
+            hasNewData = true;
+            size_t szA = snap.freqA.size();
+            size_t szB = snap.freqB.size();
+            QVector<float> freqA(static_cast<int>(szA), 0.0f);
+            QVector<float> freqB(static_cast<int>(szB), 0.0f);
+            if (szA > 0) memcpy(freqA.data(), snap.freqA.data(), szA * sizeof(float));
+            if (szB > 0) memcpy(freqB.data(), snap.freqB.data(), szB * sizeof(float));
+            m_imagingController->feedPulseData(globalCard, snap.triggerSeq, freqA, freqB);
+            if (feedCounter % 600 == 0) {
+                logMessage(QString("[成像馈送] 卡%1 seq=%2 freqA=%3 freqB=%4")
+                           .arg(globalCard).arg(snap.triggerSeq)
+                           .arg(freqA.size()).arg(freqB.size()));
+            }
+        }
+    }
+
+    // 无新数据时跳过（避免停止测量后反复馈送旧数据）
+    if (!hasNewData) return;
+
+    // 所有卡馈送完成后提交脉冲
+    m_imagingController->flushPulseData();
+
+    // ══ 馈送阶段计时（实时模式）════════════════════════════
+    uint64_t tFeedEnd = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    static uint64_t accumFeed = 0;
+    static int feedCount = 0;
+    accumFeed += (tFeedEnd - tFeedStart);
+    if (++feedCount >= 200) {
+        logMessage(QString("[成像馈送耗时] %1 次平均 %2 us/脉冲")
+                   .arg(feedCount).arg(accumFeed / feedCount));
+        feedCount = 0; accumFeed = 0;
+    }
+
+    m_imagingPulseCount++;
+
+    int moveAline = m_imagingScanParams.move_aline;
+    int progress  = m_imagingPulseCount % moveAline;
+    if (progress == 0) progress = moveAline;
+    m_lblImagingStatus->setText(QString("采集脉冲 %1/%2 · 输出 %3 帧")
+                                .arg(progress).arg(moveAline)
+                                .arg(m_imagingFrameCount));
+}
