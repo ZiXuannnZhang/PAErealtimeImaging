@@ -1,0 +1,328 @@
+﻿#include "DataProcessor.h"
+#include "FramePublisher.h"
+#define _USE_MATH_DEFINES
+#include <cmath>
+#include <chrono>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+// ─
+// 工具函数
+// 
+static uint64_t currentTimeMs() {
+    return static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+}
+
+// 
+// 构造 / 析构
+// ─
+DataProcessor::DataProcessor(
+    int cardId,
+    moodycamel::ConcurrentQueue<TriggerGroupPtr>* saveQueue,
+    DisplayBuffer* displayBuf,
+    FramePublisher* publisher,
+    const AcqConfig& config,
+    const RingFeedSink& ringFeedSink,
+    QObject* parent)
+    : QThread(parent)
+    , m_cardId(cardId)
+    , m_config(config)
+    , m_saveQueue(saveQueue)
+        , m_displayPoints(config.displayPoints)
+    , m_displayBuffer(displayBuf)
+    , m_framePublisher(publisher)
+    , m_ringFeedSink(ringFeedSink)
+    , m_expectedPackets(config.packetsPerTrig())
+{
+    m_stats.cardId = cardId;
+    setObjectName(QString("DataProcessor_%1").arg(cardId));
+}
+
+DataProcessor::~DataProcessor() {
+    if (isRunning()) {
+        requestStop();   // requestInterruption() + notify_all()
+        if (!wait(500)) terminate();
+    }
+}
+
+// 
+// 热路径：接收线程调用，无锁入队 + 条件变量通知
+// 
+void DataProcessor::enqueuePacket(const DataPacket& pkt) {
+    m_inputQueue.enqueue(pkt);
+    {
+        std::lock_guard<std::mutex> lk(m_wakeMtx);
+        m_hasData.store(true, std::memory_order_relaxed);
+    }
+    m_wakeCv.notify_one();
+}
+
+int DataProcessor::inputQueueDepth() const {
+    return static_cast<int>(m_inputQueue.size_approx());
+}
+
+// 
+// 处理线程主循环
+// 
+void DataProcessor::run() {
+#ifdef _WIN32
+    // 绑定到处理线程组（软绑定，允许 OS 在超线程核间调度）
+    // 线程亲和性由 NetworkController 在 start() 时统一设置
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+#endif
+
+    PacketAssemblyBuffer assemblyBuf(m_expectedPackets + 20);  // 动态大小，留余量
+
+    while (!isInterruptionRequested()) {
+        // 条件变量等待，最多 1ms 超时
+        {
+            std::unique_lock<std::mutex> lk(m_wakeMtx);
+            m_wakeCv.wait_for(lk, std::chrono::milliseconds(PROC_WAKE_TIMEOUT_MS),
+                [this]{ return m_hasData.load() || isInterruptionRequested(); });
+            m_hasData.store(false, std::memory_order_relaxed);
+        }
+
+        DataPacket pkt;
+        int count = 0;
+        while (m_inputQueue.try_dequeue(pkt) && count++ < PROC_BATCH_SIZE) {
+            m_stats.packetsReceived.fetch_add(1, std::memory_order_relaxed);
+
+            // ══ 步骤1：丢弃旧触发迟到包（含重复包），不重复计入丢包 ──────────────────
+            // 设计原则：迟到包在触发切换时已被精确统计（步骤2的missingInOld），
+            //           此处只丢弃，不再重复计数，避免双重统计。
+            // 首次flush前（启动阶段）用缓冲区内的triggerSeq作回退判断，
+            // 防止系统启动时网络中残留的旧触发包污染第一个触发的组装缓冲区。
+            if (m_hasFlushedOnce) {
+                // flush后：seqDiff≤0 → 属于已flush触发（或更旧），丢弃
+                if (static_cast<int16_t>(pkt.triggerSeq - m_lastFlushedTriggerSeq) <= 0) {
+                    // ── 连续丢弃恢复机制 ──────────────────────────────────────────
+                    // 场景：FPGA 重置触发序号（开始新一轮测量或断连重连）时，
+                    //       m_lastFlushedTriggerSeq 持有旧值，导致所有新包均被丢弃。
+                    //       超过 expectedPackets+1 个连续丢弃后，强制重置锚点，
+                    //       接受任意新触发序号，恢复正常处理（复位后仅丢 1 个触发）。
+                    ++m_consecutiveDiscards;
+                    if (m_consecutiveDiscards >= m_expectedPackets + 1) {
+                        m_hasFlushedOnce     = false;
+                        m_consecutiveDiscards = 0;
+                        assemblyBuf.reset();
+                        // fall through：把当前包当作第一个新包处理
+                    } else {
+                        continue;
+                    }
+                } else {
+                    m_consecutiveDiscards = 0;  // 收到有效包，重置计数
+                }
+            } else if (assemblyBuf.receivedCount() > 0) {
+                // flush前（启动期）：seqDiff<0 → 属于比当前更旧的触发，丢弃
+                if (static_cast<int16_t>(pkt.triggerSeq - assemblyBuf.triggerSeq()) < 0)
+                    continue;
+            }
+
+            // ══ 步骤2：触发切换 + 精确丢包统计 ─────────────────────────────────────
+            // 核心：用 bitmask receivedCount 计算缺失包数，对乱序到达完全不敏感
+            // 例：70包期望，收到68包（乱序 ok），切换时精确计2包丢失
+            bool didSwitch = false;
+            if (assemblyBuf.receivedCount() > 0 &&
+                pkt.triggerSeq != assemblyBuf.triggerSeq())
+            {
+                const uint16_t oldSeq = assemblyBuf.triggerSeq();
+
+                // ① 旧触发：期望包数 - 实收包数（bitmask去重，对乱序精确）
+                const int32_t missingInOld =
+                    m_expectedPackets - assemblyBuf.receivedCount();
+                if (missingInOld > 0) {
+                    m_stats.packetsDropped.fetch_add(
+                        static_cast<uint32_t>(missingInOld), std::memory_order_relaxed);
+                    emit partialTrigger(m_cardId, oldSeq, missingInOld);
+                }
+
+                // ② 旧触发与当前包触发之间跳过的完整触发（0包到达，int16差值处理回绕）
+                //    示例：oldSeq=5, pkt.triggerSeq=8 → skipGap=2 → T6+T7全部丢失
+                const int16_t skipGap =
+                    static_cast<int16_t>(pkt.triggerSeq - oldSeq) - 1;
+                if (skipGap > 0)
+                    m_stats.packetsDropped.fetch_add(
+                        static_cast<uint32_t>(skipGap) *
+                        static_cast<uint32_t>(m_expectedPackets),
+                        std::memory_order_relaxed);
+
+                m_stats.triggersPartial.fetch_add(1, std::memory_order_relaxed);
+                flushAssemblyBuf(assemblyBuf);
+                assemblyBuf.reset();
+                m_lastFlushedTriggerSeq = oldSeq;  // 锚点移到旧触发
+                m_hasFlushedOnce        = true;
+                didSwitch               = true;
+            }
+
+            // ══ 步骤3：全触发丢失检测（缓冲区原本为空时的序号断层）──────────────────
+            // 场景：T5完成→缓冲区清空→T7第一包到达（T6全部0包）
+            //       didSwitch=false（无旧触发可切换），此处通过锚点gap检测T6的丢失
+            // 注意：didSwitch=true时步骤2的skipGap已覆盖跳过的触发，此处不再执行
+            if (!didSwitch && assemblyBuf.receivedCount() == 0 && m_hasFlushedOnce) {
+                const int16_t gap =
+                    static_cast<int16_t>(pkt.triggerSeq - m_lastFlushedTriggerSeq) - 1;
+                if (gap > 0)
+                    m_stats.packetsDropped.fetch_add(
+                        static_cast<uint32_t>(gap) *
+                        static_cast<uint32_t>(m_expectedPackets),
+                        std::memory_order_relaxed);
+            }
+
+            // ══ 步骤4：插入包（bitmask去重 + 直接索引，乱序/重复均安全）───────────
+            assemblyBuf.insertPacket(pkt);
+
+            // ══ 步骤5：触发完成（所有期望包均已到达，含乱序）────────────────────────
+            if (assemblyBuf.isComplete(m_expectedPackets)) {
+                m_lastFlushedTriggerSeq = assemblyBuf.triggerSeq();
+                m_hasFlushedOnce        = true;
+                flushAssemblyBuf(assemblyBuf);
+                assemblyBuf.reset();
+            }
+        }
+
+        // 更新队列深度（供统计显示）
+        m_stats.inputQueueDepth = static_cast<int>(m_inputQueue.size_approx());
+    }
+}
+
+// 
+// computeFrequency
+// 解调（电压→声波时域信号）已在采集卡 FPGA 完成；UDP 载荷即为已解调时域信号，
+// 监听程序只做一次精度转换（int16/int32 → float32），此处保持透传，不再做
+// 差分相位→频率的二次换算（历史模拟回放路径已移除）。
+// 
+void DataProcessor::computeFrequency(TriggerGroup& group) {
+    (void)group;
+}
+
+// 
+// downsample
+// 均匀步进降采样：每 ratio 个点取一个（step-wise，非滤波）
+// 填写 *_display 字段（displayPoints 个点）
+// 
+void DataProcessor::downsample(TriggerGroup& group, int displayPoints) {
+    const int n = group.sampleCount;
+    if (n <= 0 || displayPoints <= 0) return;
+
+    displayPoints = std::min(displayPoints, n);  // 不超过实际采样点数
+
+    group.freqA_display.resize(displayPoints);
+    group.freqB_display.resize(displayPoints);
+    group.phaseA_display.resize(displayPoints);
+    group.phaseB_display.resize(displayPoints);
+
+    // 由频率积分重建显示相位（与 bitsPerChannel 无关，系数恒等）
+    constexpr float phasePerKhz = static_cast<float>(2.0 * M_PI * M_PI * 1000.0 / FPGA_ADC_FREQ_HZ);
+
+    if (displayPoints == n) {
+        // 不需要降采样，直接赋值
+        group.freqA_display = group.freqA;
+        group.freqB_display = group.freqB;
+
+        float phaseA = 0.0f;
+        float phaseB = 0.0f;
+        for (int i = 0; i < n; ++i) {
+            phaseA += group.freqA[i] * phasePerKhz;
+            phaseB += group.freqB[i] * phasePerKhz;
+            group.phaseA_display[i] = phaseA;
+            group.phaseB_display[i] = phaseB;
+        }
+        return;
+    }
+
+    double step = static_cast<double>(n) / displayPoints;
+    std::vector<int> sampleIndex(displayPoints);
+    for (int i = 0; i < displayPoints; ++i) {
+        int srcIdx = static_cast<int>(i * step);
+        if (srcIdx >= n) srcIdx = n - 1;
+        sampleIndex[i] = srcIdx;
+    }
+
+    int out = 0;
+    int nextSample = sampleIndex[0];
+    float phaseA = 0.0f;
+    float phaseB = 0.0f;
+    for (int i = 0; i < n && out < displayPoints; ++i) {
+        phaseA += group.freqA[i] * phasePerKhz;
+        phaseB += group.freqB[i] * phasePerKhz;
+
+        if (i == nextSample) {
+            group.freqA_display[out] = group.freqA[i];
+            group.freqB_display[out] = group.freqB[i];
+            group.phaseA_display[out] = phaseA;
+            group.phaseB_display[out] = phaseB;
+            ++out;
+            if (out < displayPoints) nextSample = sampleIndex[out];
+        }
+    }
+}
+
+// ─
+// flushAssemblyBuf
+// 将 assemblyBuf 当前内容 export → compute → 三路分发
+// 供正常完成（isComplete）和触发切换强制 flush 两种路径共用
+// ─
+void DataProcessor::flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf) {
+    TriggerGroupPtr group;
+    try {
+        group = std::make_shared<TriggerGroup>();
+    } catch (const std::bad_alloc&) {
+        // 内存不足时跳过本帧，避免线程崩溃；统计为丢弃
+        m_stats.triggersDiscarded.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    group->cardId = m_cardId;
+    try {
+        assemblyBuf.exportTo(*group, m_config);
+
+        if (group->isComplete)
+            m_stats.triggersComplete.fetch_add(1, std::memory_order_relaxed);
+        // triggersPartial 已在调用方统计，这里不重复计数
+
+        //  频率计算：int16 Q0.15 差分相位  float32 kHz，O(N)
+        computeFrequency(*group);
+
+        //  存储（FileSaver 负责 float32→float16 转换）
+        // 保存队列上限设计：
+        //   FileSaver 每 WRITE_BUFFER_TRIGGERS=16 个触发调用一次 QFile::write()。
+        //   在磁盘 I/O 压力高时，write() 可能阻塞长达 1000~2000ms（OS 页缓存清洗）；
+        //   阻塞期间触发以 200Hz 持续入队：2000ms × 200 = 400 个触发需要缓冲。
+        //   设 MAX_SAVE_QUEUE=400 可覆盖约 2 秒的磁盘卡顿，避免丢帧。
+        //   内存开销：400 × ~200KB/触发 × 32卡 = ~2.5GB（峰值，TriggerGroup 共享内存）。
+        static constexpr int MAX_SAVE_QUEUE = 400;
+        if (m_saveEnabled && m_saveQueue) {
+            if (m_saveQueue->size_approx() < MAX_SAVE_QUEUE) {
+                m_saveQueue->enqueue(group);
+            } else {
+                // 存储队列满：分别计入存储丢弃和总丢弃，便于 UI 区分原因
+                m_stats.saveQueueDiscards.fetch_add(1, std::memory_order_relaxed);
+                m_stats.triggersDiscarded.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+
+        //  FramePublisher（可选扩展）
+        if (m_framePublisher)
+            m_framePublisher->submit(group);
+
+        //  降采样 + DisplayBuffer 更新
+        downsample(*group, m_displayPoints.load(std::memory_order_relaxed));
+        if (m_displayBuffer) {
+            m_displayBuffer->update(group);
+            m_displayBuffer->updateFullRes(group);  // 存储全分辨率频率供成像
+        }
+        // 环形实时馈送：每触发直接入队（独立工作线程消费），
+        // 避免 DisplayBuffer latest-only + 主线程轮询在高触发率下丢触发
+        if (m_ringFeedSink)
+            m_ringFeedSink(m_cardId, group->triggerSeq, group->freqA, group->freqB);
+    } catch (const std::bad_alloc&) {
+        // 显示/存储热路径仍可能因瞬时内存压力分配失败，丢弃本帧但保持线程存活。
+        m_stats.triggersDiscarded.fetch_add(1, std::memory_order_relaxed);
+    } catch (...) {
+        // 任意单帧处理异常都不应杀死整条卡处理线程。
+        m_stats.triggersDiscarded.fetch_add(1, std::memory_order_relaxed);
+    }
+}

@@ -1,0 +1,47 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "msvc2022-release",
+      "displayName": "MSVC 2022 Release（WinSock 路线）",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/msvc2022_release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER":   "cl.exe",
+        "CMAKE_CXX_COMPILER": "cl.exe",
+        "Qt6_DIR": "D:/Qt/Qt6.8.0/6.8.0/msvc2022_64/lib/cmake/Qt6",
+        "USE_ZEROMQ": "ON"
+      }
+    },
+    {
+      "name": "mingw-debug",
+      "displayName": "MinGW Debug（UI快速调试）",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/mingw_debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER":   "D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gcc.exe",
+        "CMAKE_CXX_COMPILER": "D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe",
+        "CMAKE_MAKE_PROGRAM": "D:/Qt/Qt6.8.0/Tools/Ninja/ninja.exe",
+        "Qt6_DIR": "D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/cmake/Qt6",
+        "USE_ZEROMQ": "ON",
+        "ZMQ_INSTALL": "${sourceDir}/third_party/zeromq",
+        "IMAGING_ZMQ_DIR": "${sourceDir}/third_party/zeromq",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "msvc2022-release-build",
+      "configurePreset": "msvc2022-release",
+      "displayName": "构建 MSVC Release"
+    },
+    {
+      "name": "mingw-debug-build",
+      "configurePreset": "mingw-debug",
+      "displayName": "构建 MinGW Debug"
+    }
+  ]
+}
