@@ -74,6 +74,9 @@ private:
     struct PendingTrigger {
         std::array<std::vector<float>, 8> lines;
         uint32_t mask = 0;
+        // Monotonic order of first insertion into m_pending.  triggerSeq is
+        // a 16-bit wire value and its numeric order is not temporal order.
+        uint64_t firstSeenOrder = 0;
     };
 
     void appendCompletedTrigger(const PendingTrigger &pt);
@@ -99,6 +102,7 @@ private:
     int m_blockSeq = 0;
     std::atomic<int> m_blockTriggers{0};
     uint64_t m_globalTrigger = 0;
+    uint64_t m_nextPendingOrder = 0;
     uint32_t m_allMask = 0;
     std::map<uint16_t, PendingTrigger> m_pending;
 

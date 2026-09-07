@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 
 void RingBlockAssembler::configure(const int enabledChannels[8],
                                    int perChannelBlock, int sampDepth,
@@ -39,6 +40,7 @@ void RingBlockAssembler::reset()
     m_blockSeq = 0;
     m_blockTriggers.store(0, std::memory_order_relaxed);
     m_globalTrigger = 0;
+    m_nextPendingOrder = 0;
     if (m_configured) {
         const size_t alines = static_cast<size_t>(m_channelCount) * m_perChannelBlock;
         m_raw.assign(alines * static_cast<size_t>(m_sampDepth), 0.0f);
@@ -71,20 +73,43 @@ void RingBlockAssembler::pushChannelLine(int channelId, uint16_t triggerSeq,
     }
     m_lastTriggerUs.store(nowUs, std::memory_order_relaxed);
 
-    auto &pt = m_pending[triggerSeq];
+    auto it = m_pending.find(triggerSeq);
+    if (it == m_pending.end()) {
+        PendingTrigger pending;
+        pending.firstSeenOrder = m_nextPendingOrder++;
+        it = m_pending.emplace(triggerSeq, std::move(pending)).first;
+    }
+
+    PendingTrigger &pt = it->second;
     if ((pt.mask & (1u << channelId)) == 0) {
-        pt.lines[channelId].assign(line, line + std::min(length, m_sampDepth));
+        const int copyCount = std::min(length, m_sampDepth);
+        // Keep every completed line exactly sampDepth samples long.  This
+        // makes the later fixed-size memcpy safe for short A-lines while
+        // retaining their existing completion semantics.
+        std::vector<float> &saved = pt.lines[channelId];
+        saved.assign(static_cast<size_t>(m_sampDepth), 0.0f);
+        std::copy_n(line, copyCount, saved.begin());
         pt.mask |= (1u << channelId);
     }
 
     // 防止个别通道丢触发导致永久等待：最多缓冲 32 个未完成触发，超出丢最旧
     // （100Hz 触发率下 32 个 ≈ 320ms 容差，覆盖通道间到达抖动）
-    while (m_pending.size() > 32)
-        m_pending.erase(m_pending.begin());
+    while (m_pending.size() > 32) {
+        auto oldest = m_pending.begin();
+        for (auto candidate = std::next(m_pending.begin());
+             candidate != m_pending.end(); ++candidate) {
+            if (candidate->second.firstSeenOrder < oldest->second.firstSeenOrder)
+                oldest = candidate;
+        }
+        m_pending.erase(oldest);
+    }
 
-    if (pt.mask == m_allMask) {
-        PendingTrigger done = std::move(pt);
-        m_pending.erase(triggerSeq);
+    // Eviction may have removed the current trigger.  Re-find it instead of
+    // using a reference that could have been invalidated by erase above.
+    it = m_pending.find(triggerSeq);
+    if (it != m_pending.end() && it->second.mask == m_allMask) {
+        PendingTrigger done = std::move(it->second);
+        m_pending.erase(it);
         appendCompletedTrigger(done);
     }
 }
@@ -94,6 +119,7 @@ void RingBlockAssembler::resetRoundState()
     m_pending.clear();
     m_blockTriggers.store(0, std::memory_order_relaxed);
     m_globalTrigger = 0;
+    m_nextPendingOrder = 0;
     // 超时判定新一圈：块序号随新一圈重新计数，使“seq % 每圈块数 == 0”的
     // 圈末判定点与重建侧清零（ring_reset 后服务端从 0 计数）重新对齐
     m_blockSeq = 0;
