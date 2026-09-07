@@ -32,6 +32,39 @@ MultiPortReceiver::~MultiPortReceiver() {
     }
 }
 
+void MultiPortReceiver::updateMax(std::atomic<uint64_t>& target, uint64_t value)
+{
+    uint64_t previous = target.load(std::memory_order_relaxed);
+    while (previous < value
+           && !target.compare_exchange_weak(previous, value,
+                                            std::memory_order_relaxed,
+                                            std::memory_order_relaxed)) {
+    }
+}
+
+MultiPortReceiver::ObservabilitySnapshot MultiPortReceiver::observabilitySnapshot() const
+{
+    ObservabilitySnapshot snapshot;
+    snapshot.cardIndices = m_cardIndices;
+    snapshot.selectWakeups = m_selectWakeups.load(std::memory_order_relaxed);
+    snapshot.selectTimeouts = m_selectTimeouts.load(std::memory_order_relaxed);
+    snapshot.selectErrors = m_selectErrors.load(std::memory_order_relaxed);
+    snapshot.recvHardErrors = m_recvHardErrors.load(std::memory_order_relaxed);
+    snapshot.recvWouldBlockTerminations = m_recvWouldBlockTerminations.load(std::memory_order_relaxed);
+    snapshot.maxDrainPackets = m_maxDrainPackets.load(std::memory_order_relaxed);
+    snapshot.maxDrainDurationUs = m_maxDrainDurationUs.load(std::memory_order_relaxed);
+    snapshot.maxReceiverLoopGapUs = m_maxReceiverLoopGapUs.load(std::memory_order_relaxed);
+    snapshot.sockets.reserve(m_cardIndices.size());
+    for (size_t i = 0; i < m_cardIndices.size(); ++i) {
+        SocketObservabilitySnapshot socket;
+        socket.cardIndex = m_cardIndices[i];
+        if (i < m_socketMaxDrainPackets.size())
+            socket.maxDrainPackets = m_socketMaxDrainPackets[i].load(std::memory_order_relaxed);
+        snapshot.sockets.push_back(socket);
+    }
+    return snapshot;
+}
+
 void MultiPortReceiver::requestStop() {
     m_running.store(false, std::memory_order_release);
     requestInterruption();
@@ -141,6 +174,7 @@ void MultiPortReceiver::run() {
     }
 
 #ifdef _WIN32
+    auto previousLoopStart = std::chrono::steady_clock::now();
     // CPU 亲和性设置
     if (m_cpuCore >= 0) {
         DWORD_PTR mask = 1ULL << m_cpuCore;
@@ -156,6 +190,11 @@ void MultiPortReceiver::run() {
 
 #ifdef _WIN32
     while (m_running.load() && !isInterruptionRequested()) {
+        const auto loopStart = std::chrono::steady_clock::now();
+        updateMax(m_maxReceiverLoopGapUs,
+                  static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                      loopStart - previousLoopStart).count()));
+        previousLoopStart = loopStart;
         fd_set readfds;
         FD_ZERO(&readfds);
         int maxfd = 0;
@@ -169,7 +208,15 @@ void MultiPortReceiver::run() {
         tv.tv_usec = SELECT_TIMEOUT_US;
 
         int ret = select(maxfd + 1, &readfds, nullptr, nullptr, &tv);
-        if (ret <= 0) continue;  // timeout 或错误
+        if (ret == 0) {
+            m_selectTimeouts.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
+        if (ret < 0) {
+            m_selectErrors.fetch_add(1, std::memory_order_relaxed);
+            continue;
+        }
+        m_selectWakeups.fetch_add(1, std::memory_order_relaxed);
 
         for (int i = 0; i < static_cast<int>(m_sockets.size()); ++i) {
             SOCKET sock = static_cast<SOCKET>(m_sockets[i]);
@@ -179,11 +226,21 @@ void MultiPortReceiver::run() {
             // 避免单包/轮询节奏在高触发率下形成接收滞后窗口
             sockaddr_in srcAddr{};
             int addrLen = sizeof(srcAddr);
+            uint64_t drainPackets = 0;
+            const auto drainStart = std::chrono::steady_clock::now();
             for (;;) {
                 int recvd = recvfrom(sock, reinterpret_cast<char*>(m_recvBuf.data()),
                                      RECV_BUF_SIZE, 0,
                                      reinterpret_cast<sockaddr*>(&srcAddr), &addrLen);
-                if (recvd == SOCKET_ERROR) break;   // WSAEWOULDBLOCK：已排空
+                if (recvd == SOCKET_ERROR) {
+                    const int error = WSAGetLastError();
+                    if (error == WSAEWOULDBLOCK)
+                        m_recvWouldBlockTerminations.fetch_add(1, std::memory_order_relaxed);
+                    else
+                        m_recvHardErrors.fetch_add(1, std::memory_order_relaxed);
+                    break;
+                }
+                ++drainPackets;
                 if (recvd < UDP_HEADER_BYTES) continue;
 
                 // 解析包头：小端序（Little-Endian）
@@ -202,9 +259,17 @@ void MultiPortReceiver::run() {
                 if (i < static_cast<int>(m_processors.size()) && m_processors[i]) {
                     m_processors[i]->stats().socketPacketsReceived.fetch_add(
                         1, std::memory_order_relaxed);
+                    m_processors[i]->stats().observeRawReceive(pkt.triggerSeq, pkt.packetSeq);
                     m_processors[i]->enqueuePacket(pkt);
                 }
             }
+            const uint64_t drainDurationUs = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now() - drainStart).count());
+            updateMax(m_maxDrainPackets, drainPackets);
+            updateMax(m_maxDrainDurationUs, drainDurationUs);
+            if (i < static_cast<int>(m_socketMaxDrainPackets.size()))
+                updateMax(m_socketMaxDrainPackets[i], drainPackets);
         }
     }
 #endif

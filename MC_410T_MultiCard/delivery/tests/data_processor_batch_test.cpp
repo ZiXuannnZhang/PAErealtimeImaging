@@ -115,6 +115,92 @@ bool testMultiBatchConservation()
                  QStringLiteral("multi-batch conservation"));
 }
 
+bool testRawReceiveOrderTracker()
+{
+    CardStats sequential;
+    sequential.observeRawReceive(9, 0);
+    sequential.observeRawReceive(9, 1);
+    sequential.observeRawReceive(9, 2);
+    sequential.observeRawReceive(9, 3);
+    const auto sequentialSnapshot = sequential.snapshot();
+    bool ok = check(sequentialSnapshot.sameTriggerForwardGapEvents == 0
+                        && sequentialSnapshot.sameTriggerForwardGapPackets == 0
+                        && sequentialSnapshot.sameTriggerBackstepEvents == 0
+                        && sequentialSnapshot.sameTriggerDuplicateSeqEvents == 0,
+                    QStringLiteral("same-trigger sequential order has no anomaly"));
+
+    CardStats stats;
+    stats.observeRawReceive(10, 0);
+    stats.observeRawReceive(10, 1);
+    stats.observeRawReceive(10, 4);
+    stats.observeRawReceive(10, 4);
+    stats.observeRawReceive(10, 3);
+    stats.observeRawReceive(11, 0);
+    stats.observeRawReceive(10, 5);
+    const auto snapshot = stats.snapshot();
+    ok = check(snapshot.sameTriggerForwardGapEvents == 1
+                   && snapshot.sameTriggerForwardGapPackets == 2,
+               QStringLiteral("same-trigger forward gap classification")) && ok;
+    ok = check(snapshot.sameTriggerDuplicateSeqEvents == 1
+                   && snapshot.sameTriggerBackstepEvents == 1,
+               QStringLiteral("same-trigger duplicate/backstep classification")) && ok;
+    ok = check(snapshot.crossTriggerLateArrivalEvents == 1,
+               QStringLiteral("cross-trigger late arrival classification")) && ok;
+
+    CardStats packetWrap;
+    packetWrap.observeRawReceive(20, 65535);
+    packetWrap.observeRawReceive(20, 0);
+    const auto packetWrapSnapshot = packetWrap.snapshot();
+    ok = check(packetWrapSnapshot.sameTriggerForwardGapEvents == 0
+                   && packetWrapSnapshot.sameTriggerBackstepEvents == 0,
+               QStringLiteral("packet sequence uint16 wrap")) && ok;
+
+    CardStats triggerWrap;
+    triggerWrap.observeRawReceive(65535, 1);
+    triggerWrap.observeRawReceive(0, 0);
+    triggerWrap.observeRawReceive(65535, 2);
+    const auto triggerWrapSnapshot = triggerWrap.snapshot();
+    return check(triggerWrapSnapshot.crossTriggerLateArrivalEvents == 1,
+                 QStringLiteral("trigger sequence uint16 wrap/late arrival")) && ok;
+}
+
+bool testAssemblyRejectionClassification()
+{
+    AcqConfig config = testConfig();
+    config.acqTimeNs = 8000;
+    DataProcessor processor(0, nullptr, nullptr, nullptr, config);
+    processor.setMeasureEnabled(true);
+
+    DataPacket accepted;
+    accepted.triggerSeq = 0;
+    accepted.packetSeq = 100;
+    accepted.dataSize = 4;
+    DataPacket duplicate = accepted;
+    DataPacket outOfRange = accepted;
+    outOfRange.packetSeq = 10;
+    processor.enqueuePacket(accepted);
+    processor.enqueuePacket(duplicate);
+    processor.enqueuePacket(outOfRange);
+    processor.drainBatchForTest();
+    auto stats = processor.statsSnapshot();
+    bool ok = check(stats.assemblyDuplicatePackets == 1,
+                    QStringLiteral("assembly duplicate classification"));
+    ok = check(stats.assemblyOffsetOutOfRangePackets == 1,
+               QStringLiteral("assembly offset out-of-range classification")) && ok;
+
+    DataPacket nextTrigger = accepted;
+    nextTrigger.triggerSeq = 1;
+    nextTrigger.packetSeq = 101;
+    DataPacket stale = accepted;
+    stale.packetSeq = 102;
+    processor.enqueuePacket(nextTrigger);
+    processor.enqueuePacket(stale);
+    processor.drainBatchForTest();
+    stats = processor.statsSnapshot();
+    return check(stats.staleTriggerPacketsDiscarded == 1,
+                 QStringLiteral("stale-trigger classification")) && ok;
+}
+
 #ifdef _WIN32
 bool testSocketCounterBoundary()
 {
@@ -157,14 +243,20 @@ bool testSocketCounterBoundary()
     receiver.requestStop();
     receiver.wait(2000);
     const auto beforeDrain = processor.statsSnapshot();
+    const auto ingress = receiver.observabilitySnapshot();
     const int drained = processor.drainBatchForTest();
     const auto afterDrain = processor.statsSnapshot();
-    return check(shortSent == shortPacket.size() && validSent == validPacket.size()
+    bool ok = check(shortSent == shortPacket.size() && validSent == validPacket.size()
                      && beforeDrain.socketPacketsReceived == 1
                      && beforeDrain.processorPacketsDequeued == 0
                      && drained == 1
                      && afterDrain.processorPacketsDequeued == 1,
                  QStringLiteral("socket counter accepts only valid data packets"));
+    ok = check(ingress.selectWakeups > 0 && ingress.recvHardErrors == 0
+                   && ingress.recvWouldBlockTerminations > 0
+                   && ingress.maxDrainPackets >= 1,
+               QStringLiteral("receiver select/drain observability")) && ok;
+    return ok;
 }
 #endif
 
@@ -177,6 +269,8 @@ int main(int argc, char** argv)
     ok = testExactBatch() && ok;
     ok = testBelowBatch() && ok;
     ok = testMultiBatchConservation() && ok;
+    ok = testRawReceiveOrderTracker() && ok;
+    ok = testAssemblyRejectionClassification() && ok;
 #ifdef _WIN32
     WSADATA wsa{};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
