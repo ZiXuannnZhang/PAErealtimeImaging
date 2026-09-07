@@ -1,0 +1,42 @@
+# 构建产物（CMake/Ninja 生成目录）
+MC_410T_MultiCard/delivery/build/
+
+# 参考运行包：已编译的采集前端，仅作对照参考，不纳入版本库
+/MC410T_Receiver/
+
+# ogprog 线性实例参考源码整体不入库（含构建产物与编译版前端）
+ogprog/
+
+# 交付包与模拟发送器的可执行产物（源码与文档入库，bin 不入库）
+PALiveImaging/delivery/bin/
+PALiveImaging/delivery/build/
+PALiveImagingSimSender/bin/
+PALiveImagingSimSender/build/
+PALiveImaging/delivery/libs/imaging/*.dll
+PALiveImaging/delivery/.vscode/
+
+# MATLAB 本地偏好目录
+.matlab_prefs/
+MathWorks/
+*.asv
+
+# 本地工具（便携版 git 等，不入库）
+_tools/
+
+# 本地迁移归档与从迁移包复制的部署库
+_migration_pack/*.bundle
+MC_410T_MultiCard/delivery/third_party/ring_recon_cuda_prebuilt/
+PALiveImagingSimSender/build_oldpath_*/
+.harness_probe.txt
+
+# 下载缓存与日志
+*.7z
+*.log
+
+# 大型本地采集数据与 CUDA 运行时不纳入 GitHub 源码仓库
+testdata/
+MC_410T_MultiCard/delivery/libs/imaging/cufft64_12.dll
+
+# 临时编译产物
+*.obj
+*.o
