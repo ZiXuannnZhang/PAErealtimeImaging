@@ -192,7 +192,15 @@ LOCAL_EQ_REMOTE=True
 git status --short: empty
 ```
 
-本文件补充提交后，会再次执行 `git rev-parse HEAD`、`git ls-remote` 和 `git status --short`，并以该次结果作为本回执分支最终 SHA 证据。
+本回执文件提交后已再次执行 `git rev-parse HEAD`、`git ls-remote` 和 `git status --short`。本次回执文件提交为 `9be0ac4e1160e9439b80eebb336f01df8c286f40`，实际结果如下：
+
+```text
+HEAD=9be0ac4e1160e9439b80eebb336f01df8c286f40
+origin/codex/ring-block-assembler-safety-20260907=9be0ac4e1160e9439b80eebb336f01df8c286f40
+ls-remote=9be0ac4e1160e9439b80eebb336f01df8c286f40
+LOCAL_EQ_REMOTE=True
+git status --short: empty
+```
 
 ## 未验证项与限制
 
