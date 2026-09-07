@@ -4,6 +4,14 @@ project(diagnostic_recorder_test LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+add_executable(ring_block_assembler_test
+    ring_block_assembler_test.cpp
+    ../src/RingBlockAssembler.cpp)
+target_include_directories(ring_block_assembler_test PRIVATE ../include)
+target_compile_features(ring_block_assembler_test PRIVATE cxx_std_17)
+enable_testing()
+add_test(NAME ring_block_assembler_test COMMAND ring_block_assembler_test)
+
 find_package(Qt6 REQUIRED COMPONENTS Core Concurrent Widgets)
 
 add_executable(diagnostic_recorder_test
@@ -13,7 +21,6 @@ add_executable(diagnostic_recorder_test
 target_include_directories(diagnostic_recorder_test PRIVATE ../include)
 target_link_libraries(diagnostic_recorder_test PRIVATE Qt6::Core)
 
-enable_testing()
 add_test(NAME diagnostic_recorder_test COMMAND diagnostic_recorder_test)
 
 add_executable(ring_shm_observability_test ring_shm_observability_test.cpp)
