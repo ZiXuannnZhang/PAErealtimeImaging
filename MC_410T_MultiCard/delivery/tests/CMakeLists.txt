@@ -37,6 +37,15 @@ add_test(NAME diagnostic_dialog_test COMMAND diagnostic_dialog_test)
 set_tests_properties(diagnostic_dialog_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 if(WIN32)
+    add_executable(process_scheduling_test
+        process_scheduling_test.cpp
+        ../src/ImagingSvc/ProcessScheduling.cpp)
+    target_include_directories(process_scheduling_test PRIVATE
+        ../include ../src/ImagingSvc)
+    target_compile_definitions(process_scheduling_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(process_scheduling_test PRIVATE Qt6::Core)
+    add_test(NAME process_scheduling_test COMMAND process_scheduling_test)
+
     add_executable(network_ingress_observability_test
         network_ingress_observability_test.cpp
         ../src/NetworkDiagnostics.cpp)

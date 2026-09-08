@@ -15,6 +15,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core)
 # ============================================================
 add_executable(ImagingSvc
     main.cpp
+    ProcessScheduling.cpp
     ImagingSvc.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../RingRecon/ring_recon.cpp
 )
