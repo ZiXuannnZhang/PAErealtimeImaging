@@ -276,11 +276,13 @@ void NetworkController::recordIngressSnapshot(const QString& reason)
         group.insert(QStringLiteral("sessionAdmissionState"),
                      admission == MultiPortReceiver::AdmissionState::Running
                          ? QStringLiteral("running")
-                         : admission == MultiPortReceiver::AdmissionState::Armed
-                             ? QStringLiteral("armed")
-                             : admission == MultiPortReceiver::AdmissionState::Preparing
-                                 ? QStringLiteral("preparing")
-                                 : QStringLiteral("disarmed"));
+                         : admission == MultiPortReceiver::AdmissionState::StartFenceHold
+                             ? QStringLiteral("start_fence_hold")
+                             : admission == MultiPortReceiver::AdmissionState::Armed
+                                 ? QStringLiteral("armed")
+                                 : admission == MultiPortReceiver::AdmissionState::Preparing
+                                     ? QStringLiteral("preparing")
+                                     : QStringLiteral("disarmed"));
         QJsonArray socketStats;
         for (const auto& socket : stats.sockets) {
             QJsonObject socketObject;
@@ -1748,6 +1750,9 @@ bool NetworkController::doSendStartMeasureCard(int cardIndex,
                      cardIndex >= 0 && cardIndex < m_targetIPs.size()
                          ? m_targetIPs[cardIndex] : QString());
         fence.insert(QStringLiteral("localStartSendSucceeded"), false);
+        fence.insert(QStringLiteral("startFenceStage"), QStringLiteral("send"));
+        fence.insert(QStringLiteral("localStartSendSucceeded"), false);
+        fence.insert(QStringLiteral("startFenceCompleteSucceeded"), false);
         fence.insert(QStringLiteral("startFenceCommitted"), false);
         recordDiagnosticEvent(QStringLiteral("network.measure"),
                               QStringLiteral("measurement_start_fence"),
@@ -1903,13 +1908,48 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
     int receiverPrepareFailCount = 0;
     int receiverArmSuccessCount = 0;
     int receiverArmFailCount = 0;
-    bool receiverCommitFailed = false;
+    bool receiverStartFenceFailed = false;
+    int startFenceBeginSuccessCount = 0;
+    int startFenceBeginFailCount = 0;
+    int startFenceCompleteSuccessCount = 0;
+    int startFenceCompleteFailCount = 0;
+    int startFenceCleanupSuccessCount = 0;
     int startFenceCommittedCount = 0;
     int startFenceFailedCount = 0;
+    std::vector<bool> startFenceBeginResults(m_targetIPs.size(), false);
+    std::vector<bool> startSendResults(m_targetIPs.size(), false);
+    const auto admissionStateName = [](MultiPortReceiver::AdmissionState state) {
+        switch (state) {
+        case MultiPortReceiver::AdmissionState::Running:
+            return QStringLiteral("running");
+        case MultiPortReceiver::AdmissionState::StartFenceHold:
+            return QStringLiteral("start_fence_hold");
+        case MultiPortReceiver::AdmissionState::Armed:
+            return QStringLiteral("armed");
+        case MultiPortReceiver::AdmissionState::Preparing:
+            return QStringLiteral("preparing");
+        case MultiPortReceiver::AdmissionState::Disarmed:
+            return QStringLiteral("disarmed");
+        }
+        return QStringLiteral("unknown");
+    };
+    const auto receiverAdmissionStateForCard = [this, &admissionStateName](int cardIndex) {
+        for (const auto& receiver : m_receivers) {
+            if (!receiver) continue;
+            const auto snapshot = receiver->observabilitySnapshot();
+            if (std::find(snapshot.cardIndices.begin(), snapshot.cardIndices.end(), cardIndex)
+                != snapshot.cardIndices.end())
+                return admissionStateName(receiver->cardAdmissionState(cardIndex));
+        }
+        return QStringLiteral("disarmed");
+    };
     const auto rollback = [this, &hardwareAttempted, &startSuccessCount,
                            &startFailCount, &receiverPrepareSuccessCount,
                            &receiverPrepareFailCount, &receiverArmSuccessCount,
-                           &receiverArmFailCount, &receiverCommitFailed,
+                           &receiverArmFailCount, &receiverStartFenceFailed,
+                           &startFenceBeginSuccessCount, &startFenceBeginFailCount,
+                           &startFenceCompleteSuccessCount, &startFenceCompleteFailCount,
+                           &startFenceCleanupSuccessCount,
                            &startFenceCommittedCount, &startFenceFailedCount,
                            sessionId, common]() {
         int stopSuccess = 0;
@@ -1926,7 +1966,13 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
         fields.insert(QStringLiteral("receiverPrepareFailCount"), receiverPrepareFailCount);
         fields.insert(QStringLiteral("receiverArmSuccessCount"), receiverArmSuccessCount);
         fields.insert(QStringLiteral("receiverArmFailCount"), receiverArmFailCount);
-        fields.insert(QStringLiteral("receiverCommitFailed"), receiverCommitFailed);
+        fields.insert(QStringLiteral("receiverStartFenceFailed"), receiverStartFenceFailed);
+        fields.insert(QStringLiteral("receiverCommitFailed"), receiverStartFenceFailed);
+        fields.insert(QStringLiteral("startFenceBeginSuccessCount"), startFenceBeginSuccessCount);
+        fields.insert(QStringLiteral("startFenceBeginFailCount"), startFenceBeginFailCount);
+        fields.insert(QStringLiteral("startFenceCompleteSuccessCount"), startFenceCompleteSuccessCount);
+        fields.insert(QStringLiteral("startFenceCompleteFailCount"), startFenceCompleteFailCount);
+        fields.insert(QStringLiteral("startFenceCleanupSuccessCount"), startFenceCleanupSuccessCount);
         fields.insert(QStringLiteral("startFenceCommittedCount"), startFenceCommittedCount);
         fields.insert(QStringLiteral("startFenceFailedCount"), startFenceFailedCount);
         fields.insert(QStringLiteral("rollbackStopSuccessCount"), stopSuccess);
@@ -1996,18 +2042,23 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
                     && m_processors[index]
                     && m_processors[index]->armSession(sessionToken, 1500);
             },
-            [this, &hardwareAttempted, &startSuccessCount, &startFailCount](int cardIndex) {
+            [this, &hardwareAttempted, &startSuccessCount, &startFailCount,
+             &startSendResults](int cardIndex) {
                 hardwareAttempted = true;
                 MeasurementSessionTransaction::SendResult sent;
                 doSendStartMeasureCard(cardIndex, &sent.successCount, &sent.failCount);
                 startSuccessCount += sent.successCount;
                 startFailCount += sent.failCount;
+                startSendResults[static_cast<size_t>(cardIndex)] =
+                    sent.successCount == 1 && sent.failCount == 0;
                 return sent;
             },
             rollback,
             [this, common, &startSuccessCount, &startFailCount,
              &receiverPrepareSuccessCount, &receiverPrepareFailCount,
-             &receiverArmSuccessCount, &receiverArmFailCount](const QString &step) mutable {
+             &receiverArmSuccessCount, &receiverArmFailCount,
+             &startFenceBeginSuccessCount, &startFenceBeginFailCount,
+             &startFenceCompleteSuccessCount, &startFenceCompleteFailCount](const QString &step) mutable {
                 if (step == QStringLiteral("measurement_session_prepare") ||
                     step == QStringLiteral("measurement_start_rollback") ||
                     step == QStringLiteral("measurement_started"))
@@ -2020,6 +2071,10 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
                 fields.insert(QStringLiteral("receiverPrepareFailCount"), receiverPrepareFailCount);
                 fields.insert(QStringLiteral("receiverArmSuccessCount"), receiverArmSuccessCount);
                 fields.insert(QStringLiteral("receiverArmFailCount"), receiverArmFailCount);
+                fields.insert(QStringLiteral("startFenceBeginSuccessCount"), startFenceBeginSuccessCount);
+                fields.insert(QStringLiteral("startFenceBeginFailCount"), startFenceBeginFailCount);
+                fields.insert(QStringLiteral("startFenceCompleteSuccessCount"), startFenceCompleteSuccessCount);
+                fields.insert(QStringLiteral("startFenceCompleteFailCount"), startFenceCompleteFailCount);
                 if (step == QStringLiteral("measurement_session_armed")) {
                     m_measurementState = MeasurementState::Armed;
                     recordSessionSettingsSnapshot(step, fields);
@@ -2030,21 +2085,72 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
                                           : DiagnosticRecorder::Severity::Info,
                                       fields);
             },
-            [this, sessionId, sessionToken, &receiverCommitFailed,
-             &startFenceCommittedCount, &startFenceFailedCount](int cardIndex) {
-                bool committed = false;
+            [this, sessionId, sessionToken, &receiverStartFenceFailed,
+             &startFenceBeginSuccessCount, &startFenceBeginFailCount,
+             &startFenceCompleteSuccessCount, &startFenceCompleteFailCount,
+             &startFenceCleanupSuccessCount, &startFenceCommittedCount,
+             &startFenceFailedCount, &startFenceBeginResults,
+             &receiverAdmissionStateForCard](int cardIndex) {
+                const bool begun = [&] {
+                    for (auto& receiver : m_receivers) {
+                        if (receiver && receiver->beginCardStartFence(
+                                sessionToken, cardIndex, 1500))
+                            return true;
+                    }
+                    return false;
+                }();
+                startFenceBeginResults[static_cast<size_t>(cardIndex)] = begun;
+                if (begun) {
+                    ++startFenceBeginSuccessCount;
+                    return true;
+                }
+
+                ++startFenceBeginFailCount;
+                ++startFenceFailedCount;
+                receiverStartFenceFailed = true;
+                QJsonObject begin;
+                begin.insert(QStringLiteral("measurementSessionId"), sessionId);
+                begin.insert(QStringLiteral("configId"), m_currentConfigId);
+                begin.insert(QStringLiteral("cardIndex"), cardIndex);
+                begin.insert(QStringLiteral("targetIP"),
+                             cardIndex >= 0 && cardIndex < m_targetIPs.size()
+                                 ? m_targetIPs[cardIndex] : QString());
+                begin.insert(QStringLiteral("startFenceStage"), QStringLiteral("begin"));
+                begin.insert(QStringLiteral("startFenceBeginSucceeded"), false);
+                begin.insert(QStringLiteral("localStartSendSucceeded"), false);
+                begin.insert(QStringLiteral("startFenceCompleteSucceeded"), false);
+                begin.insert(QStringLiteral("startFenceCommitted"), false);
+                begin.insert(QStringLiteral("receiverAdmissionState"),
+                             receiverAdmissionStateForCard(cardIndex));
+                recordDiagnosticEvent(QStringLiteral("network.measure"),
+                                      QStringLiteral("measurement_start_fence_begin"),
+                                      DiagnosticRecorder::Severity::Error, begin);
+                return false;
+            },
+            [this, sessionId, sessionToken, &receiverStartFenceFailed,
+             &startFenceBeginResults, &startSendResults,
+             &startFenceCompleteSuccessCount, &startFenceCompleteFailCount,
+             &startFenceCleanupSuccessCount, &startFenceCommittedCount,
+             &startFenceFailedCount, &receiverAdmissionStateForCard]
+            (int cardIndex, bool startSucceeded) {
+                bool completed = false;
                 for (auto& receiver : m_receivers) {
-                    if (receiver && receiver->commitCardSession(
-                            sessionToken, cardIndex, 1500)) {
-                        committed = true;
+                    if (receiver && receiver->completeCardStartFence(
+                            sessionToken, cardIndex, startSucceeded, 1500)) {
+                        completed = true;
                         break;
                     }
                 }
-                if (committed)
-                    ++startFenceCommittedCount;
-                else {
+                if (completed) {
+                    ++startFenceCompleteSuccessCount;
+                    if (startSucceeded)
+                        ++startFenceCommittedCount;
+                    else
+                        ++startFenceCleanupSuccessCount;
+                } else {
+                    ++startFenceCompleteFailCount;
                     ++startFenceFailedCount;
-                    receiverCommitFailed = true;
+                    receiverStartFenceFailed = true;
                 }
                 QJsonObject fence;
                 fence.insert(QStringLiteral("measurementSessionId"), sessionId);
@@ -2053,14 +2159,25 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
                 fence.insert(QStringLiteral("targetIP"),
                              cardIndex >= 0 && cardIndex < m_targetIPs.size()
                                  ? m_targetIPs[cardIndex] : QString());
-                fence.insert(QStringLiteral("localStartSendSucceeded"), true);
-                fence.insert(QStringLiteral("startFenceCommitted"), committed);
+                fence.insert(QStringLiteral("startFenceStage"),
+                             startSucceeded ? QStringLiteral("complete_success")
+                                            : QStringLiteral("complete_failure_cleanup"));
+                fence.insert(QStringLiteral("startFenceBeginSucceeded"),
+                             static_cast<bool>(startFenceBeginResults[static_cast<size_t>(cardIndex)]));
+                fence.insert(QStringLiteral("localStartSendSucceeded"),
+                             static_cast<bool>(startSendResults[static_cast<size_t>(cardIndex)]));
+                fence.insert(QStringLiteral("startFenceCompleteSucceeded"), completed);
+                fence.insert(QStringLiteral("startFenceCommitted"),
+                             startSucceeded && completed);
+                fence.insert(QStringLiteral("receiverAdmissionState"),
+                             receiverAdmissionStateForCard(cardIndex));
                 recordDiagnosticEvent(QStringLiteral("network.measure"),
                                       QStringLiteral("measurement_start_fence"),
-                                      committed ? DiagnosticRecorder::Severity::Info
-                                                : DiagnosticRecorder::Severity::Error,
+                                      startSucceeded && completed
+                                          ? DiagnosticRecorder::Severity::Info
+                                          : DiagnosticRecorder::Severity::Error,
                                       fence);
-                return committed;
+                return completed;
             });
 
     if (!result.success) {
@@ -2077,7 +2194,13 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
     started.insert(QStringLiteral("receiverPrepareFailCount"), receiverPrepareFailCount);
     started.insert(QStringLiteral("receiverArmSuccessCount"), receiverArmSuccessCount);
     started.insert(QStringLiteral("receiverArmFailCount"), receiverArmFailCount);
-    started.insert(QStringLiteral("receiverCommitFailed"), receiverCommitFailed);
+    started.insert(QStringLiteral("receiverStartFenceFailed"), receiverStartFenceFailed);
+    started.insert(QStringLiteral("receiverCommitFailed"), receiverStartFenceFailed);
+    started.insert(QStringLiteral("startFenceBeginSuccessCount"), result.startFenceBeginSuccessCount);
+    started.insert(QStringLiteral("startFenceBeginFailCount"), result.startFenceBeginFailCount);
+    started.insert(QStringLiteral("startFenceCompleteSuccessCount"), result.startFenceCompleteSuccessCount);
+    started.insert(QStringLiteral("startFenceCompleteFailCount"), result.startFenceCompleteFailCount);
+    started.insert(QStringLiteral("startFenceCleanupSuccessCount"), startFenceCleanupSuccessCount);
     started.insert(QStringLiteral("startFenceCommittedCount"), startFenceCommittedCount);
     started.insert(QStringLiteral("startFenceFailedCount"), startFenceFailedCount);
     recordSessionSettingsSnapshot(QStringLiteral("measurement_started"), started);

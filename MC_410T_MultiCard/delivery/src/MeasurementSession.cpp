@@ -8,14 +8,16 @@ MeasurementSessionTransaction::Result MeasurementSessionTransaction::start(
     const SendStep &sendStart,
     const RollbackStep &rollback,
     const StepObserver &observe,
-    const FenceStep &commitStartFence)
+    const FenceBeginStep &beginStartFence,
+    const FenceCompleteStep &completeStartFence)
 {
     Result result;
     const auto step = [&result, &observe](const QString &name) {
         result.steps.append(name);
         if (observe) observe(name);
     };
-    if (processorCount <= 0 || targetCount <= 0 || !prepare || !arm || !sendStart) {
+    if (processorCount <= 0 || targetCount <= 0 || !prepare || !arm || !sendStart
+        || !beginStartFence || !completeStartFence) {
         result.reason = QStringLiteral("invalid_transaction_inputs");
         if (rollback) rollback();
         return result;
@@ -49,20 +51,47 @@ MeasurementSessionTransaction::Result MeasurementSessionTransaction::start(
 
     step(QStringLiteral("measurement_start_command"));
     for (int cardIndex = 0; cardIndex < targetCount; ++cardIndex) {
+        step(QStringLiteral("measurement_start_fence_begin"));
+        if (!beginStartFence(cardIndex)) {
+            ++result.startFenceBeginFailCount;
+            result.reason = QStringLiteral("start_fence_begin_failed");
+            step(QStringLiteral("measurement_start_fence_begin_failed"));
+            step(QStringLiteral("measurement_start_failed"));
+            step(QStringLiteral("measurement_start_rollback"));
+            if (rollback) rollback();
+            return result;
+        }
+        ++result.startFenceBeginSuccessCount;
+        step(QStringLiteral("measurement_start_fence_begin_succeeded"));
+
         const SendResult sent = sendStart(cardIndex);
         result.successCount += sent.successCount;
         result.failCount += sent.failCount;
         if (sent.successCount == 1 && sent.failCount == 0) {
-            if (!commitStartFence || !commitStartFence(cardIndex)) {
-                result.reason = QStringLiteral("start_fence_failed");
+            step(QStringLiteral("measurement_start_fence_send_succeeded"));
+            if (!completeStartFence(cardIndex, true)) {
+                ++result.startFenceCompleteFailCount;
+                result.reason = QStringLiteral("start_fence_complete_failed");
+                step(QStringLiteral("measurement_start_fence_complete_failed"));
                 step(QStringLiteral("measurement_start_failed"));
                 step(QStringLiteral("measurement_start_rollback"));
                 if (rollback) rollback();
                 return result;
             }
+            ++result.startFenceCompleteSuccessCount;
+            step(QStringLiteral("measurement_start_fence_complete_succeeded"));
             continue;
         }
 
+        step(QStringLiteral("measurement_start_fence_send_failed"));
+        const bool failureCleanupSucceeded = completeStartFence(cardIndex, false);
+        if (failureCleanupSucceeded) {
+            ++result.startFenceCompleteSuccessCount;
+            step(QStringLiteral("measurement_start_fence_failure_cleanup_succeeded"));
+        } else {
+            ++result.startFenceCompleteFailCount;
+            step(QStringLiteral("measurement_start_fence_failure_cleanup_failed"));
+        }
         result.reason = result.successCount > 0
             ? QStringLiteral("partial_start_send")
             : QStringLiteral("start_send_failed");

@@ -44,10 +44,13 @@ public:
     // the caller only waits for the bounded result.
     bool prepareSession(uint64_t sessionToken, int timeoutMs = 1500);
     bool armSession(uint64_t sessionToken, int timeoutMs = 1500);
-    // Publish the Start fence for one card only.  The card remains closed
-    // until its own local hardware Start send has succeeded.
-    bool commitCardSession(uint64_t sessionToken, int cardIndex,
-                           int timeoutMs = 1500);
+    // Establish and complete the receiver-owned per-card Start fence.  A
+    // card remains closed while the controller performs its local hardware
+    // Start send; only complete(..., true) publishes RUNNING.
+    bool beginCardStartFence(uint64_t sessionToken, int cardIndex,
+                             int timeoutMs = 1500);
+    bool completeCardStartFence(uint64_t sessionToken, int cardIndex,
+                                bool startSucceeded, int timeoutMs = 1500);
     bool disarmSession(int timeoutMs = 1500);
     // Legacy test compatibility only; production start/stop never calls this
     // bypass and uses the bounded prepare/arm/per-card-fence barriers above.
@@ -57,10 +60,23 @@ public:
     // run().  It injects a datagram without creating an FPGA sender.
     bool dispatchDatagramForTest(const QByteArray& datagram, int socketIndex = 0);
 
-    enum class AdmissionState { Disarmed, Preparing, Armed, Running };
+    enum class AdmissionState {
+        Disarmed,
+        Preparing,
+        Armed,
+        StartFenceHold,
+        Running
+    };
     AdmissionState admissionState() const {
         return static_cast<AdmissionState>(m_admissionState.load(std::memory_order_acquire));
     }
+    AdmissionState cardAdmissionState(int cardIndex) const;
+
+#ifdef MULTI_PORT_RECEIVER_TEST_SEAM
+    // Deterministically hold command application while a test creates a
+    // readable socket plus a pending completion command.
+    void setCommandProcessingBlockedForTest(bool blocked);
+#endif
 
     struct SocketObservabilitySnapshot {
         int cardIndex = -1;
@@ -92,7 +108,13 @@ protected:
 private:
     bool openSockets();
     void closeSockets();
-    enum class SessionCommandKind { Prepare, Arm, CommitCard, Disarm };
+    enum class SessionCommandKind {
+        Prepare,
+        Arm,
+        BeginCardStartFence,
+        CompleteCardStartFence,
+        Disarm
+    };
     struct SessionCommandWait {
         std::mutex mutex;
         std::condition_variable condition;
@@ -104,15 +126,21 @@ private:
         uint64_t sessionToken = 0;
         int cardIndex = -1;
         int timeoutMs = 1500;
+        bool startSucceeded = false;
         std::shared_ptr<SessionCommandWait> wait;
     };
     bool postSessionCommand(SessionCommandKind kind, uint64_t sessionToken,
-                            int cardIndex, int timeoutMs);
+                            int cardIndex, int timeoutMs,
+                            bool startSucceeded = false);
     void processSessionCommands();
     bool applySessionCommand(const SessionCommand& command);
     void updateAggregateAdmissionState();
+    int localCardIndex(int cardIndex) const;
+    bool quiesceCardSocket(int localIndex, int timeoutMs);
+    enum class DrainMode { Normal, StartFenceQuiescence };
     bool drainSocketBacklog(int timeoutMs);
     bool drainSocket(uintptr_t socket, int socketIndex, bool dispatch,
+                     DrainMode mode = DrainMode::Normal,
                      uint64_t* outPackets = nullptr);
     bool dispatchDatagram(const char* bytes, int length, int socketIndex);
 
@@ -126,6 +154,9 @@ private:
     std::atomic<uint64_t>        m_sessionToken{0};
     std::array<std::atomic<int>, 4> m_cardAdmissionStates{};
     std::array<std::atomic<uint64_t>, 4> m_cardSessionTokens{};
+#ifdef MULTI_PORT_RECEIVER_TEST_SEAM
+    std::atomic<bool> m_testCommandProcessingBlocked{false};
+#endif
 
     mutable std::mutex           m_commandMutex;
     std::deque<SessionCommand>   m_commands;

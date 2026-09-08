@@ -113,7 +113,8 @@ if(WIN32)
         ../src/MeasurementSession.cpp
         ../include/MeasurementSession.h)
     target_include_directories(session_boundary_receiver_test PRIVATE ../include)
-    target_compile_definitions(session_boundary_receiver_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_definitions(session_boundary_receiver_test PRIVATE
+        MULTI_PORT_RECEIVER_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(session_boundary_receiver_test PRIVATE Qt6::Core ws2_32)
     add_test(NAME session_boundary_receiver_test COMMAND session_boundary_receiver_test)
 

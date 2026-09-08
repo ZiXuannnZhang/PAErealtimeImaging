@@ -24,6 +24,10 @@ public:
         int prepareFailCount = 0;
         int armSuccessCount = 0;
         int armFailCount = 0;
+        int startFenceBeginSuccessCount = 0;
+        int startFenceBeginFailCount = 0;
+        int startFenceCompleteSuccessCount = 0;
+        int startFenceCompleteFailCount = 0;
         QString reason;
         QList<QString> steps;
     };
@@ -42,7 +46,8 @@ public:
     using SendStep = std::function<SendResult(int)>;
     using RollbackStep = std::function<void()>;
     using StepObserver = std::function<void(const QString&)>;
-    using FenceStep = std::function<bool(int)>;
+    using FenceBeginStep = std::function<bool(int)>;
+    using FenceCompleteStep = std::function<bool(int, bool)>;
 
     static Result start(int processorCount,
                         int targetCount,
@@ -51,7 +56,8 @@ public:
                         const SendStep &sendStart,
                         const RollbackStep &rollback,
                         const StepObserver &observe = {},
-                        const FenceStep &commitStartFence = {});
+                        const FenceBeginStep &beginStartFence = {},
+                        const FenceCompleteStep &completeStartFence = {});
 
     // Aggregates the bounded receiver/processor disarm barriers.  Every
     // callback is attempted so the caller receives a complete teardown

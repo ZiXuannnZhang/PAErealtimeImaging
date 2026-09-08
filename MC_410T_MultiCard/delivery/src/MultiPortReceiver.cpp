@@ -104,15 +104,43 @@ bool MultiPortReceiver::armSession(uint64_t sessionToken, int timeoutMs)
         && postSessionCommand(SessionCommandKind::Arm, sessionToken, -1, timeoutMs);
 }
 
-bool MultiPortReceiver::commitCardSession(uint64_t sessionToken,
-                                          int cardIndex,
-                                          int timeoutMs)
+int MultiPortReceiver::localCardIndex(int cardIndex) const
 {
-    const bool ownsCard = std::find(m_cardIndices.begin(), m_cardIndices.end(), cardIndex)
-                          != m_cardIndices.end();
-    return sessionToken != 0 && cardIndex >= 0 && ownsCard
-        && postSessionCommand(SessionCommandKind::CommitCard, sessionToken,
-                              cardIndex, timeoutMs);
+    const auto it = std::find(m_cardIndices.begin(), m_cardIndices.end(), cardIndex);
+    return it == m_cardIndices.end()
+        ? -1
+        : static_cast<int>(std::distance(m_cardIndices.begin(), it));
+}
+
+MultiPortReceiver::AdmissionState
+MultiPortReceiver::cardAdmissionState(int cardIndex) const
+{
+    const int localIndex = localCardIndex(cardIndex);
+    if (localIndex < 0 || localIndex >= static_cast<int>(m_cardAdmissionStates.size()))
+        return AdmissionState::Disarmed;
+    return static_cast<AdmissionState>(
+        m_cardAdmissionStates[static_cast<size_t>(localIndex)].load(std::memory_order_acquire));
+}
+
+bool MultiPortReceiver::beginCardStartFence(uint64_t sessionToken,
+                                            int cardIndex,
+                                            int timeoutMs)
+{
+    return sessionToken != 0 && cardIndex >= 0
+        && localCardIndex(cardIndex) >= 0
+        && postSessionCommand(SessionCommandKind::BeginCardStartFence,
+                              sessionToken, cardIndex, timeoutMs);
+}
+
+bool MultiPortReceiver::completeCardStartFence(uint64_t sessionToken,
+                                               int cardIndex,
+                                               bool startSucceeded,
+                                               int timeoutMs)
+{
+    return sessionToken != 0 && cardIndex >= 0
+        && localCardIndex(cardIndex) >= 0
+        && postSessionCommand(SessionCommandKind::CompleteCardStartFence,
+                              sessionToken, cardIndex, timeoutMs, startSucceeded);
 }
 
 bool MultiPortReceiver::disarmSession(int timeoutMs)
@@ -144,17 +172,26 @@ void MultiPortReceiver::setCompatibilityAdmission(bool enable,
     }
 }
 
+#ifdef MULTI_PORT_RECEIVER_TEST_SEAM
+void MultiPortReceiver::setCommandProcessingBlockedForTest(bool blocked)
+{
+    m_testCommandProcessingBlocked.store(blocked, std::memory_order_release);
+    m_commandCv.notify_all();
+}
+#endif
+
 bool MultiPortReceiver::postSessionCommand(SessionCommandKind kind,
                                            uint64_t sessionToken,
                                            int cardIndex,
-                                           int timeoutMs)
+                                           int timeoutMs,
+                                           bool startSucceeded)
 {
     if (!m_active.load(std::memory_order_acquire)) return false;
     auto wait = std::make_shared<SessionCommandWait>();
     {
         std::lock_guard<std::mutex> lock(m_commandMutex);
         m_commands.push_back(SessionCommand{kind, sessionToken, cardIndex,
-                                            timeoutMs, wait});
+                                            timeoutMs, startSucceeded, wait});
     }
     m_commandCv.notify_one();
     std::unique_lock<std::mutex> lock(wait->mutex);
@@ -222,14 +259,8 @@ bool MultiPortReceiver::applySessionCommand(const SessionCommand& command)
         m_admissionState.store(static_cast<int>(AdmissionState::Armed),
                                std::memory_order_release);
         return true;
-    case SessionCommandKind::CommitCard: {
-        int localIndex = -1;
-        for (int i = 0; i < static_cast<int>(m_cardIndices.size()); ++i) {
-            if (m_cardIndices[static_cast<size_t>(i)] == command.cardIndex) {
-                localIndex = i;
-                break;
-            }
-        }
+    case SessionCommandKind::BeginCardStartFence: {
+        const int localIndex = localCardIndex(command.cardIndex);
         if (command.sessionToken == 0 || localIndex < 0 ||
             localIndex >= static_cast<int>(m_cardAdmissionStates.size()) ||
             m_cardSessionTokens[static_cast<size_t>(localIndex)].load(std::memory_order_acquire)
@@ -237,10 +268,56 @@ bool MultiPortReceiver::applySessionCommand(const SessionCommand& command)
             m_cardAdmissionStates[static_cast<size_t>(localIndex)].load(std::memory_order_acquire)
                 != static_cast<int>(AdmissionState::Armed))
             return false;
+
+        // The receiver thread establishes HOLD before the final pre-Start
+        // quiescence.  Any packet read by this explicit quiescence therefore
+        // remains closed-admission data; packets arriving after it stay in
+        // the kernel backlog because the normal fdset path skips HOLD.
         m_cardAdmissionStates[static_cast<size_t>(localIndex)].store(
-            static_cast<int>(AdmissionState::Running), std::memory_order_release);
+            static_cast<int>(AdmissionState::StartFenceHold),
+            std::memory_order_release);
         updateAggregateAdmissionState();
+        if (!quiesceCardSocket(localIndex, command.timeoutMs)) {
+            m_cardSessionTokens[static_cast<size_t>(localIndex)].store(
+                0, std::memory_order_release);
+            m_cardAdmissionStates[static_cast<size_t>(localIndex)].store(
+                static_cast<int>(AdmissionState::Disarmed),
+                std::memory_order_release);
+            updateAggregateAdmissionState();
+            return false;
+        }
         return true;
+    }
+    case SessionCommandKind::CompleteCardStartFence: {
+        const int localIndex = localCardIndex(command.cardIndex);
+        if (command.sessionToken == 0 || localIndex < 0 ||
+            localIndex >= static_cast<int>(m_cardAdmissionStates.size()) ||
+            m_cardSessionTokens[static_cast<size_t>(localIndex)].load(std::memory_order_acquire)
+                != command.sessionToken ||
+            m_cardAdmissionStates[static_cast<size_t>(localIndex)].load(std::memory_order_acquire)
+                != static_cast<int>(AdmissionState::StartFenceHold))
+            return false;
+
+        if (command.startSucceeded) {
+            // Publish RUNNING in the receiver thread before the command can
+            // return.  The next normal loop is then allowed to drain the
+            // same datagrams that accumulated during HOLD.
+            m_cardAdmissionStates[static_cast<size_t>(localIndex)].store(
+                static_cast<int>(AdmissionState::Running),
+                std::memory_order_release);
+            updateAggregateAdmissionState();
+            return true;
+        }
+
+        // A failed local Start never opens admission.  Close the card first,
+        // then clear any HOLD backlog through the existing closed path.
+        m_cardSessionTokens[static_cast<size_t>(localIndex)].store(
+            0, std::memory_order_release);
+        m_cardAdmissionStates[static_cast<size_t>(localIndex)].store(
+            static_cast<int>(AdmissionState::Disarmed),
+            std::memory_order_release);
+        updateAggregateAdmissionState();
+        return quiesceCardSocket(localIndex, command.timeoutMs);
     }
     case SessionCommandKind::Disarm:
         m_admissionState.store(static_cast<int>(AdmissionState::Disarmed),
@@ -266,16 +343,21 @@ void MultiPortReceiver::updateAggregateAdmissionState()
     bool allRunning = true;
     bool anyPreparing = false;
     bool anyArmed = false;
+    bool anyStartFenceHold = false;
     for (size_t i = 0; i < m_cardIndices.size() && i < m_cardAdmissionStates.size(); ++i) {
         const int state = m_cardAdmissionStates[i].load(std::memory_order_acquire);
         allRunning = allRunning && state == static_cast<int>(AdmissionState::Running);
         anyPreparing = anyPreparing || state == static_cast<int>(AdmissionState::Preparing);
         anyArmed = anyArmed || state == static_cast<int>(AdmissionState::Armed);
+        anyStartFenceHold = anyStartFenceHold
+            || state == static_cast<int>(AdmissionState::StartFenceHold);
     }
     const AdmissionState aggregate = allRunning
         ? AdmissionState::Running
-        : (anyPreparing ? AdmissionState::Preparing
-                       : (anyArmed ? AdmissionState::Armed : AdmissionState::Disarmed));
+        : (anyStartFenceHold ? AdmissionState::StartFenceHold
+                             : (anyPreparing ? AdmissionState::Preparing
+                                              : (anyArmed ? AdmissionState::Armed
+                                                          : AdmissionState::Disarmed)));
     m_admissionState.store(static_cast<int>(aggregate), std::memory_order_release);
 }
 
@@ -289,7 +371,8 @@ bool MultiPortReceiver::drainSocketBacklog(int timeoutMs)
         bool anyData = false;
         for (int i = 0; i < static_cast<int>(m_sockets.size()); ++i) {
             uint64_t drained = 0;
-            const bool ok = drainSocket(m_sockets[i], i, true, &drained);
+            const bool ok = drainSocket(m_sockets[i], i, true,
+                                        DrainMode::Normal, &drained);
             if (!ok) return false;
             anyData = anyData || drained != 0;
         }
@@ -297,6 +380,29 @@ bool MultiPortReceiver::drainSocketBacklog(int timeoutMs)
         if (std::chrono::steady_clock::now() >= deadline) return false;
     }
 #else
+    Q_UNUSED(timeoutMs);
+    return false;
+#endif
+}
+
+bool MultiPortReceiver::quiesceCardSocket(int localIndex, int timeoutMs)
+{
+    if (m_testNoSockets) return true;
+#ifdef _WIN32
+    if (localIndex < 0 || localIndex >= static_cast<int>(m_sockets.size()))
+        return false;
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::milliseconds(std::max(0, timeoutMs));
+    for (;;) {
+        uint64_t drained = 0;
+        if (!drainSocket(m_sockets[static_cast<size_t>(localIndex)], localIndex,
+                         true, DrainMode::StartFenceQuiescence, &drained))
+            return false;
+        if (drained == 0 || std::chrono::steady_clock::now() >= deadline)
+            return drained == 0;
+    }
+#else
+    Q_UNUSED(localIndex);
     Q_UNUSED(timeoutMs);
     return false;
 #endif
@@ -353,9 +459,17 @@ bool MultiPortReceiver::dispatchDatagram(const char* bytes, int length, int sock
 bool MultiPortReceiver::drainSocket(uintptr_t socketValue,
                                     int socketIndex,
                                     bool dispatch,
+                                    DrainMode mode,
                                     uint64_t* outPackets)
 {
 #ifdef _WIN32
+    if (mode == DrainMode::Normal &&
+        socketIndex >= 0 && socketIndex < static_cast<int>(m_cardAdmissionStates.size()) &&
+        m_cardAdmissionStates[static_cast<size_t>(socketIndex)].load(std::memory_order_acquire)
+            == static_cast<int>(AdmissionState::StartFenceHold)) {
+        if (outPackets) *outPackets = 0;
+        return true;
+    }
     SOCKET sock = static_cast<SOCKET>(socketValue);
     sockaddr_in srcAddr{};
     uint64_t drainPackets = 0;
@@ -394,6 +508,7 @@ bool MultiPortReceiver::drainSocket(uintptr_t socketValue,
     Q_UNUSED(socketValue);
     Q_UNUSED(socketIndex);
     Q_UNUSED(dispatch);
+    Q_UNUSED(mode);
     return false;
 #endif
 }
@@ -504,6 +619,16 @@ void MultiPortReceiver::run() {
 
 
     while (m_running.load() && !isInterruptionRequested()) {
+#ifdef MULTI_PORT_RECEIVER_TEST_SEAM
+        while (m_testCommandProcessingBlocked.load(std::memory_order_acquire)
+               && m_running.load() && !isInterruptionRequested()) {
+            std::unique_lock<std::mutex> lock(m_commandMutex);
+            m_commandCv.wait_for(lock, std::chrono::milliseconds(1), [this] {
+                return !m_testCommandProcessingBlocked.load(std::memory_order_acquire)
+                    || !m_running.load() || isInterruptionRequested();
+            });
+        }
+#endif
         processSessionCommands();
         if (m_testNoSockets) {
             std::unique_lock<std::mutex> lock(m_commandMutex);
@@ -522,9 +647,25 @@ void MultiPortReceiver::run() {
         fd_set readfds;
         FD_ZERO(&readfds);
         int maxfd = 0;
-        for (auto s : m_sockets) {
+        int eligibleSockets = 0;
+        for (int i = 0; i < static_cast<int>(m_sockets.size()); ++i) {
+            const int state = i < static_cast<int>(m_cardAdmissionStates.size())
+                ? m_cardAdmissionStates[static_cast<size_t>(i)].load(std::memory_order_acquire)
+                : static_cast<int>(AdmissionState::Disarmed);
+            if (state == static_cast<int>(AdmissionState::StartFenceHold)) continue;
+            const auto s = m_sockets[static_cast<size_t>(i)];
             FD_SET(static_cast<SOCKET>(s), &readfds);
+            ++eligibleSockets;
             if (static_cast<int>(s) > maxfd) maxfd = static_cast<int>(s);
+        }
+
+        if (eligibleSockets == 0) {
+            std::unique_lock<std::mutex> lock(m_commandMutex);
+            m_commandCv.wait_for(lock, std::chrono::milliseconds(1), [this] {
+                return !m_commands.empty() || !m_running.load() ||
+                       isInterruptionRequested();
+            });
+            continue;
         }
 
         timeval tv;
@@ -545,7 +686,8 @@ void MultiPortReceiver::run() {
         for (int i = 0; i < static_cast<int>(m_sockets.size()); ++i) {
             SOCKET sock = static_cast<SOCKET>(m_sockets[i]);
             if (!FD_ISSET(sock, &readfds)) continue;
-            drainSocket(static_cast<uintptr_t>(sock), i, true);
+            drainSocket(static_cast<uintptr_t>(sock), i, true,
+                        DrainMode::Normal);
         }
 #endif
     }
