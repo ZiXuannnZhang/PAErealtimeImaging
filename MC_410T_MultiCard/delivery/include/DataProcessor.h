@@ -48,6 +48,10 @@ public:
 
     //  热路径接口（接收线程调用，无锁入队 + 唤醒）
     void enqueuePacket(const DataPacket& pkt);
+    // Receiver-owned admission path.  The receiver supplies the session
+    // epoch explicitly; DataProcessor never infers a new epoch from a late
+    // packet's enqueue time.
+    void enqueuePacketForSession(const DataPacket& pkt, uint64_t sessionToken);
 
     //  停止：发出中断请求并立即唤醒等待中的条件变量
     void requestStop() {

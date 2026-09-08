@@ -67,6 +67,51 @@ bool testPartialStartRollback()
                QStringLiteral("partial start performs one rollback")) && ok;
     return ok;
 }
+
+bool testCommitBarrierFailure()
+{
+    int startSends = 0;
+    bool rolledBack = false;
+    const auto result = MeasurementSessionTransaction::start(
+        4, 4,
+        [](int) { return true; },
+        [](int) { return true; },
+        [&startSends] {
+            ++startSends;
+            return MeasurementSessionTransaction::SendResult{4, 0};
+        },
+        [&rolledBack] { rolledBack = true; },
+        {},
+        [] { return false; });
+    bool ok = check(!result.success && startSends == 1 && rolledBack,
+                    QStringLiteral("admission commit failure rolls back after send"));
+    ok = check(result.reason == QStringLiteral("receiver_commit_failed"),
+               QStringLiteral("commit failure has explicit reason")) && ok;
+    return ok;
+}
+
+bool testTeardownAggregation()
+{
+    const auto hardwareFailure = MeasurementSessionTransaction::teardown(
+        2, 4, false,
+        [](int index) { return index == 0; },
+        [](int index) { return index != 3; });
+    bool ok = check(!hardwareFailure.success
+                        && hardwareFailure.receiverSuccessCount == 1
+                        && hardwareFailure.receiverFailCount == 1
+                        && hardwareFailure.processorSuccessCount == 3
+                        && hardwareFailure.processorFailCount == 1
+                        && hardwareFailure.reason == QStringLiteral("hardware_stop_send_failed"),
+                    QStringLiteral("teardown aggregates hardware and barrier failures"));
+    const auto processorFailure = MeasurementSessionTransaction::teardown(
+        1, 2, true,
+        [](int) { return true; },
+        [](int index) { return index == 0; });
+    ok = check(!processorFailure.success
+                   && processorFailure.reason == QStringLiteral("processor_disarm_failed"),
+               QStringLiteral("processor disarm failure is propagated")) && ok;
+    return ok;
+}
 }
 
 int main()
@@ -74,6 +119,8 @@ int main()
     bool ok = testOrdering();
     ok = testPrepareFailureBlocksHardware() && ok;
     ok = testPartialStartRollback() && ok;
+    ok = testCommitBarrierFailure() && ok;
+    ok = testTeardownAggregation() && ok;
     QTextStream(stdout) << (ok ? "PASS" : "FAIL")
                         << " measurement session transaction tests" << Qt::endl;
     return ok ? 0 : 1;

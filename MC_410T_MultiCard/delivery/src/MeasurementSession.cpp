@@ -7,7 +7,8 @@ MeasurementSessionTransaction::Result MeasurementSessionTransaction::start(
     const ProcessorStep &arm,
     const SendStep &sendStart,
     const RollbackStep &rollback,
-    const StepObserver &observe)
+    const StepObserver &observe,
+    const AdmissionStep &commitAdmission)
 {
     Result result;
     const auto step = [&result, &observe](const QString &name) {
@@ -22,7 +23,11 @@ MeasurementSessionTransaction::Result MeasurementSessionTransaction::start(
 
     step(QStringLiteral("measurement_session_prepare"));
     for (int index = 0; index < processorCount; ++index) {
-        if (prepare(index)) continue;
+        if (prepare(index)) {
+            ++result.prepareSuccessCount;
+            continue;
+        }
+        ++result.prepareFailCount;
         result.reason = QStringLiteral("processor_prepare_failed");
         step(QStringLiteral("measurement_start_failed"));
         if (rollback) rollback();
@@ -30,7 +35,11 @@ MeasurementSessionTransaction::Result MeasurementSessionTransaction::start(
     }
 
     for (int index = 0; index < processorCount; ++index) {
-        if (arm(index)) continue;
+        if (arm(index)) {
+            ++result.armSuccessCount;
+            continue;
+        }
+        ++result.armFailCount;
         result.reason = QStringLiteral("processor_arm_failed");
         step(QStringLiteral("measurement_start_failed"));
         if (rollback) rollback();
@@ -43,6 +52,13 @@ MeasurementSessionTransaction::Result MeasurementSessionTransaction::start(
     result.successCount = sent.successCount;
     result.failCount = sent.failCount;
     if (sent.successCount == targetCount && sent.failCount == 0) {
+        if (commitAdmission && !commitAdmission()) {
+            result.reason = QStringLiteral("receiver_commit_failed");
+            step(QStringLiteral("measurement_start_failed"));
+            step(QStringLiteral("measurement_start_rollback"));
+            if (rollback) rollback();
+            return result;
+        }
         result.success = true;
         step(QStringLiteral("measurement_started"));
         result.reason = QStringLiteral("all_targets_sent");
@@ -55,5 +71,40 @@ MeasurementSessionTransaction::Result MeasurementSessionTransaction::start(
     step(QStringLiteral("measurement_start_failed"));
     step(QStringLiteral("measurement_start_rollback"));
     if (rollback) rollback();
+    return result;
+}
+
+MeasurementSessionTransaction::TeardownResult
+MeasurementSessionTransaction::teardown(
+    int receiverCount,
+    int processorCount,
+    bool hardwareStopSucceeded,
+    const ProcessorStep &disarmReceiver,
+    const ProcessorStep &disarmProcessor)
+{
+    TeardownResult result;
+    result.hardwareStopSucceeded = hardwareStopSucceeded;
+    if (receiverCount < 0 || processorCount < 0 || !disarmReceiver || !disarmProcessor) {
+        result.reason = QStringLiteral("invalid_teardown_inputs");
+        return result;
+    }
+    for (int index = 0; index < receiverCount; ++index) {
+        if (disarmReceiver(index)) ++result.receiverSuccessCount;
+        else ++result.receiverFailCount;
+    }
+    for (int index = 0; index < processorCount; ++index) {
+        if (disarmProcessor(index)) ++result.processorSuccessCount;
+        else ++result.processorFailCount;
+    }
+    if (!hardwareStopSucceeded) {
+        result.reason = QStringLiteral("hardware_stop_send_failed");
+    } else if (result.receiverFailCount != 0) {
+        result.reason = QStringLiteral("receiver_disarm_failed");
+    } else if (result.processorFailCount != 0) {
+        result.reason = QStringLiteral("processor_disarm_failed");
+    } else {
+        result.success = true;
+        result.reason = QStringLiteral("teardown_complete");
+    }
     return result;
 }

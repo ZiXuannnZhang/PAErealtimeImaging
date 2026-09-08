@@ -102,6 +102,10 @@ struct CardStats {
     std::atomic<uint64_t> staleTriggerPacketsDiscarded{0};
     std::atomic<uint64_t> assemblyDuplicatePackets{0};
     std::atomic<uint64_t> assemblyOffsetOutOfRangePackets{0};
+    // Valid datagrams observed by the receiver while the session admission
+    // gate was closed.  This is cumulative observability, not a processor
+    // loss counter and is never folded into packetsDropped.
+    std::atomic<uint64_t> sessionBoundaryPacketsDiscarded{0};
     std::atomic<uint16_t> rawLastTriggerSeq{0};
     std::atomic<uint16_t> rawLastPacketSeq{0};
     std::atomic<bool> rawSequenceInitialized{false};
@@ -190,6 +194,7 @@ struct CardStats {
         uint64_t staleTriggerPacketsDiscarded = 0;
         uint64_t assemblyDuplicatePackets = 0;
         uint64_t assemblyOffsetOutOfRangePackets = 0;
+        uint64_t sessionBoundaryPacketsDiscarded = 0;
         uint16_t lastTriggerSeq = 0;
         uint16_t lastPacketSeq = 0;
         bool rawSequenceInitialized = false;
@@ -220,6 +225,7 @@ struct CardStats {
         s.staleTriggerPacketsDiscarded = staleTriggerPacketsDiscarded.load(std::memory_order_relaxed);
         s.assemblyDuplicatePackets = assemblyDuplicatePackets.load(std::memory_order_relaxed);
         s.assemblyOffsetOutOfRangePackets = assemblyOffsetOutOfRangePackets.load(std::memory_order_relaxed);
+        s.sessionBoundaryPacketsDiscarded = sessionBoundaryPacketsDiscarded.load(std::memory_order_relaxed);
         s.lastTriggerSeq = rawLastTriggerSeq.load(std::memory_order_relaxed);
         s.lastPacketSeq = rawLastPacketSeq.load(std::memory_order_relaxed);
         s.rawSequenceInitialized = rawSequenceInitialized.load(std::memory_order_relaxed);

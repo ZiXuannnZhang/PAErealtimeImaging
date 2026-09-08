@@ -141,6 +141,8 @@ QJsonObject NetworkController::runtimeStatsFields(const CardStats::Snapshot& sta
                   static_cast<double>(stats.assemblyDuplicatePackets));
     fields.insert(QStringLiteral("assemblyOffsetOutOfRangePackets"),
                   static_cast<double>(stats.assemblyOffsetOutOfRangePackets));
+    fields.insert(QStringLiteral("sessionBoundaryPacketsDiscarded"),
+                  static_cast<double>(stats.sessionBoundaryPacketsDiscarded));
     fields.insert(QStringLiteral("lastTriggerSeq"), static_cast<int>(stats.lastTriggerSeq));
     fields.insert(QStringLiteral("lastPacketSeq"), static_cast<int>(stats.lastPacketSeq));
     fields.insert(QStringLiteral("rawSequenceInitialized"), stats.rawSequenceInitialized);
@@ -270,6 +272,15 @@ void NetworkController::recordIngressSnapshot(const QString& reason)
         group.insert(QStringLiteral("maxDrainDurationUs"), static_cast<double>(stats.maxDrainDurationUs));
         group.insert(QStringLiteral("maxReceiverLoopGapUs"),
                      static_cast<double>(stats.maxReceiverLoopGapUs));
+        const auto admission = receiver->admissionState();
+        group.insert(QStringLiteral("sessionAdmissionState"),
+                     admission == MultiPortReceiver::AdmissionState::Running
+                         ? QStringLiteral("running")
+                         : admission == MultiPortReceiver::AdmissionState::Armed
+                             ? QStringLiteral("armed")
+                             : admission == MultiPortReceiver::AdmissionState::Preparing
+                                 ? QStringLiteral("preparing")
+                                 : QStringLiteral("disarmed"));
         QJsonArray socketStats;
         for (const auto& socket : stats.sockets) {
             QJsonObject socketObject;
@@ -356,6 +367,8 @@ bool NetworkController::start(const AcqConfig& config, std::function<void()> onS
     m_pendingMeasurementSessionId.clear();
     m_measurementSessionToken = 0;
     m_measurementRunning = false;
+    m_measurementState = MeasurementState::Disarmed;
+    m_measurementFaultReason.clear();
     m_feedbackSequence.store(0, std::memory_order_relaxed);
     m_feedbackTimeoutCount.store(0, std::memory_order_relaxed);
     m_ingressSampler.reset();
@@ -364,6 +377,7 @@ bool NetworkController::start(const AcqConfig& config, std::function<void()> onS
     // 初始化卡就绪状态
     m_cardsReady.assign(config.nCards, false);
     m_cmdQueue.clear();
+    clearPendingMeasurementRequests(QStringLiteral("listener_start_rollback"));
 
     // 初始化配置确认状态
     m_configPhase   = ConfigPhase::Idle;
@@ -530,6 +544,7 @@ void NetworkController::rollbackStart()
     m_displayBuffers.clear();
     m_publisher.reset();
     m_cmdQueue.clear();
+    clearPendingMeasurementRequests(QStringLiteral("listener_stop"));
     m_cardsReady.assign(m_config.nCards, false);
     m_configPhase = ConfigPhase::Idle;
     m_configAck.clear();
@@ -569,6 +584,7 @@ void NetworkController::stop() {
     if (m_configTimer) { m_configTimer->stop(); m_configTimer->deleteLater(); m_configTimer = nullptr; }
     m_probeRetryCount = 0;
     m_cmdQueue.clear();
+    clearPendingMeasurementRequests(QStringLiteral("listener_stop"));
     m_cardsReady.assign(m_config.nCards, false);
     m_configPhase = ConfigPhase::Idle;
     m_configAck.clear();
@@ -1430,6 +1446,7 @@ void NetworkController::onConfigTimerTick()
                                 QStringLiteral("failed"), m_currentConfigId);
         if (DiagnosticRecorder *recorder = diagnosticRecorder())
             recorder->requestFlush();
+        clearPendingMeasurementRequests(QStringLiteral("config_failed"));
     }
 }
 
@@ -1505,9 +1522,10 @@ void NetworkController::retryPendingCommand()
         emit errorOccurred("配置未确认（存在失败卡），无法执行测量命令，请重新下发配置");
         QJsonObject fields;
         fields.insert(QStringLiteral("command"),
-                      front.type == PendingCmdType::StartMeasure
-                          ? QStringLiteral("start") : QStringLiteral("stop"));
+                          front.type == PendingCmdType::StartMeasure
+                              ? QStringLiteral("start") : QStringLiteral("stop"));
         fields.insert(QStringLiteral("configId"), m_currentConfigId);
+        fields.insert(QStringLiteral("measurementSessionId"), front.measurementSessionId);
         fields.insert(QStringLiteral("outcome"), QStringLiteral("rejected"));
         fields.insert(QStringLiteral("reason"), QStringLiteral("config_failed"));
         recordDiagnosticEvent(QStringLiteral("network.measure"),
@@ -1515,6 +1533,7 @@ void NetworkController::retryPendingCommand()
                               DiagnosticRecorder::Severity::Error,
                               fields);
         m_cmdQueue.pop_front();
+        clearPendingMeasurementRequests(QStringLiteral("queued_config_failed"));
         return;
     }
     // Idle / WaitingAck：等待配置确认完成（configConfirmed 会再次触发本函数）
@@ -1756,12 +1775,69 @@ QString NetworkController::newMeasurementSessionId()
     return QStringLiteral("measurement-%1").arg(m_measurementSessionToken);
 }
 
-void NetworkController::resetProcessorsAfterSession()
+MeasurementSessionTransaction::TeardownResult
+NetworkController::resetProcessorsAfterSession(bool hardwareStopSucceeded)
 {
-    for (auto &processor : m_processors) {
-        if (processor) processor->disarmSession(1500);
+    return MeasurementSessionTransaction::teardown(
+        static_cast<int>(m_receivers.size()),
+        static_cast<int>(m_processors.size()),
+        hardwareStopSucceeded,
+        [this](int index) {
+            return index >= 0 && index < static_cast<int>(m_receivers.size())
+                && m_receivers[index]
+                && m_receivers[index]->disarmSession(1500);
+        },
+        [this](int index) {
+            return index >= 0 && index < static_cast<int>(m_processors.size())
+                && m_processors[index]
+                && m_processors[index]->disarmSession(1500);
+        });
+}
+
+void NetworkController::recordSessionSettingsSnapshot(const QString& phase,
+                                                       const QJsonObject& fields) const
+{
+    DiagnosticRecorder *recorder = diagnosticRecorder();
+    if (!recorder) return;
+    QJsonObject settings = fields;
+    settings.insert(QStringLiteral("phase"), phase);
+    settings.insert(QStringLiteral("bitsPerChannel"), m_config.bitsPerChannel);
+    settings.insert(QStringLiteral("sampleIntervalNs"), m_config.sampleIntervalNs);
+    settings.insert(QStringLiteral("acqTimeNs"), m_config.acqTimeNs);
+    settings.insert(QStringLiteral("targetIPs"), QJsonArray::fromStringList(m_targetIPs.toList()));
+    recorder->recordSettingsSnapshot(settings);
+}
+
+void NetworkController::clearPendingMeasurementRequests(const QString& reason)
+{
+    bool removed = false;
+    for (auto it = m_cmdQueue.begin(); it != m_cmdQueue.end();) {
+        if (it->type == PendingCmdType::StartMeasure ||
+            it->type == PendingCmdType::StopMeasure) {
+            it = m_cmdQueue.erase(it);
+            removed = true;
+        } else {
+            ++it;
+        }
     }
-    m_measurementRunning = false;
+    if (!m_measurementRunning && m_measurementState != MeasurementState::Fault)
+        m_pendingMeasurementSessionId.clear();
+    if (removed) {
+        QJsonObject fields;
+        fields.insert(QStringLiteral("configId"), m_currentConfigId);
+        fields.insert(QStringLiteral("measurementSessionId"), m_pendingMeasurementSessionId);
+        fields.insert(QStringLiteral("outcome"), QStringLiteral("cleared"));
+        fields.insert(QStringLiteral("reason"), reason);
+        recordDiagnosticEvent(QStringLiteral("network.measure"),
+                              QStringLiteral("pending_session_cleared"),
+                              DiagnosticRecorder::Severity::Warning, fields);
+    }
+}
+
+void NetworkController::setMeasurementBoundaryFault(const QString& reason)
+{
+    m_measurementState = MeasurementState::Fault;
+    m_measurementFaultReason = reason;
 }
 
 bool NetworkController::executeStartTransaction(const QString& requestedSessionId)
@@ -1773,6 +1849,8 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
     const quint64 sessionToken = m_measurementSessionToken;
     m_measurementSessionId = sessionId;
     m_pendingMeasurementSessionId.clear();
+    m_measurementFaultReason.clear();
+    m_measurementState = MeasurementState::Preparing;
 
     QJsonObject common;
     common.insert(QStringLiteral("measurementSessionId"), sessionId);
@@ -1788,14 +1866,7 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
                  diagnosticRecorder() ? diagnosticRecorder()->runId() : QString());
     common.insert(QStringLiteral("trigger"), m_currentConfigTrigger);
 
-    if (DiagnosticRecorder *recorder = diagnosticRecorder()) {
-        QJsonObject settings = common;
-        settings.insert(QStringLiteral("phase"), QStringLiteral("measurement_session_prepare"));
-        settings.insert(QStringLiteral("bitsPerChannel"), m_config.bitsPerChannel);
-        settings.insert(QStringLiteral("sampleIntervalNs"), m_config.sampleIntervalNs);
-        settings.insert(QStringLiteral("targetIPs"), QJsonArray::fromStringList(m_targetIPs.toList()));
-        recorder->recordSettingsSnapshot(settings);
-    }
+    recordSessionSettingsSnapshot(QStringLiteral("measurement_session_prepare"), common);
     recordDiagnosticEvent(QStringLiteral("measurement.session"),
                           QStringLiteral("measurement_session_prepare"),
                           DiagnosticRecorder::Severity::Info, common);
@@ -1805,21 +1876,45 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
     bool hardwareAttempted = false;
     int startSuccessCount = 0;
     int startFailCount = 0;
+    int receiverPrepareSuccessCount = 0;
+    int receiverPrepareFailCount = 0;
+    int receiverArmSuccessCount = 0;
+    int receiverArmFailCount = 0;
+    bool receiverCommitFailed = false;
     const auto rollback = [this, &hardwareAttempted, &startSuccessCount,
-                           &startFailCount, sessionId, common]() {
+                           &startFailCount, &receiverPrepareSuccessCount,
+                           &receiverPrepareFailCount, &receiverArmSuccessCount,
+                           &receiverArmFailCount, &receiverCommitFailed,
+                           sessionId, common]() {
         int stopSuccess = 0;
         int stopFail = 0;
         if (hardwareAttempted)
             doSendStopMeasure(&stopSuccess, &stopFail);
-        resetProcessorsAfterSession();
+        const bool hardwareStopSucceeded = !hardwareAttempted ||
+            (stopSuccess == m_targetIPs.size() && stopFail == 0);
+        const auto teardown = resetProcessorsAfterSession(hardwareStopSucceeded);
         QJsonObject fields = common;
         fields.insert(QStringLiteral("successCount"), startSuccessCount);
         fields.insert(QStringLiteral("failCount"), startFailCount);
+        fields.insert(QStringLiteral("receiverPrepareSuccessCount"), receiverPrepareSuccessCount);
+        fields.insert(QStringLiteral("receiverPrepareFailCount"), receiverPrepareFailCount);
+        fields.insert(QStringLiteral("receiverArmSuccessCount"), receiverArmSuccessCount);
+        fields.insert(QStringLiteral("receiverArmFailCount"), receiverArmFailCount);
+        fields.insert(QStringLiteral("receiverCommitFailed"), receiverCommitFailed);
         fields.insert(QStringLiteral("rollbackStopSuccessCount"), stopSuccess);
         fields.insert(QStringLiteral("rollbackStopFailCount"), stopFail);
+        fields.insert(QStringLiteral("receiverDisarmSuccessCount"), teardown.receiverSuccessCount);
+        fields.insert(QStringLiteral("receiverDisarmFailCount"), teardown.receiverFailCount);
+        fields.insert(QStringLiteral("processorDisarmSuccessCount"), teardown.processorSuccessCount);
+        fields.insert(QStringLiteral("processorDisarmFailCount"), teardown.processorFailCount);
+        fields.insert(QStringLiteral("teardownSuccess"), teardown.success);
+        fields.insert(QStringLiteral("teardownReason"), teardown.reason);
         fields.insert(QStringLiteral("hardwareRollbackAttempted"), hardwareAttempted);
         fields.insert(QStringLiteral("outcome"), QStringLiteral("rolled_back"));
-        fields.insert(QStringLiteral("reason"), QStringLiteral("start_transaction_failed"));
+        fields.insert(QStringLiteral("reason"), teardown.success
+                          ? QStringLiteral("start_transaction_failed")
+                          : QStringLiteral("start_rollback_teardown_failed"));
+        recordSessionSettingsSnapshot(QStringLiteral("measurement_start_rollback"), fields);
         recordDiagnosticEvent(QStringLiteral("measurement.session"),
                               QStringLiteral("measurement_start_rollback"),
                               DiagnosticRecorder::Severity::Error, fields);
@@ -1827,6 +1922,15 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
         recordCardSnapshots(QStringLiteral("rollback"));
         if (DiagnosticRecorder *recorder = diagnosticRecorder())
             recorder->requestFlush();
+        if (teardown.success) {
+            m_measurementState = MeasurementState::Disarmed;
+            m_measurementRunning = false;
+            m_measurementSessionId.clear();
+            m_measurementSessionToken = 0;
+        } else {
+            m_measurementRunning = true;
+            setMeasurementBoundaryFault(teardown.reason);
+        }
         emit measurementStartFailed(sessionId, QStringLiteral("start_transaction_failed"));
     };
 
@@ -1834,12 +1938,32 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
         MeasurementSessionTransaction::start(
             static_cast<int>(m_processors.size()),
             static_cast<int>(m_targetIPs.size()),
-            [this, sessionToken](int index) {
+            [this, sessionToken, &receiverPrepareSuccessCount,
+             &receiverPrepareFailCount](int index) {
+                if (index == 0) {
+                    for (auto& receiver : m_receivers) {
+                        if (receiver && receiver->prepareSession(sessionToken, 1500))
+                            ++receiverPrepareSuccessCount;
+                        else
+                            ++receiverPrepareFailCount;
+                    }
+                    if (receiverPrepareFailCount != 0) return false;
+                }
                 return index >= 0 && index < static_cast<int>(m_processors.size())
                     && m_processors[index]
                     && m_processors[index]->prepareSession(sessionToken, 1500);
             },
-            [this, sessionToken](int index) {
+            [this, sessionToken, &receiverArmSuccessCount,
+             &receiverArmFailCount](int index) {
+                if (index == 0) {
+                    for (auto& receiver : m_receivers) {
+                        if (receiver && receiver->armSession(sessionToken, 1500))
+                            ++receiverArmSuccessCount;
+                        else
+                            ++receiverArmFailCount;
+                    }
+                    if (receiverArmFailCount != 0) return false;
+                }
                 return index >= 0 && index < static_cast<int>(m_processors.size())
                     && m_processors[index]
                     && m_processors[index]->armSession(sessionToken, 1500);
@@ -1853,28 +1977,57 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
                 return sent;
             },
             rollback,
-            [this, common, &startSuccessCount, &startFailCount](const QString &step) mutable {
+            [this, common, &startSuccessCount, &startFailCount,
+             &receiverPrepareSuccessCount, &receiverPrepareFailCount,
+             &receiverArmSuccessCount, &receiverArmFailCount](const QString &step) mutable {
+                if (step == QStringLiteral("measurement_session_prepare") ||
+                    step == QStringLiteral("measurement_start_rollback") ||
+                    step == QStringLiteral("measurement_started"))
+                    return;
                 QJsonObject fields = common;
                 fields.insert(QStringLiteral("step"), step);
                 fields.insert(QStringLiteral("successCount"), startSuccessCount);
                 fields.insert(QStringLiteral("failCount"), startFailCount);
+                fields.insert(QStringLiteral("receiverPrepareSuccessCount"), receiverPrepareSuccessCount);
+                fields.insert(QStringLiteral("receiverPrepareFailCount"), receiverPrepareFailCount);
+                fields.insert(QStringLiteral("receiverArmSuccessCount"), receiverArmSuccessCount);
+                fields.insert(QStringLiteral("receiverArmFailCount"), receiverArmFailCount);
+                if (step == QStringLiteral("measurement_session_armed")) {
+                    m_measurementState = MeasurementState::Armed;
+                    recordSessionSettingsSnapshot(step, fields);
+                }
                 recordDiagnosticEvent(QStringLiteral("measurement.session"), step,
                                       step == QStringLiteral("measurement_start_failed")
                                           ? DiagnosticRecorder::Severity::Error
                                           : DiagnosticRecorder::Severity::Info,
                                       fields);
+            },
+            [this, sessionToken, &receiverCommitFailed]() {
+                for (auto& receiver : m_receivers) {
+                    if (!receiver || !receiver->commitSession(sessionToken, 1500)) {
+                        receiverCommitFailed = true;
+                        return false;
+                    }
+                }
+                return true;
             });
 
     if (!result.success) {
-        m_measurementSessionId.clear();
         return false;
     }
 
     m_measurementRunning = true;
+    m_measurementState = MeasurementState::Running;
     QJsonObject started = common;
     started.insert(QStringLiteral("successCount"), result.successCount);
     started.insert(QStringLiteral("failCount"), result.failCount);
     started.insert(QStringLiteral("outcome"), QStringLiteral("running"));
+    started.insert(QStringLiteral("receiverPrepareSuccessCount"), receiverPrepareSuccessCount);
+    started.insert(QStringLiteral("receiverPrepareFailCount"), receiverPrepareFailCount);
+    started.insert(QStringLiteral("receiverArmSuccessCount"), receiverArmSuccessCount);
+    started.insert(QStringLiteral("receiverArmFailCount"), receiverArmFailCount);
+    started.insert(QStringLiteral("receiverCommitFailed"), receiverCommitFailed);
+    recordSessionSettingsSnapshot(QStringLiteral("measurement_started"), started);
     recordDiagnosticEvent(QStringLiteral("measurement.session"),
                           QStringLiteral("measurement_started"),
                           DiagnosticRecorder::Severity::Info, started);
@@ -1892,6 +2045,7 @@ bool NetworkController::executeStopTransaction(const QString& requestedSessionId
 {
     const QString sessionId = requestedSessionId.isEmpty()
         ? m_measurementSessionId : requestedSessionId;
+    m_measurementState = MeasurementState::Stopping;
     QJsonObject fields;
     fields.insert(QStringLiteral("measurementSessionId"), sessionId);
     fields.insert(QStringLiteral("configId"), m_currentConfigId);
@@ -1902,6 +2056,11 @@ bool NetworkController::executeStopTransaction(const QString& requestedSessionId
                   diagnosticRecorder() ? diagnosticRecorder()->runId() : QString());
     fields.insert(QStringLiteral("runId"),
                   diagnosticRecorder() ? diagnosticRecorder()->runId() : QString());
+    fields.insert(QStringLiteral("successCount"), 0);
+    fields.insert(QStringLiteral("failCount"), 0);
+    fields.insert(QStringLiteral("outcome"), QStringLiteral("attempting"));
+    fields.insert(QStringLiteral("reason"), QStringLiteral("stop_command"));
+    recordSessionSettingsSnapshot(QStringLiteral("measurement_stop_command"), fields);
     recordDiagnosticEvent(QStringLiteral("measurement.session"),
                           QStringLiteral("measurement_stop_command"),
                           DiagnosticRecorder::Severity::Info, fields);
@@ -1909,38 +2068,55 @@ bool NetworkController::executeStopTransaction(const QString& requestedSessionId
     int successCount = 0;
     int failCount = 0;
     const bool commandSucceeded = doSendStopMeasure(&successCount, &failCount);
+    const auto teardown = resetProcessorsAfterSession(commandSucceeded);
+    const bool clean = commandSucceeded && teardown.success;
     fields.insert(QStringLiteral("successCount"), successCount);
     fields.insert(QStringLiteral("failCount"), failCount);
-    fields.insert(QStringLiteral("outcome"), commandSucceeded
-                      ? QStringLiteral("sent") : QStringLiteral("send_failed"));
+    fields.insert(QStringLiteral("receiverDisarmSuccessCount"), teardown.receiverSuccessCount);
+    fields.insert(QStringLiteral("receiverDisarmFailCount"), teardown.receiverFailCount);
+    fields.insert(QStringLiteral("processorDisarmSuccessCount"), teardown.processorSuccessCount);
+    fields.insert(QStringLiteral("processorDisarmFailCount"), teardown.processorFailCount);
+    fields.insert(QStringLiteral("teardownSuccess"), teardown.success);
+    fields.insert(QStringLiteral("teardownReason"), teardown.reason);
+    fields.insert(QStringLiteral("outcome"), clean
+                      ? QStringLiteral("stopped") : QStringLiteral("failed"));
+    fields.insert(QStringLiteral("reason"), clean
+                      ? QStringLiteral("teardown_complete") : teardown.reason);
+    recordSessionSettingsSnapshot(clean ? QStringLiteral("measurement_stopped")
+                                        : QStringLiteral("measurement_stop_failed"), fields);
     recordDiagnosticEvent(QStringLiteral("measurement.session"),
-                          commandSucceeded ? QStringLiteral("measurement_stopped")
-                                            : QStringLiteral("measurement_stop_failed"),
-                          commandSucceeded ? DiagnosticRecorder::Severity::Info
-                                            : DiagnosticRecorder::Severity::Error,
+                          clean ? QStringLiteral("measurement_stopped")
+                                : QStringLiteral("measurement_stop_failed"),
+                          clean ? DiagnosticRecorder::Severity::Info
+                                : DiagnosticRecorder::Severity::Error,
                           fields);
-    // Hardware Stop is attempted before this worker-owned disarm/reset.
-    resetProcessorsAfterSession();
-    // A failed hardware Stop leaves the physical state uncertain. Keep this
-    // session marked running so a retry uses the same session id instead of
-    // silently starting a new measurement.
-    if (!commandSucceeded)
+    // Hardware Stop is attempted before receiver/processor worker-owned
+    // disarm/reset.  A failed command or barrier leaves an explicit fault;
+    // the session id is retained so a later Stop can retry the same boundary.
+    if (!clean) {
         m_measurementRunning = true;
-    recordIngressSnapshot(commandSucceeded ? QStringLiteral("measurement_stopped")
-                                           : QStringLiteral("measurement_stop_failed"));
-    recordCardSnapshots(commandSucceeded ? QStringLiteral("stopped")
-                                         : QStringLiteral("stop_failed"));
+        setMeasurementBoundaryFault(teardown.reason);
+    } else {
+        m_measurementRunning = false;
+        m_measurementState = MeasurementState::Disarmed;
+        m_measurementFaultReason.clear();
+        m_measurementSessionId.clear();
+        m_measurementSessionToken = 0;
+        m_pendingMeasurementSessionId.clear();
+    }
+    recordIngressSnapshot(clean ? QStringLiteral("measurement_stopped")
+                                : QStringLiteral("measurement_stop_failed"));
+    recordCardSnapshots(clean ? QStringLiteral("stopped")
+                              : QStringLiteral("stop_failed"));
     if (DiagnosticRecorder *recorder = diagnosticRecorder()) {
         recorder->requestFlush();
         recorder->flush(1500);
     }
-    if (commandSucceeded)
+    if (clean)
         emit measurementStopped(sessionId, true);
     else
-        emit measurementStopFailed(sessionId, QStringLiteral("stop_send_failed"));
-    if (commandSucceeded)
-        m_measurementSessionId.clear();
-    return commandSucceeded;
+        emit measurementStopFailed(sessionId, teardown.reason);
+    return clean;
 }
 
 bool NetworkController::sendRawCommand(const QByteArray& cmd,
@@ -2106,6 +2282,16 @@ bool NetworkController::sendStartMeasure()
         emit errorOccurred("已有测量会话正在运行或等待启动");
         return false;
     }
+    if (m_measurementState == MeasurementState::Fault ||
+        m_measurementState == MeasurementState::Stopping ||
+        m_measurementState == MeasurementState::Preparing ||
+        m_measurementState == MeasurementState::Armed) {
+        emit errorOccurred(QString("测量边界处于故障/过渡状态：%1")
+                           .arg(m_measurementFaultReason.isEmpty()
+                                    ? QStringLiteral("session_boundary_not_clean")
+                                    : m_measurementFaultReason));
+        return false;
+    }
     const QString measurementSessionId = newMeasurementSessionId();
     m_pendingMeasurementSessionId = measurementSessionId;
 
@@ -2135,12 +2321,14 @@ bool NetworkController::sendStartMeasure()
             QJsonObject fields;
             fields.insert(QStringLiteral("command"), QStringLiteral("start"));
             fields.insert(QStringLiteral("configId"), m_currentConfigId);
+            fields.insert(QStringLiteral("measurementSessionId"), measurementSessionId);
             fields.insert(QStringLiteral("outcome"), QStringLiteral("rejected"));
             fields.insert(QStringLiteral("reason"), QStringLiteral("config_failed"));
             recordDiagnosticEvent(QStringLiteral("network.measure"),
                                   QStringLiteral("command_rejected"),
                                   DiagnosticRecorder::Severity::Error,
                                   fields);
+            m_pendingMeasurementSessionId.clear();
             return false;
         }
         // 等待配置确认完成后自动发送（configConfirmed 会触发 retryPendingCommand）
@@ -2281,6 +2469,9 @@ bool NetworkController::sendStopMeasure()
 
 void NetworkController::setMeasureEnabled(bool enable)
 {
+    for (auto& receiver : m_receivers) {
+        if (receiver) receiver->setCompatibilityAdmission(enable, 1);
+    }
     for (auto &p : m_processors) {
         if (p) p->setMeasureEnabled(enable);
     }

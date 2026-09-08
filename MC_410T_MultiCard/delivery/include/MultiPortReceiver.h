@@ -1,9 +1,13 @@
 ﻿#pragma once
 #include <QThread>
+#include <QByteArray>
 #include <vector>
 #include <array>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
+#include <deque>
+#include <memory>
 #include "DataTypes.h"
 #include "DataProcessor.h"
 
@@ -22,7 +26,8 @@ public:
         const std::vector<int>& cardIndices,    // 负责的卡号列表（0-based，最多4张）
         const std::vector<DataProcessor*>& processors,
         int cpuCore = -1,                       // 绑定的 CPU 核心号（-1 = 不绑定）
-        QObject* parent = nullptr);
+        QObject* parent = nullptr,
+        bool testNoSockets = false);
 
     ~MultiPortReceiver() override;
 
@@ -33,6 +38,26 @@ public:
     bool waitUntilStarted(int timeoutMs) const;
     // 紧急停止时关闭所有 socket（与 requestStop 配合，避免 terminate 泄漏 UDP 端口）
     void forceCloseSockets();
+
+    // Receiver-owned measurement admission barriers.  The command is
+    // executed by the receiver thread, including socket backlog quiescence;
+    // the caller only waits for the bounded result.
+    bool prepareSession(uint64_t sessionToken, int timeoutMs = 1500);
+    bool armSession(uint64_t sessionToken, int timeoutMs = 1500);
+    bool commitSession(uint64_t sessionToken, int timeoutMs = 1500);
+    bool disarmSession(int timeoutMs = 1500);
+    // Legacy test compatibility only; production start/stop never calls this
+    // bypass and uses the bounded prepare/arm/commit barriers above.
+    void setCompatibilityAdmission(bool enable, uint64_t sessionToken = 1);
+
+    // Deterministic test hook for the same parser/admission dispatch used by
+    // run().  It injects a datagram without creating an FPGA sender.
+    bool dispatchDatagramForTest(const QByteArray& datagram, int socketIndex = 0);
+
+    enum class AdmissionState { Disarmed, Preparing, Armed, Running };
+    AdmissionState admissionState() const {
+        return static_cast<AdmissionState>(m_admissionState.load(std::memory_order_acquire));
+    }
 
     struct SocketObservabilitySnapshot {
         int cardIndex = -1;
@@ -64,12 +89,40 @@ protected:
 private:
     bool openSockets();
     void closeSockets();
+    enum class SessionCommandKind { Prepare, Arm, Commit, Disarm };
+    struct SessionCommandWait {
+        std::mutex mutex;
+        std::condition_variable condition;
+        bool done = false;
+        bool success = false;
+    };
+    struct SessionCommand {
+        SessionCommandKind kind = SessionCommandKind::Prepare;
+        uint64_t sessionToken = 0;
+        int timeoutMs = 1500;
+        std::shared_ptr<SessionCommandWait> wait;
+    };
+    bool postSessionCommand(SessionCommandKind kind, uint64_t sessionToken,
+                            int timeoutMs);
+    void processSessionCommands();
+    bool applySessionCommand(const SessionCommand& command);
+    bool drainSocketBacklog(int timeoutMs);
+    bool drainSocket(uintptr_t socket, int socketIndex, bool dispatch,
+                     uint64_t* outPackets = nullptr);
+    bool dispatchDatagram(const char* bytes, int length, int socketIndex);
 
     std::vector<int>             m_cardIndices;
     std::vector<DataProcessor*>  m_processors;
     int                          m_cpuCore;
     std::atomic<bool>            m_running{false};
     std::atomic<bool>            m_active{false};
+    const bool                   m_testNoSockets = false;
+    std::atomic<int>             m_admissionState{static_cast<int>(AdmissionState::Disarmed)};
+    std::atomic<uint64_t>        m_sessionToken{0};
+
+    mutable std::mutex           m_commandMutex;
+    std::deque<SessionCommand>   m_commands;
+    std::condition_variable      m_commandCv;
 
     // WinSock 原生句柄（避免 Qt 对象跨线程问题）
     mutable std::mutex           m_socketMutex;  // 保护 m_sockets（forceCloseSockets 可能跨线程调用）

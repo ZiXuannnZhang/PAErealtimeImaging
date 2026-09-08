@@ -8,6 +8,9 @@
 #include <QTextStream>
 #include <QDir>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QHash>
 #include <ws2tcpip.h>
 
 namespace {
@@ -80,6 +83,7 @@ bool runtimeStatsFieldMapping()
     stats.staleTriggerPacketsDiscarded = 6;
     stats.assemblyDuplicatePackets = 7;
     stats.assemblyOffsetOutOfRangePackets = 8;
+    stats.sessionBoundaryPacketsDiscarded = 9;
     stats.lastTriggerSeq = 12;
     stats.lastPacketSeq = 34;
     stats.rawSequenceInitialized = true;
@@ -93,7 +97,8 @@ bool runtimeStatsFieldMapping()
     ok = require(fields.value("sameTriggerForwardGapEvents").toDouble() == 2
                      && fields.value("sameTriggerForwardGapPackets").toDouble() == 5
                      && fields.value("staleTriggerPacketsDiscarded").toDouble() == 6
-                     && fields.value("assemblyOffsetOutOfRangePackets").toDouble() == 8,
+                     && fields.value("assemblyOffsetOutOfRangePackets").toDouble() == 8
+                     && fields.value("sessionBoundaryPacketsDiscarded").toDouble() == 9,
                  "runtime ingress/rejection field mapping") && ok;
     ok = require(fields.value("packetsDropped").toDouble() == 7
                      && fields.value("triggersPartial").toDouble() == 3
@@ -219,6 +224,94 @@ public:
         QTextStream(stdout) << "PASS " << n << " targets: " << (n==5?"fifth timeout; first four confirmed":"all confirmed") << Qt::endl;
         return true;
     }
+
+    static bool pendingSessionCleanup()
+    {
+        NetworkController c;
+        c.m_targetIPs = {QStringLiteral("127.0.0.1")};
+        c.m_cardsReady = {true};
+        c.m_configPhase = NetworkController::ConfigPhase::Failed;
+        c.m_pendingMeasurementSessionId = QStringLiteral("pending-direct");
+        c.m_cmdQueue.push_back({NetworkController::PendingCmdType::StartMeasure,
+                                0, 0, 0, QString(), QStringLiteral("api"),
+                                QStringLiteral("pending-queued")});
+        c.retryPendingCommand();
+        bool ok = require(c.m_cmdQueue.empty() && c.m_pendingMeasurementSessionId.isEmpty(),
+                          "queued config failure clears pending measurement session");
+
+        c.m_targetIPs = {QStringLiteral("127.0.0.1")};
+        c.m_cardsReady = {true};
+        c.m_configPhase = NetworkController::ConfigPhase::Failed;
+        if (!require(c.initControlSocket(), "pending cleanup control socket")) return false;
+        const bool accepted = c.sendStartMeasure();
+        ok = require(!accepted && c.m_pendingMeasurementSessionId.isEmpty(),
+                      "direct config failure clears pending measurement session") && ok;
+        c.cleanupControlSocket();
+        return ok;
+    }
+
+    static bool measurementBoundaryEvidence()
+    {
+        NetworkController controller;
+        AcqConfig config;
+        config.nCards = 1;
+        config.acqTimeNs = 16000;
+        config.localBindIP = "127.0.0.1";
+        config.targetIPs = {"127.0.0.1"};
+        controller.setDiagnosticContext(QStringLiteral("session-boundary"),
+                                        QStringLiteral("test_loopback"));
+        if (!require(controller.start(config), "session boundary controller start")) return false;
+        controller.m_cardsReady = {true};
+        controller.m_configAck = {true};
+        controller.m_configPhase = NetworkController::ConfigPhase::Confirmed;
+        controller.m_currentConfigId = QStringLiteral("boundary-config");
+        if (!require(controller.sendStartMeasure(), "session boundary start transaction")) {
+            controller.stop();
+            return false;
+        }
+        const QString sessionId = controller.m_measurementSessionId;
+        const bool stopped = controller.sendStopMeasure();
+        controller.stop();
+        if (!require(stopped, "session boundary stop transaction")) return false;
+
+        DiagnosticRecorder *recorder = DiagnosticRecorder::instance();
+        if (!require(recorder && recorder->flush(2000), "session boundary recorder flush")) return false;
+        QFile events(QDir(recorder->runDirectory()).filePath(QStringLiteral("events.jsonl")));
+        QFile settings(QDir(recorder->runDirectory()).filePath(QStringLiteral("settings_history.jsonl")));
+        QFile network(QDir(recorder->runDirectory()).filePath(QStringLiteral("network_history.jsonl")));
+        QFile cards(QDir(recorder->runDirectory()).filePath(QStringLiteral("card_history.jsonl")));
+        if (!require(events.open(QIODevice::ReadOnly) && settings.open(QIODevice::ReadOnly)
+                         && network.open(QIODevice::ReadOnly) && cards.open(QIODevice::ReadOnly),
+                     "session boundary evidence files")) return false;
+
+        QHash<QString, int> eventCounts;
+        while (!events.atEnd()) {
+            const QJsonObject object = QJsonDocument::fromJson(events.readLine()).object();
+            const QJsonObject fields = object.value(QStringLiteral("fields")).toObject();
+            if (fields.value(QStringLiteral("measurementSessionId")).toString() != sessionId)
+                continue;
+            ++eventCounts[object.value(QStringLiteral("message")).toString()];
+        }
+        bool ok = true;
+        for (const QString& marker : {QStringLiteral("measurement_session_prepare"),
+                                       QStringLiteral("measurement_session_armed"),
+                                       QStringLiteral("measurement_start_command"),
+                                       QStringLiteral("measurement_started"),
+                                       QStringLiteral("measurement_stop_command"),
+                                       QStringLiteral("measurement_stopped")}) {
+            ok = require(eventCounts.value(marker) == 1,
+                         QStringLiteral("canonical marker %1 occurs once").arg(marker)) && ok;
+        }
+        const QByteArray sessionBytes = sessionId.toUtf8();
+        const QByteArray settingsBytes = settings.readAll();
+        const QByteArray networkBytes = network.readAll();
+        const QByteArray cardBytes = cards.readAll();
+        ok = require(settingsBytes.count(sessionBytes) >= 4,
+                      "start/stop settings snapshots carry session id") && ok;
+        ok = require(networkBytes.contains(sessionBytes) && cardBytes.contains(sessionBytes),
+                      "stop boundary has ingress and card snapshots") && ok;
+        return ok;
+    }
 };
 
 int main(int argc, char **argv) {
@@ -231,6 +324,8 @@ int main(int argc, char **argv) {
     auto *recorder=DiagnosticRecorder::initialize(options);
     const bool ok=runtimeStatsFieldMapping()
         && NetworkDiagnosticTestAccess::exercise(4) && NetworkDiagnosticTestAccess::exercise(5)
+        && NetworkDiagnosticTestAccess::pendingSessionCleanup()
+        && NetworkDiagnosticTestAccess::measurementBoundaryEvidence()
         && receptionDuringExport(false,QString())
         && receptionDuringExport(true,QDir(temporary.path()).filePath("during-reception.zip"));
     QThreadPool::globalInstance()->waitForDone();

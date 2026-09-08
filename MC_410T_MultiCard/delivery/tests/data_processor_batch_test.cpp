@@ -214,6 +214,9 @@ bool testSocketCounterBoundary()
         receiver.wait(2000);
         return false;
     }
+    // Legacy test path explicitly opts into compatibility admission; the
+    // production controller uses prepare/arm/commit barriers instead.
+    receiver.setCompatibilityAdmission(true);
 
     SOCKET sender = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (!check(sender != INVALID_SOCKET, QStringLiteral("UDP sender socket"))) {

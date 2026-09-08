@@ -62,9 +62,14 @@ DataProcessor::~DataProcessor() {
 // 热路径：接收线程调用，无锁入队 + 条件变量通知
 // 
 void DataProcessor::enqueuePacket(const DataPacket& pkt) {
+    enqueuePacketForSession(pkt,
+                            m_ingressSessionToken.load(std::memory_order_acquire));
+}
+
+void DataProcessor::enqueuePacketForSession(const DataPacket& pkt,
+                                            uint64_t sessionToken) {
     DataPacket tagged = pkt;
-    tagged.measurementSessionToken =
-        m_ingressSessionToken.load(std::memory_order_acquire);
+    tagged.measurementSessionToken = sessionToken;
     m_inputQueue.enqueue(tagged);
     {
         std::lock_guard<std::mutex> lk(m_wakeMtx);

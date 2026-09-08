@@ -110,6 +110,7 @@ public:
     bool sendStartMeasure();
     bool sendStopMeasure();
     // 测量门控：true=开始测量（处理并显示数据），false=停止测量（丢弃数据）
+    // 仅保留给旧测试/兼容调用方；生产 Start/Stop 必须走 session transaction。
     void setMeasureEnabled(bool enable);
 
     //  状态查询
@@ -207,7 +208,12 @@ private:
     QString newMeasurementSessionId();
     bool executeStartTransaction(const QString& measurementSessionId);
     bool executeStopTransaction(const QString& measurementSessionId);
-    void resetProcessorsAfterSession();
+    MeasurementSessionTransaction::TeardownResult
+    resetProcessorsAfterSession(bool hardwareStopSucceeded);
+    void recordSessionSettingsSnapshot(const QString& phase,
+                                       const QJsonObject& fields) const;
+    void clearPendingMeasurementRequests(const QString& reason);
+    void setMeasurementBoundaryFault(const QString& reason);
     struct PendingCmd {
         PendingCmdType type = PendingCmdType::None;
         int  dataTime = 0;
@@ -267,6 +273,9 @@ private:
     QString m_measurementSessionId;
     QString m_pendingMeasurementSessionId;
     bool m_measurementRunning = false;
+    enum class MeasurementState { Disarmed, Preparing, Armed, Running, Stopping, Fault };
+    MeasurementState m_measurementState = MeasurementState::Disarmed;
+    QString m_measurementFaultReason;
     std::atomic<quint64> m_feedbackSequence{0};
     std::atomic<quint64> m_feedbackTimeoutCount{0};
 

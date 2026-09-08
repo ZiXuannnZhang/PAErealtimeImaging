@@ -102,6 +102,19 @@ if(WIN32)
     target_link_libraries(session_boundary_test PRIVATE Qt6::Core ws2_32)
     add_test(NAME session_boundary_test COMMAND session_boundary_test)
 
+    add_executable(session_boundary_receiver_test
+        session_boundary_receiver_test.cpp
+        ../src/DataProcessor.cpp
+        ../include/DataProcessor.h
+        ../src/FramePublisher.cpp
+        ../include/FramePublisher.h
+        ../src/MultiPortReceiver.cpp
+        ../include/MultiPortReceiver.h)
+    target_include_directories(session_boundary_receiver_test PRIVATE ../include)
+    target_compile_definitions(session_boundary_receiver_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(session_boundary_receiver_test PRIVATE Qt6::Core ws2_32)
+    add_test(NAME session_boundary_receiver_test COMMAND session_boundary_receiver_test)
+
     add_executable(data_processor_batch_test
         data_processor_batch_test.cpp
         ../src/DataProcessor.cpp
