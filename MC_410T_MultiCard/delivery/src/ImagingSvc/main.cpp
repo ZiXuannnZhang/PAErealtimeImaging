@@ -2,6 +2,7 @@
 #include <QFile>
 #include <QDir>
 #include "ImagingSvc.h"
+#include "ProcessScheduling.h"
 
 // =====================================================================
 // ImagingSvc 子进程入口
@@ -14,6 +15,9 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     app.setApplicationName("ImagingSvc");
+
+    const auto scheduling = ProcessScheduling::applyIngressProtectionScheduling();
+    qInfo().noquote() << scheduling.logLine;
 
     ImagingSvc svc;
     if (!svc.initialize()) {
