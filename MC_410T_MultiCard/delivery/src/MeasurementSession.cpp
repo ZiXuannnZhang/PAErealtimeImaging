@@ -47,18 +47,22 @@ MeasurementSessionTransaction::Result MeasurementSessionTransaction::start(
     }
     step(QStringLiteral("measurement_session_armed"));
 
+    if (commitAdmission && !commitAdmission()) {
+        result.reason = QStringLiteral("receiver_commit_failed");
+        step(QStringLiteral("measurement_start_failed"));
+        step(QStringLiteral("measurement_start_rollback"));
+        if (rollback) rollback();
+        return result;
+    }
+
+    // Admission is committed only after every receiver/processor barrier has
+    // completed.  The hardware Start send follows immediately, so the first
+    // production datagram cannot wait for a post-send receiver command.
     step(QStringLiteral("measurement_start_command"));
     const SendResult sent = sendStart();
     result.successCount = sent.successCount;
     result.failCount = sent.failCount;
     if (sent.successCount == targetCount && sent.failCount == 0) {
-        if (commitAdmission && !commitAdmission()) {
-            result.reason = QStringLiteral("receiver_commit_failed");
-            step(QStringLiteral("measurement_start_failed"));
-            step(QStringLiteral("measurement_start_rollback"));
-            if (rollback) rollback();
-            return result;
-        }
         result.success = true;
         step(QStringLiteral("measurement_started"));
         result.reason = QStringLiteral("all_targets_sent");

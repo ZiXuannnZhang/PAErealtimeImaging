@@ -83,8 +83,8 @@ bool testCommitBarrierFailure()
         [&rolledBack] { rolledBack = true; },
         {},
         [] { return false; });
-    bool ok = check(!result.success && startSends == 1 && rolledBack,
-                    QStringLiteral("admission commit failure rolls back after send"));
+    bool ok = check(!result.success && startSends == 0 && rolledBack,
+                    QStringLiteral("admission commit failure blocks hardware send"));
     ok = check(result.reason == QStringLiteral("receiver_commit_failed"),
                QStringLiteral("commit failure has explicit reason")) && ok;
     return ok;
