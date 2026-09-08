@@ -18,6 +18,7 @@
 #include "AcqConfig.h"
 #include "DataProcessor.h"
 #include "FileSaver.h"
+#include "MeasurementSession.h"
 #include "FramePublisher.h"
 #include "DisplayBuffer.h"
 #include "DiagnosticRecorder.h"
@@ -144,6 +145,13 @@ signals:
     void configAcked(int cardIdx);          // 单卡收到 60 字节配置反馈
     void configConfirmed();                 // 所有卡均收到 60 字节配置反馈
     void configAckFailed(int cardIdx);      // 单卡配置确认失败（重发超限）
+    void measurementStarted(const QString& measurementSessionId);
+    void measurementStartFailed(const QString& measurementSessionId,
+                                const QString& reason);
+    void measurementStopped(const QString& measurementSessionId,
+                            bool commandSucceeded);
+    void measurementStopFailed(const QString& measurementSessionId,
+                               const QString& reason);
     void stopped();   // 所有子线程已退出，stop() 后台工作完成
     // started() 已移除，改用 start(config, onStarted回调) 方式通知 UI
 
@@ -194,8 +202,12 @@ private:
     enum class PendingCmdType { None, Config, StartMeasure, StopMeasure };
     // 底层发送函数（不做就绪检查，由重试机制/已就绪时直接调用）
     bool doSendConfigCommand(int dataTime, int aDelay, int bDelay);
-    bool doSendStartMeasure();
-    bool doSendStopMeasure();
+    bool doSendStartMeasure(int* outSuccess = nullptr, int* outFail = nullptr);
+    bool doSendStopMeasure(int* outSuccess = nullptr, int* outFail = nullptr);
+    QString newMeasurementSessionId();
+    bool executeStartTransaction(const QString& measurementSessionId);
+    bool executeStopTransaction(const QString& measurementSessionId);
+    void resetProcessorsAfterSession();
     struct PendingCmd {
         PendingCmdType type = PendingCmdType::None;
         int  dataTime = 0;
@@ -203,6 +215,7 @@ private:
         int  bDelay   = 0;
         QString configId;
         QString trigger = QStringLiteral("api");
+        QString measurementSessionId;
     };
     std::deque<PendingCmd> m_cmdQueue; // 待执行命令队列（按序：配置 → 测量，避免测量覆盖配置）
     QTimer*      m_retryTimer = nullptr; // 重试定时器（500ms）
@@ -249,6 +262,11 @@ private:
     quint64 m_nextConfigId = 1;
     QString m_currentConfigId;
     QString m_currentConfigTrigger = QStringLiteral("api");
+    quint64 m_nextMeasurementSessionId = 1;
+    quint64 m_measurementSessionToken = 0;
+    QString m_measurementSessionId;
+    QString m_pendingMeasurementSessionId;
+    bool m_measurementRunning = false;
     std::atomic<quint64> m_feedbackSequence{0};
     std::atomic<quint64> m_feedbackTimeoutCount{0};
 

@@ -4,6 +4,8 @@
 #include <mutex>
 #include <condition_variable>
 #include <functional>
+#include <deque>
+#include <memory>
 #include "DataTypes.h"
 #include "AcqConfig.h"
 #include "DisplayBuffer.h"
@@ -59,14 +61,27 @@ public:
     // 自动保存会话代读取器（入队前调用，把当前会话代打在触发组上；
     // 未设置时触发组 sessionGen=0，即手动模式）
     void setSessionGenReader(std::function<uint64_t()> reader) { m_sessionGenReader = std::move(reader); }
-    // 测量门控：未收到“开始测量”前丢弃数据（与真实采集卡时序一致，
-    // 模拟发送端始终在线发送时，未点击开始测量不显示信号）
+    // 兼容旧测试/调用方的简单门控。生产 Start/Stop 必须使用下面的
+    // prepareSession -> armSession -> disarmSession barrier。
     void setMeasureEnabled(bool enable) {
+        if (enable) {
+            m_ingressSessionToken.store(1, std::memory_order_release);
+            m_activeSessionToken.store(1, std::memory_order_release);
+        } else {
+            m_ingressSessionToken.store(0, std::memory_order_release);
+            m_activeSessionToken.store(0, std::memory_order_release);
+        }
         m_measureEnabled.store(enable, std::memory_order_relaxed);
     }
     bool isMeasureEnabled() const {
         return m_measureEnabled.load(std::memory_order_relaxed);
     }
+
+    // Measurement session lifecycle.  These calls synchronously wait for the
+    // DataProcessor worker to own and mutate its PacketAssemblyBuffer/state.
+    bool prepareSession(uint64_t sessionToken, int timeoutMs = 1500);
+    bool armSession(uint64_t sessionToken, int timeoutMs = 1500);
+    bool disarmSession(int timeoutMs = 1500);
     // 更新采集参数（停止测量后、重新开始前调用，线程安全）
     void updateConfig(const AcqConfig& config) {
         m_config = config;
@@ -88,6 +103,16 @@ public:
     // 仅供确定性边界测试：执行一轮与生产线程完全相同的 queue drain，
     // 不启动 QThread，便于断言 513 个包时第 513 个仍留在队列中。
     int drainBatchForTest();
+
+    struct SessionStateSnapshot {
+        int assemblyReceived = 0;
+        bool hasFlushedOnce = false;
+        uint16_t lastFlushedTriggerSeq = 0;
+        int consecutiveDiscards = 0;
+        uint64_t activeSessionToken = 0;
+        bool measureEnabled = false;
+    };
+    SessionStateSnapshot sessionStateForTest() const;
 #endif
 
 signals:
@@ -112,11 +137,33 @@ private:
     // 保证 batch 边界回归测试不会只验证独立条件表达式。
     int processInputBatch(PacketAssemblyBuffer& assemblyBuf);
 
+    enum class SessionCommandKind { Prepare, Arm, Disarm };
+    struct SessionCommandWait {
+        std::mutex mutex;
+        std::condition_variable condition;
+        bool done = false;
+        bool success = false;
+    };
+    struct SessionCommand {
+        SessionCommandKind kind = SessionCommandKind::Prepare;
+        uint64_t sessionToken = 0;
+        std::shared_ptr<SessionCommandWait> wait;
+    };
+
+    bool postSessionCommand(SessionCommandKind kind,
+                            uint64_t sessionToken,
+                            int timeoutMs);
+    void processSessionCommands(PacketAssemblyBuffer& assemblyBuf);
+    int drainInputQueue();
+    void resetSessionState(PacketAssemblyBuffer& assemblyBuf);
+
     //  成员 
     int              m_cardId;
     AcqConfig        m_config;
     bool             m_saveEnabled = false;
     std::atomic<bool> m_measureEnabled{false};  // 开始测量门控
+    std::atomic<uint64_t> m_ingressSessionToken{0};
+    std::atomic<uint64_t> m_activeSessionToken{0};
     // 原始：使用静态 MAX_SAVE_QUEUE 常量在 cpp 中控制
     std::atomic<int> m_displayPoints{1000};  // 显示降采样点数（主线程可实时修改）
 
@@ -131,6 +178,9 @@ private:
     std::mutex              m_wakeMtx;
     std::condition_variable m_wakeCv;
     std::atomic<bool>       m_hasData{false};
+    std::mutex               m_sessionCommandMtx;
+    std::deque<SessionCommand> m_sessionCommands;
+    std::atomic<bool>          m_hasSessionCommand{false};
 
     CardStats  m_stats;
     // 丢包统计锚点：用触发序号取代包序号跟踪，对乱序完全不敏感
@@ -142,6 +192,11 @@ private:
     // 导致所有新包均被 step1 丢弃（带宽正常但触发数停止）。
     // 超过阈值后强制重置锚点，快速恢复。
     int        m_consecutiveDiscards   = 0;
+    std::unique_ptr<PacketAssemblyBuffer> m_workerAssembly;
+    std::atomic<int>      m_assemblyReceived{0};
+    std::atomic<bool>     m_hasFlushedOnceAtomic{false};
+    std::atomic<uint16_t> m_lastFlushedTriggerSeqAtomic{0};
+    std::atomic<int>      m_consecutiveDiscardsAtomic{0};
 
     // 新一帧/新一轮测量触发序号重置识别阈值：
     // 触发序号相对上一帧末触发大幅回退（远大于乱序抖动窗口）时，

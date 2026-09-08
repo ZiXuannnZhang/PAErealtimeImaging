@@ -92,6 +92,8 @@ public:
         QString directory;
         QString startIsoTime;
         QString endIsoTime;
+        QString earliestIsoTime;
+        QString latestIsoTime;
         bool active = false;
         quint64 lastSequence = 0;
         qint64 bytes = 0;
@@ -123,6 +125,16 @@ public:
         std::function<bool()> flushBeforeExport;
     };
 
+    struct TimeWindowRequest {
+        QString requestedStartTime;
+        QString requestedEndTime;
+        QString exportCapturedAt;
+        QString note;
+        QString rootDirectory;
+        QString validationError;
+        QVector<ExportRequest> sources;
+    };
+
     struct ExportResult {
         bool success = false;
         QString targetPath;
@@ -130,6 +142,10 @@ public:
         quint64 boundarySequence = 0;
         QStringList missingFiles;
         QStringList truncationReasons;
+        bool noRecords = false;
+        int sourceRunCount = 0;
+        QJsonObject formalWindowRecordCounts;
+        QJsonObject boundaryContextCounts;
     };
 
     static DiagnosticRecorder *instance();
@@ -182,6 +198,10 @@ public:
     ExportRequest captureExportRequest(quint64 boundarySequence = 0,
                                        const QString &note = QString()) const;
 
+    TimeWindowRequest captureTimeWindowRequest(const QDateTime &startLocal,
+                                               const QDateTime &endLocal,
+                                               const QString &note = QString()) const;
+
     ExportResult exportRun(const QString &targetZipPath,
                            quint64 boundarySequence = 0,
                            const QString &note = QString());
@@ -190,6 +210,10 @@ public:
                                              const QString &note = QString());
     static ExportResult exportRequest(const ExportRequest &request,
                                       const QString &targetZipPath);
+    static ExportResult exportTimeWindow(const TimeWindowRequest &request,
+                                         const QString &targetZipPath);
+    std::future<ExportResult> exportTimeWindowAsync(const TimeWindowRequest &request,
+                                                    const QString &targetZipPath) const;
 
     static QVector<RunInfo> enumerateRuns(const QString &rootDirectory = QString());
 

@@ -16,6 +16,8 @@ struct DataPacket {
     uint16_t dataSize   = UDP_PAYLOAD_BYTES;       // 有效载荷字节数（最后一包可能 < 1440）
     uint32_t sourceIPv4 = 0;                       // 源 IP（uint32 网络字节序），FileSaver 用于判断是否切换文件
     uint8_t  data[UDP_PAYLOAD_BYTES] = {};         // 1440 字节原始载荷（B/A 交织 int16）
+    // 由 DataProcessor::enqueuePacket 在进程侧打标。0 表示 gate 关闭期间的旧包。
+    uint64_t measurementSessionToken = 0;
 };
 
 // ============================================================
@@ -143,6 +145,14 @@ struct CardStats {
             rawLastTriggerSeq.store(triggerSeq, std::memory_order_relaxed);
             rawLastPacketSeq.store(packetSeq, std::memory_order_relaxed);
         }
+    }
+
+    // Measurement session 边界只重置 raw-order anchor，不清除累计计数。
+    // 该操作由 DataProcessor worker 在 prepare/disarm barrier 内调用。
+    void resetRawSequenceAnchor() {
+        rawLastTriggerSeq.store(0, std::memory_order_relaxed);
+        rawLastPacketSeq.store(0, std::memory_order_relaxed);
+        rawSequenceInitialized.store(false, std::memory_order_relaxed);
     }
 
     //  速率字段（由主线程 1Hz 采样更新，无需 atomic）

@@ -1,7 +1,6 @@
 #include "DiagnosticExportDialog.h"
 
-#include <QComboBox>
-#include <QDateTime>
+#include <QDateTimeEdit>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFileDialog>
@@ -14,9 +13,12 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QTimeZone>
 #include <QVBoxLayout>
 #include <QFutureWatcher>
+#include <QMessageBox>
 #include <QtConcurrent/QtConcurrentRun>
+#include <limits>
 
 DiagnosticExportDialog::DiagnosticExportDialog(const QString &currentRunId,
                                                const QString &currentRunDirectory,
@@ -32,16 +34,24 @@ DiagnosticExportDialog::DiagnosticExportDialog(const QString &currentRunId,
     auto *layout = new QVBoxLayout(this);
     auto *form = new QFormLayout();
 
-    m_runCombo = new QComboBox(this);
-    m_runCombo->setObjectName(QStringLiteral("runCombo"));
-    const QString liveLabel = m_currentRunId.isEmpty()
-        ? QStringLiteral("当前运行")
-        : QStringLiteral("当前运行（%1）").arg(m_currentRunId);
-    m_runCombo->addItem(liveLabel);
-    m_runCombo->setToolTip(QStringLiteral("导出点击保存时当前运行的日志边界"));
-    form->addRow(QStringLiteral("导出范围:"), m_runCombo);
+    const QDateTime now = QDateTime::currentDateTime();
+    m_startEdit = new QDateTimeEdit(now.addSecs(-600), this);
+    m_endEdit = new QDateTimeEdit(now, this);
+    for (QDateTimeEdit *edit : {m_startEdit, m_endEdit}) {
+        edit->setObjectName(edit == m_startEdit ? QStringLiteral("startTimeEdit")
+                                                 : QStringLiteral("endTimeEdit"));
+        edit->setDisplayFormat(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+        edit->setCalendarPopup(true);
+        edit->setTimeZone(QTimeZone::systemTimeZone());
+        edit->setKeyboardTracking(false);
+    }
+    m_endEdit->setMaximumDateTime(now);
+    form->addRow(QStringLiteral("开始时间（本机）:"), m_startEdit);
+    form->addRow(QStringLiteral("结束时间（本机）:"), m_endEdit);
 
-    m_historyStatus = new QLabel(QStringLiteral("正在加载历史运行…"), this);
+    m_historyStatus = new QLabel(QStringLiteral("正在加载 diagnostics retention 覆盖范围…"), this);
+    m_historyStatus->setObjectName(QStringLiteral("retentionStatus"));
+    m_historyStatus->setWordWrap(true);
     m_historyStatus->setStyleSheet(QStringLiteral("color: #888888;"));
     form->addRow(QString(), m_historyStatus);
 
@@ -61,24 +71,22 @@ DiagnosticExportDialog::DiagnosticExportDialog(const QString &currentRunId,
     targetLayout->addWidget(m_targetEdit, 1);
     targetLayout->addWidget(browseButton);
     form->addRow(QStringLiteral("ZIP 文件:"), targetRow);
-
     layout->addLayout(form);
 
     const QString documents = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     const QString directory = documents.isEmpty() ? QDir::currentPath() : documents;
     QString safeRunId = m_currentRunId;
     safeRunId.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9_.-]")), QStringLiteral("_"));
-    if (safeRunId.isEmpty()) safeRunId = QStringLiteral("current");
+    if (safeRunId.isEmpty()) safeRunId = QStringLiteral("time-window");
     m_targetEdit->setText(QDir(directory).filePath(
         QStringLiteral("diagnostic-%1-%2.zip")
             .arg(safeRunId)
-            .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss")))));
+            .arg(now.toString(QStringLiteral("yyyyMMdd-hhmmss")))));
 
     auto *buttons = new QDialogButtonBox(this);
     QPushButton *exportButton = buttons->addButton(QStringLiteral("导出"), QDialogButtonBox::AcceptRole);
     exportButton->setObjectName(QStringLiteral("exportButton"));
-    QPushButton *cancelButton = buttons->addButton(QStringLiteral("取消"), QDialogButtonBox::RejectRole);
-    cancelButton->setObjectName(QStringLiteral("cancelButton"));
+    buttons->addButton(QStringLiteral("取消"), QDialogButtonBox::RejectRole);
     layout->addWidget(buttons);
 
     connect(browseButton, &QPushButton::clicked,
@@ -87,18 +95,11 @@ DiagnosticExportDialog::DiagnosticExportDialog(const QString &currentRunId,
             this, &DiagnosticExportDialog::acceptSelection);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
-    // The worker captures no dialog state.  Only the finished signal touches
-    // widgets, and the QObject context disconnects it if the dialog closes.
     m_historyWatcher = new QFutureWatcher<QVector<DiagnosticRecorder::RunInfo>>(this);
     connect(m_historyWatcher,
             &QFutureWatcher<QVector<DiagnosticRecorder::RunInfo>>::finished,
             this,
-            [this]() {
-                applyHistoricalRuns(m_historyWatcher->result());
-                m_historyStatus->setText(m_historicalRuns.isEmpty()
-                    ? QStringLiteral("没有可选的历史运行")
-                    : QStringLiteral("已加载 %1 个历史运行").arg(m_historicalRuns.size()));
-            });
+            [this]() { applyRetentionBounds(m_historyWatcher->result()); });
     const QString historyRoot = QFileInfo(m_currentRunDirectory).absolutePath();
     m_historyWatcher->setFuture(QtConcurrent::run([historyRoot] {
         return DiagnosticRecorder::enumerateRuns(historyRoot);
@@ -110,15 +111,18 @@ DiagnosticExportDialog::~DiagnosticExportDialog() = default;
 DiagnosticExportDialog::Selection DiagnosticExportDialog::selection() const
 {
     Selection result;
-    result.currentRun = m_runCombo && m_runCombo->currentIndex() == 0;
-    if (!result.currentRun) {
-        const int historyIndex = m_runCombo->currentIndex() - 1;
-        if (historyIndex >= 0 && historyIndex < m_historicalRuns.size())
-            result.historical = m_historicalRuns.at(historyIndex);
-    }
+    result.startTime = m_startEdit ? m_startEdit->dateTime() : QDateTime();
+    result.endTime = m_endEdit ? m_endEdit->dateTime() : QDateTime();
     result.note = m_noteEdit ? m_noteEdit->toPlainText().trimmed() : QString();
     result.targetPath = m_targetEdit ? m_targetEdit->text().trimmed() : QString();
     return result;
+}
+
+bool DiagnosticExportDialog::isValidTimeWindow(const QDateTime &start,
+                                               const QDateTime &end,
+                                               const QDateTime &now)
+{
+    return start.isValid() && end.isValid() && start <= end && end <= now;
 }
 
 void DiagnosticExportDialog::chooseTargetPath()
@@ -137,8 +141,14 @@ void DiagnosticExportDialog::chooseTargetPath()
 
 void DiagnosticExportDialog::acceptSelection()
 {
+    if (!m_startEdit || !m_endEdit
+        || !isValidTimeWindow(m_startEdit->dateTime(), m_endEdit->dateTime())) {
+        QMessageBox::warning(this, QStringLiteral("导出诊断日志"),
+                             QStringLiteral("时间窗无效：开始时间必须早于或等于结束时间，且结束时间不能晚于当前时间。"));
+        return;
+    }
     if (!m_targetEdit || m_targetEdit->text().trimmed().isEmpty()) {
-        m_targetEdit->setFocus();
+        if (m_targetEdit) m_targetEdit->setFocus();
         return;
     }
     QString normalized = m_targetEdit->text().trimmed();
@@ -148,23 +158,27 @@ void DiagnosticExportDialog::acceptSelection()
     accept();
 }
 
-void DiagnosticExportDialog::applyHistoricalRuns(
+void DiagnosticExportDialog::applyRetentionBounds(
     const QVector<DiagnosticRecorder::RunInfo> &runs)
 {
-    m_historicalRuns.clear();
+    qint64 earliest = std::numeric_limits<qint64>::max();
+    qint64 latest = std::numeric_limits<qint64>::min();
+    int active = 0;
     for (const auto &run : runs) {
-        if (run.directory.isEmpty() || run.runId.isEmpty()) continue;
-        if (!m_currentRunDirectory.isEmpty()
-            && QFileInfo(run.directory).absoluteFilePath()
-                == QFileInfo(m_currentRunDirectory).absoluteFilePath())
-            continue;
-        m_historicalRuns.append(run);
-        const QString time = run.startIsoTime.isEmpty()
-            ? QStringLiteral("时间未知") : run.startIsoTime;
-        const QString state = run.active
-            ? QStringLiteral("进行中")
-            : (run.manifestComplete ? QStringLiteral("已完成") : QStringLiteral("未完整结束"));
-        const QString id = run.runId.isEmpty() ? QFileInfo(run.directory).fileName() : run.runId;
-        m_runCombo->addItem(QStringLiteral("历史：%1 · %2 · %3").arg(time, state, id));
+        const QString first = run.earliestIsoTime.isEmpty() ? run.startIsoTime : run.earliestIsoTime;
+        const QString last = run.latestIsoTime.isEmpty() ? run.endIsoTime : run.latestIsoTime;
+        const QDateTime firstTime = QDateTime::fromString(first, Qt::ISODateWithMs);
+        const QDateTime lastTime = QDateTime::fromString(last, Qt::ISODateWithMs);
+        if (firstTime.isValid()) earliest = qMin(earliest, firstTime.toMSecsSinceEpoch());
+        if (lastTime.isValid()) latest = qMax(latest, lastTime.toMSecsSinceEpoch());
+        if (run.active) ++active;
     }
+    const QString firstText = earliest == std::numeric_limits<qint64>::max()
+        ? QStringLiteral("未知")
+        : QDateTime::fromMSecsSinceEpoch(earliest).toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    const QString lastText = latest == std::numeric_limits<qint64>::min()
+        ? QStringLiteral("未知")
+        : QDateTime::fromMSecsSinceEpoch(latest).toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+    m_historyStatus->setText(QStringLiteral("当前 retention 覆盖：%1 至 %2；run=%3，active=%4。导出会跨越所有重叠 run，包含正常、active 和 incomplete run。")
+                             .arg(firstText, lastText).arg(runs.size()).arg(active));
 }

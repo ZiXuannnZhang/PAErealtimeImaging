@@ -39,6 +39,12 @@ DataProcessor::DataProcessor(
     , m_expectedPackets(config.packetsPerTrig())
 {
     m_stats.cardId = cardId;
+    // Keep the worker-owned buffer large enough for the full supported packet
+    // range.  The UI can reconfigure acquisition time while the thread is
+    // alive; a later session must not inherit a buffer sized for the prior
+    // (possibly smaller) setting.
+    m_workerAssembly = std::make_unique<PacketAssemblyBuffer>(
+        std::max(m_expectedPackets + 20, MAX_PKTS_PER_TRIG));
     setObjectName(QString("DataProcessor_%1").arg(cardId));
 }
 
@@ -56,7 +62,10 @@ DataProcessor::~DataProcessor() {
 // 热路径：接收线程调用，无锁入队 + 条件变量通知
 // 
 void DataProcessor::enqueuePacket(const DataPacket& pkt) {
-    m_inputQueue.enqueue(pkt);
+    DataPacket tagged = pkt;
+    tagged.measurementSessionToken =
+        m_ingressSessionToken.load(std::memory_order_acquire);
+    m_inputQueue.enqueue(tagged);
     {
         std::lock_guard<std::mutex> lk(m_wakeMtx);
         m_hasData.store(true, std::memory_order_relaxed);
@@ -66,6 +75,104 @@ void DataProcessor::enqueuePacket(const DataPacket& pkt) {
 
 int DataProcessor::inputQueueDepth() const {
     return static_cast<int>(m_inputQueue.size_approx());
+}
+
+bool DataProcessor::postSessionCommand(SessionCommandKind kind,
+                                       uint64_t sessionToken,
+                                       int timeoutMs)
+{
+    if (!isRunning()) return false;
+    auto wait = std::make_shared<SessionCommandWait>();
+    {
+        std::lock_guard<std::mutex> lock(m_sessionCommandMtx);
+        m_sessionCommands.push_back(SessionCommand{kind, sessionToken, wait});
+        m_hasSessionCommand.store(true, std::memory_order_release);
+    }
+    m_wakeCv.notify_one();
+
+    std::unique_lock<std::mutex> lock(wait->mutex);
+    const auto ready = [&wait] { return wait->done; };
+    const bool reached = timeoutMs < 0
+        ? (wait->condition.wait(lock, ready), true)
+        : wait->condition.wait_for(lock, std::chrono::milliseconds(timeoutMs), ready);
+    return reached && wait->success;
+}
+
+bool DataProcessor::prepareSession(uint64_t sessionToken, int timeoutMs)
+{
+    return sessionToken != 0
+        && postSessionCommand(SessionCommandKind::Prepare, sessionToken, timeoutMs);
+}
+
+bool DataProcessor::armSession(uint64_t sessionToken, int timeoutMs)
+{
+    return sessionToken != 0
+        && postSessionCommand(SessionCommandKind::Arm, sessionToken, timeoutMs);
+}
+
+bool DataProcessor::disarmSession(int timeoutMs)
+{
+    return postSessionCommand(SessionCommandKind::Disarm, 0, timeoutMs);
+}
+
+int DataProcessor::drainInputQueue()
+{
+    int drained = 0;
+    DataPacket packet;
+    while (m_inputQueue.try_dequeue(packet)) ++drained;
+    return drained;
+}
+
+void DataProcessor::resetSessionState(PacketAssemblyBuffer& assemblyBuf)
+{
+    m_measureEnabled.store(false, std::memory_order_release);
+    m_ingressSessionToken.store(0, std::memory_order_release);
+    m_activeSessionToken.store(0, std::memory_order_release);
+    assemblyBuf.reset();
+    drainInputQueue();
+    m_lastFlushedTriggerSeq = 0;
+    m_hasFlushedOnce = false;
+    m_consecutiveDiscards = 0;
+    m_stats.resetRawSequenceAnchor();
+    m_assemblyReceived.store(0, std::memory_order_release);
+    m_hasFlushedOnceAtomic.store(false, std::memory_order_release);
+    m_lastFlushedTriggerSeqAtomic.store(0, std::memory_order_release);
+    m_consecutiveDiscardsAtomic.store(0, std::memory_order_release);
+}
+
+void DataProcessor::processSessionCommands(PacketAssemblyBuffer& assemblyBuf)
+{
+    std::deque<SessionCommand> commands;
+    {
+        std::lock_guard<std::mutex> lock(m_sessionCommandMtx);
+        commands.swap(m_sessionCommands);
+        m_hasSessionCommand.store(!m_sessionCommands.empty(), std::memory_order_release);
+    }
+    for (SessionCommand& command : commands) {
+        bool success = true;
+        switch (command.kind) {
+        case SessionCommandKind::Prepare:
+            resetSessionState(assemblyBuf);
+            break;
+        case SessionCommandKind::Arm:
+            // A second drain immediately before the gate opens removes packets
+            // that arrived after PREPARING but before ARMED.
+            drainInputQueue();
+            m_ingressSessionToken.store(command.sessionToken, std::memory_order_release);
+            m_activeSessionToken.store(command.sessionToken, std::memory_order_release);
+            m_measureEnabled.store(true, std::memory_order_release);
+            break;
+        case SessionCommandKind::Disarm:
+            resetSessionState(assemblyBuf);
+            break;
+        }
+        if (command.wait) {
+            std::lock_guard<std::mutex> lock(command.wait->mutex);
+            command.wait->success = success;
+            command.wait->done = true;
+            command.wait->condition.notify_one();
+        }
+    }
 }
 
 // 
@@ -78,19 +185,25 @@ void DataProcessor::run() {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
 #endif
 
-    PacketAssemblyBuffer assemblyBuf(m_expectedPackets + 20);  // 动态大小，留余量
+    PacketAssemblyBuffer *assembly = m_workerAssembly.get();
+    if (!assembly) return;
 
     while (!isInterruptionRequested()) {
+        processSessionCommands(*assembly);
         // 条件变量等待，最多 1ms 超时
         {
             std::unique_lock<std::mutex> lk(m_wakeMtx);
             m_wakeCv.wait_for(lk, std::chrono::milliseconds(PROC_WAKE_TIMEOUT_MS),
-                [this]{ return m_hasData.load() || isInterruptionRequested(); });
+                [this]{ return m_hasData.load() || m_hasSessionCommand.load()
+                              || isInterruptionRequested(); });
             m_hasData.store(false, std::memory_order_relaxed);
         }
 
-        processInputBatch(assemblyBuf);
+        processSessionCommands(*assembly);
+        processInputBatch(*assembly);
     }
+    processSessionCommands(*assembly);
+    m_assemblyReceived.store(0, std::memory_order_release);
 }
 
 int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
@@ -103,8 +216,13 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
         m_stats.processorPacketsDequeued.fetch_add(1, std::memory_order_relaxed);
         m_stats.packetsReceived.fetch_add(1, std::memory_order_relaxed);
 
-        // 测量门控：未点击“开始测量”前丢弃数据包，不进入组包/显示/环形馈送
-        if (!m_measureEnabled.load(std::memory_order_relaxed))
+        // Gate 关闭期间以及旧 session token 的包都只出队、不进入组包。
+        // 这样 PREPARING/ARMED 边界不会把旧队列数据算入新 session。
+        const uint64_t activeToken =
+            m_activeSessionToken.load(std::memory_order_acquire);
+        if (!m_measureEnabled.load(std::memory_order_relaxed)
+            || activeToken == 0
+            || pkt.measurementSessionToken != activeToken)
             continue;
 
         // ══ 步骤1：丢弃旧触发迟到包（含重复包），不重复计入丢包 ──────────────────
@@ -126,6 +244,9 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
                     m_hasFlushedOnce     = false;
                     m_consecutiveDiscards = 0;
                     assemblyBuf.reset();
+                    m_assemblyReceived.store(0, std::memory_order_release);
+                    m_hasFlushedOnceAtomic.store(false, std::memory_order_release);
+                    m_consecutiveDiscardsAtomic.store(0, std::memory_order_release);
                     // fall through：把当前包当作第一个新包处理
                 } else {
                     // ── 连续丢弃恢复机制（小回退=乱序迟到包）─────────────────
@@ -136,6 +257,9 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
                         m_hasFlushedOnce     = false;
                         m_consecutiveDiscards = 0;
                         assemblyBuf.reset();
+                        m_assemblyReceived.store(0, std::memory_order_release);
+                        m_hasFlushedOnceAtomic.store(false, std::memory_order_release);
+                        m_consecutiveDiscardsAtomic.store(0, std::memory_order_release);
                         // fall through：把当前包当作第一个新包处理
                     } else {
                         m_stats.staleTriggerPacketsDiscarded.fetch_add(1, std::memory_order_relaxed);
@@ -187,6 +311,8 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
             assemblyBuf.reset();
             m_lastFlushedTriggerSeq = oldSeq;  // 锚点移到旧触发
             m_hasFlushedOnce        = true;
+            m_lastFlushedTriggerSeqAtomic.store(m_lastFlushedTriggerSeq, std::memory_order_release);
+            m_hasFlushedOnceAtomic.store(true, std::memory_order_release);
             didSwitch               = true;
         }
 
@@ -216,9 +342,14 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
         if (assemblyBuf.isComplete(m_expectedPackets)) {
             m_lastFlushedTriggerSeq = assemblyBuf.triggerSeq();
             m_hasFlushedOnce        = true;
+            m_lastFlushedTriggerSeqAtomic.store(m_lastFlushedTriggerSeq, std::memory_order_release);
+            m_hasFlushedOnceAtomic.store(true, std::memory_order_release);
             flushAssemblyBuf(assemblyBuf);
             assemblyBuf.reset();
+            m_assemblyReceived.store(0, std::memory_order_release);
         }
+        m_assemblyReceived.store(assemblyBuf.receivedCount(), std::memory_order_release);
+        m_consecutiveDiscardsAtomic.store(m_consecutiveDiscards, std::memory_order_release);
     }
 
     // quota 在 dequeue 前检查，因此没有“取出后因边界被丢弃”的路径；
@@ -232,6 +363,17 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
 int DataProcessor::drainBatchForTest() {
     PacketAssemblyBuffer assemblyBuf(m_expectedPackets + 20);
     return processInputBatch(assemblyBuf);
+}
+
+DataProcessor::SessionStateSnapshot DataProcessor::sessionStateForTest() const {
+    SessionStateSnapshot state;
+    state.assemblyReceived = m_assemblyReceived.load(std::memory_order_acquire);
+    state.hasFlushedOnce = m_hasFlushedOnceAtomic.load(std::memory_order_acquire);
+    state.lastFlushedTriggerSeq = m_lastFlushedTriggerSeqAtomic.load(std::memory_order_acquire);
+    state.consecutiveDiscards = m_consecutiveDiscardsAtomic.load(std::memory_order_acquire);
+    state.activeSessionToken = m_activeSessionToken.load(std::memory_order_acquire);
+    state.measureEnabled = m_measureEnabled.load(std::memory_order_acquire);
+    return state;
 }
 #endif
 

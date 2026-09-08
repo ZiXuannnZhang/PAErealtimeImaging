@@ -3,25 +3,25 @@
 #include "DiagnosticRecorder.h"
 
 #include <QDialog>
+#include <QDateTime>
 #include <QVector>
 
-class QComboBox;
+class QDateTimeEdit;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 template <typename T>
 class QFutureWatcher;
 
-// UI for choosing the live recorder run or a persisted historical run and
-// collecting the optional operator note and ZIP destination.  Enumeration is
-// intentionally started by the dialog in QtConcurrent so opening the dialog
-// never walks the diagnostics directory on the UI thread.
+// UI for selecting a local-time interval across all retained runs. Enumeration
+// is intentionally performed in QtConcurrent so opening the dialog never
+// walks the diagnostics directory on the UI thread.
 class DiagnosticExportDialog final : public QDialog
 {
 public:
     struct Selection {
-        bool currentRun = true;
-        DiagnosticRecorder::RunInfo historical;
+        QDateTime startTime;
+        QDateTime endTime;
         QString note;
         QString targetPath;
     };
@@ -32,18 +32,21 @@ public:
     ~DiagnosticExportDialog() override;
 
     Selection selection() const;
+    static bool isValidTimeWindow(const QDateTime &start,
+                                  const QDateTime &end,
+                                  const QDateTime &now = QDateTime::currentDateTime());
 
 private:
     void chooseTargetPath();
     void acceptSelection();
-    void applyHistoricalRuns(const QVector<DiagnosticRecorder::RunInfo> &runs);
+    void applyRetentionBounds(const QVector<DiagnosticRecorder::RunInfo> &runs);
 
     QString m_currentRunId;
     QString m_currentRunDirectory;
-    QComboBox *m_runCombo = nullptr;
+    QDateTimeEdit *m_startEdit = nullptr;
+    QDateTimeEdit *m_endEdit = nullptr;
     QPlainTextEdit *m_noteEdit = nullptr;
     QLineEdit *m_targetEdit = nullptr;
     QLabel *m_historyStatus = nullptr;
-    QVector<DiagnosticRecorder::RunInfo> m_historicalRuns;
     QFutureWatcher<QVector<DiagnosticRecorder::RunInfo>> *m_historyWatcher = nullptr;
 };

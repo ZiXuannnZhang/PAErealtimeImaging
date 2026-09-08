@@ -110,20 +110,6 @@ static QString uniqueDiagnosticZipPath(const QString &requestedPath)
     return absolute;
 }
 
-static DiagnosticRecorder::ExportRequest diagnosticRequestForHistoricalRun(
-    const DiagnosticRecorder::RunInfo &run, const QString &note)
-{
-    DiagnosticRecorder::ExportRequest request;
-    request.runId = run.runId;
-    request.sourceDirectory = run.directory;
-    request.startIsoTime = run.startIsoTime;
-    request.endIsoTime = run.endIsoTime;
-    request.boundarySequence = run.lastSequence;
-    request.sourceWasActive = run.active;
-    request.note = note;
-    return request;
-}
-
 // ══ 频域显示辅助：radix-2 FFT 幅值谱（Hann 窗）══
 static int nextPow2Ceil(int n) {
     int p = 1;
@@ -1597,16 +1583,11 @@ void MainWindow::onExportDiagnosticClicked()
 
     recordDiagnosticAction(QStringLiteral("diagnostic_export"),
                            {{QStringLiteral("targetPath"), targetPath},
-                            {QStringLiteral("historical"), !selected.currentRun}});
+                            {QStringLiteral("requestedStartTime"), selected.startTime.toString(Qt::ISODateWithMs)},
+                            {QStringLiteral("requestedEndTime"), selected.endTime.toString(Qt::ISODateWithMs)}});
 
-    DiagnosticRecorder::ExportRequest request;
-    if (selected.currentRun) {
-        // Capture immediately after the save click.  The immutable request
-        // carries the cutoff; the exporter performs any live flush later.
-        request = recorder->captureExportRequest(recorder->captureBoundary(), selected.note);
-    } else {
-        request = diagnosticRequestForHistoricalRun(selected.historical, selected.note);
-    }
+    const DiagnosticRecorder::TimeWindowRequest request =
+        recorder->captureTimeWindowRequest(selected.startTime, selected.endTime, selected.note);
 
     statusBar()->showMessage(QStringLiteral("正在后台导出诊断日志…"), 3000);
     const QPointer<MainWindow> guard(this);
@@ -1629,6 +1610,8 @@ void MainWindow::onExportDiagnosticClicked()
 
                 QString details = QStringLiteral("诊断日志已导出：\n%1")
                                       .arg(result.targetPath);
+                if (result.noRecords)
+                    details += QStringLiteral("\n\n该时间段没有日志。");
                 if (!result.truncationReasons.isEmpty()) {
                     details += QStringLiteral("\n\n提示：导出包含以下记录完整性说明：\n• ")
                                + result.truncationReasons.join(QStringLiteral("\n• "));
@@ -1648,7 +1631,7 @@ void MainWindow::onExportDiagnosticClicked()
             });
     watcher->setFuture(QtConcurrent::run(
         [request, targetPath]() mutable {
-            return DiagnosticRecorder::exportRequest(request, targetPath);
+            return DiagnosticRecorder::exportTimeWindow(request, targetPath);
         }));
 }
 
@@ -1856,6 +1839,35 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
     connect(m_netController, &NetworkController::configAckFailed, this, [this](int cardIdx) {
         logMessage(QString("⚠️ 卡%1 配置确认失败，请检查链路后重新下发配置").arg(cardIdx + 1));
     });
+    connect(m_netController, &NetworkController::measurementStarted,
+            this, [this](const QString& sessionId) {
+        m_isMeasuring = true;
+        setBtnText(ui->btnStartMeasure, "停止测量");
+        ui->btnStartMeasure->setProperty("state", "measuring");
+        ui->btnStartMeasure->style()->unpolish(ui->btnStartMeasure);
+        ui->btnStartMeasure->style()->polish(ui->btnStartMeasure);
+        m_highDataRateWarningShown = false;
+        logMessage(QString("测量会话已启动：%1").arg(sessionId));
+    });
+    connect(m_netController, &NetworkController::measurementStartFailed,
+            this, [this](const QString& sessionId, const QString& reason) {
+        logMessage(QString("❌ 测量会话启动失败并已回滚：%1（%2）")
+                   .arg(sessionId, reason));
+    });
+    connect(m_netController, &NetworkController::measurementStopped,
+            this, [this](const QString& sessionId, bool) {
+        m_isMeasuring = false;
+        setBtnText(ui->btnStartMeasure, "开始测量");
+        ui->btnStartMeasure->setProperty("state", QVariant());
+        ui->btnStartMeasure->style()->unpolish(ui->btnStartMeasure);
+        ui->btnStartMeasure->style()->polish(ui->btnStartMeasure);
+        logMessage(QString("测量会话已停止：%1").arg(sessionId));
+    });
+    connect(m_netController, &NetworkController::measurementStopFailed,
+            this, [this](const QString& sessionId, const QString& reason) {
+        logMessage(QString("⚠️ 测量停止失败，已 disarm 处理器但硬件状态需复核：%1（%2）")
+                   .arg(sessionId, reason));
+    });
 
     // 初始状态：等待卡片就绪
     ui->lblTargetIPs->setText(
@@ -1985,37 +1997,20 @@ void MainWindow::onStartMeasureClicked()
         logMessage("开始测量：先下发配置参数");
         onConfigParamsClicked(true);
         if (m_netController) {
-            if (m_netController->sendStartMeasure()) {
-                logMessage("开始测量命令发送成功");
-            } else {
-                logMessage("开始测量命令发送失败");
-            }
+            if (m_netController->sendStartMeasure())
+                logMessage("开始测量请求已提交，等待所有处理器 armed 和四卡发送确认");
+            else
+                logMessage("开始测量请求失败，未进入测量状态");
         }
-        m_isMeasuring = true;
-        if (m_netController) m_netController->setMeasureEnabled(true);
-        setBtnText(ui->btnStartMeasure, "停止测量");
-        ui->btnStartMeasure->setProperty("state", "measuring");
-        ui->btnStartMeasure->style()->unpolish(ui->btnStartMeasure);
-        ui->btnStartMeasure->style()->polish(ui->btnStartMeasure);
-        m_highDataRateWarningShown = false;
-        logMessage("开始测量");
     } else {
         recordDiagnosticAction(QStringLiteral("measure_button"),
                                {{QStringLiteral("phase"), QStringLiteral("stop")}});
         if (m_netController) {
-            if (m_netController->sendStopMeasure()) {
-                logMessage("停止测量命令发送成功");
-            } else {
-                logMessage("停止测量命令发送失败");
-            }
+            if (m_netController->sendStopMeasure())
+                logMessage("停止测量请求已提交，等待硬件 Stop 和处理器 disarm 完成");
+            else
+                logMessage("停止测量请求失败，仍保留当前测量状态供复核");
         }
-        m_isMeasuring = false;
-        if (m_netController) m_netController->setMeasureEnabled(false);
-        setBtnText(ui->btnStartMeasure, "开始测量");
-        ui->btnStartMeasure->setProperty("state", QVariant());
-        ui->btnStartMeasure->style()->unpolish(ui->btnStartMeasure);
-        ui->btnStartMeasure->style()->polish(ui->btnStartMeasure);
-        logMessage("停止测量");
     }
 }
 

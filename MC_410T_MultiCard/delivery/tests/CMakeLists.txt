@@ -36,6 +36,13 @@ target_link_libraries(diagnostic_dialog_test PRIVATE Qt6::Widgets Qt6::Concurren
 add_test(NAME diagnostic_dialog_test COMMAND diagnostic_dialog_test)
 set_tests_properties(diagnostic_dialog_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(diagnostic_time_window_test
+    diagnostic_time_window_test.cpp
+    ../src/DiagnosticRecorder.cpp)
+target_include_directories(diagnostic_time_window_test PRIVATE ../include)
+target_link_libraries(diagnostic_time_window_test PRIVATE Qt6::Core)
+add_test(NAME diagnostic_time_window_test COMMAND diagnostic_time_window_test)
+
 if(WIN32)
     add_executable(process_scheduling_test
         process_scheduling_test.cpp
@@ -63,6 +70,7 @@ if(WIN32)
     add_executable(network_diagnostics_test
         network_diagnostics_test.cpp
         ../src/NetworkController.cpp ../include/NetworkController.h
+        ../src/MeasurementSession.cpp ../include/MeasurementSession.h
         ../src/NetworkDiagnostics.cpp ../src/DiagnosticRecorder.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
         ../src/FileSaver.cpp ../include/FileSaver.h
@@ -72,6 +80,27 @@ if(WIN32)
     target_compile_definitions(network_diagnostics_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(network_diagnostics_test PRIVATE Qt6::Core Qt6::Concurrent ws2_32 iphlpapi)
     add_test(NAME network_diagnostics_test COMMAND network_diagnostics_test)
+
+    add_executable(measurement_session_transaction_test
+        measurement_session_transaction_test.cpp
+        ../src/MeasurementSession.cpp)
+    target_include_directories(measurement_session_transaction_test PRIVATE ../include)
+    target_link_libraries(measurement_session_transaction_test PRIVATE Qt6::Core)
+    add_test(NAME measurement_session_transaction_test COMMAND measurement_session_transaction_test)
+
+    add_executable(session_boundary_test
+        session_boundary_test.cpp
+        ../src/DataProcessor.cpp
+        ../include/DataProcessor.h
+        ../src/FramePublisher.cpp
+        ../include/FramePublisher.h
+        ../src/MultiPortReceiver.cpp
+        ../include/MultiPortReceiver.h)
+    target_include_directories(session_boundary_test PRIVATE ../include)
+    target_compile_definitions(session_boundary_test PRIVATE
+        DATA_PROCESSOR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(session_boundary_test PRIVATE Qt6::Core ws2_32)
+    add_test(NAME session_boundary_test COMMAND session_boundary_test)
 
     add_executable(data_processor_batch_test
         data_processor_batch_test.cpp

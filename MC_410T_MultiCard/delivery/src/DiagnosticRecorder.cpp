@@ -902,6 +902,222 @@ struct DiagnosticRecorder::State
     QFile runtimeFile, eventsFile, networkHistoryFile, settingsHistoryFile, cardHistoryFile; std::thread worker; bool active = false, accepting = false, stopping = false, flushRequested = false, writeError = false; QString writeErrorText; quint64 nextSequence = 1, writtenSequence = 0, processedSequence = 0, flushedSequence = 0, flushTarget = 0;
 };
 
+namespace {
+
+qint64 isoMillisLocal(const QString &text)
+{
+    if (text.isEmpty()) return std::numeric_limits<qint64>::min();
+    const QDateTime value = QDateTime::fromString(text, Qt::ISODateWithMs);
+    return value.isValid() ? value.toMSecsSinceEpoch() : std::numeric_limits<qint64>::min();
+}
+
+QString isoFromMillis(qint64 value)
+{
+    return value == std::numeric_limits<qint64>::min()
+        ? QString() : QDateTime::fromMSecsSinceEpoch(value).toString(Qt::ISODateWithMs);
+}
+
+struct JsonWindowScan {
+    QByteArray lines;
+    QJsonArray objects;
+    int formalCount = 0;
+    int contextCount = 0;
+    qint64 earliest = std::numeric_limits<qint64>::max();
+    qint64 latest = std::numeric_limits<qint64>::min();
+    qint64 includedEarliest = std::numeric_limits<qint64>::max();
+    qint64 includedLatest = std::numeric_limits<qint64>::min();
+    bool exists = false;
+    QStringList warnings;
+};
+
+QString scanWarnings(const JsonWindowScan &scan)
+{
+    return scan.warnings.join(QStringLiteral("；"));
+}
+
+QJsonObject tagWindowObject(const QJsonObject &input,
+                            const QString &role,
+                            const QString &runId,
+                            const QString &directory)
+{
+    QJsonObject value = input;
+    value.insert(QStringLiteral("windowRole"), role);
+    value.insert(QStringLiteral("sourceRunId"), runId);
+    value.insert(QStringLiteral("sourceRunDirectory"), directory);
+    return value;
+}
+
+JsonWindowScan scanJsonHistoryFile(const QString &path,
+                                   const QString &runId,
+                                   const QString &directory,
+                                   qint64 startMs,
+                                   qint64 endMs,
+                                   quint64 boundary,
+                                   const QString &kind)
+{
+    Q_UNUSED(kind);
+    JsonWindowScan result;
+    QFile file(path);
+    if (!file.exists()) return result;
+    result.exists = true;
+    if (!file.open(QIODevice::ReadOnly)) {
+        result.warnings.append(QStringLiteral("无法读取 %1：%2").arg(path, file.errorString()));
+        return result;
+    }
+
+    QJsonObject before;
+    QJsonObject after;
+    qint64 beforeMs = std::numeric_limits<qint64>::min();
+    qint64 afterMs = std::numeric_limits<qint64>::max();
+    quint64 beforeSequence = 0;
+    quint64 afterSequence = 0;
+    while (!file.atEnd()) {
+        const QByteArray line = file.readLine();
+        if (line.trimmed().isEmpty()) continue;
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+            result.warnings.append(QStringLiteral("%1 存在无法解析的记录").arg(path));
+            continue;
+        }
+        const QJsonObject object = document.object();
+        const quint64 sequence = static_cast<quint64>(object.value(QStringLiteral("sequence")).toDouble(0));
+        if (boundary != 0 && sequence != 0 && sequence > boundary) continue;
+        const qint64 timestamp = isoMillisLocal(object.value(QStringLiteral("timestamp")).toString());
+        if (timestamp == std::numeric_limits<qint64>::min()) {
+            result.warnings.append(QStringLiteral("%1 存在无效 timestamp").arg(path));
+            continue;
+        }
+        result.earliest = qMin(result.earliest, timestamp);
+        result.latest = qMax(result.latest, timestamp);
+        if (timestamp >= startMs && timestamp <= endMs) {
+            const QJsonObject tagged = tagWindowObject(object, QStringLiteral("formal"), runId, directory);
+            result.lines += QJsonDocument(tagged).toJson(QJsonDocument::Compact) + '\n';
+            result.objects.append(tagged);
+            ++result.formalCount;
+            result.includedEarliest = qMin(result.includedEarliest, timestamp);
+            result.includedLatest = qMax(result.includedLatest, timestamp);
+        }
+        if (timestamp <= startMs && timestamp >= beforeMs) {
+            before = object;
+            beforeMs = timestamp;
+            beforeSequence = sequence;
+        }
+        if (timestamp >= endMs && timestamp <= afterMs) {
+            after = object;
+            afterMs = timestamp;
+            afterSequence = sequence;
+        }
+    }
+
+    const auto appendContext = [&](const QJsonObject &object,
+                                   quint64 sequence,
+                                   const QString &role) {
+        if (object.isEmpty()) return;
+        const qint64 timestamp = isoMillisLocal(object.value(QStringLiteral("timestamp")).toString());
+        if (timestamp >= startMs && timestamp <= endMs) return;
+        const QJsonObject tagged = tagWindowObject(object, role, runId, directory);
+        result.lines += QJsonDocument(tagged).toJson(QJsonDocument::Compact) + '\n';
+        result.objects.append(tagged);
+        result.includedEarliest = qMin(result.includedEarliest, timestamp);
+        result.includedLatest = qMax(result.includedLatest, timestamp);
+        Q_UNUSED(sequence);
+        ++result.contextCount;
+    };
+    appendContext(before, beforeSequence, QStringLiteral("boundary-before"));
+    if (afterSequence != beforeSequence)
+        appendContext(after, afterSequence, QStringLiteral("boundary-after"));
+    return result;
+}
+
+JsonWindowScan scanEventHistoryFile(const QString &path,
+                                    const QString &runId,
+                                    const QString &directory,
+                                    qint64 startMs,
+                                    qint64 endMs,
+                                    quint64 boundary)
+{
+    JsonWindowScan result;
+    QFile file(path);
+    if (!file.exists()) return result;
+    result.exists = true;
+    if (!file.open(QIODevice::ReadOnly)) {
+        result.warnings.append(QStringLiteral("无法读取 %1：%2").arg(path, file.errorString()));
+        return result;
+    }
+    while (!file.atEnd()) {
+        const QByteArray line = file.readLine();
+        if (line.trimmed().isEmpty()) continue;
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(line, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+            result.warnings.append(QStringLiteral("%1 存在无法解析的记录").arg(path));
+            continue;
+        }
+        const QJsonObject object = document.object();
+        const quint64 sequence = static_cast<quint64>(object.value(QStringLiteral("sequence")).toDouble(0));
+        if (boundary != 0 && sequence != 0 && sequence > boundary) continue;
+        const qint64 timestamp = isoMillisLocal(object.value(QStringLiteral("timestamp")).toString());
+        if (timestamp == std::numeric_limits<qint64>::min()) {
+            result.warnings.append(QStringLiteral("%1 存在无效 timestamp").arg(path));
+            continue;
+        }
+        result.earliest = qMin(result.earliest, timestamp);
+        result.latest = qMax(result.latest, timestamp);
+        if (timestamp < startMs || timestamp > endMs) continue;
+        const QJsonObject tagged = tagWindowObject(object, QStringLiteral("formal"), runId, directory);
+        result.lines += QJsonDocument(tagged).toJson(QJsonDocument::Compact) + '\n';
+        result.objects.append(tagged);
+        ++result.formalCount;
+        result.includedEarliest = qMin(result.includedEarliest, timestamp);
+        result.includedLatest = qMax(result.includedLatest, timestamp);
+    }
+    return result;
+}
+
+JsonWindowScan scanRuntimeFile(const QString &path,
+                               qint64 startMs,
+                               qint64 endMs,
+                               quint64 boundary)
+{
+    JsonWindowScan result;
+    QFile file(path);
+    if (!file.exists()) return result;
+    result.exists = true;
+    if (!file.open(QIODevice::ReadOnly)) {
+        result.warnings.append(QStringLiteral("无法读取 %1：%2").arg(path, file.errorString()));
+        return result;
+    }
+    const QRegularExpression expression(QStringLiteral("^\\[seq=(\\d+)\\] \\[(.*?)\\]"));
+    while (!file.atEnd()) {
+        const QByteArray line = file.readLine();
+        const QRegularExpressionMatch match = expression.match(QString::fromUtf8(line));
+        if (!match.hasMatch()) {
+            result.warnings.append(QStringLiteral("%1 存在无序号记录").arg(path));
+            continue;
+        }
+        bool ok = false;
+        const quint64 sequence = match.captured(1).toULongLong(&ok);
+        const qint64 timestamp = isoMillisLocal(match.captured(2));
+        if (!ok || timestamp == std::numeric_limits<qint64>::min()) {
+            result.warnings.append(QStringLiteral("%1 存在无效 timestamp").arg(path));
+            continue;
+        }
+        if (boundary != 0 && sequence != 0 && sequence > boundary) continue;
+        result.earliest = qMin(result.earliest, timestamp);
+        result.latest = qMax(result.latest, timestamp);
+        if (timestamp >= startMs && timestamp <= endMs) {
+            result.lines += line;
+            ++result.formalCount;
+            result.includedEarliest = qMin(result.includedEarliest, timestamp);
+            result.includedLatest = qMax(result.includedLatest, timestamp);
+        }
+    }
+    return result;
+}
+
+} // namespace
+
 DiagnosticRecorder *DiagnosticRecorder::instance() { std::lock_guard<std::mutex> guard(g_instanceMutex); return g_instance; }
 DiagnosticRecorder *DiagnosticRecorder::initialize(const Options &options, QString *error) { std::lock_guard<std::mutex> guard(g_instanceMutex); if (g_instance) return g_instance; DiagnosticRecorder *recorder = new DiagnosticRecorder(options); if (error && recorder->status().writeError) *error = recorder->status().writeErrorText; g_instance = recorder; return recorder; }
 DiagnosticRecorder *DiagnosticRecorder::initialize(QString *error) { return initialize(Options(), error); }
@@ -930,6 +1146,70 @@ DiagnosticRecorder::ExportRequest DiagnosticRecorder::captureExportRequest(quint
         return state->flushTo(boundary, 5000);
     };
     return request;
+}
+
+DiagnosticRecorder::TimeWindowRequest DiagnosticRecorder::captureTimeWindowRequest(
+    const QDateTime &startLocal,
+    const QDateTime &endLocal,
+    const QString &note) const
+{
+    TimeWindowRequest result;
+    result.requestedStartTime = startLocal.toString(Qt::ISODateWithMs);
+    result.requestedEndTime = endLocal.toString(Qt::ISODateWithMs);
+    result.exportCapturedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    result.note = note;
+    result.rootDirectory = m_state ? m_state->rootDirectory : QString();
+    if (!startLocal.isValid() || !endLocal.isValid()) {
+        result.validationError = QStringLiteral("时间窗无效");
+        return result;
+    }
+    if (startLocal > endLocal) {
+        result.validationError = QStringLiteral("开始时间必须早于或等于结束时间");
+        return result;
+    }
+
+    const qint64 startMs = startLocal.toMSecsSinceEpoch();
+    const qint64 endMs = endLocal.toMSecsSinceEpoch();
+    const QVector<RunInfo> runs = enumerateRuns(result.rootDirectory);
+    const QString liveDirectory = runDirectory();
+    bool liveIncluded = false;
+    for (const RunInfo &run : runs) {
+        const qint64 earliest = isoMillisLocal(run.earliestIsoTime.isEmpty()
+                                                   ? run.startIsoTime : run.earliestIsoTime);
+        qint64 latest = isoMillisLocal(run.latestIsoTime.isEmpty()
+                                           ? run.endIsoTime : run.latestIsoTime);
+        if (run.active || latest == std::numeric_limits<qint64>::min())
+            latest = qMax(latest, QDateTime::currentDateTime().toMSecsSinceEpoch());
+        const bool overlap = earliest == std::numeric_limits<qint64>::min()
+            || latest == std::numeric_limits<qint64>::min()
+            || (earliest <= endMs && latest >= startMs);
+        if (!overlap) continue;
+        if (!liveDirectory.isEmpty()
+            && QFileInfo(run.directory).absoluteFilePath()
+                == QFileInfo(liveDirectory).absoluteFilePath()) {
+            result.sources.append(captureExportRequest(captureBoundary(), note));
+            liveIncluded = true;
+            continue;
+        }
+        ExportRequest source;
+        source.runId = run.runId;
+        source.sourceDirectory = run.directory;
+        source.startIsoTime = run.startIsoTime;
+        source.endIsoTime = run.endIsoTime;
+        source.boundarySequence = run.lastSequence;
+        source.sourceWasActive = run.active;
+        source.note = note;
+        result.sources.append(source);
+    }
+    if (!liveIncluded && m_state && !liveDirectory.isEmpty()) {
+        // The active manifest may not have been rewritten yet.  Always include
+        // the immutable live cut when its run could overlap the requested now.
+        const qint64 liveStart = isoMillisLocal(m_state->startIsoTime);
+        if (liveStart == std::numeric_limits<qint64>::min()
+            || (liveStart <= endMs && QDateTime::currentDateTime().toMSecsSinceEpoch() >= startMs))
+            result.sources.append(captureExportRequest(captureBoundary(), note));
+    }
+    return result;
 }
 DiagnosticRecorder::ExportResult DiagnosticRecorder::exportRun(const QString &targetZipPath, quint64 boundarySequence, const QString &note) { return exportRequest(captureExportRequest(boundarySequence, note), targetZipPath); }
 std::future<DiagnosticRecorder::ExportResult> DiagnosticRecorder::exportRunAsync(const QString &targetZipPath, quint64 boundarySequence, const QString &note) { const ExportRequest request = captureExportRequest(boundarySequence, note); return std::async(std::launch::async, [request, targetZipPath] { return DiagnosticRecorder::exportRequest(request, targetZipPath); }); }
@@ -983,6 +1263,275 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportRequest(const ExportR
     result.success = true; result.missingFiles = missing; result.truncationReasons = truncationReasons; return result;
 }
 
+DiagnosticRecorder::ExportResult DiagnosticRecorder::exportTimeWindow(
+    const TimeWindowRequest &request,
+    const QString &targetZipPath)
+{
+    ExportResult result;
+    result.targetPath = targetZipPath;
+    if (!request.validationError.isEmpty()) {
+        result.error = request.validationError;
+        return result;
+    }
+    if (targetZipPath.isEmpty()) {
+        result.error = QStringLiteral("target ZIP path is empty");
+        return result;
+    }
+    if (QFileInfo::exists(targetZipPath)) {
+        result.error = QStringLiteral("目标文件已存在，请选择新的文件名");
+        return result;
+    }
+
+    const qint64 startMs = isoMillisLocal(request.requestedStartTime);
+    const qint64 endMs = isoMillisLocal(request.requestedEndTime);
+    if (startMs == std::numeric_limits<qint64>::min()
+        || endMs == std::numeric_limits<qint64>::min() || startMs > endMs) {
+        result.error = QStringLiteral("时间窗无效");
+        return result;
+    }
+
+    QByteArray runtime;
+    QByteArray events;
+    QByteArray networkHistory;
+    QByteArray settingsHistory;
+    QByteArray cardHistory;
+    QJsonArray networkObjects;
+    QJsonArray settingsObjects;
+    QJsonArray cardObjects;
+    QStringList missing;
+    QStringList truncationReasons;
+    QSet<QString> sourceIds;
+    QJsonArray activeSources;
+    QJsonArray incompleteSources;
+    DiagnosticRecorder::DropCounters drops;
+    bool anyWriteError = false;
+    QString writeErrorText;
+    int formalEvents = 0;
+    int formalRuntime = 0;
+    int formalNetwork = 0;
+    int formalSettings = 0;
+    int formalCards = 0;
+    int contextNetwork = 0;
+    int contextSettings = 0;
+    int contextCards = 0;
+    qint64 includedEarliest = std::numeric_limits<qint64>::max();
+    qint64 includedLatest = std::numeric_limits<qint64>::min();
+
+    const auto updateIncludedBounds = [&](const JsonWindowScan &scan) {
+        if (scan.includedEarliest != std::numeric_limits<qint64>::max())
+            includedEarliest = qMin(includedEarliest, scan.includedEarliest);
+        if (scan.includedLatest != std::numeric_limits<qint64>::min())
+            includedLatest = qMax(includedLatest, scan.includedLatest);
+    };
+    const auto appendWarnings = [&](const JsonWindowScan &scan) {
+        truncationReasons.append(scanWarnings(scan));
+    };
+    const auto mergeDrops = [&](const DiagnosticRecorder::DropCounters &value) {
+        drops.queueDropped += value.queueDropped;
+        drops.criticalQueueDropped += value.criticalQueueDropped;
+        drops.noiseDropped += value.noiseDropped;
+        drops.writeFallbackDropped += value.writeFallbackDropped;
+    };
+
+    for (const ExportRequest &source : request.sources) {
+        if (source.runId.isEmpty() || source.sourceDirectory.isEmpty()) continue;
+        sourceIds.insert(source.runId);
+        if (source.sourceWasActive || runIsActive(source.sourceDirectory))
+            activeSources.append(source.runId);
+        else if (!source.endIsoTime.isEmpty())
+            ;
+        else
+            incompleteSources.append(source.runId);
+
+        if (source.flushBeforeExport && !source.flushBeforeExport())
+            truncationReasons.append(QStringLiteral("运行 %1 导出前刷新未完成或发生写入错误").arg(source.runId));
+        mergeDrops(source.drops);
+        anyWriteError = anyWriteError || source.writeError;
+        if (writeErrorText.isEmpty()) writeErrorText = source.writeErrorText;
+
+        const JsonWindowScan eventScan = scanEventHistoryFile(
+            QDir(source.sourceDirectory).filePath(QStringLiteral("events.jsonl")),
+            source.runId, source.sourceDirectory, startMs, endMs, source.boundarySequence);
+        const JsonWindowScan runtimeScan = scanRuntimeFile(
+            QDir(source.sourceDirectory).filePath(QStringLiteral("runtime.log")),
+            startMs, endMs, source.boundarySequence);
+        const JsonWindowScan networkScan = scanJsonHistoryFile(
+            QDir(source.sourceDirectory).filePath(QStringLiteral("network_history.jsonl")),
+            source.runId, source.sourceDirectory, startMs, endMs, source.boundarySequence,
+            QStringLiteral("network"));
+        const JsonWindowScan settingsScan = scanJsonHistoryFile(
+            QDir(source.sourceDirectory).filePath(QStringLiteral("settings_history.jsonl")),
+            source.runId, source.sourceDirectory, startMs, endMs, source.boundarySequence,
+            QStringLiteral("settings"));
+        const JsonWindowScan cardScan = scanJsonHistoryFile(
+            QDir(source.sourceDirectory).filePath(QStringLiteral("card_history.jsonl")),
+            source.runId, source.sourceDirectory, startMs, endMs, source.boundarySequence,
+            QStringLiteral("card"));
+
+        const auto requireFile = [&](const JsonWindowScan &scan, const QString &name) {
+            if (!scan.exists)
+                missing.append(QStringLiteral("%1/%2").arg(source.runId, name));
+        };
+        requireFile(eventScan, QStringLiteral("events.jsonl"));
+        requireFile(runtimeScan, QStringLiteral("runtime.log"));
+        requireFile(networkScan, QStringLiteral("network_history.jsonl"));
+        requireFile(settingsScan, QStringLiteral("settings_history.jsonl"));
+        requireFile(cardScan, QStringLiteral("card_history.jsonl"));
+        appendWarnings(eventScan);
+        appendWarnings(runtimeScan);
+        appendWarnings(networkScan);
+        appendWarnings(settingsScan);
+        appendWarnings(cardScan);
+
+        events += eventScan.lines;
+        runtime += runtimeScan.lines;
+        networkHistory += networkScan.lines;
+        settingsHistory += settingsScan.lines;
+        cardHistory += cardScan.lines;
+        for (const QJsonValue &value : networkScan.objects) networkObjects.append(value);
+        for (const QJsonValue &value : settingsScan.objects) settingsObjects.append(value);
+        for (const QJsonValue &value : cardScan.objects) cardObjects.append(value);
+        formalEvents += eventScan.formalCount;
+        formalRuntime += runtimeScan.formalCount;
+        formalNetwork += networkScan.formalCount;
+        formalSettings += settingsScan.formalCount;
+        formalCards += cardScan.formalCount;
+        contextNetwork += networkScan.contextCount;
+        contextSettings += settingsScan.contextCount;
+        contextCards += cardScan.contextCount;
+        updateIncludedBounds(eventScan);
+        updateIncludedBounds(runtimeScan);
+        updateIncludedBounds(networkScan);
+        updateIncludedBounds(settingsScan);
+        updateIncludedBounds(cardScan);
+    }
+
+    result.sourceRunCount = sourceIds.size();
+    result.noRecords = formalEvents == 0 && formalRuntime == 0
+        && formalNetwork == 0 && formalSettings == 0 && formalCards == 0;
+    result.formalWindowRecordCounts = QJsonObject{
+        {QStringLiteral("events"), formalEvents},
+        {QStringLiteral("runtime"), formalRuntime},
+        {QStringLiteral("network"), formalNetwork},
+        {QStringLiteral("settings"), formalSettings},
+        {QStringLiteral("card"), formalCards}
+    };
+    result.boundaryContextCounts = QJsonObject{
+        {QStringLiteral("network"), contextNetwork},
+        {QStringLiteral("settings"), contextSettings},
+        {QStringLiteral("card"), contextCards}
+    };
+
+    QJsonObject networkDocument = makeSnapshotDocument(
+        QStringLiteral("time-window"), 0, networkObjects, cardObjects);
+    networkDocument.insert(QStringLiteral("requestedStartTime"), request.requestedStartTime);
+    networkDocument.insert(QStringLiteral("requestedEndTime"), request.requestedEndTime);
+    QJsonObject settingsDocument = makeSnapshotDocument(
+        QStringLiteral("time-window"), 0, settingsObjects);
+    settingsDocument.insert(QStringLiteral("requestedStartTime"), request.requestedStartTime);
+    settingsDocument.insert(QStringLiteral("requestedEndTime"), request.requestedEndTime);
+
+    QStringList summaryLines;
+    summaryLines << QStringLiteral("MC410T 时间窗诊断导出")
+                 << QStringLiteral("正式时间窗：[ %1, %2 ]").arg(request.requestedStartTime, request.requestedEndTime)
+                 << QStringLiteral("导出捕获时间：%1").arg(request.exportCapturedAt)
+                 << QStringLiteral("源 run 数：%1").arg(result.sourceRunCount)
+                 << QStringLiteral("正式记录：events=%1, runtime=%2, network=%3, settings=%4, card=%5")
+                       .arg(formalEvents).arg(formalRuntime).arg(formalNetwork)
+                       .arg(formalSettings).arg(formalCards)
+                 << QStringLiteral("窗口外边界上下文：network=%1, settings=%2, card=%3")
+                       .arg(contextNetwork).arg(contextSettings).arg(contextCards);
+    if (result.noRecords)
+        summaryLines << QStringLiteral("该时间段没有日志（没有正式时间窗记录）。");
+    if (!request.note.isEmpty()) summaryLines << QStringLiteral("现场说明：%1").arg(request.note);
+    if (!missing.isEmpty()) summaryLines << QStringLiteral("缺失文件：%1").arg(missing.join(QStringLiteral("；")));
+    if (!truncationReasons.isEmpty())
+        summaryLines << QStringLiteral("完整性说明：%1").arg(truncationReasons.join(QStringLiteral("；")));
+
+    QJsonObject manifest;
+    manifest.insert(QStringLiteral("formatVersion"), 2);
+    manifest.insert(QStringLiteral("exportType"), QStringLiteral("time-window"));
+    manifest.insert(QStringLiteral("requestedStartTime"), request.requestedStartTime);
+    manifest.insert(QStringLiteral("requestedEndTime"), request.requestedEndTime);
+    manifest.insert(QStringLiteral("exportCapturedAt"), request.exportCapturedAt);
+    QJsonArray sourceRunIds;
+    for (const QString &id : sourceIds) sourceRunIds.append(id);
+    manifest.insert(QStringLiteral("sourceRunIds"), sourceRunIds);
+    manifest.insert(QStringLiteral("sourceRunCount"), result.sourceRunCount);
+    manifest.insert(QStringLiteral("formalWindowRecordCounts"), result.formalWindowRecordCounts);
+    manifest.insert(QStringLiteral("boundaryContextCounts"), result.boundaryContextCounts);
+    manifest.insert(QStringLiteral("actualEarliestIncludedTime"),
+                    isoFromMillis(includedEarliest));
+    manifest.insert(QStringLiteral("actualLatestIncludedTime"),
+                    isoFromMillis(includedLatest));
+    manifest.insert(QStringLiteral("activeSourceRunIds"), activeSources);
+    manifest.insert(QStringLiteral("incompleteSourceRunIds"), incompleteSources);
+    manifest.insert(QStringLiteral("missingFiles"), QJsonArray::fromStringList(missing));
+    manifest.insert(QStringLiteral("truncationReasons"), QJsonArray::fromStringList(truncationReasons));
+    manifest.insert(QStringLiteral("recorderWriteError"), anyWriteError);
+    if (!writeErrorText.isEmpty()) manifest.insert(QStringLiteral("recorderWriteErrorText"), writeErrorText);
+    QJsonObject dropObject;
+    dropObject.insert(QStringLiteral("queueDropped"), static_cast<double>(drops.queueDropped));
+    dropObject.insert(QStringLiteral("criticalQueueDropped"), static_cast<double>(drops.criticalQueueDropped));
+    dropObject.insert(QStringLiteral("noiseDropped"), static_cast<double>(drops.noiseDropped));
+    dropObject.insert(QStringLiteral("writeFallbackDropped"), static_cast<double>(drops.writeFallbackDropped));
+    manifest.insert(QStringLiteral("recorderDropCounters"), dropObject);
+    manifest.insert(QStringLiteral("note"), request.note);
+
+    QHash<QString, QByteArray> contents;
+    contents.insert(QStringLiteral("runtime.log"), runtime);
+    contents.insert(QStringLiteral("events.jsonl"), events);
+    contents.insert(QStringLiteral("network_history.jsonl"), networkHistory);
+    contents.insert(QStringLiteral("settings_history.jsonl"), settingsHistory);
+    contents.insert(QStringLiteral("card_history.jsonl"), cardHistory);
+    contents.insert(QStringLiteral("network.json"), jsonBytes(networkDocument) + '\n');
+    contents.insert(QStringLiteral("settings.json"), jsonBytes(settingsDocument) + '\n');
+    contents.insert(QStringLiteral("summary.txt"), (summaryLines.join(QStringLiteral("\n")) + '\n').toUtf8());
+    contents.insert(QStringLiteral("manifest.json"), jsonBytes(manifest) + '\n');
+
+    const QFileInfo targetInfo(targetZipPath);
+    if (!QDir().mkpath(targetInfo.absolutePath())) {
+        result.error = QStringLiteral("create target directory failed: %1").arg(targetInfo.absolutePath());
+        result.missingFiles = missing;
+        result.truncationReasons = truncationReasons;
+        return result;
+    }
+    const QString temporaryPath = targetZipPath + QStringLiteral(".part-")
+        + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QString error;
+    ZipWriter writer(temporaryPath);
+    bool ok = writer.open(&error);
+    for (auto it = contents.constBegin(); ok && it != contents.constEnd(); ++it)
+        ok = writer.addStored(it.key(), it.value(), &error);
+    if (ok) ok = writer.close(&error);
+    if (!ok) {
+        writer.cancel();
+        QFile::remove(temporaryPath);
+        result.error = error;
+        result.missingFiles = missing;
+        result.truncationReasons = truncationReasons;
+        return result;
+    }
+    if (!QFile::rename(temporaryPath, targetZipPath)) {
+        QFile::remove(temporaryPath);
+        result.error = QStringLiteral("publish target ZIP failed");
+        return result;
+    }
+    result.success = true;
+    result.missingFiles = missing;
+    result.truncationReasons = truncationReasons;
+    return result;
+}
+
+std::future<DiagnosticRecorder::ExportResult> DiagnosticRecorder::exportTimeWindowAsync(
+    const TimeWindowRequest &request,
+    const QString &targetZipPath) const
+{
+    return std::async(std::launch::async, [request, targetZipPath] {
+        return DiagnosticRecorder::exportTimeWindow(request, targetZipPath);
+    });
+}
+
 QVector<DiagnosticRecorder::RunInfo> DiagnosticRecorder::enumerateRuns(const QString &rootDirectory)
 {
     const QString rootPath = rootDirectory.trimmed().isEmpty() ? defaultRootDirectoryLocal() : rootDirectory; QVector<RunInfo> result; QDir root(rootPath);
@@ -1002,6 +1551,15 @@ QVector<DiagnosticRecorder::RunInfo> DiagnosticRecorder::enumerateRuns(const QSt
         // Recover the best safe cutoff from append-only files so a historical
         // export remains useful instead of silently exporting an empty run.
         run.lastSequence = qMax(run.lastSequence, maxSequenceOnDisk(run.directory));
+        const JsonWindowScan eventBounds = scanEventHistoryFile(
+            QDir(run.directory).filePath(QStringLiteral("events.jsonl")),
+            run.runId, run.directory,
+            std::numeric_limits<qint64>::min(),
+            std::numeric_limits<qint64>::max(), 0);
+        run.earliestIsoTime = isoFromMillis(eventBounds.includedEarliest);
+        run.latestIsoTime = isoFromMillis(eventBounds.includedLatest);
+        if (run.earliestIsoTime.isEmpty()) run.earliestIsoTime = run.startIsoTime;
+        if (run.latestIsoTime.isEmpty()) run.latestIsoTime = run.endIsoTime;
         if (run.runId.isEmpty()) run.runId = info.fileName(); result.append(run);
     }
     return result;

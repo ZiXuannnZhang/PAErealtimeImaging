@@ -26,6 +26,7 @@ set(SOURCES
     src/main.cpp
     src/DiagnosticRecorder.cpp
     src/DiagnosticExportDialog.cpp
+    src/MeasurementSession.cpp
     src/NetworkDiagnostics.cpp
     src/DataProcessor.cpp
     src/FileSaver.cpp
@@ -46,6 +47,7 @@ set(HEADERS
     include/Constants.h
     include/DiagnosticRecorder.h
     include/DiagnosticExportDialog.h
+    include/MeasurementSession.h
     include/NetworkDiagnostics.h
     include/AcqConfig.h
     include/DataTypes.h
