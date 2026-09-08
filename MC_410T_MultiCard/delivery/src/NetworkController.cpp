@@ -1739,6 +1739,20 @@ bool NetworkController::doSendStartMeasureCard(int cardIndex,
     }
     if (outSuccess) *outSuccess = successCount;
     if (outFail) *outFail = failCount;
+    if (successCount != 1) {
+        QJsonObject fence;
+        fence.insert(QStringLiteral("measurementSessionId"), m_measurementSessionId);
+        fence.insert(QStringLiteral("configId"), m_currentConfigId);
+        fence.insert(QStringLiteral("cardIndex"), cardIndex);
+        fence.insert(QStringLiteral("targetIP"),
+                     cardIndex >= 0 && cardIndex < m_targetIPs.size()
+                         ? m_targetIPs[cardIndex] : QString());
+        fence.insert(QStringLiteral("localStartSendSucceeded"), false);
+        fence.insert(QStringLiteral("startFenceCommitted"), false);
+        recordDiagnosticEvent(QStringLiteral("network.measure"),
+                              QStringLiteral("measurement_start_fence"),
+                              DiagnosticRecorder::Severity::Error, fence);
+    }
     if (successCount == 1 && failCount == 0) {
         emit statusMessage(QString("卡%1 开始测量命令已发送")
                           .arg(cardIndex + 1));
@@ -2039,6 +2053,7 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
                 fence.insert(QStringLiteral("targetIP"),
                              cardIndex >= 0 && cardIndex < m_targetIPs.size()
                                  ? m_targetIPs[cardIndex] : QString());
+                fence.insert(QStringLiteral("localStartSendSucceeded"), true);
                 fence.insert(QStringLiteral("startFenceCommitted"), committed);
                 recordDiagnosticEvent(QStringLiteral("network.measure"),
                                       QStringLiteral("measurement_start_fence"),
