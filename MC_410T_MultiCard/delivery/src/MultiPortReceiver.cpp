@@ -1,5 +1,6 @@
 ﻿#include "MultiPortReceiver.h"
 #include <QDebug>
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 
@@ -23,6 +24,11 @@ MultiPortReceiver::MultiPortReceiver(
     , m_testNoSockets(testNoSockets)
 {
     m_recvBuf.resize(RECV_BUF_SIZE);
+    for (size_t i = 0; i < m_cardAdmissionStates.size(); ++i) {
+        m_cardAdmissionStates[i].store(static_cast<int>(AdmissionState::Disarmed),
+                                       std::memory_order_relaxed);
+        m_cardSessionTokens[i].store(0, std::memory_order_relaxed);
+    }
     setObjectName(QString("MultiPortReceiver_%1").arg(cardIndices.empty() ? -1 : cardIndices[0]));
 }
 
@@ -89,24 +95,29 @@ void MultiPortReceiver::requestStop() {
 bool MultiPortReceiver::prepareSession(uint64_t sessionToken, int timeoutMs)
 {
     return sessionToken != 0
-        && postSessionCommand(SessionCommandKind::Prepare, sessionToken, timeoutMs);
+        && postSessionCommand(SessionCommandKind::Prepare, sessionToken, -1, timeoutMs);
 }
 
 bool MultiPortReceiver::armSession(uint64_t sessionToken, int timeoutMs)
 {
     return sessionToken != 0
-        && postSessionCommand(SessionCommandKind::Arm, sessionToken, timeoutMs);
+        && postSessionCommand(SessionCommandKind::Arm, sessionToken, -1, timeoutMs);
 }
 
-bool MultiPortReceiver::commitSession(uint64_t sessionToken, int timeoutMs)
+bool MultiPortReceiver::commitCardSession(uint64_t sessionToken,
+                                          int cardIndex,
+                                          int timeoutMs)
 {
-    return sessionToken != 0
-        && postSessionCommand(SessionCommandKind::Commit, sessionToken, timeoutMs);
+    const bool ownsCard = std::find(m_cardIndices.begin(), m_cardIndices.end(), cardIndex)
+                          != m_cardIndices.end();
+    return sessionToken != 0 && cardIndex >= 0 && ownsCard
+        && postSessionCommand(SessionCommandKind::CommitCard, sessionToken,
+                              cardIndex, timeoutMs);
 }
 
 bool MultiPortReceiver::disarmSession(int timeoutMs)
 {
-    return postSessionCommand(SessionCommandKind::Disarm, 0, timeoutMs);
+    return postSessionCommand(SessionCommandKind::Disarm, 0, -1, timeoutMs);
 }
 
 void MultiPortReceiver::setCompatibilityAdmission(bool enable,
@@ -114,10 +125,20 @@ void MultiPortReceiver::setCompatibilityAdmission(bool enable,
 {
     if (enable && sessionToken != 0) {
         m_sessionToken.store(sessionToken, std::memory_order_release);
+        for (size_t i = 0; i < m_cardIndices.size() && i < m_cardAdmissionStates.size(); ++i) {
+            m_cardSessionTokens[i].store(sessionToken, std::memory_order_release);
+            m_cardAdmissionStates[i].store(static_cast<int>(AdmissionState::Running),
+                                           std::memory_order_release);
+        }
         m_admissionState.store(static_cast<int>(AdmissionState::Running),
                                std::memory_order_release);
     } else {
         m_sessionToken.store(0, std::memory_order_release);
+        for (size_t i = 0; i < m_cardIndices.size() && i < m_cardAdmissionStates.size(); ++i) {
+            m_cardSessionTokens[i].store(0, std::memory_order_release);
+            m_cardAdmissionStates[i].store(static_cast<int>(AdmissionState::Disarmed),
+                                           std::memory_order_release);
+        }
         m_admissionState.store(static_cast<int>(AdmissionState::Disarmed),
                                std::memory_order_release);
     }
@@ -125,13 +146,15 @@ void MultiPortReceiver::setCompatibilityAdmission(bool enable,
 
 bool MultiPortReceiver::postSessionCommand(SessionCommandKind kind,
                                            uint64_t sessionToken,
+                                           int cardIndex,
                                            int timeoutMs)
 {
     if (!m_active.load(std::memory_order_acquire)) return false;
     auto wait = std::make_shared<SessionCommandWait>();
     {
         std::lock_guard<std::mutex> lock(m_commandMutex);
-        m_commands.push_back(SessionCommand{kind, sessionToken, timeoutMs, wait});
+        m_commands.push_back(SessionCommand{kind, sessionToken, cardIndex,
+                                            timeoutMs, wait});
     }
     m_commandCv.notify_one();
     std::unique_lock<std::mutex> lock(wait->mutex);
@@ -169,9 +192,17 @@ bool MultiPortReceiver::applySessionCommand(const SessionCommand& command)
         m_admissionState.store(static_cast<int>(AdmissionState::Preparing),
                                std::memory_order_release);
         m_sessionToken.store(0, std::memory_order_release);
+        for (size_t i = 0; i < m_cardIndices.size() && i < m_cardAdmissionStates.size(); ++i) {
+            m_cardSessionTokens[i].store(0, std::memory_order_release);
+            m_cardAdmissionStates[i].store(static_cast<int>(AdmissionState::Preparing),
+                                           std::memory_order_release);
+        }
         if (!drainSocketBacklog(command.timeoutMs)) {
             m_admissionState.store(static_cast<int>(AdmissionState::Disarmed),
                                    std::memory_order_release);
+            for (size_t i = 0; i < m_cardIndices.size() && i < m_cardAdmissionStates.size(); ++i)
+                m_cardAdmissionStates[i].store(static_cast<int>(AdmissionState::Disarmed),
+                                               std::memory_order_release);
             return false;
         }
         return true;
@@ -180,26 +211,72 @@ bool MultiPortReceiver::applySessionCommand(const SessionCommand& command)
             !drainSocketBacklog(command.timeoutMs))
             return false;
         // ARMED is deliberately still closed to datagram admission.  The
-        // controller opens it only after the hardware Start send succeeds.
+        // controller opens each card only after that card's hardware Start
+        // send succeeds.
         m_sessionToken.store(command.sessionToken, std::memory_order_release);
+        for (size_t i = 0; i < m_cardIndices.size() && i < m_cardAdmissionStates.size(); ++i) {
+            m_cardSessionTokens[i].store(command.sessionToken, std::memory_order_release);
+            m_cardAdmissionStates[i].store(static_cast<int>(AdmissionState::Armed),
+                                           std::memory_order_release);
+        }
         m_admissionState.store(static_cast<int>(AdmissionState::Armed),
                                std::memory_order_release);
         return true;
-    case SessionCommandKind::Commit:
-        if (command.sessionToken == 0 ||
-            m_sessionToken.load(std::memory_order_acquire) != command.sessionToken ||
-            admissionState() != AdmissionState::Armed)
+    case SessionCommandKind::CommitCard: {
+        int localIndex = -1;
+        for (int i = 0; i < static_cast<int>(m_cardIndices.size()); ++i) {
+            if (m_cardIndices[static_cast<size_t>(i)] == command.cardIndex) {
+                localIndex = i;
+                break;
+            }
+        }
+        if (command.sessionToken == 0 || localIndex < 0 ||
+            localIndex >= static_cast<int>(m_cardAdmissionStates.size()) ||
+            m_cardSessionTokens[static_cast<size_t>(localIndex)].load(std::memory_order_acquire)
+                != command.sessionToken ||
+            m_cardAdmissionStates[static_cast<size_t>(localIndex)].load(std::memory_order_acquire)
+                != static_cast<int>(AdmissionState::Armed))
             return false;
-        m_admissionState.store(static_cast<int>(AdmissionState::Running),
-                               std::memory_order_release);
+        m_cardAdmissionStates[static_cast<size_t>(localIndex)].store(
+            static_cast<int>(AdmissionState::Running), std::memory_order_release);
+        updateAggregateAdmissionState();
         return true;
+    }
     case SessionCommandKind::Disarm:
         m_admissionState.store(static_cast<int>(AdmissionState::Disarmed),
                                std::memory_order_release);
         m_sessionToken.store(0, std::memory_order_release);
+        for (size_t i = 0; i < m_cardIndices.size() && i < m_cardAdmissionStates.size(); ++i) {
+            m_cardSessionTokens[i].store(0, std::memory_order_release);
+            m_cardAdmissionStates[i].store(static_cast<int>(AdmissionState::Disarmed),
+                                           std::memory_order_release);
+        }
         return drainSocketBacklog(command.timeoutMs);
     }
     return false;
+}
+
+void MultiPortReceiver::updateAggregateAdmissionState()
+{
+    if (m_cardIndices.empty()) {
+        m_admissionState.store(static_cast<int>(AdmissionState::Disarmed),
+                               std::memory_order_release);
+        return;
+    }
+    bool allRunning = true;
+    bool anyPreparing = false;
+    bool anyArmed = false;
+    for (size_t i = 0; i < m_cardIndices.size() && i < m_cardAdmissionStates.size(); ++i) {
+        const int state = m_cardAdmissionStates[i].load(std::memory_order_acquire);
+        allRunning = allRunning && state == static_cast<int>(AdmissionState::Running);
+        anyPreparing = anyPreparing || state == static_cast<int>(AdmissionState::Preparing);
+        anyArmed = anyArmed || state == static_cast<int>(AdmissionState::Armed);
+    }
+    const AdmissionState aggregate = allRunning
+        ? AdmissionState::Running
+        : (anyPreparing ? AdmissionState::Preparing
+                       : (anyArmed ? AdmissionState::Armed : AdmissionState::Disarmed));
+    m_admissionState.store(static_cast<int>(aggregate), std::memory_order_release);
 }
 
 bool MultiPortReceiver::drainSocketBacklog(int timeoutMs)
@@ -252,8 +329,13 @@ bool MultiPortReceiver::dispatchDatagram(const char* bytes, int length, int sock
 
     DataProcessor* processor = m_processors[socketIndex];
     processor->stats().socketPacketsReceived.fetch_add(1, std::memory_order_relaxed);
-    const AdmissionState state = admissionState();
-    const uint64_t token = m_sessionToken.load(std::memory_order_acquire);
+    const AdmissionState state = socketIndex < static_cast<int>(m_cardAdmissionStates.size())
+        ? static_cast<AdmissionState>(m_cardAdmissionStates[static_cast<size_t>(socketIndex)]
+                                          .load(std::memory_order_acquire))
+        : AdmissionState::Disarmed;
+    const uint64_t token = socketIndex < static_cast<int>(m_cardSessionTokens.size())
+        ? m_cardSessionTokens[static_cast<size_t>(socketIndex)].load(std::memory_order_acquire)
+        : 0;
     if (state != AdmissionState::Running || token == 0) {
         processor->stats().sessionBoundaryPacketsDiscarded.fetch_add(
             1, std::memory_order_relaxed);
@@ -472,6 +554,11 @@ void MultiPortReceiver::run() {
     m_admissionState.store(static_cast<int>(AdmissionState::Disarmed),
                            std::memory_order_release);
     m_sessionToken.store(0, std::memory_order_release);
+    for (size_t i = 0; i < m_cardIndices.size() && i < m_cardAdmissionStates.size(); ++i) {
+        m_cardAdmissionStates[i].store(static_cast<int>(AdmissionState::Disarmed),
+                                       std::memory_order_release);
+        m_cardSessionTokens[i].store(0, std::memory_order_release);
+    }
     if (!m_testNoSockets) closeSockets();
     emit statusMessage("MultiPortReceiver 已停止");
 }

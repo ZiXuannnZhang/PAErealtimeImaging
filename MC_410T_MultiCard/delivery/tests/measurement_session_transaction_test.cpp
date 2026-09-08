@@ -19,16 +19,25 @@ bool testOrdering()
         4, 4,
         [&trace](int index) { trace.append(QStringLiteral("prepare%1").arg(index)); return true; },
         [&trace](int index) { trace.append(QStringLiteral("arm%1").arg(index)); return true; },
-        [&trace, &startSends] {
-            trace.append(QStringLiteral("hardware_start"));
+        [&trace, &startSends](int cardIndex) {
+            trace.append(QStringLiteral("hardware_start%1").arg(cardIndex));
             ++startSends;
-            return MeasurementSessionTransaction::SendResult{4, 0};
+            return MeasurementSessionTransaction::SendResult{1, 0};
         },
-        [&trace] { trace.append(QStringLiteral("rollback")); });
-    bool ok = check(result.success && startSends == 1, QStringLiteral("all-card start succeeds"));
-    const int hardware = trace.indexOf(QStringLiteral("hardware_start"));
+        [&trace] { trace.append(QStringLiteral("rollback")); },
+        {},
+        [&trace](int cardIndex) {
+            trace.append(QStringLiteral("fence%1").arg(cardIndex));
+            return true;
+        });
+    bool ok = check(result.success && startSends == 4, QStringLiteral("all-card start succeeds"));
+    const int hardware = trace.indexOf(QStringLiteral("hardware_start0"));
     const int lastArm = trace.lastIndexOf(QStringLiteral("arm3"));
     ok = check(hardware > lastArm, QStringLiteral("hardware start follows all processors armed")) && ok;
+    ok = check(trace.indexOf(QStringLiteral("fence0")) > hardware
+                   && trace.indexOf(QStringLiteral("hardware_start1"))
+                          > trace.indexOf(QStringLiteral("fence0")),
+               QStringLiteral("each card fence follows its local start")) && ok;
     return ok;
 }
 
@@ -40,11 +49,13 @@ bool testPrepareFailureBlocksHardware()
         4, 4,
         [](int index) { return index != 2; },
         [](int) { return true; },
-        [&startSends] {
+        [&startSends](int) {
             ++startSends;
-            return MeasurementSessionTransaction::SendResult{4, 0};
+            return MeasurementSessionTransaction::SendResult{1, 0};
         },
-        [&rolledBack] { rolledBack = true; });
+        [&rolledBack] { rolledBack = true; },
+        {},
+        [](int) { return true; });
     bool ok = check(!result.success && startSends == 0,
                     QStringLiteral("prepare failure sends zero hardware starts"));
     ok = check(rolledBack && result.reason == QStringLiteral("processor_prepare_failed"),
@@ -59,8 +70,14 @@ bool testPartialStartRollback()
         4, 4,
         [](int) { return true; },
         [](int) { return true; },
-        [] { return MeasurementSessionTransaction::SendResult{3, 1}; },
-        [&stopRollbacks] { ++stopRollbacks; });
+        [](int index) {
+            return index == 3
+                ? MeasurementSessionTransaction::SendResult{0, 1}
+                : MeasurementSessionTransaction::SendResult{1, 0};
+        },
+        [&stopRollbacks] { ++stopRollbacks; },
+        {},
+        [](int) { return true; });
     bool ok = check(!result.success && result.successCount == 3 && result.failCount == 1,
                     QStringLiteral("partial start is failure"));
     ok = check(stopRollbacks == 1 && result.reason == QStringLiteral("partial_start_send"),
@@ -68,7 +85,7 @@ bool testPartialStartRollback()
     return ok;
 }
 
-bool testCommitBarrierFailure()
+bool testFenceBarrierFailure()
 {
     int startSends = 0;
     bool rolledBack = false;
@@ -76,17 +93,17 @@ bool testCommitBarrierFailure()
         4, 4,
         [](int) { return true; },
         [](int) { return true; },
-        [&startSends] {
+        [&startSends](int) {
             ++startSends;
-            return MeasurementSessionTransaction::SendResult{4, 0};
+            return MeasurementSessionTransaction::SendResult{1, 0};
         },
         [&rolledBack] { rolledBack = true; },
         {},
-        [] { return false; });
-    bool ok = check(!result.success && startSends == 0 && rolledBack,
-                    QStringLiteral("admission commit failure blocks hardware send"));
-    ok = check(result.reason == QStringLiteral("receiver_commit_failed"),
-               QStringLiteral("commit failure has explicit reason")) && ok;
+        [](int) { return false; });
+    bool ok = check(!result.success && startSends == 1 && rolledBack,
+                    QStringLiteral("fence failure rolls back after local hardware send"));
+    ok = check(result.reason == QStringLiteral("start_fence_failed"),
+               QStringLiteral("fence failure has explicit reason")) && ok;
     return ok;
 }
 
@@ -119,7 +136,7 @@ int main()
     bool ok = testOrdering();
     ok = testPrepareFailureBlocksHardware() && ok;
     ok = testPartialStartRollback() && ok;
-    ok = testCommitBarrierFailure() && ok;
+    ok = testFenceBarrierFailure() && ok;
     ok = testTeardownAggregation() && ok;
     QTextStream(stdout) << (ok ? "PASS" : "FAIL")
                         << " measurement session transaction tests" << Qt::endl;

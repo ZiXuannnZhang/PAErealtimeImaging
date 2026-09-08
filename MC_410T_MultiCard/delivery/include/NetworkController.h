@@ -203,7 +203,9 @@ private:
     enum class PendingCmdType { None, Config, StartMeasure, StopMeasure };
     // 底层发送函数（不做就绪检查，由重试机制/已就绪时直接调用）
     bool doSendConfigCommand(int dataTime, int aDelay, int bDelay);
-    bool doSendStartMeasure(int* outSuccess = nullptr, int* outFail = nullptr);
+    bool doSendStartMeasureCard(int cardIndex,
+                                int* outSuccess = nullptr,
+                                int* outFail = nullptr);
     bool doSendStopMeasure(int* outSuccess = nullptr, int* outFail = nullptr);
     QString newMeasurementSessionId();
     bool executeStartTransaction(const QString& measurementSessionId);

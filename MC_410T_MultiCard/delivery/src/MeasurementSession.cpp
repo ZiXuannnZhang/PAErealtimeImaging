@@ -8,7 +8,7 @@ MeasurementSessionTransaction::Result MeasurementSessionTransaction::start(
     const SendStep &sendStart,
     const RollbackStep &rollback,
     const StepObserver &observe,
-    const AdmissionStep &commitAdmission)
+    const FenceStep &commitStartFence)
 {
     Result result;
     const auto step = [&result, &observe](const QString &name) {
@@ -47,34 +47,34 @@ MeasurementSessionTransaction::Result MeasurementSessionTransaction::start(
     }
     step(QStringLiteral("measurement_session_armed"));
 
-    if (commitAdmission && !commitAdmission()) {
-        result.reason = QStringLiteral("receiver_commit_failed");
+    step(QStringLiteral("measurement_start_command"));
+    for (int cardIndex = 0; cardIndex < targetCount; ++cardIndex) {
+        const SendResult sent = sendStart(cardIndex);
+        result.successCount += sent.successCount;
+        result.failCount += sent.failCount;
+        if (sent.successCount == 1 && sent.failCount == 0) {
+            if (!commitStartFence || !commitStartFence(cardIndex)) {
+                result.reason = QStringLiteral("start_fence_failed");
+                step(QStringLiteral("measurement_start_failed"));
+                step(QStringLiteral("measurement_start_rollback"));
+                if (rollback) rollback();
+                return result;
+            }
+            continue;
+        }
+
+        result.reason = result.successCount > 0
+            ? QStringLiteral("partial_start_send")
+            : QStringLiteral("start_send_failed");
         step(QStringLiteral("measurement_start_failed"));
         step(QStringLiteral("measurement_start_rollback"));
         if (rollback) rollback();
         return result;
     }
 
-    // Admission is committed only after every receiver/processor barrier has
-    // completed.  The hardware Start send follows immediately, so the first
-    // production datagram cannot wait for a post-send receiver command.
-    step(QStringLiteral("measurement_start_command"));
-    const SendResult sent = sendStart();
-    result.successCount = sent.successCount;
-    result.failCount = sent.failCount;
-    if (sent.successCount == targetCount && sent.failCount == 0) {
-        result.success = true;
-        step(QStringLiteral("measurement_started"));
-        result.reason = QStringLiteral("all_targets_sent");
-        return result;
-    }
-
-    result.reason = sent.successCount > 0
-        ? QStringLiteral("partial_start_send")
-        : QStringLiteral("start_send_failed");
-    step(QStringLiteral("measurement_start_failed"));
-    step(QStringLiteral("measurement_start_rollback"));
-    if (rollback) rollback();
+    result.success = true;
+    step(QStringLiteral("measurement_started"));
+    result.reason = QStringLiteral("all_targets_sent");
     return result;
 }
 

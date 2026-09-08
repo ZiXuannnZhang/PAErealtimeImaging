@@ -285,12 +285,16 @@ public:
                      "session boundary evidence files")) return false;
 
         QHash<QString, int> eventCounts;
+        QJsonObject startFenceFields;
         while (!events.atEnd()) {
             const QJsonObject object = QJsonDocument::fromJson(events.readLine()).object();
             const QJsonObject fields = object.value(QStringLiteral("fields")).toObject();
             if (fields.value(QStringLiteral("measurementSessionId")).toString() != sessionId)
                 continue;
-            ++eventCounts[object.value(QStringLiteral("message")).toString()];
+            const QString message = object.value(QStringLiteral("message")).toString();
+            ++eventCounts[message];
+            if (message == QStringLiteral("measurement_start_fence"))
+                startFenceFields = fields;
         }
         bool ok = true;
         for (const QString& marker : {QStringLiteral("measurement_session_prepare"),
@@ -302,6 +306,10 @@ public:
             ok = require(eventCounts.value(marker) == 1,
                          QStringLiteral("canonical marker %1 occurs once").arg(marker)) && ok;
         }
+        ok = require(eventCounts.value(QStringLiteral("measurement_start_fence")) == 1
+                         && startFenceFields.value(QStringLiteral("cardIndex")).toInt() == 0
+                         && startFenceFields.value(QStringLiteral("startFenceCommitted")).toBool(),
+                     "per-card start fence evidence is committed") && ok;
         const QByteArray sessionBytes = sessionId.toUtf8();
         const QByteArray settingsBytes = settings.readAll();
         const QByteArray networkBytes = network.readAll();

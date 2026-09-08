@@ -109,7 +109,9 @@ if(WIN32)
         ../src/FramePublisher.cpp
         ../include/FramePublisher.h
         ../src/MultiPortReceiver.cpp
-        ../include/MultiPortReceiver.h)
+        ../include/MultiPortReceiver.h
+        ../src/MeasurementSession.cpp
+        ../include/MeasurementSession.h)
     target_include_directories(session_boundary_receiver_test PRIVATE ../include)
     target_compile_definitions(session_boundary_receiver_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(session_boundary_receiver_test PRIVATE Qt6::Core ws2_32)

@@ -44,10 +44,13 @@ public:
     // the caller only waits for the bounded result.
     bool prepareSession(uint64_t sessionToken, int timeoutMs = 1500);
     bool armSession(uint64_t sessionToken, int timeoutMs = 1500);
-    bool commitSession(uint64_t sessionToken, int timeoutMs = 1500);
+    // Publish the Start fence for one card only.  The card remains closed
+    // until its own local hardware Start send has succeeded.
+    bool commitCardSession(uint64_t sessionToken, int cardIndex,
+                           int timeoutMs = 1500);
     bool disarmSession(int timeoutMs = 1500);
     // Legacy test compatibility only; production start/stop never calls this
-    // bypass and uses the bounded prepare/arm/commit barriers above.
+    // bypass and uses the bounded prepare/arm/per-card-fence barriers above.
     void setCompatibilityAdmission(bool enable, uint64_t sessionToken = 1);
 
     // Deterministic test hook for the same parser/admission dispatch used by
@@ -89,7 +92,7 @@ protected:
 private:
     bool openSockets();
     void closeSockets();
-    enum class SessionCommandKind { Prepare, Arm, Commit, Disarm };
+    enum class SessionCommandKind { Prepare, Arm, CommitCard, Disarm };
     struct SessionCommandWait {
         std::mutex mutex;
         std::condition_variable condition;
@@ -99,13 +102,15 @@ private:
     struct SessionCommand {
         SessionCommandKind kind = SessionCommandKind::Prepare;
         uint64_t sessionToken = 0;
+        int cardIndex = -1;
         int timeoutMs = 1500;
         std::shared_ptr<SessionCommandWait> wait;
     };
     bool postSessionCommand(SessionCommandKind kind, uint64_t sessionToken,
-                            int timeoutMs);
+                            int cardIndex, int timeoutMs);
     void processSessionCommands();
     bool applySessionCommand(const SessionCommand& command);
+    void updateAggregateAdmissionState();
     bool drainSocketBacklog(int timeoutMs);
     bool drainSocket(uintptr_t socket, int socketIndex, bool dispatch,
                      uint64_t* outPackets = nullptr);
@@ -119,6 +124,8 @@ private:
     const bool                   m_testNoSockets = false;
     std::atomic<int>             m_admissionState{static_cast<int>(AdmissionState::Disarmed)};
     std::atomic<uint64_t>        m_sessionToken{0};
+    std::array<std::atomic<int>, 4> m_cardAdmissionStates{};
+    std::array<std::atomic<uint64_t>, 4> m_cardSessionTokens{};
 
     mutable std::mutex           m_commandMutex;
     std::deque<SessionCommand>   m_commands;

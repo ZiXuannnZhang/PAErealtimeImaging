@@ -39,10 +39,10 @@ public:
     };
 
     using ProcessorStep = std::function<bool(int)>;
-    using SendStep = std::function<SendResult()>;
+    using SendStep = std::function<SendResult(int)>;
     using RollbackStep = std::function<void()>;
     using StepObserver = std::function<void(const QString&)>;
-    using AdmissionStep = std::function<bool()>;
+    using FenceStep = std::function<bool(int)>;
 
     static Result start(int processorCount,
                         int targetCount,
@@ -51,7 +51,7 @@ public:
                         const SendStep &sendStart,
                         const RollbackStep &rollback,
                         const StepObserver &observe = {},
-                        const AdmissionStep &commitAdmission = {});
+                        const FenceStep &commitStartFence = {});
 
     // Aggregates the bounded receiver/processor disarm barriers.  Every
     // callback is attempted so the caller receives a complete teardown
