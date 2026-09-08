@@ -312,6 +312,68 @@ public:
                       "stop boundary has ingress and card snapshots") && ok;
         return ok;
     }
+
+    static bool measurementBoundaryFailureEvidence()
+    {
+        NetworkController controller;
+        AcqConfig config;
+        config.nCards = 1;
+        config.acqTimeNs = 16000;
+        config.localBindIP = "127.0.0.1";
+        config.targetIPs = {"127.0.0.1"};
+        controller.setDiagnosticContext(QStringLiteral("session-boundary-failure"),
+                                        QStringLiteral("test_loopback"));
+        if (!require(controller.start(config), "failure evidence controller start")) return false;
+        controller.m_cardsReady = {true};
+        controller.m_configAck = {true};
+        controller.m_configPhase = NetworkController::ConfigPhase::Confirmed;
+        controller.m_currentConfigId = QStringLiteral("boundary-failure-config");
+
+        // Stop the actual receiver thread before Start.  This injects a
+        // receiver prepare/disarm failure through the production transaction,
+        // without a fake dispatch path or hardware protocol change.
+        controller.m_receivers.front()->requestStop();
+        controller.m_receivers.front()->wait(2000);
+        const bool started = controller.sendStartMeasure();
+        const QString sessionId = controller.m_measurementSessionId;
+        bool ok = require(!started && controller.m_measurementState
+                              == NetworkController::MeasurementState::Fault,
+                          "receiver barrier failure blocks start and enters fault")
+                  && require(controller.m_pendingMeasurementSessionId.isEmpty(),
+                              "receiver barrier failure clears pending session")
+                  && require(!sessionId.isEmpty(), "failed session id retained for diagnosis");
+
+        DiagnosticRecorder *recorder = DiagnosticRecorder::instance();
+        ok = require(recorder && recorder->flush(2000), "failure evidence recorder flush") && ok;
+        QFile events(QDir(recorder->runDirectory()).filePath(QStringLiteral("events.jsonl")));
+        QFile settings(QDir(recorder->runDirectory()).filePath(QStringLiteral("settings_history.jsonl")));
+        if (!require(events.open(QIODevice::ReadOnly) && settings.open(QIODevice::ReadOnly),
+                     "failure evidence files")) {
+            controller.stop();
+            return false;
+        }
+        QHash<QString, int> eventCounts;
+        while (!events.atEnd()) {
+            const QJsonObject object = QJsonDocument::fromJson(events.readLine()).object();
+            const QJsonObject fields = object.value(QStringLiteral("fields")).toObject();
+            if (fields.value(QStringLiteral("measurementSessionId")).toString() == sessionId
+                && fields.value(QStringLiteral("configId")).toString()
+                       == QStringLiteral("boundary-failure-config"))
+                ++eventCounts[object.value(QStringLiteral("message")).toString()];
+        }
+        ok = require(eventCounts.value(QStringLiteral("measurement_start_failed")) == 1,
+                     "failed start canonical marker occurs once") && ok;
+        ok = require(eventCounts.value(QStringLiteral("measurement_start_rollback")) == 1,
+                     "rollback canonical marker occurs once") && ok;
+        ok = require(eventCounts.value(QStringLiteral("measurement_started")) == 0,
+                     "failed start has no started marker") && ok;
+        const QByteArray settingsEvidence = settings.readAll();
+        ok = require(settingsEvidence.contains(sessionId.toUtf8())
+                         && settingsEvidence.contains("measurement_start_rollback"),
+                     "rollback settings snapshot carries session boundary") && ok;
+        controller.stop();
+        return ok;
+    }
 };
 
 int main(int argc, char **argv) {
@@ -326,6 +388,7 @@ int main(int argc, char **argv) {
         && NetworkDiagnosticTestAccess::exercise(4) && NetworkDiagnosticTestAccess::exercise(5)
         && NetworkDiagnosticTestAccess::pendingSessionCleanup()
         && NetworkDiagnosticTestAccess::measurementBoundaryEvidence()
+        && NetworkDiagnosticTestAccess::measurementBoundaryFailureEvidence()
         && receptionDuringExport(false,QString())
         && receptionDuringExport(true,QDir(temporary.path()).filePath("during-reception.zip"));
     QThreadPool::globalInstance()->waitForDone();
