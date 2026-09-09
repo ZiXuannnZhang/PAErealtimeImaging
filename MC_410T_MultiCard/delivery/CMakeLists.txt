@@ -18,6 +18,16 @@ option(USE_ZEROMQ "Enable ZeroMQ FramePublisher extension" OFF)
 # Qt 6 组件
 # ============================================================
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets PrintSupport OpenGL OpenGLWidgets Svg Concurrent)
+execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE PAIMAGE_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND git status --porcelain --untracked-files=no WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE PAIMAGE_TRACKED_STATUS OUTPUT_STRIP_TRAILING_WHITESPACE)
+set(PAIMAGE_TRACKED_DIRTY false)
+if(PAIMAGE_TRACKED_STATUS)
+    set(PAIMAGE_TRACKED_DIRTY true)
+endif()
+configure_file(include/PaimageAcquisition/BuildIdentity.h.in
+    generated/PaimageAcquisition/BuildIdentity.h @ONLY)
 
 # ============================================================
 # 源文件列表
@@ -82,11 +92,31 @@ add_executable(${PROJECT_NAME}
     ${SOURCES}
     ${HEADERS}
 )
+target_sources(${PROJECT_NAME} PRIVATE
+    src/PaimageAcquisition/SourceCore.cpp
+    src/PaimageAcquisition/ControlState.cpp
+    src/PaimageAcquisition/ControlSocket.cpp
+    src/PaimageAcquisition/SocketReceiver.cpp
+    src/PaimageAcquisition/TraceWriter.cpp
+    src/PaimageAcquisition/TraceBundle.cpp
+    src/PaimageAcquisition/OutputQueues.cpp
+    src/PaimageAcquisition/OutputWorkers.cpp
+    src/PaimageAcquisition/FrameConverter.cpp
+    src/PaimageAcquisition/HostOutput.cpp
+    src/PaimageAcquisition/Backend.cpp
+    src/PaimageAcquisition/NetworkControllerPaimage.cpp)
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/paimage_trace_analyze.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/paimage-trace-schema.md"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools")
 
 # ============================================================
 # 头文件搜索路径
 # ============================================================
 target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/qcustomplot
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/imaging
@@ -229,7 +259,7 @@ endif()
 # ============================================================
 set_target_properties(${PROJECT_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    OUTPUT_NAME "MC410T_Receiver"
+    OUTPUT_NAME "PAimageAcquisitionPort"
 )
 
 # ============================================================

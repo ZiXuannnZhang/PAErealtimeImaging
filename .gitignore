@@ -40,3 +40,8 @@ MC_410T_MultiCard/delivery/libs/imaging/cufft64_12.dll
 # 临时编译产物
 *.obj
 *.o
+
+# Isolated PAimage migration build and runtime evidence (indexed by reports).
+/build/
+/artifacts/
+MC_410T_MultiCard/delivery/tools/__pycache__/

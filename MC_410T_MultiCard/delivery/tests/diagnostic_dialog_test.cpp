@@ -33,7 +33,7 @@ int main(int argc, char **argv) {
         dialog.show();
         auto *start=dialog.findChild<QDateTimeEdit*>("startTimeEdit");
         auto *end=dialog.findChild<QDateTimeEdit*>("endTimeEdit");
-        auto *path=dialog.findChild<QLineEdit*>();
+        auto *path=dialog.findChild<QLineEdit*>("targetEdit");
         auto *note=dialog.findChild<QPlainTextEdit*>();
         if(!start || !end || !path || !note) return 2;
         QElapsedTimer timer; timer.start();

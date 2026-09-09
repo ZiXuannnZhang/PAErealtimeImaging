@@ -1,3 +1,4 @@
+#include "PaimageAcquisition/SettingsPath.h"
 #include "RingConfigDialog.h"
 #include "ImagingController.h"
 
@@ -105,7 +106,7 @@ RingConfigDialog::RingConfigDialog(ImagingController *controller, QWidget *paren
     restoreDefaults();
 
     // 记忆上次关闭前的大小
-    QSettings s("MC410T", "MC410T_Receiver");
+    QSettings s(paimageSettingsPath(), QSettings::IniFormat);
     const QSize saved = s.value("RingConfigDialog/Size").toSize();
     if (saved.isValid() && saved.width() >= 500 && saved.height() >= 450)
         resize(saved);
@@ -356,7 +357,7 @@ void RingConfigDialog::restoreDefaults()
 {
     // 采样率/采样深度不参与恢复默认：数据来源固定为线性采集参数
     // 优先使用“设为默认”保存的参数；未保存过则回退到出厂硬编码默认值
-    QSettings s("MC410T", "MC410T_Receiver");
+    QSettings s(paimageSettingsPath(), QSettings::IniFormat);
     s.beginGroup("RingConfigDialog/Defaults");
     auto val = [&s](const QString &k, const QVariant &dflt) {
         return s.contains(k) ? s.value(k) : dflt;
@@ -404,7 +405,7 @@ void RingConfigDialog::restoreDefaults()
 
 void RingConfigDialog::saveDefaults()
 {
-    QSettings s("MC410T", "MC410T_Receiver");
+    QSettings s(paimageSettingsPath(), QSettings::IniFormat);
     s.beginGroup("RingConfigDialog/Defaults");
     s.setValue("block", m_spnBlock->value());
     s.setValue("shiftWL2", m_chkShiftWL2->isChecked());
@@ -569,7 +570,7 @@ bool RingConfigDialog::applyConfig()
 void RingConfigDialog::showEvent(QShowEvent *event)
 {
     QDialog::showEvent(event);
-    QSettings s("MC410T", "MC410T_Receiver");
+    QSettings s(paimageSettingsPath(), QSettings::IniFormat);
     const QSize saved = s.value("RingConfigDialog/Size").toSize();
     if (saved.isValid() && saved.width() >= 500 && saved.height() >= 450)
         resize(saved);
@@ -577,7 +578,7 @@ void RingConfigDialog::showEvent(QShowEvent *event)
 
 void RingConfigDialog::hideEvent(QHideEvent *event)
 {
-    QSettings s("MC410T", "MC410T_Receiver");
+    QSettings s(paimageSettingsPath(), QSettings::IniFormat);
     s.setValue("RingConfigDialog/Size", size());
     s.sync();
     QDialog::hideEvent(event);

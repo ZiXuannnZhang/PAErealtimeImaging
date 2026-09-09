@@ -17,6 +17,10 @@
 class DiagnosticRecorder final
 {
 public:
+    using BundleSink=std::function<bool(const QString&,const QByteArray&)>;
+    using BundleExtension=std::function<bool(const BundleSink&,QString*)>;
+    using BundleCapture=std::function<BundleExtension(qint64,qint64)>;
+    static void setBundleCapture(BundleCapture);
     enum class Severity {
         Trace = 0,
         Debug,
@@ -105,6 +109,7 @@ public:
     // represented by the on-disk files, so a later worker cannot accidentally
     // include state recorded after the button click.
     struct ExportRequest {
+        BundleExtension bundleExtension;
         QString runId;
         QString sourceDirectory;
         QString startIsoTime;
@@ -126,6 +131,7 @@ public:
     };
 
     struct TimeWindowRequest {
+        BundleExtension bundleExtension;
         QString requestedStartTime;
         QString requestedEndTime;
         QString exportCapturedAt;

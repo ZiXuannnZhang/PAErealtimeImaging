@@ -32,6 +32,12 @@ namespace {
 using Clock = std::chrono::steady_clock;
 std::mutex g_instanceMutex;
 DiagnosticRecorder *g_instance = nullptr;
+std::mutex g_bundleMutex;
+DiagnosticRecorder::BundleCapture g_bundleCapture;
+DiagnosticRecorder::BundleExtension captureBundle(qint64 start,qint64 end){
+    std::lock_guard<std::mutex> lock(g_bundleMutex);
+    return g_bundleCapture?g_bundleCapture(start,end):DiagnosticRecorder::BundleExtension{};
+}
 
 QString defaultRootDirectoryLocal()
 {
@@ -1135,6 +1141,7 @@ quint64 DiagnosticRecorder::recordNetworkSnapshot(const QJsonObject &snapshot) {
 quint64 DiagnosticRecorder::recordSettingsSnapshot(const QJsonObject &snapshot) { return m_state ? m_state->recordSettingsSnapshot(snapshot) : 0; }
 quint64 DiagnosticRecorder::setCardSnapshot(int card, const QString &ip, const QString &state, const QJsonObject &fields) { return m_state ? m_state->setCardSnapshot(card, ip, state, fields) : 0; }
 void DiagnosticRecorder::requestFlush() { if (m_state) m_state->requestFlush(); }
+void DiagnosticRecorder::setBundleCapture(BundleCapture capture){std::lock_guard<std::mutex> lock(g_bundleMutex);g_bundleCapture=std::move(capture);}
 bool DiagnosticRecorder::flush(int timeoutMs) { if (!m_state) return false; const quint64 boundary = m_state->captureRequest(0, QString()).boundarySequence; return m_state->flushTo(boundary, timeoutMs); }
 quint64 DiagnosticRecorder::captureBoundary() const { if (!m_state) return 0; std::lock_guard<std::mutex> lock(m_state->mutex); return m_state->nextSequence - 1; }
 DiagnosticRecorder::ExportRequest DiagnosticRecorder::captureExportRequest(quint64 boundarySequence, const QString &note) const
@@ -1142,6 +1149,7 @@ DiagnosticRecorder::ExportRequest DiagnosticRecorder::captureExportRequest(quint
     if (!m_state) return ExportRequest();
     ExportRequest request = m_state->captureRequest(boundarySequence, note);
     request.capturedLive = true;
+    request.bundleExtension=captureBundle(std::numeric_limits<qint64>::min(),QDateTime::currentMSecsSinceEpoch());
     request.flushBeforeExport = [state = m_state, boundary = request.boundarySequence] {
         return state->flushTo(boundary, 5000);
     };
@@ -1159,6 +1167,7 @@ DiagnosticRecorder::TimeWindowRequest DiagnosticRecorder::captureTimeWindowReque
     result.exportCapturedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
     result.note = note;
     result.rootDirectory = m_state ? m_state->rootDirectory : QString();
+    result.bundleExtension=captureBundle(startLocal.toMSecsSinceEpoch(),qMin(endLocal.toMSecsSinceEpoch(),QDateTime::currentMSecsSinceEpoch()));
     if (!startLocal.isValid() || !endLocal.isValid()) {
         result.validationError = QStringLiteral("时间窗无效");
         return result;
@@ -1257,7 +1266,7 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportRequest(const ExportR
     QHash<QString, QByteArray> contents; contents.insert(QStringLiteral("runtime.log"), events.runtime); contents.insert(QStringLiteral("events.jsonl"), events.events); contents.insert(QStringLiteral("network.json"), jsonBytes(snapshots.network) + '\n'); contents.insert(QStringLiteral("settings.json"), jsonBytes(snapshots.settings) + '\n'); contents.insert(QStringLiteral("summary.txt"), summary);
     const QJsonObject manifest = manifestObject(effective.runId, effective.startIsoTime, effective.endIsoTime, effective.boundarySequence, effective.sourceWasActive, effective.writeError, effective.writeErrorText, effective.drops, missing, truncationReasons, effective.note, names, contents); contents.insert(QStringLiteral("manifest.json"), jsonBytes(manifest) + '\n');
     const QFileInfo targetInfo(targetZipPath); if (!QDir().mkpath(targetInfo.absolutePath())) { result.error = QStringLiteral("create target directory failed: %1").arg(targetInfo.absolutePath()); result.missingFiles = missing; result.truncationReasons = truncationReasons; return result; }
-    const QString temporaryPath = targetZipPath + QStringLiteral(".part-") + QUuid::createUuid().toString(QUuid::WithoutBraces); QString error; ZipWriter writer(temporaryPath); bool ok = writer.open(&error); if (ok) for (const QString &name : names) if (!writer.addStored(name, contents.value(name), &error)) { ok = false; break; } if (ok) ok = writer.close(&error);
+    const QString temporaryPath = targetZipPath + QStringLiteral(".part-") + QUuid::createUuid().toString(QUuid::WithoutBraces); QString error; ZipWriter writer(temporaryPath); bool ok = writer.open(&error); if (ok) for (const QString &name : names) if (!writer.addStored(name, contents.value(name), &error)) { ok = false; break; } if(ok&&effective.bundleExtension)ok=effective.bundleExtension([&](const QString& name,const QByteArray& bytes){return writer.addStored(name,bytes,&error);},&error); if (ok) ok = writer.close(&error);
     if (!ok) { writer.cancel(); QFile::remove(temporaryPath); result.error = error; result.missingFiles = missing; result.truncationReasons = truncationReasons; return result; }
     if (!QFile::rename(temporaryPath, targetZipPath)) { QFile::remove(temporaryPath); result.error = QStringLiteral("publish target ZIP failed"); return result; }
     result.success = true; result.missingFiles = missing; result.truncationReasons = truncationReasons; return result;
@@ -1503,6 +1512,7 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportTimeWindow(
     bool ok = writer.open(&error);
     for (auto it = contents.constBegin(); ok && it != contents.constEnd(); ++it)
         ok = writer.addStored(it.key(), it.value(), &error);
+    if(ok&&request.bundleExtension)ok=request.bundleExtension([&](const QString& name,const QByteArray& bytes){return writer.addStored(name,bytes,&error);},&error);
     if (ok) ok = writer.close(&error);
     if (!ok) {
         writer.cancel();

@@ -1,3 +1,6 @@
+#include "PaimageAcquisition/SettingsPath.h"
+#include <QInputDialog>
+#include <QMenuBar>
 #include "MainWindow.h"
 #include "ui_MainWindow.h"
 #include "NetworkController.h"
@@ -252,6 +255,21 @@ MainWindow::MainWindow(QWidget *parent)
         }
 
     ui->setupUi(this);
+    setWindowTitle(QStringLiteral("PAimage采集移植测试版 — paimage-derived"));
+    auto* trialAction=menuBar()->addAction(QStringLiteral("实验标记"));
+    connect(trialAction,&QAction::triggered,this,[this]{
+        bool ok=false;const QString marker=QInputDialog::getText(this,QStringLiteral("实验轮次标记"),
+            QStringLiteral("trialId / roundId（例如 trialA / 1；记录操作时刻，不代表触发沿）"),QLineEdit::Normal,QString(),&ok);
+        if(!ok||marker.trimmed().isEmpty())return;
+        const auto parts=marker.split('/');
+        recordDiagnosticAction(QStringLiteral("experiment_marker"),
+            {{"trialId",parts.value(0).trimmed()},{"roundId",parts.value(1).trimmed()},
+             {"markerText",marker},{"dataTimeNs",ui->edtDataTime->text().toInt()},
+             {"saving",m_netController&&m_netController->isSaving()},{"measuring",m_isMeasuring},
+             {"operatorTimestampNotTriggerEdge",true}});
+        recordAcquisitionSnapshot({},QStringLiteral("experiment_marker"));
+        logMessage(QStringLiteral("实验标记：")+marker);
+    });
 
     // 工作七：主窗口可自由缩小，内容超出时自动出现滚动条
     {
@@ -571,7 +589,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     // 窗口几何尺寸恢复
     {
-        QSettings s("MC410T", "MC410T_Receiver");
+        QSettings s(paimageSettingsPath(), QSettings::IniFormat);
         if (s.contains("Window/X")) {
             int wx = s.value("Window/X", 100).toInt();
             int wy = s.value("Window/Y", 100).toInt();
@@ -1998,7 +2016,7 @@ void MainWindow::onStartMeasureClicked()
         onConfigParamsClicked(true);
         if (m_netController) {
             if (m_netController->sendStartMeasure())
-                logMessage("开始测量请求已提交，等待所有处理器 armed 和四卡发送确认");
+                logMessage("开始测量请求已提交，等待 PAimage CONFIG 确认及 START 发送结果");
             else
                 logMessage("开始测量请求失败，未进入测量状态");
         }
@@ -2007,7 +2025,7 @@ void MainWindow::onStartMeasureClicked()
                                {{QStringLiteral("phase"), QStringLiteral("stop")}});
         if (m_netController) {
             if (m_netController->sendStopMeasure())
-                logMessage("停止测量请求已提交，等待硬件 Stop 和处理器 disarm 完成");
+                logMessage("停止测量请求已提交，等待 PAimage STOP 发送结果");
             else
                 logMessage("停止测量请求失败，仍保留当前测量状态供复核");
         }
@@ -2873,7 +2891,7 @@ void MainWindow::loadStyleSheet()
 // =====================================================================
 void MainWindow::loadSettings()
 {
-    QSettings settings("MC410T", "MC410T_Receiver");
+    QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
 
     // 阻塞信号，防止 setValue 触发 saveSettings 覆写未加载的参数
     ui->spnRefreshRate->blockSignals(true);
@@ -3026,7 +3044,7 @@ void MainWindow::loadSettings()
 
 void MainWindow::saveSettings()
 {
-    QSettings settings("MC410T", "MC410T_Receiver");
+    QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
     settings.setValue("AcquisitionParams/NCards",   m_nCards);
     settings.setValue("NetworkParams/LocalBindIP",   m_localBindIP);
     settings.setValue("NetworkParams/ScanBaseIP",    m_scanBaseIP);
@@ -3569,7 +3587,7 @@ void MainWindow::onImagingConfigClicked()
     m_imagingConfigDialog->setWindowTitle("成像参数配置");
     m_imagingConfigDialog->setMinimumSize(500, 450);
     // 记忆上次关闭前的大小
-    QSettings cfgSize("MC410T", "MC410T_Receiver");
+    QSettings cfgSize(paimageSettingsPath(), QSettings::IniFormat);
     if (cfgSize.contains("ImagingConfigDialog/Size")) {
         const QSize saved = cfgSize.value("ImagingConfigDialog/Size").toSize();
         if (saved.isValid() && saved.width() >= 500 && saved.height() >= 450)
@@ -4083,19 +4101,19 @@ void MainWindow::onImagingConfigClicked()
         return d;
     };
     connect(btnSaveDefault, &QPushButton::clicked, this, [collectDefaults]() {
-        QSettings s("MC410T", "MC410T_Receiver");
+        QSettings s(paimageSettingsPath(), QSettings::IniFormat);
         s.setValue("ImagingConfigDialog/Defaults", QVariant(collectDefaults()));
         s.sync();
     });
     connect(btnRestore, &QPushButton::clicked, this, [=]() {
-        QSettings s("MC410T", "MC410T_Receiver");
+        QSettings s(paimageSettingsPath(), QSettings::IniFormat);
         applyDefaults(s.value("ImagingConfigDialog/Defaults").toMap());
     });
 
     // 关闭时保存窗口大小
     connect(m_imagingConfigDialog, &QDialog::finished, this, [this](int) {
         if (!m_imagingConfigDialog) return;
-        QSettings s("MC410T", "MC410T_Receiver");
+        QSettings s(paimageSettingsPath(), QSettings::IniFormat);
         s.setValue("ImagingConfigDialog/Size", m_imagingConfigDialog->size());
         s.sync();
     });

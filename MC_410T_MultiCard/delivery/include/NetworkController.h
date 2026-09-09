@@ -34,6 +34,7 @@
 #endif
 
 #include "MultiPortReceiver.h"
+#include "PaimageAcquisition/Backend.h"
 
 // ============================================================
 // NetworkController  多线程组统一管理（采集系统核心协调者）
@@ -161,6 +162,24 @@ private slots:
 
 private:
     friend class NetworkDiagnosticTestAccess;
+    bool startPaimage(const AcqConfig&,std::function<void()>,std::function<void()>);
+    void stopPaimage();
+    bool configurePaimage(int,int,int,const QString&);
+    bool startPaimageMeasurement();
+    bool stopPaimageMeasurement();
+    void pollPaimage();
+    bool createPaimageBackend(QString&);
+    std::unique_ptr<paimage::TraceWriter> m_paimageTrace;
+    std::unique_ptr<paimage::Backend> m_paimage;
+    QTimer* m_paimageTimer=nullptr;
+    bool m_paimageStartPending=false;
+    bool m_paimageConfigReported=false;
+    quint64 m_paimageGeneration=0;
+    QString m_paimageSaveDir,m_paimageSaveSuffix;
+    int m_paimageSaveCount=1000;
+    bool m_paimageSavingRequested=false;
+    std::vector<std::uint64_t> m_paimageLastBytes;
+    void recordPaimageSnapshot();
 
     // UDP 控制命令底层实现
     bool initControlSocket();

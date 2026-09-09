@@ -89,6 +89,7 @@ struct CardStats {
     // 分层采集计数：socket 成功接收、processor 成功出队，以及
     // batch quota 边界哨兵。最后一个计数在修复后的正常路径应始终为 0。
     std::atomic<uint64_t> socketPacketsReceived{0};
+    std::atomic<uint64_t> socketBytesReceived{0};
     std::atomic<uint64_t> processorPacketsDequeued{0};
     std::atomic<uint64_t> batchBoundaryDiscards{0};
 

@@ -1,0 +1,32 @@
+[OUTPUT] 
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/_paimage_acquisition_port_20260909/build/paimage-host-checks
+
+[HANDLER_OUTPUT] 
+Test project D:/ChatGPT/PAERealtimeImaging/_paimage_acquisition_port_20260909/build/paimage-host-checks
+
+      Start 15: paimage_network_test
+ 1/11 Test #15: paimage_network_test .............   Passed    2.06 sec
+      Start 16: paimage_host_output_test
+ 2/11 Test #16: paimage_host_output_test .........   Passed    0.77 sec
+      Start 17: paimage_trace_bundle_test
+ 3/11 Test #17: paimage_trace_bundle_test ........   Passed    0.62 sec
+      Start 18: paimage_core_checks
+ 4/11 Test #18: paimage_core_checks ..............   Passed    0.17 sec
+      Start 19: paimage_output_checks
+ 5/11 Test #19: paimage_output_checks ............   Passed    0.10 sec
+      Start 20: paimage_control_checks
+ 6/11 Test #20: paimage_control_checks ...........   Passed    0.12 sec
+      Start 21: paimage_socket_short
+ 7/11 Test #21: paimage_socket_short .............   Passed    2.47 sec
+      Start 22: paimage_trace_checks
+ 8/11 Test #22: paimage_trace_checks .............   Passed    0.17 sec
+      Start 23: paimage_worker_checks
+ 9/11 Test #23: paimage_worker_checks ............   Passed    0.24 sec
+      Start 24: paimage_protocol_checks
+10/11 Test #24: paimage_protocol_checks ..........   Passed    0.34 sec
+      Start 25: paimage_conversion_checks
+11/11 Test #25: paimage_conversion_checks ........   Passed    0.16 sec
+
+100% tests passed, 0 tests failed out of 11
+
+Total Test time (real) =   7.24 sec

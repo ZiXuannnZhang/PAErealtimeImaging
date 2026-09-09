@@ -479,6 +479,18 @@ void DataProcessor::flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf) {
         //  频率计算：int16 Q0.15 差分相位  float32 kHz，O(N)
         computeFrequency(*group);
 
+        deliverAssembled(group, true, true);
+    } catch (...) {
+        m_stats.triggersDiscarded.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
+        const TriggerGroupPtr& group, bool save, bool displayAndRing) {
+    DeliveryResult result;
+    if (!group) { result.exception = true; return result; }
+    try {
+
         //  存储（FileSaver 负责 float32→float16 转换）
         // 保存队列上限设计：
         //   FileSaver 每 WRITE_BUFFER_TRIGGERS=16 个触发调用一次 QFile::write()。
@@ -487,38 +499,58 @@ void DataProcessor::flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf) {
         //   设 MAX_SAVE_QUEUE=400 可覆盖约 2 秒的磁盘卡顿，避免丢帧。
         //   内存开销：400 × ~200KB/触发 × 32卡 = ~2.5GB（峰值，TriggerGroup 共享内存）。
         static constexpr int MAX_SAVE_QUEUE = 400;
-        if (m_saveEnabled && m_saveQueue) {
+        if (save) result.save = DeliveryResult::Disabled;
+        if (save && m_directSaveSink) {
+            result.save = m_directSaveSink(group) ? DeliveryResult::Consumed : DeliveryResult::ConsumerFailure;
+        } else if (save && m_saveEnabled.load(std::memory_order_acquire) && m_saveQueue) {
             // 自动保存会话代打标：入队前读取当前会话代（UI 线程在边界空闲期
             // 提前推进），保存器按代路由目录，实现逐触发严格分界
             group->sessionGen = m_sessionGenReader ? m_sessionGenReader() : 0;
             if (m_saveQueue->size_approx() < MAX_SAVE_QUEUE) {
-                m_saveQueue->enqueue(group);
+                if (m_saveQueue->enqueue(group)) {
+                    result.save = DeliveryResult::Queued;
+                } else {
+                    result.save = DeliveryResult::QueueFailure;
+                    m_stats.saveQueueDiscards.fetch_add(1, std::memory_order_relaxed);
+                    m_stats.triggersDiscarded.fetch_add(1, std::memory_order_relaxed);
+                }
             } else {
                 // 存储队列满：分别计入存储丢弃和总丢弃，便于 UI 区分原因
                 m_stats.saveQueueDiscards.fetch_add(1, std::memory_order_relaxed);
                 m_stats.triggersDiscarded.fetch_add(1, std::memory_order_relaxed);
+                result.save = DeliveryResult::QueueFull;
             }
         }
 
+        if (!displayAndRing) return result;
+
         //  FramePublisher（可选扩展）
-        if (m_framePublisher)
+        if (m_framePublisher) {
             m_framePublisher->submit(group);
+            result.publisher = true;
+        }
 
         //  降采样 + DisplayBuffer 更新
         downsample(*group, m_displayPoints.load(std::memory_order_relaxed));
         if (m_displayBuffer) {
             m_displayBuffer->update(group);
             m_displayBuffer->updateFullRes(group);  // 存储全分辨率频率供成像
+            result.display = true;
         }
         // 环形实时馈送：每触发直接入队（独立工作线程消费），
         // 避免 DisplayBuffer latest-only + 主线程轮询在高触发率下丢触发
-        if (m_ringFeedSink)
+        if (m_ringFeedSink) {
             m_ringFeedSink(m_cardId, group->triggerSeq, group->freqA, group->freqB);
+            result.ring = true;
+        }
     } catch (const std::bad_alloc&) {
         // 显示/存储热路径仍可能因瞬时内存压力分配失败，丢弃本帧但保持线程存活。
         m_stats.triggersDiscarded.fetch_add(1, std::memory_order_relaxed);
+        result.exception = true;
     } catch (...) {
         // 任意单帧处理异常都不应杀死整条卡处理线程。
         m_stats.triggersDiscarded.fetch_add(1, std::memory_order_relaxed);
+        result.exception = true;
     }
+    return result;
 }

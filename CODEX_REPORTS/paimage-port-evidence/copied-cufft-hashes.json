@@ -1,0 +1,12 @@
+[
+  {
+    "Algorithm": "SHA256",
+    "Hash": "2480D8AB849D7E9A375275F6C0278B8764C14AC0C1A3BDACAF256AE4A93C5590",
+    "Path": "D:\\ChatGPT\\PAERealtimeImaging\\_session_boundary_stage_20260908\\MC_410T_MultiCard\\delivery\\libs\\imaging\\cufft64_12.dll"
+  },
+  {
+    "Algorithm": "SHA256",
+    "Hash": "2480D8AB849D7E9A375275F6C0278B8764C14AC0C1A3BDACAF256AE4A93C5590",
+    "Path": "D:\\ChatGPT\\PAERealtimeImaging\\_paimage_acquisition_port_20260909\\MC_410T_MultiCard\\delivery\\libs\\imaging\\cufft64_12.dll"
+  }
+]

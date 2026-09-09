@@ -79,7 +79,10 @@ if(WIN32)
     target_include_directories(network_diagnostics_test PRIVATE ../include)
     target_compile_definitions(network_diagnostics_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(network_diagnostics_test PRIVATE Qt6::Core Qt6::Concurrent ws2_32 iphlpapi)
-    add_test(NAME network_diagnostics_test COMMAND network_diagnostics_test)
+    # The removed production StartFence is not a PAimage acceptance criterion.
+    # Retain historical control/field helpers; real source admission/export is
+    # exercised by paimage_network_test and paimage_trace_bundle_test.
+    add_test(NAME network_diagnostics_test COMMAND network_diagnostics_test --legacy-control-only)
 
     add_executable(measurement_session_transaction_test
         measurement_session_transaction_test.cpp
@@ -136,4 +139,33 @@ if(WIN32)
     target_include_directories(card_status_formatting_test PRIVATE ../include)
     target_link_libraries(card_status_formatting_test PRIVATE Qt6::Core)
     add_test(NAME card_status_formatting_test COMMAND card_status_formatting_test)
+    add_subdirectory(paimage_core)
+    target_sources(network_diagnostics_test PRIVATE
+        ../src/PaimageAcquisition/HostOutput.cpp
+        ../src/PaimageAcquisition/Backend.cpp
+        ../src/PaimageAcquisition/NetworkControllerPaimage.cpp)
+    target_link_libraries(network_diagnostics_test PRIVATE paimage_socket)
+    get_target_property(PAIMAGE_NETWORK_TEST_SOURCES network_diagnostics_test SOURCES)
+    list(REMOVE_ITEM PAIMAGE_NETWORK_TEST_SOURCES network_diagnostics_test.cpp)
+    add_executable(paimage_network_test paimage_network_test.cpp ${PAIMAGE_NETWORK_TEST_SOURCES})
+    target_include_directories(paimage_network_test PRIVATE ../include)
+    target_compile_definitions(paimage_network_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(paimage_network_test PRIVATE paimage_socket Qt6::Core Qt6::Concurrent ws2_32 iphlpapi)
+    add_test(NAME paimage_network_test COMMAND paimage_network_test)
+    set_tests_properties(paimage_network_test PROPERTIES RUN_SERIAL TRUE)
+    add_executable(paimage_host_output_test paimage_host_output_test.cpp
+        ../src/PaimageAcquisition/HostOutput.cpp
+        ../src/PaimageAcquisition/Backend.cpp
+        ../src/DataProcessor.cpp ../include/DataProcessor.h
+        ../src/FileSaver.cpp ../include/FileSaver.h
+        ../src/FramePublisher.cpp ../include/FramePublisher.h)
+    target_include_directories(paimage_host_output_test PRIVATE ../include)
+    target_compile_definitions(paimage_host_output_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(paimage_host_output_test PRIVATE paimage_socket Qt6::Core)
+    add_test(NAME paimage_host_output_test COMMAND paimage_host_output_test)
+    add_executable(paimage_trace_bundle_test paimage_trace_bundle_test.cpp
+        ../src/PaimageAcquisition/TraceBundle.cpp ../src/DiagnosticRecorder.cpp)
+    target_include_directories(paimage_trace_bundle_test PRIVATE ../include)
+    target_link_libraries(paimage_trace_bundle_test PRIVATE paimage_socket Qt6::Core)
+    add_test(NAME paimage_trace_bundle_test COMMAND paimage_trace_bundle_test)
 endif()

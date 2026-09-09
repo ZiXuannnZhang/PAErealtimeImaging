@@ -42,6 +42,14 @@ public:
     //  热路径接口（DataProcessor 线程调用，无锁入队）
     void saveTriggerGroup(const TriggerGroupPtr& group);
 
+    // PAimage host adaptation: called only by the single source saving worker,
+    // with this FileSaver's QThread left unstarted. Reuses the same file format,
+    // routing, batching and float16 conversion as the historical run() path.
+    bool consumeTriggerGroup(const TriggerGroupPtr& group);
+    void serviceCloseRequest();
+    void suspendForSourceRestart();
+    void resumeAfterSourceRestart(){m_saving.store(true,std::memory_order_release);}
+
     // 自动保存会话代目录解析：按触发组携带的 sessionGen 查询保存目录。
     // gen=0（手动/无会话代）返回空串=保持当前目录不变。
     void setSessionDirResolver(std::function<QString(uint64_t)> resolver) {

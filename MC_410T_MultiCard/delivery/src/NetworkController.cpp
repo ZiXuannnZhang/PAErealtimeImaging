@@ -299,6 +299,10 @@ void NetworkController::recordIngressSnapshot(const QString& reason)
 }
 
 NetworkController::~NetworkController() {
+    if(m_paimageTimer)m_paimageTimer->stop();
+    if(m_stopThread.joinable())m_stopThread.join();
+    if(m_paimage){m_paimage->stop();m_paimage.reset();}
+    if(m_paimageTrace){m_paimageTrace->stop();m_paimageTrace.reset();}
     // 析构时需要同步等待后台停止线程（不能留 this 指针悬空）
     if (m_running) {
         // 析构路径不会经过 stop()，因此这里也要先留存一次接近关闭时刻的
@@ -340,177 +344,9 @@ NetworkController::~NetworkController() {
 // start()  根据 AcqConfig 创建全部线程
 // ─────────────────────────────────────────────────────────────────────
 bool NetworkController::start(const AcqConfig& config, std::function<void()> onStarted, std::function<void()> onFailed) {
-    if (m_running) stop();
-    m_config  = config;
-    m_running = true;
-
-    // 重建目标IP列表（优先使用网段扫描结果；否则默认 192.168.0.2 起每卡+1）
-    m_targetIPs.clear();
-    if (!config.targetIPs.empty()) {
-        for (const auto& s : config.targetIPs)
-            m_targetIPs.append(QString::fromStdString(s));
-    } else {
-        for (int i = 0; i < config.nCards; ++i)
-            m_targetIPs.append(QString("192.168.0.%1").arg(i + 2));
-    }
-
-    m_cardDiagnostics.assign(m_targetIPs.size(), CardDiagnosticState{});
-    for (CardDiagnosticState& card : m_cardDiagnostics) {
-        card.discovery = config.targetIPs.empty()
-            ? QStringLiteral("default")
-            : QStringLiteral("configured");
-        card.localAddress = config.localBindIP.empty()
-            ? QStringLiteral("unknown")
-            : QString::fromStdString(config.localBindIP);
-    }
-    m_currentConfigId.clear();
-    m_currentConfigTrigger = QStringLiteral("api");
-    m_measurementSessionId.clear();
-    m_pendingMeasurementSessionId.clear();
-    m_measurementSessionToken = 0;
-    m_measurementRunning = false;
-    m_measurementState = MeasurementState::Disarmed;
-    m_measurementFaultReason.clear();
-    m_feedbackSequence.store(0, std::memory_order_relaxed);
-    m_feedbackTimeoutCount.store(0, std::memory_order_relaxed);
-    m_ingressSampler.reset();
-    m_lastIngressSnapshotMs = 0;
-
-    // 初始化卡就绪状态
-    m_cardsReady.assign(config.nCards, false);
-    m_cmdQueue.clear();
-    clearPendingMeasurementRequests(QStringLiteral("listener_start_rollback"));
-
-    // 初始化配置确认状态
-    m_configPhase   = ConfigPhase::Idle;
-    m_configAck.clear();
-    m_configRetry.clear();
-    m_configSentMs.clear();
-
-    recordCardSnapshots(QStringLiteral("idle"));
-    scheduleNetworkSnapshot(QStringLiteral("start"), QStringLiteral("idle"));
-
-    // 初始化控制 socket（WSAStartup 已由此调用处理）
-    initControlSocket();
-
-    // 启动反馈监听线程（检测 18 字节就绪包）
-    initFeedbackListener();
-
-    const int nCards = config.nCards;
-
-    //  可选扩展：FramePublisher 
-    m_publisher = std::make_unique<FramePublisher>(this);
-    m_publisher->configure(config.enablePublisher, nCards, config.samplesPerTrig());
-    if (config.enablePublisher)
-        m_publisher->start();
-
-    // 每卡创建：DisplayBuffer + FileSaver + DataProcessor
-    m_processors.clear();
-    m_displayBuffers.clear();
-    m_savers.clear();
-    m_lastPktsReceived.assign(nCards, 0);
-    m_lastPktsDropped.assign(nCards, 0);
-    m_lastTrigsComplete.assign(nCards, 0);
-
-    for (int i = 0; i < nCards; ++i) {
-        auto dispBuf  = std::make_unique<DisplayBuffer>();
-        auto saver    = std::make_unique<FileSaver>(i, this);
-        // 自动保存会话代：保存器按触发组携带的会话代路由目录（gen=0 保持当前目录）
-        saver->setSessionDirResolver([this](uint64_t gen) { return sessionDir(gen); });
-        auto proc     = std::make_unique<DataProcessor>(
-            i,
-            saver->saveQueue(),
-            dispBuf.get(),
-            config.enablePublisher ? m_publisher.get() : nullptr,
-            config,
-            m_ringFeedSink
-        );
-        // 入队前打标：读取当前会话代（UI 线程在边界空闲期提前推进）
-        proc->setSessionGenReader([this]() { return autoSessionGen(); });
-        connect(saver.get(), &FileSaver::statusMessage,
-                this, &NetworkController::statusMessage);
-        connect(saver.get(), &FileSaver::errorOccurred,
-                this, &NetworkController::errorOccurred);
-        connect(proc.get(), &DataProcessor::partialTrigger,
-                this, [this](int cardId, uint16_t seq, int missing) {
-            emit statusMessage(QString("⚠ 卡%1 部分触发 seq=%2 缺%3包")
-                               .arg(cardId + 1).arg(seq).arg(missing));
-        });
-
-        m_displayBuffers.push_back(std::move(dispBuf));
-        m_savers.push_back(std::move(saver));
-        m_processors.push_back(std::move(proc));
-    }
-
-    //  启动 DataProcessor 线程 
-    for (auto& p : m_processors) p->start();
-    //  启动 FileSaver 线程 
-    for (auto& s : m_savers) s->start();
-
-    //  创建并启动接收线程组 
-    m_receivers.clear();
-    std::vector<DataProcessor*> procPtrs;
-    for (auto& p : m_processors) procPtrs.push_back(p.get());
-
-    // ─────────────────────────────────────────────────────────────
-    // 路线A：WinSock select 多路复用
-    // 每 4 张卡一个 MultiPortReceiver，绑定独立 CPU 核
-    // ─────────────────────────────────────────────────────────────
-    const int CARDS_PER_RECEIVER = 4;
-    int cpuCore = 2;  // 从 P 核 2 开始分配
-    for (int g = 0; g < nCards; g += CARDS_PER_RECEIVER) {
-        std::vector<int>             cardIdx;
-        std::vector<DataProcessor*>  procs;
-        for (int k = g; k < std::min(g + CARDS_PER_RECEIVER, nCards); ++k) {
-            cardIdx.push_back(k);
-            procs.push_back(procPtrs[k]);
-        }
-        auto recv = std::make_unique<MultiPortReceiver>(cardIdx, procs, cpuCore++, this);
-        connect(recv.get(), &MultiPortReceiver::statusMessage,
-                this, &NetworkController::statusMessage);
-        connect(recv.get(), &MultiPortReceiver::errorOccurred,
-                this, &NetworkController::errorOccurred);
-        recv->start();
-        m_receivers.push_back(std::move(recv));
-    }
-
-    // ══ 启动确认：所有接收线程必须完成端口绑定并进入接收循环 ══
-    // 任一端口绑定失败（如端口被残留进程占用）时立即回滚，
-    // 避免 UI 误报“监听已启动”而实际无任何数据接收。
-    constexpr int RECEIVER_STARTUP_WAIT_MS = 3000;
-    bool receiversReady = true;
-    for (auto& r : m_receivers) {
-        if (!r->waitUntilStarted(RECEIVER_STARTUP_WAIT_MS)) {
-            receiversReady = false;
-            break;
-        }
-    }
-    if (!receiversReady) {
-        rollbackStart();
-        emit errorOccurred("接收端口启动失败，网络监听未启动（请检查 8001+ 端口是否被占用）");
-        if (onFailed) onFailed();
-        return false;
-    }
-
-    emit statusMessage(QString("NetworkController: 路线A（WinSock）启动，%1 卡，%2 接收组")
-                       .arg(nCards).arg(m_receivers.size()));
-
-    //  统计定时器 
-    m_lastStatsMs = nowMs();
-    m_lastRuntimeSnapshotMs = 0;
-    m_lastIngressSnapshotMs = 0;
-    m_statsTimer = new QTimer(this);
-    connect(m_statsTimer, &QTimer::timeout, this, &NetworkController::onStatsTimer);
-    m_statsTimer->start(STATS_UPDATE_MS);
-
-    // 路线A同步完成，调用回调通知 UI
-    if (onStarted) onStarted();
-    return true;
+    return startPaimage(config,std::move(onStarted),std::move(onFailed));
 }
 
-// ═════════════════════════════════════════════════════════════════════
-// rollbackStart()  接收线程启动失败时同步清理本次 start() 已创建的资源
-// ═════════════════════════════════════════════════════════════════════
 void NetworkController::rollbackStart()
 {
     recordCardSnapshots(QStringLiteral("failed"));
@@ -560,6 +396,7 @@ void NetworkController::rollbackStart()
 // stop()  有序停止
 // ─────────────────────────────────────────────────────────────────────
 void NetworkController::stop() {
+    if(m_paimage){stopPaimage();return;}
     // 防止重复调用
     if (!m_running && !m_stopThread.joinable()) {
         QMetaObject::invokeMethod(this, [this]() { emit stopped(); }, Qt::QueuedConnection);
@@ -650,12 +487,15 @@ void NetworkController::stop() {
 void NetworkController::startSaving(const QString& directory,
                                      int triggersPerFile,
                                      const QString& suffix) {
+    if(m_paimage){m_paimageSaveDir=directory;m_paimageSaveCount=triggersPerFile;m_paimageSaveSuffix=suffix;
+        m_paimageSavingRequested=true;m_paimage->output().startSaving(directory,triggersPerFile,suffix);return;}
     for (auto& p : m_processors) p->setSaveEnabled(true);
     for (auto& s : m_savers)
         s->startSaving(directory, triggersPerFile, suffix);
 }
 
 void NetworkController::stopSaving() {
+    if(m_paimage){m_paimageSavingRequested=false;m_paimage->output().stopSaving();return;}
     for (auto& p : m_processors) p->setSaveEnabled(false);
     for (auto& s : m_savers) s->stopSaving();
 }
@@ -685,6 +525,7 @@ void NetworkController::setDisplayPoints(int displayPoints) {
 }
 
 void NetworkController::reconfigure(const AcqConfig& config) {
+    if(m_paimage){m_config.displayPoints=config.displayPoints;setDisplayPoints(config.displayPoints);return;}
     m_config = config;
     for (auto& p : m_processors) p->updateConfig(config);
 }
@@ -702,7 +543,7 @@ NetworkController::getCardStats(int cardIdx) const {
         return std::nullopt;
     auto snap = m_processors[cardIdx]->statsSnapshot();
     if (cardIdx < static_cast<int>(m_savers.size()))
-        snap.saveQueueDepth = m_savers[cardIdx]->queueDepth();
+        snap.saveQueueDepth = m_paimage ? int(m_paimage->output().cardDepth(cardIdx)) : m_savers[cardIdx]->queueDepth();
     return snap;
 }
 
@@ -711,7 +552,7 @@ std::vector<CardStats::Snapshot> NetworkController::getAllCardStats() const {
     for (int i = 0; i < static_cast<int>(m_processors.size()); ++i) {
         auto snap = m_processors[i]->statsSnapshot();
         if (i < static_cast<int>(m_savers.size()))
-            snap.saveQueueDepth = m_savers[i]->queueDepth();
+            snap.saveQueueDepth = m_paimage ? int(m_paimage->output().cardDepth(int(i))) : m_savers[i]->queueDepth();
         result.push_back(snap);
     }
     return result;
@@ -754,6 +595,8 @@ void NetworkController::updateAllStats() {
 
         // Mbps = 包数  包大小(bit) / 时间(s) / 1e6
         stats.recvMbps       = dpkts * UDP_TOTAL_BYTES * 8.0 / dt / 1e6;
+        if(m_paimage){const auto bytes=stats.socketBytesReceived.load();
+            stats.recvMbps=double(bytes-m_paimageLastBytes[i])*8.0/dt/1e6;m_paimageLastBytes[i]=bytes;}
         stats.triggerHz      = dtrig / dt;
         // 丢包率（基于接收包和丢包的比例）
         double totalPkts = dpkts + ddrop;
@@ -768,6 +611,7 @@ void NetworkController::updateAllStats() {
     if (m_lastRuntimeSnapshotMs == 0 ||
         now - m_lastRuntimeSnapshotMs >= 2000) {
         m_lastRuntimeSnapshotMs = now;
+        if(m_paimage)recordPaimageSnapshot();
         recordCardSnapshots(QStringLiteral("runtime"));
     }
     if (m_lastIngressSnapshotMs == 0 ||
@@ -2387,6 +2231,7 @@ bool NetworkController::sendConfigCommand(int dataTime,
                                           int bDelay,
                                           QString trigger)
 {
+    if(m_paimage)return configurePaimage(dataTime,aDelay,bDelay,trigger);
     const QString configId = QStringLiteral("config-%1").arg(m_nextConfigId++);
     if (trigger.isEmpty()) trigger = QStringLiteral("api");
 
@@ -2441,6 +2286,7 @@ bool NetworkController::sendConfigCommand(int dataTime,
 
 bool NetworkController::sendStartMeasure()
 {
+    if(m_paimage)return startPaimageMeasurement();
     if (m_controlSocket == INVALID_SOCKET) {
         emit errorOccurred("控制 socket 未初始化，请先点击[开始监听]");
         QJsonObject fields;
@@ -2553,6 +2399,7 @@ bool NetworkController::sendStartMeasure()
 
 bool NetworkController::sendStopMeasure()
 {
+    if(m_paimage)return stopPaimageMeasurement();
     if (m_controlSocket == INVALID_SOCKET) {
         emit errorOccurred("控制 socket 未初始化，请先点击[开始监听]");
         QJsonObject fields;
@@ -2645,6 +2492,7 @@ bool NetworkController::sendStopMeasure()
 
 void NetworkController::setMeasureEnabled(bool enable)
 {
+    if(m_paimage){if(enable)startPaimageMeasurement();else stopPaimageMeasurement();return;}
     for (auto& receiver : m_receivers) {
         if (receiver) receiver->setCompatibilityAdmission(enable, 1);
     }

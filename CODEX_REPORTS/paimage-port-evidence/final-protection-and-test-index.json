@@ -1,0 +1,115 @@
+{
+  "originalBranchRefChanges": {},
+  "rootTrackedStatusMatchesRecorded": true,
+  "scope": "Only ref/status comparison; no complete pre-task per-file content hash snapshot exists.",
+  "currentSourceHead": "9eef7b729228778bcf464e06306f2ad153c14e6c",
+  "evidence": [
+    {
+      "path": "build/production-28-600s.log",
+      "bytes": 116,
+      "sha256": "9f19f4ba6fadcd8f42eb369b967a127bbb88f4578b19a21ecfd4ca390c3e2eae"
+    },
+    {
+      "path": "build/production-70-600s.log",
+      "bytes": 116,
+      "sha256": "8155795fb717fb4e0f0f0becc9b9621d9c5a70fe58987cade0f1cfb862113795"
+    },
+    {
+      "path": "build/production-compare-off.log",
+      "bytes": 178,
+      "sha256": "81789f8254aedce4a6c8274302616266c1058afcccad029afd341665c3a11fd4"
+    },
+    {
+      "path": "build/production-compare-on.log",
+      "bytes": 178,
+      "sha256": "38b7e54772259b3c6a01b3b10c335a9689136a43f0a3318ca561b13d976f397f"
+    },
+    {
+      "path": "build/production-missing-middle.log",
+      "bytes": 173,
+      "sha256": "202328c7b817778c3ba803ecab0f21d6abecc56548e61e234ab99a910cd8754d"
+    },
+    {
+      "path": "build/noninteractive-final-tests.log",
+      "bytes": 3269,
+      "sha256": "39d61455f82cb0896ead8afae138a7555c8aa119f763b735177881efd550d24d"
+    },
+    {
+      "path": "build/paimage-final-tests.log",
+      "bytes": 1598,
+      "sha256": "5a8911bf3c535e998cca1e097a04995e81005a81a1af9e72426d14c7caa13f4a"
+    },
+    {
+      "runId": "b49e0acf-cf46-4803-9aa5-a8dd74a11a01",
+      "summary": {
+        "schemaVersion": 2,
+        "recordBytes": 64,
+        "recordsIssued": 6168105,
+        "recordsWritten": 6168105,
+        "queueDropped": 0,
+        "writerUnwritten": 0,
+        "traceIncomplete": false,
+        "queuePeak": 842,
+        "queueAllocatedBytes": 16777216,
+        "segmentBudgetBytes": 67108864,
+        "totalBudgetBytes": 1073741824,
+        "writeFailed": false
+      },
+      "summarySha256": "5e44907ec8df6417bf44882db0aabc1c114bba48cb947612550dcc08e42755de"
+    },
+    {
+      "runId": "490b72f9-b92f-48e5-95c8-44f253da9625",
+      "summary": {
+        "schemaVersion": 2,
+        "recordBytes": 64,
+        "recordsIssued": 14232105,
+        "recordsWritten": 14232105,
+        "queueDropped": 0,
+        "writerUnwritten": 0,
+        "traceIncomplete": false,
+        "queuePeak": 1186,
+        "queueAllocatedBytes": 16777216,
+        "segmentBudgetBytes": 67108864,
+        "totalBudgetBytes": 1073741824,
+        "writeFailed": false
+      },
+      "summarySha256": "6cbedc34da2d797a21837ccc822adf8931311ac60e682fa8dda96e05d5ad66d5"
+    },
+    {
+      "runId": "636e29a6-2b24-4649-85e4-bdb50d7fd941",
+      "summary": {
+        "schemaVersion": 2,
+        "recordBytes": 64,
+        "recordsIssued": 237305,
+        "recordsWritten": 237305,
+        "queueDropped": 0,
+        "writerUnwritten": 0,
+        "traceIncomplete": false,
+        "queuePeak": 1002,
+        "queueAllocatedBytes": 16777216,
+        "segmentBudgetBytes": 67108864,
+        "totalBudgetBytes": 1073741824,
+        "writeFailed": false
+      },
+      "summarySha256": "ebd009e10eb59aeec66b8a9fc4f0cce8bb4477726088964637e9d1d504818835"
+    },
+    {
+      "runId": "303c1c23-76bc-46c9-9bf5-81a8952ed864",
+      "summary": {
+        "schemaVersion": 2,
+        "recordBytes": 64,
+        "recordsIssued": 20643,
+        "recordsWritten": 20643,
+        "queueDropped": 0,
+        "writerUnwritten": 0,
+        "traceIncomplete": false,
+        "queuePeak": 770,
+        "queueAllocatedBytes": 16777216,
+        "segmentBudgetBytes": 67108864,
+        "totalBudgetBytes": 1073741824,
+        "writeFailed": false
+      },
+      "summarySha256": "d505de6dd09a87b843976dbc75a24d1998eb9ceb6ab6a5b375a6b28bdab264c5"
+    }
+  ]
+}

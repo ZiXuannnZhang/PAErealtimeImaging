@@ -53,6 +53,18 @@ public:
     // packet's enqueue time.
     void enqueuePacketForSession(const DataPacket& pkt, uint64_t sessionToken);
 
+    // Already assembled PAimage output. This entry never touches packet queues,
+    // PacketAssemblyBuffer, StartFence, or numerical conversion. The source
+    // saving worker uses save=true; its sync worker uses displayAndRing=true.
+    struct DeliveryResult {
+        enum Save { NotRequested, Disabled, Queued, QueueFull, QueueFailure, Consumed, ConsumerFailure } save=NotRequested;
+        bool display=false,ring=false,publisher=false,exception=false;
+    };
+    DeliveryResult deliverAssembled(const TriggerGroupPtr&,bool save,bool displayAndRing);
+    // Set before starting source workers. No second saving queue in this path.
+    void setDirectSaveSink(std::function<bool(const TriggerGroupPtr&)> sink) { m_directSaveSink=std::move(sink); }
+    std::uint64_t captureSaveSessionGen()const{return m_sessionGenReader?m_sessionGenReader():0;}
+
     //  停止：发出中断请求并立即唤醒等待中的条件变量
     void requestStop() {
         requestInterruption();
@@ -60,8 +72,8 @@ public:
     }
 
     //  采集控制 
-    void setSaveEnabled(bool enable) { m_saveEnabled = enable; }
-    bool isSaveEnabled() const       { return m_saveEnabled; }
+    void setSaveEnabled(bool enable) { m_saveEnabled.store(enable); }
+    bool isSaveEnabled() const       { return m_saveEnabled.load(); }
     // 自动保存会话代读取器（入队前调用，把当前会话代打在触发组上；
     // 未设置时触发组 sessionGen=0，即手动模式）
     void setSessionGenReader(std::function<uint64_t()> reader) { m_sessionGenReader = std::move(reader); }
@@ -164,7 +176,8 @@ private:
     //  成员 
     int              m_cardId;
     AcqConfig        m_config;
-    bool             m_saveEnabled = false;
+    std::atomic<bool> m_saveEnabled{false};
+    std::function<bool(const TriggerGroupPtr&)> m_directSaveSink;
     std::atomic<bool> m_measureEnabled{false};  // 开始测量门控
     std::atomic<uint64_t> m_ingressSessionToken{0};
     std::atomic<uint64_t> m_activeSessionToken{0};

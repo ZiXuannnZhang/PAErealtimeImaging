@@ -1,5 +1,9 @@
 #include <QApplication>
 #include <QSettings>
+#include "PaimageAcquisition/TraceBundle.h"
+#include "PaimageAcquisition/BuildIdentity.h"
+#include "PaimageAcquisition/SettingsPath.h"
+#include <QJsonDocument>
 #include <QDebug>
 #include <QStringList>
 #include <QJsonArray>
@@ -430,12 +434,16 @@ int main(int argc, char* argv[]) {
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QApplication::setAttribute(Qt::AA_EnableAccessibility);   // Qt5: 启用 UIA 支持
 #endif
-    app.setApplicationName("MC410T 多卡接收处理系统");
-    app.setApplicationVersion("1.0.0");
-    app.setOrganizationName("MC_410T");
+    app.setApplicationName("PAimage采集移植测试版");
+    app.setApplicationVersion("1.0.0-paimage-derived");
+    app.setOrganizationName("PAimageAcquisitionPort");
 
     QString diagnosticError;
-    auto *recorder = DiagnosticRecorder::initialize(&diagnosticError);
+    const bool copiedLegacyParameters=seedPaimageSettings();
+    paimage::installTraceBundle(QCoreApplication::applicationDirPath()+"/paimage-traces",QCoreApplication::applicationDirPath()+"/diagnostic-tools");
+    DiagnosticRecorder::Options diagnosticOptions;
+    diagnosticOptions.rootDirectory=QCoreApplication::applicationDirPath()+"/paimage-diagnostics";
+    auto *recorder = DiagnosticRecorder::initialize(diagnosticOptions,&diagnosticError);
     if (recorder) {
         std::lock_guard<std::mutex> lock(earlyDiagnosticMutex);
         diagnosticReady.store(true, std::memory_order_release);
@@ -445,6 +453,12 @@ int main(int argc, char* argv[]) {
     }
     const QString executablePath = QCoreApplication::applicationFilePath();
     QJsonObject identity{{"kind", "program"}, {"executablePath", executablePath},
+        {"backendId","paimage-derived"},
+        {"behaviorMappingVersion","production-3"},
+        {"parameterStore",paimageSettingsPath()},{"copiedLegacyParameters",copiedLegacyParameters},
+        {"sourceGitSha",PAIMAGE_GIT_SHA},{"trackedSourceDirty",PAIMAGE_TRACKED_DIRTY},
+        {"buildType",PAIMAGE_BUILD_TYPE},{"compiler",PAIMAGE_COMPILER},
+        {"productBaseline",PAIMAGE_PRODUCT_BASELINE},{"sourcePaimageSha256",PAIMAGE_SOURCE_SHA256},
         {"applicationVersion", app.applicationVersion()}, {"qtVersion", qVersion()},
         {"build", QStringLiteral(__DATE__ " " __TIME__)},
         {"os", QSysInfo::prettyProductName()}, {"architecture", QSysInfo::currentCpuArchitecture()},
@@ -458,12 +472,25 @@ int main(int argc, char* argv[]) {
         if (executable.open(QIODevice::ReadOnly) && hash.addData(&executable))
             identity.insert("executableSha256", QString::fromLatin1(hash.result().toHex()));
         else identity.insert("identityError", executable.errorString());
+        QJsonArray libraries;
+        const QDir directory(QFileInfo(executablePath).absolutePath());
+        for(const auto& name:{QString("Qt6Core.dll"),QString("ring_recon_cuda.dll"),QString("cufft64_12.dll"),QString("ImagingSvc.exe"),QString("libzmq-v141-mt-4_3_5.dll")}){
+            QFile file(directory.filePath(name));QCryptographicHash digest(QCryptographicHash::Sha256);
+            QJsonObject entry{{"file",name}};
+            if(file.open(QIODevice::ReadOnly)&&digest.addData(&file))entry.insert("sha256",QString::fromLatin1(digest.result().toHex()));
+            else entry.insert("status","unknown: unavailable or unreadable");
+            libraries.append(entry);
+        }
+        identity.insert("keyBinaryHashes",libraries);
+        QFile manifest(directory.filePath("build-manifest.json"));
+        if(manifest.open(QIODevice::ReadOnly))identity.insert("buildManifest",QJsonDocument::fromJson(manifest.readAll()).object());
         if (auto *r = DiagnosticRecorder::instance()) r->recordSettingsSnapshot(identity);
     });
 
     int ret = 0;
     {
         MainWindow window;
+        window.setWindowTitle(QStringLiteral("PAimage采集移植测试版 — paimage-derived — ")+QString::fromLatin1(PAIMAGE_GIT_SHA).left(12));
         window.show();
         if (!diagnosticError.isEmpty()) qWarning().noquote() << "诊断日志初始化：" << diagnosticError;
         ret = app.exec();

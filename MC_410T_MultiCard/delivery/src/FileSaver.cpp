@@ -242,96 +242,119 @@ void FileSaver::run() {
             QThread::msleep(1);  // 队列空，短暂休眠
             continue;
         }
-        if (!m_saving.load()) {
-            // 保存已停止 → 丢弃队列中的残余数据
-            // 不做刷盘/关文件，因为 stopSaving() 已处理
-            continue;
-        }
-
-        // 自动保存会话代切换：边界处刷盘并关闭上一会话文件，
-        // 按新会话代查询目录（gen=0 保持当前目录，即手动模式）
-        const uint64_t gen = group->sessionGen;
-        if (gen != m_currentGen) {
-            flushWriteBuffers();
-            closeFiles();
-            m_currentGen = gen;
-            m_fileSequence = 0;
-            m_currentFileTriggers = 0;
-            m_dropGen = 0;
-            if (m_dirResolver && gen != 0) {
-                const QString d = m_dirResolver(gen);
-                if (!d.isEmpty()) {
-                    m_saveDirectory = d;
-                } else {
-                    // 方案C：目录未注册（正常流程不应发生）——告警并丢弃本会话数据，
-                    // 防止误写入上一会话目录
-                    emit errorOccurred(QString("Card%1: 自动保存会话代 %2 目录未注册，丢弃本会话数据")
-                                           .arg(m_cardId + 1).arg(gen));
-                    m_dropGen = gen;
-                }
-            }
-        }
-        // 方案C：目录缺失的会话代数据直接丢弃
-        if (m_dropGen != 0 && gen == m_dropGen)
-            continue;
-
-        // 打开文件（首次 或 IP 来源变化时）
-        if (!m_fileChannelA || !m_fileChannelB ||
-            group->sourceIPv4 != m_currentSourceIPv4) {
-            if (group->sourceIPv4 != m_currentSourceIPv4)
-                m_fileSequence = 0;  // 新 IP 来源，文件序号重置
-            openNewFiles(group->sourceIPv4);
-        }
-
-        // 文件序号翻滚
-        if (m_currentFileTriggers >= m_triggersPerFile) {
-            flushWriteBuffers();   // 翻滚前先刷盘
-            ++m_fileSequence;
-            closeFiles();
-            openNewFiles(m_currentSourceIPv4);
-        }
-
-        if (!m_fileChannelA || !m_fileChannelB) {
-            emit errorOccurred(QString("Card%1: 保存文件未成功打开，已自动停止保存")
-                               .arg(m_cardId + 1));
-            m_saving.store(false, std::memory_order_release);
-            closeFiles();
-            continue;
-        }
-
-        int n = group->sampleCount;
-        if (n <= 0) continue;
-
-        try {
-            // float32  float16 批量转换并积累到内存缓冲区
-            size_t offset = m_writeAccumA.size();
-            m_writeAccumA.resize(offset + n);
-            m_writeAccumB.resize(offset + n);
-            convertBatch(group->freqA.data(), m_writeAccumA.data() + offset, n);
-            convertBatch(group->freqB.data(), m_writeAccumB.data() + offset, n);
-            ++m_accumTriggers;
-
-            // 达到合并阈値时一次性写盘（WRITE_BUFFER_TRIGGERS 个触发合并为一条大 I/O）
-            if (m_accumTriggers >= WRITE_BUFFER_TRIGGERS)
-                flushWriteBuffers();
-
-        } catch (const std::bad_alloc&) {
-            emit errorOccurred(QString("Card%1: 保存线程内存不足，已自动停止保存")
-                               .arg(m_cardId + 1));
-            m_saving.store(false, std::memory_order_release);
-            closeFiles();
-            continue;
-        } catch (...) {
-            emit errorOccurred(QString("Card%1: 保存线程发生异常，已自动停止保存")
-                               .arg(m_cardId + 1));
-            m_saving.store(false, std::memory_order_release);
-            closeFiles();
-            continue;
-        }
-
-        ++m_currentFileTriggers;
-        m_savedCount.fetch_add(1, std::memory_order_relaxed);
+        consumeTriggerGroup(group);
     }
 
     closeFiles();
+}
+
+
+bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
+    if (!group) return false;
+    if (!m_saving.load()) {
+        // 保存已停止 → 丢弃队列中的残余数据
+        // 不做刷盘/关文件，因为 stopSaving() 已处理
+        return false;
+    }
+
+    // 自动保存会话代切换：边界处刷盘并关闭上一会话文件，
+    // 按新会话代查询目录（gen=0 保持当前目录，即手动模式）
+    const uint64_t gen = group->sessionGen;
+    if (gen != m_currentGen) {
+        flushWriteBuffers();
+        closeFiles();
+        m_currentGen = gen;
+        m_fileSequence = 0;
+        m_currentFileTriggers = 0;
+        m_dropGen = 0;
+        if (m_dirResolver && gen != 0) {
+            const QString d = m_dirResolver(gen);
+            if (!d.isEmpty()) {
+                m_saveDirectory = d;
+            } else {
+                // 方案C：目录未注册（正常流程不应发生）——告警并丢弃本会话数据，
+                // 防止误写入上一会话目录
+                emit errorOccurred(QString("Card%1: 自动保存会话代 %2 目录未注册，丢弃本会话数据")
+                                       .arg(m_cardId + 1).arg(gen));
+                m_dropGen = gen;
+            }
+        }
+    }
+    // 方案C：目录缺失的会话代数据直接丢弃
+    if (m_dropGen != 0 && gen == m_dropGen)
+        return false;
+
+    // 打开文件（首次 或 IP 来源变化时）
+    if (!m_fileChannelA || !m_fileChannelB ||
+        group->sourceIPv4 != m_currentSourceIPv4) {
+        if (group->sourceIPv4 != m_currentSourceIPv4)
+            m_fileSequence = 0;  // 新 IP 来源，文件序号重置
+        openNewFiles(group->sourceIPv4);
+    }
+
+    // 文件序号翻滚
+    if (m_currentFileTriggers >= m_triggersPerFile) {
+        flushWriteBuffers();   // 翻滚前先刷盘
+        ++m_fileSequence;
+        closeFiles();
+        openNewFiles(m_currentSourceIPv4);
+    }
+
+    if (!m_fileChannelA || !m_fileChannelB) {
+        emit errorOccurred(QString("Card%1: 保存文件未成功打开，已自动停止保存")
+                           .arg(m_cardId + 1));
+        m_saving.store(false, std::memory_order_release);
+        closeFiles();
+        return false;
+    }
+
+    int n = group->sampleCount;
+    if (n <= 0) return false;
+
+    try {
+        // float32  float16 批量转换并积累到内存缓冲区
+        size_t offset = m_writeAccumA.size();
+        m_writeAccumA.resize(offset + n);
+        m_writeAccumB.resize(offset + n);
+        convertBatch(group->freqA.data(), m_writeAccumA.data() + offset, n);
+        convertBatch(group->freqB.data(), m_writeAccumB.data() + offset, n);
+        ++m_accumTriggers;
+
+        // 达到合并阈値时一次性写盘（WRITE_BUFFER_TRIGGERS 个触发合并为一条大 I/O）
+        if (m_accumTriggers >= WRITE_BUFFER_TRIGGERS)
+            flushWriteBuffers();
+
+    } catch (const std::bad_alloc&) {
+        emit errorOccurred(QString("Card%1: 保存线程内存不足，已自动停止保存")
+                           .arg(m_cardId + 1));
+        m_saving.store(false, std::memory_order_release);
+        closeFiles();
+        return false;
+    } catch (...) {
+        emit errorOccurred(QString("Card%1: 保存线程发生异常，已自动停止保存")
+                           .arg(m_cardId + 1));
+        m_saving.store(false, std::memory_order_release);
+        closeFiles();
+        return false;
+    }
+
+    ++m_currentFileTriggers;
+    m_savedCount.fetch_add(1, std::memory_order_relaxed);
+    return m_saving.load(std::memory_order_acquire);
+}
+
+void FileSaver::serviceCloseRequest() {
+    if (m_closeRequest.exchange(false, std::memory_order_acq_rel)) {
+        flushWriteBuffers();
+        closeFiles();
+    }
+}
+
+void FileSaver::suspendForSourceRestart() {
+    const bool hadData=m_currentFileTriggers>0;
+    stopSaving();
+    // The immutable source listener is rebuilt when sample count changes.
+    // Continue the host file sequence rather than reopening/truncating the
+    // file containing the preceding sample layout. Format and names unchanged.
+    if(hadData)++m_fileSequence;
 }

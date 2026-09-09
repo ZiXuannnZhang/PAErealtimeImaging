@@ -386,6 +386,7 @@ public:
 
 int main(int argc, char **argv) {
     QCoreApplication app(argc,argv);
+    const bool legacyControlOnly=app.arguments().contains("--legacy-control-only");
     WSADATA winsock{};
     if(WSAStartup(MAKEWORD(2,2),&winsock)!=0) return 2;
     QTemporaryDir temporary;
@@ -395,10 +396,10 @@ int main(int argc, char **argv) {
     const bool ok=runtimeStatsFieldMapping()
         && NetworkDiagnosticTestAccess::exercise(4) && NetworkDiagnosticTestAccess::exercise(5)
         && NetworkDiagnosticTestAccess::pendingSessionCleanup()
-        && NetworkDiagnosticTestAccess::measurementBoundaryEvidence()
+        && (legacyControlOnly || (NetworkDiagnosticTestAccess::measurementBoundaryEvidence()
         && NetworkDiagnosticTestAccess::measurementBoundaryFailureEvidence()
         && receptionDuringExport(false,QString())
-        && receptionDuringExport(true,QDir(temporary.path()).filePath("during-reception.zip"));
+        && receptionDuringExport(true,QDir(temporary.path()).filePath("during-reception.zip"))));
     QThreadPool::globalInstance()->waitForDone();
     const auto result=recorder->exportRun(QDir(temporary.path()).filePath("control-test.zip"));
     QFile evidence(QDir(recorder->runDirectory()).filePath("events.jsonl"));

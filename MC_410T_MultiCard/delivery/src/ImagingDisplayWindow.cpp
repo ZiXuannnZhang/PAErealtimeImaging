@@ -1,3 +1,4 @@
+#include "PaimageAcquisition/SettingsPath.h"
 #include "ImagingDisplayWindow.h"
 
 #include <algorithm>
@@ -32,7 +33,7 @@ ImagingDisplayWindow::ImagingDisplayWindow(QWidget *parent)
 {
     setWindowTitle("环形扫描实时成像");
     // 窗口大小记忆：恢复上次关闭前的几何（位置+尺寸）
-    QSettings s("MC410T", "MC410T_Receiver");
+    QSettings s(paimageSettingsPath(), QSettings::IniFormat);
     const bool restored = restoreGeometry(s.value("ImagingWindow/Geometry").toByteArray());
     if (restored) {
         const QRect avail = screen() ? screen()->availableGeometry()
@@ -59,7 +60,7 @@ ImagingDisplayWindow::ImagingDisplayWindow(QWidget *parent)
 
 ImagingDisplayWindow::~ImagingDisplayWindow()
 {
-    QSettings s("MC410T", "MC410T_Receiver");
+    QSettings s(paimageSettingsPath(), QSettings::IniFormat);
     s.setValue("ImagingWindow/Geometry", saveGeometry());
     s.setValue("ImagingWindow/Range1Low",  m_range1.lower);
     s.setValue("ImagingWindow/Range1High", m_range1.upper);
@@ -389,7 +390,7 @@ void ImagingDisplayWindow::changeEvent(QEvent *event)
 
 void ImagingDisplayWindow::closeEvent(QCloseEvent *event)
 {
-    QSettings s("MC410T", "MC410T_Receiver");
+    QSettings s(paimageSettingsPath(), QSettings::IniFormat);
     s.setValue("ImagingWindow/Geometry", saveGeometry());
     s.setValue("ImagingWindow/Range1Low",  m_range1.lower);
     s.setValue("ImagingWindow/Range1High", m_range1.upper);

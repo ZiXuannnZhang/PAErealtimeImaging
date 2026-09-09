@@ -30,6 +30,7 @@ struct AcqConfig {
     int  delayB          = 1000;     // B 通道延时（ns）
     int  displayPoints   = 1000;     // UI 显示点数（降采样后）
     bool enablePublisher = false;    // 是否启用 ZeroMQ FramePublisher
+    bool diagnosticTraceEnabled = true; // Production default; deterministic replay comparison may disable.
 
     // ══ 数据格式参数（真实采集固定 250 MSa/s 满速率，与 Constants.h 一致）══
     // 32bit Q16.16 差分相位，采样间隔 4.0 ns，不抽取。
