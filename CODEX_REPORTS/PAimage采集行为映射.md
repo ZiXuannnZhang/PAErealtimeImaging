@@ -1,6 +1,6 @@
 # PAimage采集行为映射
 
-映射版本：production-3，2026-09-10。工程候选版已实际替换生产采集路径；桌面验收待解锁。
+映射版本：production-3，2026-09-10。交付版已实际替换生产采集路径；剩余界面验收由用户接管。
 产品基线：e66a29bfbbaa6534911a23d48e8624fb8d552bec。
 源PAimage 1.5.16.0 SHA256：2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec。
 静态基址0x140000000；下表RVA=VA减基址。名称为恢复源码自拟名称，不是原始符号。
@@ -38,5 +38,5 @@
 
 46处选定机器码指令已由verify_recovery.py核对。完整函数恢复同时依赖扩展反汇编和调用/数据流核验；数量不是完整性证明。PE exception目录可能仅含函数片段，不能将片段结尾当正常路径结尾。
 
-证据位于paimage-port-evidence：input-hashes.json、recovery-verified.json、fn-*.asm及分析脚本。没有完整原源码或原EXE动态对拍。驱动内部、物理触发沿、包在应用入口之前的具体丢失位置仍不可观测。实际窗口交互与用户外接网卡实验尚未验收。
+证据位于paimage-port-evidence：input-hashes.json、recovery-verified.json、fn-*.asm及分析脚本。没有完整原源码或原EXE动态对拍。驱动内部、物理触发沿、包在应用入口之前的具体丢失位置仍不可观测。实际窗口启动、标记和空闲导出已验证；剩余参数交互及外接网卡实验由用户验收。
 

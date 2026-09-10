@@ -1,0 +1,19 @@
+Start testing: Sep 10 10:52 中国标准时间
+----------------------------------------------------------
+4/25 Testing: diagnostic_dialog_test
+4/25 Test: diagnostic_dialog_test
+Command: "D:/ChatGPT/PAERealtimeImaging/_paimage_acquisition_port_20260909/build/paimage-host-checks/diagnostic_dialog_test.exe"
+Directory: D:/ChatGPT/PAERealtimeImaging/_paimage_acquisition_port_20260909/build/paimage-host-checks
+"diagnostic_dialog_test" start time: Sep 10 10:52 中国标准时间
+Output:
+----------------------------------------------------------
+PASS diagnostic dialog time-window validation/note/path selection
+<end of output>
+Test time =   3.29 sec
+----------------------------------------------------------
+Test Passed.
+"diagnostic_dialog_test" end time: Sep 10 10:53 中国标准时间
+"diagnostic_dialog_test" time elapsed: 00:00:03
+----------------------------------------------------------
+
+End testing: Sep 10 10:53 中国标准时间

@@ -35,6 +35,13 @@ target_compile_definitions(diagnostic_dialog_test PRIVATE DIAGNOSTIC_SOURCE_DIR=
 target_link_libraries(diagnostic_dialog_test PRIVATE Qt6::Widgets Qt6::Concurrent)
 add_test(NAME diagnostic_dialog_test COMMAND diagnostic_dialog_test)
 set_tests_properties(diagnostic_dialog_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+if(WIN32 AND TARGET Qt6::QOffscreenIntegrationPlugin)
+    add_custom_command(TARGET diagnostic_dialog_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:diagnostic_dialog_test>/platforms"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>"
+            "$<TARGET_FILE_DIR:diagnostic_dialog_test>/platforms/")
+endif()
 
 add_executable(diagnostic_time_window_test
     diagnostic_time_window_test.cpp

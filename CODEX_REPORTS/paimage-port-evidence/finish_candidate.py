@@ -21,7 +21,9 @@ shutil.copy2(Path(__file__).parent/'final-protection-and-test-index.json',receip
 receipt={'binarySourceCommit':source,'backendId':'paimage-derived','buildType':manifest['buildType'],
     'executableSha256':sha(out/'PAimageAcquisitionPort.exe'),'staticImportsUnresolved':[],
     'noninteractiveTests':{'passed':24,'latestPaimageSubsetPassed':11,'independentAnalyzerFixtures':'passed'},
-    'guiAcceptance':'pending unlocked desktop; diagnostic_dialog_test stalls inside QApplication initialization',
+    'engineeringDelivery':'complete; remaining manual acceptance delegated to user',
+    'guiAcceptance':json.loads((Path(__file__).parent/'gui-offline-validation.json').read_text(encoding='utf-8')),
+    'diagnosticDialogTest':'passed 3.29 seconds after deploying qoffscreen.dll',
     'physicalNicExperiment':'not performed','packagePath':str(out),'exampleZipIntegrity':{}}
 for path in (out/'examples').glob('*.zip'):
     with zipfile.ZipFile(path) as z:
@@ -30,11 +32,16 @@ for path in (out/'examples').glob('*.zip'):
         result=json.loads(z.read('analysis.json'))
         receipt['exampleZipIntegrity'][path.name]={'crc':'passed','rawPartialCardTriggers':result['rawPartialCardTriggers'],
             'traceIncomplete':result['traceIncomplete'],'associationComplete':result['associationComplete']}
-(root/'CODEX_REPORTS/候选交付回执.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2),encoding='utf-8')
-shutil.copy2(root/'CODEX_REPORTS/候选交付回执.json',out/'候选交付回执.json')
-manifest['files']=[{'path':p.relative_to(out).as_posix(),'bytes':p.stat().st_size,'sha256':sha(p)} for p in sorted(out.rglob('*')) if p.is_file() and p!=manpath]
+receipt['documentationBaseCommit']=git('rev-parse','HEAD').strip()
+(root/'CODEX_REPORTS/最终交付回执.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2),encoding='utf-8')
+shutil.copy2(root/'CODEX_REPORTS/最终交付回执.json',out/'最终交付回执.json')
+for name in ('gui-offline-validation.json','diagnostic-dialog-passed.txt'):
+    shutil.copy2(Path(__file__).parent/name,receipts/name)
+manifest['acceptance']='engineering delivery complete; remaining manual GUI acceptance delegated to user; physical NIC experiment not performed'
+manifest['documentationBaseCommit']=receipt['documentationBaseCommit']
+manifest['runtimeExclusions']=['PAimageAcquisitionPort.ini','app_log.txt','paimage-diagnostics/','paimage-traces/']
+manifest['files']=[{'path':p.relative_to(out).as_posix(),'bytes':p.stat().st_size,'sha256':sha(p)} for p in sorted(out.rglob('*')) if p.is_file() and p!=manpath and p.name not in ('PAimageAcquisitionPort.ini','app_log.txt','候选交付回执.json') and not {'paimage-diagnostics','paimage-traces'}.intersection(p.relative_to(out).parts)]
 manpath.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
 for item in manifest['files']:
     if sha(out/item['path'])!=item['sha256']:raise RuntimeError('manifest hash mismatch')
 print(json.dumps({'sourceCommit':source,'verifiedFiles':len(manifest['files']),'examples':receipt['exampleZipIntegrity']},ensure_ascii=False))
-
