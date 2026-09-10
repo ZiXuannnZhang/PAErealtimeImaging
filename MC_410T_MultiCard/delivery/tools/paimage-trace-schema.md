@@ -1,4 +1,4 @@
-# PAimage-derived trace schema 2
+# PAimage receiver diagnostics schema 3
 
 Each little-endian record is 64 bytes, Python struct `<QQQQIIIHHHHHhBB4sH`.
 Fields: sequence, monotonicNs, measurementSession, correlation, threadId,
@@ -47,3 +47,23 @@ run identity and SHA256 of exported files.
 Usage: `python paimage_trace_analyze.py TRACE_DIR --packets 28 --samples 5000 --output analysis.json`
 Use 70 and 12500 for 50 microseconds. Production endpoint metadata overrides the
 replay port default. Each source run is analyzed separately.
+
+Schema 3 keeps schema-1/2 ingress records unchanged and adds an independent
+64-byte timing stream with Python struct `<QQQQQIIIHhHHI>`. Timing kinds are:
+1 receiver thread lifetime, 2 select, 3 socket drain, 4 loop gap, 5 recvfrom,
+6 raw trace push, 7 ingress statistics callback, 8 core mutex wait, 9 core ingest,
+10 core poll, 11 control-thread core mutex wait, 12 control-thread mutex hold,
+13 card enqueue, 14 sync enqueue, 15 card worker, 16 sync worker. Detailed files
+retain data-bearing select/drain records and intervals at least 0.5 ms; every
+interval contributes to fixed aggregates and 0.5/2/10/100 ms histogram buckets.
+
+`timing-summary.json` records queue/budget loss and paired QPC/UTC anchors.
+Wall elapsed records show elapsed time only; use WPR scheduling evidence before
+classifying a long interval as CPU preemption. The timing queue is 16 MiB and disk budget is 256 MiB. This quick candidate targets listener runs up to 120 seconds. Observed detailed event rate reached about 21,182 records/second; exhaustion is explicit. QPC/UTC to steady-clock alignment error is not yet verified.
+
+`--rounds-json` accepts a JSON object with a `rounds` array. Each item may
+set `trialId`, `roundId`, `extraTrigger`, `effectiveCount` and `basis`.
+Only `user-confirmed` or `protocol-confirmed` round starts plus a complete
+trace allow the analyzer to verify the 4000-trigger conservation check. An
+operator marker time is never treated as a physical trigger edge. ZIP input is
+supported; use `--run-id` when a ZIP contains multiple runs.

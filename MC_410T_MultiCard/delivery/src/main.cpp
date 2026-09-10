@@ -434,9 +434,9 @@ int main(int argc, char* argv[]) {
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QApplication::setAttribute(Qt::AA_EnableAccessibility);   // Qt5: 启用 UIA 支持
 #endif
-    app.setApplicationName("PAimage采集移植测试版");
-    app.setApplicationVersion("1.0.0-paimage-derived");
-    app.setOrganizationName("PAimageAcquisitionPort");
+    app.setApplicationName("PAimage接收诊断版");
+    app.setApplicationVersion("1.1.0-receiver-diagnostics");
+    app.setOrganizationName("PAimageReceiverDiagnostics");
 
     QString diagnosticError;
     const bool copiedLegacyParameters=seedPaimageSettings();
@@ -453,8 +453,8 @@ int main(int argc, char* argv[]) {
     }
     const QString executablePath = QCoreApplication::applicationFilePath();
     QJsonObject identity{{"kind", "program"}, {"executablePath", executablePath},
-        {"backendId","paimage-derived"},
-        {"behaviorMappingVersion","production-3"},
+        {"backendId","paimage-receiver-diagnostics"},
+        {"behaviorMappingVersion","receiver-diagnostics-1"},
         {"parameterStore",paimageSettingsPath()},{"copiedLegacyParameters",copiedLegacyParameters},
         {"sourceGitSha",PAIMAGE_GIT_SHA},{"trackedSourceDirty",PAIMAGE_TRACKED_DIRTY},
         {"buildType",PAIMAGE_BUILD_TYPE},{"compiler",PAIMAGE_COMPILER},
@@ -490,7 +490,7 @@ int main(int argc, char* argv[]) {
     int ret = 0;
     {
         MainWindow window;
-        window.setWindowTitle(QStringLiteral("PAimage采集移植测试版 — paimage-derived — ")+QString::fromLatin1(PAIMAGE_GIT_SHA).left(12));
+        window.setWindowTitle(QStringLiteral("PAimage接收诊断版 — receiver-diagnostics — ")+QString::fromLatin1(PAIMAGE_GIT_SHA).left(12));
         window.show();
         if (!diagnosticError.isEmpty()) qWarning().noquote() << "诊断日志初始化：" << diagnosticError;
         ret = app.exec();

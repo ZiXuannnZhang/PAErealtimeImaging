@@ -54,5 +54,35 @@ def main():
         (gaps/'trace-summary.json').write_text(json.dumps(dict(recordsIssued=5,traceIncomplete=False)))
         gap_result=m.analyze(gaps,2,18001,181,32,4)
         assert gap_result['traceIncomplete'] and gap_result['missingRecordRanges']==[[2,2],[4,5]]
+        assert gap_result['fileOrderInversions']==0
+        ordered=root/'ordered';fixture(ordered,[(1,0,1444),(1,1,12)])
+        raw=(ordered/'trace-0.bin').read_bytes();first=list(m.RECORD.unpack(raw[:64]));second=list(m.RECORD.unpack(raw[64:]));first[0]=2;second[0]=1
+        (ordered/'trace-0.bin').write_bytes(m.RECORD.pack(*first)+m.RECORD.pack(*second))
+        swapped=m.analyze(ordered,2,18001,181,32,4)
+        assert swapped['fileOrderInversions']==1 and swapped['missingRecordCount']==0 and not swapped['traceIncomplete']
+        dict_targets=root/'dict-targets';fixture(dict_targets,[(1,0,1444),(1,1,12)])
+        (dict_targets/'run-config.json').write_text(json.dumps({'targets':[{'card':0,'ip':'127.0.0.2'}],'cards':4,'dataPort':18001,'samples':181,'bits':32}))
+        assert m.analyze(dict_targets,2,18001,181,32,4)['rawCompleteCardTriggers']==1
+        rounds=m.analyze(root/'good',2,18001,181,32,4,[{'trialId':'t','roundId':1,'extraTrigger':0,'effectiveCount':1,'basis':'user-confirmed'}])
+        card0=rounds['rounds'][0]['perCard'][0]
+        assert card0['effectiveComplete']==1 and card0['effectiveCompletelyUnseen']==0 and card0['conservationVerified']
+        duplicate_session=root/'duplicate-session'
+        fixture(duplicate_session,[(1,0,1444),(1,1,12)])
+        raw=(duplicate_session/'trace-0.bin').read_bytes()
+        extra=[]
+        for offset in (0,64):
+            record=list(m.RECORD.unpack(raw[offset:offset+64]));record[0]+=2;record[2]=2;record[3]+=2
+            extra.append(m.RECORD.pack(*record))
+        (duplicate_session/'trace-0.bin').write_bytes(raw+b''.join(extra))
+        (duplicate_session/'trace-summary.json').write_text(json.dumps(dict(recordsIssued=4,traceIncomplete=False)))
+        round_spec={'extraTrigger':0,'effectiveCount':1,'basis':'user-confirmed'}
+        ambiguous=m.analyze(duplicate_session,2,18001,181,32,4,[round_spec])['rounds'][0]
+        assert not ambiguous['perCard'][0]['conservationVerified']
+        assert ambiguous['perCard'][0]['effectiveAmbiguous']==1 and ambiguous['classificationStatus']=='candidate/unknown'
+        scoped=m.analyze(duplicate_session,2,18001,181,32,4,[dict(round_spec,session=1)])['rounds'][0]
+        assert scoped['perCard'][0]['conservationVerified'] and scoped['perCard'][0]['effectiveComplete']==1
+        wrap=root/'wrap';fixture(wrap,[(65535,0,1444),(65535,1,12),(0,0,1444),(0,1,12)])
+        wrapped=m.analyze(wrap,2,18001,181,32,4,[dict(round_spec,extraTrigger=65535)])['rounds'][0]['perCard'][0]
+        assert wrapped['effectiveComplete']==1 and wrapped['extraComplete'] and wrapped['conservationVerified']
     print('PASS independent analyzer fixtures: complete, short tail, reused ID, cross-session exact link, short datagram, missing summary')
 if __name__=='__main__':main()

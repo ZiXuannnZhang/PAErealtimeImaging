@@ -10,7 +10,7 @@ class Backend {
 public:
     struct Settings {Config acquisition;int blockSize=50;std::string localIp;
         std::vector<std::string> targets;std::uint16_t dataPort=8001,feedbackPort=8000,controlPort=8080;};
-    Backend(Settings,std::vector<DataProcessor*>,std::vector<FileSaver*>,TraceWriter*);
+    Backend(Settings,std::vector<DataProcessor*>,std::vector<FileSaver*>,TraceWriter*,TimingWriter* = nullptr);
     ~Backend();
     bool listen(std::string&);
     void requestStop();
@@ -29,7 +29,7 @@ public:
     SocketReceiver& receiver(){return receiver_;}
     std::function<void(int,int)> feedbackSink;
 private:
-    Settings settings_;TraceWriter* trace_;ControlSocket socket_;
+    Settings settings_;TraceWriter* trace_;TimingWriter* timing_;ControlSocket socket_;
     HostOutput output_;SocketReceiver receiver_;ControlState control_;
     bool listening_=false;std::uint64_t session_=0;
 };

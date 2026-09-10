@@ -255,7 +255,7 @@ MainWindow::MainWindow(QWidget *parent)
         }
 
     ui->setupUi(this);
-    setWindowTitle(QStringLiteral("PAimage采集移植测试版 — paimage-derived"));
+    setWindowTitle(QStringLiteral("PAimage接收诊断版 — receiver-diagnostics"));
     auto* trialAction=menuBar()->addAction(QStringLiteral("实验标记"));
     connect(trialAction,&QAction::triggered,this,[this]{
         bool ok=false;const QString marker=QInputDialog::getText(this,QStringLiteral("实验轮次标记"),
@@ -1907,6 +1907,11 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
     // 数据格式参数：与线性实例相同来源（注册表，默认 250 MSa/s 满速率 32bit Q16.16）
     cfg.bitsPerChannel = m_bitsPerChannel;
     cfg.sampleIntervalNs = m_sampleIntervalNs;
+    {
+        QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
+        cfg.diagnosticLevel = qBound(0, settings.value("Diagnostics/Level", 1).toInt(), 2);
+        cfg.diagnosticTraceEnabled = settings.value("Diagnostics/RawIngressTrace", true).toBool();
+    }
 
     // ── 路线A（WinSock）：start() 同步完成，直接在调用后更新按钮 ──
     if (!m_netController->start(cfg)) {

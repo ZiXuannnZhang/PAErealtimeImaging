@@ -4,7 +4,7 @@
 #include <QSettings>
 #include <QFileInfo>
 #include <QDateTime>
-inline QString paimageSettingsPath(){return QCoreApplication::applicationDirPath()+QStringLiteral("/PAimageAcquisitionPort.ini");}
+inline QString paimageSettingsPath(){return QCoreApplication::applicationDirPath()+QStringLiteral("/PAimageReceiverDiagnostics.ini");}
 inline bool seedPaimageSettings(){
     if(QFileInfo::exists(paimageSettingsPath()))return false;
     // Read the existing application's parameters once; all setters target only

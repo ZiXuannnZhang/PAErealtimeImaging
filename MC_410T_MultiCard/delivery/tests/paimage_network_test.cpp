@@ -12,7 +12,8 @@
 void require(bool b,const char* message){if(!b)throw std::runtime_error(message);}
 template<class F> bool until(F f){QElapsedTimer timer;timer.start();while(!f()&&timer.elapsed()<5000){QCoreApplication::processEvents();QThread::msleep(1);}return f();}
 int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
-    const bool stress=argc>=3;const int triggers=stress?std::stoi(argv[1])*40:22;
+    const bool stress=argc>=3;const int hz=argc>=5?std::stoi(argv[4]):40;
+    const int triggers=stress?std::stoi(argv[1])*hz:22;
     const bool missing=argc>=4&&std::string(argv[3])=="missing";
     FILETIME creation{},exit{},kernelBefore{},userBefore{},kernelAfter{},userAfter{};
     GetProcessTimes(GetCurrentProcess(),&creation,&exit,&kernelBefore,&userBefore);
@@ -23,6 +24,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     std::vector<SOCKET> hardware;AcqConfig config;config.nCards=4;config.acqTimeNs=20000;config.localBindIP="127.0.0.1";
     config.acqTimeNs=durations.front();
     config.diagnosticTraceEnabled=!(argc>=4&&std::string(argv[3])=="off");
+    config.diagnosticLevel=argc>=4&&std::string(argv[3])=="raw"?0:1;
     for(int c=0;c<4;++c){auto ip=QString("127.0.0.%1").arg(c+2).toStdString();config.targetIPs.push_back(ip);
         SOCKET s=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(8080);inet_pton(AF_INET,ip.c_str(),&address.sin_addr);
         require(bind(s,reinterpret_cast<sockaddr*>(&address),sizeof(address))==0,"hardware control bind");DWORD timeout=2000;setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,reinterpret_cast<char*>(&timeout),sizeof(timeout));hardware.push_back(s);
@@ -49,7 +51,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
         require(until([&]{return started==phase+1;}),"ACK starts measurement");readCommands(paimage::startCommand());
         auto schedule=std::chrono::steady_clock::now();
         for(int trigger=0;trigger<triggers;++trigger){
-            auto deadline=schedule+std::chrono::milliseconds(trigger*25);std::this_thread::sleep_until(deadline);
+            auto deadline=schedule+std::chrono::microseconds(trigger*(1000000ll/hz));std::this_thread::sleep_until(deadline);
             maxLateMs=std::max(maxLateMs,std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-deadline).count());
             for(int c=0;c<4;++c)for(int offset=0;offset<ns*2;offset+=1440){
                 if(missing&&trigger==30&&c==0&&offset==10*1440)continue;

@@ -6,10 +6,10 @@ namespace {std::vector<SocketReceiver::Endpoint> endpoints(const Backend::Settin
     for(int c=0;c<s.acquisition.cards;++c)result.push_back({std::uint16_t(s.dataPort+c),{}});
     return result;
 }}
-Backend::Backend(Settings settings,std::vector<DataProcessor*> p,std::vector<FileSaver*> s,TraceWriter* trace)
-    :settings_(std::move(settings)),trace_(trace),
-    output_(settings_.acquisition.bits,settings_.blockSize,std::move(p),std::move(s),trace),
-    receiver_(settings_.acquisition,endpoints(settings_),{settings_.feedbackPort,{}},settings_.targets,trace,
+Backend::Backend(Settings settings,std::vector<DataProcessor*> p,std::vector<FileSaver*> s,TraceWriter* trace,TimingWriter* timing)
+    :settings_(std::move(settings)),trace_(trace),timing_(timing),
+    output_(settings_.acquisition.bits,settings_.blockSize,std::move(p),std::move(s),trace,timing),
+    receiver_(settings_.acquisition,endpoints(settings_),{settings_.feedbackPort,{}},settings_.targets,trace,timing,
         [this](Frame f){output_.card(f);},[this](auto t,const auto& f,bool startup){output_.sync(t,f,startup);}),
     control_(settings_.acquisition.cards,[this](const Command& cmd,const auto& cards){
         return socket_.send(cmd,cards,[this](const Command& bytes,const ControlSocket::SendResult& sent){

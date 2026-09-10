@@ -92,12 +92,14 @@ add_executable(${PROJECT_NAME}
     ${SOURCES}
     ${HEADERS}
 )
+set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME PAimageReceiverDiagnostics)
 target_sources(${PROJECT_NAME} PRIVATE
     src/PaimageAcquisition/SourceCore.cpp
     src/PaimageAcquisition/ControlState.cpp
     src/PaimageAcquisition/ControlSocket.cpp
     src/PaimageAcquisition/SocketReceiver.cpp
     src/PaimageAcquisition/TraceWriter.cpp
+    src/PaimageAcquisition/TimingWriter.cpp
     src/PaimageAcquisition/TraceBundle.cpp
     src/PaimageAcquisition/OutputQueues.cpp
     src/PaimageAcquisition/OutputWorkers.cpp
@@ -110,6 +112,8 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/paimage_trace_analyze.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/paimage-trace-schema.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/receiver_system_capture.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/receiver-scheduling.wprp"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools")
 
 # ============================================================
@@ -259,7 +263,7 @@ endif()
 # ============================================================
 set_target_properties(${PROJECT_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-    OUTPUT_NAME "PAimageAcquisitionPort"
+    OUTPUT_NAME "PAimageReceiverDiagnostics"
 )
 
 # ============================================================

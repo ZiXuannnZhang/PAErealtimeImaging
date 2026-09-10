@@ -1,5 +1,6 @@
 #include "PaimageAcquisition/TraceBundle.h"
 #include "PaimageAcquisition/TraceWriter.h"
+#include "PaimageAcquisition/TimingWriter.h"
 #include "DiagnosticRecorder.h"
 #include <QDir>
 #include <QFile>
@@ -18,8 +19,9 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
         // Capture just identities and sequence fences on the UI thread. File
         // reads, writer flush waits, filtering and hashing run in the exporter.
         auto cuts=TraceWriter::captureCuts();
+        auto timingCuts=TimingWriter::captureCuts();
         auto dirs=QDir(root).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name);
-        return [root,toolsDirectory,start,end,cuts=std::move(cuts),dirs=std::move(dirs)]
+        return [root,toolsDirectory,start,end,cuts=std::move(cuts),timingCuts=std::move(timingCuts),dirs=std::move(dirs)]
             (const DiagnosticRecorder::BundleSink& sink,QString* error){
             QJsonArray runs,files;bool bundleIncomplete=false;
             auto write=[&](const QString& name,const QByteArray& bytes){
@@ -55,6 +57,11 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     if(!chosen.isEmpty()){const QString out=QString("paimage/%1/trace-%2.bin").arg(dir).arg(part++);
                         if(!write(out,chosen))return false;runFiles.append(out);}
                 }
+                bool timingFlushed=true;quint64 timingBoundary=0;for(const auto& cut:timingCuts)if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){timingBoundary=cut.sequence;timingFlushed=cut.flush();break;}
+                auto timingSummary=object(QDir(path).filePath("timing-summary.json"));
+                if(timingSummary.isEmpty()&&timingBoundary)incomplete=true;
+                auto timingNames=QDir(path).entryList({"timing-*.bin"},QDir::Files,QDir::Name);int timingPart=0;quint64 timingSelected=0;
+                for(const auto& name:timingNames){QByteArray bytes=read(QDir(path).filePath(name)),chosen;if(bytes.size()%64)incomplete=true;for(qsizetype at=0;at+64<=bytes.size();at+=64){TimingRecord r;std::memcpy(&r,bytes.constData()+at,64);if(timingBoundary&&r.sequence>timingBoundary)continue;chosen.append(bytes.constData()+at,64);++timingSelected;}if(!chosen.isEmpty()){const QString out=QString("paimage/%1/timing-%2.bin").arg(dir).arg(timingPart++);if(!write(out,chosen))return false;runFiles.append(out);}}
                 if(!selected)continue;
                 if(!boundary)boundary=maxSequence;
                 incomplete=incomplete||filtered>0||selected!=boundary;bundleIncomplete|=incomplete;
@@ -64,15 +71,17 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 const QString prefix="paimage/"+dir+"/";
                 if(!write(prefix+"run-config.json",QJsonDocument(metadata).toJson())||
                    !write(prefix+"trace-summary.json",QJsonDocument(exported).toJson()))return false;
+                if(!timingSummary.isEmpty()){timingSummary.insert("exportFlushCompleted",timingFlushed);timingSummary.insert("recordsWritten",double(timingSelected));timingSummary.insert("timingIncomplete",timingSummary.value("timingIncomplete").toBool()||!timingFlushed||(timingBoundary&&timingSelected!=timingBoundary));if(!write(prefix+"timing-summary.json",QJsonDocument(timingSummary).toJson()))return false;}
                 runs.append(QJsonObject{{"runId",metadata.value("runId")},{"recordBoundary",double(boundary)},
                     {"recordsIncluded",double(selected)},{"recordsOutsideWindow",double(filtered)},
                     {"traceIncomplete",incomplete},{"anchorKnown",anchorKnown},{"files",runFiles},
                     {"firstIncludedMs",anchorKnown?QJsonValue(double(firstMs)):QJsonValue()},
                     {"lastIncludedMs",anchorKnown?QJsonValue(double(lastMs)):QJsonValue()}});
             }
-            for(const auto& name:{QString("paimage_trace_analyze.py"),QString("paimage-trace-schema.md")}){
+            for(const auto& name:{QString("paimage_trace_analyze.py"),QString("paimage-trace-schema.md"),QString("receiver_system_capture.ps1")}){
                 auto bytes=read(QDir(toolsDirectory).filePath(name));
-                if(bytes.isEmpty())bundleIncomplete=true;else if(!write("paimage/tools/"+name,bytes))return false;
+                // An optional system helper is not evidence of lost application records.
+                if(bytes.isEmpty()){if(name!="receiver_system_capture.ps1")bundleIncomplete=true;}else if(!write("paimage/tools/"+name,bytes))return false;
             }
             QJsonObject manifest{{"schemaVersion",2},{"backendId","paimage-derived"},
                 {"requestedStartMs",double(start)},{"fixedEndMs",double(end)},{"traceIncomplete",bundleIncomplete},

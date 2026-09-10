@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
+#include <QSysInfo>
 
 namespace {
 QJsonObject processorTopology(){
@@ -28,6 +29,14 @@ QJsonObject processorTopology(){
     }
     return {{"status","known"},{"cores",cores}};
 }
+QJsonArray interfaceIdentity(const std::string& localIp){
+    QJsonArray result;ULONG bytes=16*1024;std::vector<unsigned char> storage(bytes);ULONG status=ERROR_BUFFER_OVERFLOW;
+    for(int attempt=0;attempt<3&&status==ERROR_BUFFER_OVERFLOW;++attempt){storage.resize(bytes);status=GetAdaptersAddresses(AF_INET,GAA_FLAG_INCLUDE_PREFIX,nullptr,reinterpret_cast<PIP_ADAPTER_ADDRESSES>(storage.data()),&bytes);}
+    if(status!=NO_ERROR){result.append(QJsonObject{{"status","unknown"},{"api","GetAdaptersAddresses"},{"error",int(status)}});return result;}
+    for(auto adapter=reinterpret_cast<PIP_ADAPTER_ADDRESSES>(storage.data());adapter;adapter=adapter->Next){bool match=localIp.empty();QJsonArray addresses;for(auto u=adapter->FirstUnicastAddress;u;u=u->Next){char text[INET_ADDRSTRLEN]{};auto in=reinterpret_cast<sockaddr_in*>(u->Address.lpSockaddr);InetNtopA(AF_INET,&in->sin_addr,text,sizeof(text));addresses.append(text);if(localIp==text)match=true;}if(!match)continue;
+        QJsonObject o{{"status","known"},{"interfaceIndex",int(adapter->IfIndex)},{"interfaceLuid",QString::number(quint64(adapter->Luid.Value))},{"adapterGuid",QString::fromLatin1(adapter->AdapterName?adapter->AdapterName:"")},{"friendlyName",adapter->FriendlyName?QString::fromWCharArray(adapter->FriendlyName):QString("unknown")},{"description",adapter->Description?QString::fromWCharArray(adapter->Description):QString("unknown")},{"receiveLinkSpeed",QString::number(quint64(adapter->ReceiveLinkSpeed))},{"transmitLinkSpeed",QString::number(quint64(adapter->TransmitLinkSpeed))},{"localIPv4",addresses}};result.append(o);}
+    if(result.isEmpty())result.append(QJsonObject{{"status","unknown"},{"error","bound address did not map to an adapter"}});return result;
+}
 }
 
 bool NetworkController::createPaimageBackend(QString& error){
@@ -44,17 +53,24 @@ bool NetworkController::createPaimageBackend(QString& error){
         if(!QDir().mkpath(tracePath))throw std::runtime_error("trace directory creation failed");
         if(m_config.diagnosticTraceEnabled)
             m_paimageTrace=std::make_unique<paimage::TraceWriter>(std::filesystem::path(tracePath.toStdWString()));
+        if(m_config.diagnosticLevel>=1)
+            m_paimageTiming=std::make_unique<paimage::TimingWriter>(std::filesystem::path(tracePath.toStdWString()));
         QJsonArray targets;for(const auto& ip:m_targetIPs)targets.append(ip);
-        QJsonObject identity{{"runId",id},{"backendId","paimage-derived"},{"schemaVersion",2},
+        QJsonObject identity{{"runId",id},{"backendId","paimage-receiver-diagnostics"},{"schemaVersion",3},
             {"wallAnchorMs",double(QDateTime::currentMSecsSinceEpoch())},{"monotonicAnchorNs",QString::number(paimage::SocketReceiver::now())},
             {"cpuTopology",processorTopology()},{"affinityRequested",false},{"diagnosticTraceEnabled",m_config.diagnosticTraceEnabled},
+            {"diagnosticLevel",m_config.diagnosticLevel},{"timingEnabled",m_config.diagnosticLevel>=1},
+            {"diagnosticModes",QJsonObject{{"0","raw-ingress only"},{"1","raw-ingress plus lightweight timing"},{"2","lightweight timing plus externally managed system capture index"}}},
             {"listenId",m_diagnosticListenId},{"configId",m_currentConfigId},{"samples",m_config.samplesPerTrig()},
             {"bits",m_config.bitsPerChannel},{"cards",m_config.nCards},{"dataPort",8001},{"feedbackPort",8000},
-            {"targets",targets},{"startupIdleMs",1000},{"localBindIP",QString::fromStdString(m_config.localBindIP)}};
+            {"targets",targets},{"startupIdleMs",1000},{"localBindIP",QString::fromStdString(m_config.localBindIP)},
+            {"interfaces",interfaceIdentity(m_config.localBindIP)},{"osVersion",QSysInfo::prettyProductName()},
+            {"processId",double(QCoreApplication::applicationPid())},{"receiverThreadIdStatus","recorded in timing thread-life records"},
+            {"driverProviderVersionStatus","unknown unless Windows adapter APIs expose it; system capture manifest retains tool output"}};
         QFile metadata(QDir(tracePath).filePath("run-config.json"));
         if(!metadata.open(QIODevice::WriteOnly)||metadata.write(QJsonDocument(identity).toJson())<0)throw std::runtime_error("trace identity write failed");
         metadata.close();
-        m_paimage=std::make_unique<paimage::Backend>(settings,processors,savers,m_paimageTrace.get());
+        m_paimage=std::make_unique<paimage::Backend>(settings,processors,savers,m_paimageTrace.get(),m_paimageTiming.get());
         const int expected=m_config.packetsPerTrig();
         m_paimage->receiver().ingressSink=[this](int card,const paimage::TraceRecord& r){
             if(card>=0&&card<int(m_processors.size())){auto& stats=m_processors[card]->stats();
@@ -171,10 +187,10 @@ void NetworkController::stopPaimage(){
     if(m_statsTimer){m_statsTimer->stop();m_statsTimer->deleteLater();m_statsTimer=nullptr;}
     if(m_paimage)m_paimage->requestStop();if(m_publisher)m_publisher->requestInterruption();
     m_stopThread=std::thread([this]{
-        if(m_paimage)m_paimage->stop();if(m_publisher)m_publisher->wait();if(m_paimageTrace)m_paimageTrace->stop();
+        if(m_paimage)m_paimage->stop();if(m_publisher)m_publisher->wait();if(m_paimageTrace)m_paimageTrace->stop();if(m_paimageTiming)m_paimageTiming->stop();
         QMetaObject::invokeMethod(this,[this]{
             if(m_stopThread.joinable())m_stopThread.join();
-            m_paimage.reset();m_paimageTrace.reset();m_processors.clear();m_savers.clear();m_displayBuffers.clear();m_publisher.reset();
+            m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_processors.clear();m_savers.clear();m_displayBuffers.clear();m_publisher.reset();
             m_measurementRunning=false;m_paimageSavingRequested=false;emit stopped();
         },Qt::QueuedConnection);
     });
@@ -187,7 +203,7 @@ bool NetworkController::configurePaimage(int ns,int a,int b,const QString& trigg
         // Source 141c70 copies configuration only while listener is stopped.
         // Preserve host workflow by rebuilding that immutable source listener.
         if(m_paimageSavingRequested)m_paimage->output().prepareConfigurationRestart();
-        m_paimage->stop();m_paimage.reset();if(m_paimageTrace)m_paimageTrace->stop();m_paimageTrace.reset();m_config.acqTimeNs=ns;
+        m_paimage->stop();m_paimage.reset();if(m_paimageTrace)m_paimageTrace->stop();m_paimageTrace.reset();if(m_paimageTiming)m_paimageTiming->stop();m_paimageTiming.reset();m_config.acqTimeNs=ns;
         QString error;if(!createPaimageBackend(error)){emit errorOccurred(error);stopPaimage();return false;}
         if(m_paimageSavingRequested)m_paimage->output().resumeSaving();
         recordDiagnosticEvent("paimage.lifecycle","configuration_listener_restart",DiagnosticRecorder::Severity::Info,{{"samples",m_config.samplesPerTrig()}});

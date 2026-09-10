@@ -8,8 +8,8 @@
 #include <stdexcept>
 namespace paimage {
 HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors,
-    std::vector<FileSaver*> savers,TraceWriter* trace)
-    :processors_(std::move(processors)),savers_(std::move(savers)),trace_(trace),
+    std::vector<FileSaver*> savers,TraceWriter* trace,TimingWriter* timing)
+    :processors_(std::move(processors)),savers_(std::move(savers)),trace_(trace),timing_(timing),
      converter_(bits,QDateTime::currentMSecsSinceEpoch(),SocketReceiver::now()),
      workers_(int(processors_.size()),block,[this](Frame f){consumeCard(f);},
         [this](const SyncFrame& f){consumeSync(f);},
@@ -22,6 +22,14 @@ HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors
                            [this]{for(auto s:savers_){if(configurationRestart_)s->suspendForSourceRestart();else s->stopSaving();}});
 }
 HostOutput::~HostOutput(){stop();}
+void HostOutput::card(Frame f){
+    converter_.tagSaveSession(f,processors_.at(f->card)->captureSaveSessionGen());const auto begin=SocketReceiver::now();const auto session=f->measurementSession,link=f->firstIngressId;const int card=f->card;
+    workers_.pushCard(std::move(f));if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.correlation=link;r.threadId=GetCurrentThreadId();r.card=card;r.kind=std::uint16_t(TimingKind::CardEnqueue);timing_->observe(r,end-begin>=500000);}
+}
+void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
+    const auto begin=SocketReceiver::now();const auto session=frames.empty()?0:frames.front()->measurementSession;workers_.pushSync(trigger,frames,startup);
+    if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.threadId=GetCurrentThreadId();r.card=-1;r.kind=std::uint16_t(TimingKind::SyncEnqueue);r.value0=std::uint32_t(frames.size());r.flags=startup?1:0;timing_->observe(r,end-begin>=500000);}
+}
 void HostOutput::observe(Frame f,std::uint8_t stage,std::uint8_t reason,std::uint32_t value){
     if(!trace_)return;TraceRecord r;r.monotonicNs=SocketReceiver::now();
     r.threadId=GetCurrentThreadId();r.stage=stage;r.reason=reason;r.value=value;
@@ -30,14 +38,17 @@ void HostOutput::observe(Frame f,std::uint8_t stage,std::uint8_t reason,std::uin
     trace_->push(r);
 }
 void HostOutput::consumeCard(Frame f){
+    const auto begin=SocketReceiver::now();
     auto group=converter_.convert(f);
     auto result=processors_.at(f->card)->deliverAssembled(group,true,false);
     // stage 7: 0 save consumer result, 1 display returned, 2 Ring returned,
     // 3 publisher returned, 4 exception, 5 session stale after conversion.
     observe(f,7,0,std::uint32_t(result.save));
     if(result.exception)observe(f,7,4);
+    if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=f->measurementSession;r.correlation=f->firstIngressId;r.threadId=GetCurrentThreadId();r.card=f->card;r.kind=std::uint16_t(TimingKind::CardWorker);r.value0=std::uint32_t(result.save);timing_->observe(r,end-begin>=500000);}
 }
 void HostOutput::consumeSync(const SyncFrame& sync){
+    const auto begin=SocketReceiver::now();
     std::vector<TriggerGroupPtr> groups;groups.reserve(sync.cards.size());
     for(auto f:sync.cards)groups.push_back(converter_.convert(f));
     if(!workers_.isCurrentSession(sync.session)){for(auto f:sync.cards)observe(f,7,5);return;}
@@ -46,6 +57,7 @@ void HostOutput::consumeSync(const SyncFrame& sync){
         observe(f,7,1,result.display);observe(f,7,2,result.ring);observe(f,7,3,result.publisher);
         if(result.exception)observe(f,7,4);
     }
+    if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=sync.session;r.threadId=GetCurrentThreadId();r.card=-1;r.kind=std::uint16_t(TimingKind::SyncWorker);r.value0=std::uint32_t(sync.cards.size());timing_->observe(r,end-begin>=500000);}
 }
 std::uint64_t HostOutput::startSaving(const QString& dir,int count,const QString& suffix){
     return workers_.configureSaving(true,[this,dir,count,suffix]{for(auto s:savers_)s->startSaving(dir,count,suffix);});

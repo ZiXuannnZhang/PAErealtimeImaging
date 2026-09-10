@@ -170,6 +170,7 @@ private:
     void pollPaimage();
     bool createPaimageBackend(QString&);
     std::unique_ptr<paimage::TraceWriter> m_paimageTrace;
+    std::unique_ptr<paimage::TimingWriter> m_paimageTiming;
     std::unique_ptr<paimage::Backend> m_paimage;
     QTimer* m_paimageTimer=nullptr;
     bool m_paimageStartPending=false;
