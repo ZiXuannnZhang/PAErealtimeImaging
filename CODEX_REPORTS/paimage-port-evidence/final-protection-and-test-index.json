@@ -2,7 +2,7 @@
   "originalBranchRefChanges": {},
   "rootTrackedStatusMatchesRecorded": true,
   "scope": "Only ref/status comparison; no complete pre-task per-file content hash snapshot exists.",
-  "currentSourceHead": "9eef7b729228778bcf464e06306f2ad153c14e6c",
+  "currentSourceHead": "7984bf447e23ad37cce8dc2435b52e08d5bd6524",
   "evidence": [
     {
       "path": "build/production-28-600s.log",
