@@ -158,6 +158,7 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
 void NetworkController::recordPaimageSnapshot(){
     if(!m_paimage)return;
     const auto counters=m_paimage->receiver().counters();QJsonArray buffers,bytes;
+    const auto outputStats=m_paimage->output().stats();
     for(auto n:m_paimage->receiver().receiveBuffers())buffers.append(n<0?QJsonValue("unknown"):QJsonValue(n));
     for(const auto& p:m_processors)bytes.append(QString::number(p->stats().socketBytesReceived.load()));
     QJsonObject fields{{"backendId","paimage-derived"},{"configId",m_currentConfigId},
@@ -177,6 +178,12 @@ void NetworkController::recordPaimageSnapshot(){
         {"affinityQuery","unknown; no affinity request"},{"driverVersion","unknown"},
         {"sourceSyncBlockSize",50},
         {"savingRequested",m_paimageSavingRequested},{"legacyProcessorCountersNotApplicable",true},
+        {"saveQueueEnqueued",QString::number(outputStats.saveEnqueued)},
+        {"saveQueueDequeued",QString::number(outputStats.saveDequeued)},
+        {"saveQueueCurrentDepth",QString::number(outputStats.saveCurrentDepth)},
+        {"saveQueuePeakDepth",QString::number(outputStats.savePeakDepth)},
+        {"saveQueueFull",QString::number(outputStats.saveQueueFull)},
+        {"saveWorkerMaxNs",QString::number(outputStats.maxSaveWorkerNs)},
         {"traceIncomplete",m_paimageTrace&&m_paimageTrace->incomplete()}};
     recordDiagnosticEvent("paimage.snapshot","source_snapshot",DiagnosticRecorder::Severity::Info,fields);
 }

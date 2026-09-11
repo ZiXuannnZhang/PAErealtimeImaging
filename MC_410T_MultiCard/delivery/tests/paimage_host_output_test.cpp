@@ -21,10 +21,10 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         for(int card=0;card<4;++card){
             displays.push_back(std::make_unique<DisplayBuffer>());savers.push_back(std::make_unique<FileSaver>(card));
             processors.push_back(std::make_unique<DataProcessor>(card,nullptr,displays.back().get(),nullptr,cfg,
-                [&](int c,std::uint16_t t,const auto& a,const auto& b){
-                    if(t!=9||a.size()!=std::size_t(samples)||b.size()!=a.size())values=false;
-                    for(std::size_t i=0;i<a.size();++i)if(a[i]!=c+1||b[i]!=-c-1)values=false;
-                    ++rings;
+                [&](const TriggerGroupConstPtr& frame){
+                    if(!frame||frame->triggerSeq!=9||frame->freqA.size()!=std::size_t(samples)||frame->freqB.size()!=frame->freqA.size())values=false;
+                    for(std::size_t i=0;i<frame->freqA.size();++i)if(frame->freqA[i]!=frame->cardId+1||frame->freqB[i]!=-frame->cardId-1)values=false;
+                    ++rings;return ImagingSubmitResult::Accepted;
                 }));pp.push_back(processors.back().get());ss.push_back(savers.back().get());
         }
         HostOutput output(32,50,pp,ss,nullptr);output.beginSession(1);output.start();

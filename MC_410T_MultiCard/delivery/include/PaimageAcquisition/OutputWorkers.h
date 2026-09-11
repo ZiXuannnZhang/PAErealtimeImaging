@@ -10,6 +10,10 @@ namespace paimage {
 // call control methods synchronously. Host format adapters run in these workers.
 class OutputWorkers {
 public:
+    struct Snapshot {
+        std::uint64_t saveEnqueued=0,saveDequeued=0,saveQueueFull=0;
+        std::uint64_t saveCurrentDepth=0,savePeakDepth=0,maxSaveWorkerNs=0;
+    };
     enum class Result { CardQueued, CardDisabled, CardFull, CardConsumed,
         SyncQueued, SyncEvicted, SyncConsumed, SyncStale, CallbackFailed,
         ListenerDiscard, SessionDiscard, SavingDiscard };
@@ -35,6 +39,7 @@ public:
     // Source checks again after downstream computation at 13aece. The host
     // adapter must use this immediately before publishing converted sync data.
     bool isCurrentSession(std::uint64_t s) const {return s==session_.load();}
+    Snapshot snapshot() const noexcept;
 private:
     void cardLoop();void syncLoop();void event(Result,Frame);
     OutputQueues cardQueue_,syncQueue_;
@@ -47,5 +52,7 @@ private:
     std::atomic<std::uint64_t> saveApplied_{0};
     std::function<void()> saveApply_,saveIdle_,saveExit_;
     std::thread cardWorker_,syncWorker_;
+    std::atomic<std::uint64_t> saveEnqueued_{0},saveDequeued_{0},saveQueueFull_{0};
+    std::atomic<std::uint64_t> saveDepth_{0},savePeakDepth_{0},maxSaveWorkerNs_{0};
 };
 }

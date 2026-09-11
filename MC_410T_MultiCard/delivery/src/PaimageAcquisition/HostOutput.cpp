@@ -41,7 +41,7 @@ void HostOutput::consumeCard(Frame f){
     const auto begin=SocketReceiver::now();
     auto group=converter_.convert(f);
     auto result=processors_.at(f->card)->deliverAssembled(group,true,false);
-    // stage 7: 0 save consumer result, 1 display returned, 2 Ring returned,
+    // stage 7: 0 save consumer result, 1 display accepted, 2 imaging result,
     // 3 publisher returned, 4 exception, 5 session stale after conversion.
     observe(f,7,0,std::uint32_t(result.save));
     if(result.exception)observe(f,7,4);
@@ -54,7 +54,7 @@ void HostOutput::consumeSync(const SyncFrame& sync){
     if(!workers_.isCurrentSession(sync.session)){for(auto f:sync.cards)observe(f,7,5);return;}
     for(std::size_t i=0;i<groups.size();++i){auto f=sync.cards[i];
         auto result=processors_.at(f->card)->deliverAssembled(groups[i],false,true);
-        observe(f,7,1,result.display);observe(f,7,2,result.ring);observe(f,7,3,result.publisher);
+        observe(f,7,1,result.displayAccepted);observe(f,7,2,std::uint32_t(result.imagingDropReason));observe(f,7,3,result.publisherAccepted);
         if(result.exception)observe(f,7,4);
     }
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=sync.session;r.threadId=GetCurrentThreadId();r.card=-1;r.kind=std::uint16_t(TimingKind::SyncWorker);r.value0=std::uint32_t(sync.cards.size());timing_->observe(r,end-begin>=500000);}

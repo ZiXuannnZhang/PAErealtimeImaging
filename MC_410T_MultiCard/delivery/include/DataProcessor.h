@@ -10,6 +10,7 @@
 #include "AcqConfig.h"
 #include "DisplayBuffer.h"
 #include "PacketAssemblyBuffer.h"
+#include "ImagingBypass.h"
 #include "third_party/concurrentqueue.h"
 
 // 前向声明
@@ -31,9 +32,7 @@ class DataProcessor : public QThread {
 
 public:
     // 环形实时馈送回调：每完成一个触发由 DataProcessor 线程调用（高速率链路）
-    using RingFeedSink = std::function<void(int cardId, uint16_t triggerSeq,
-                                            const std::vector<float>& freqA,
-                                            const std::vector<float>& freqB)>;
+    using RingFeedSink = std::function<ImagingSubmitResult(const TriggerGroupConstPtr&)>;
 
     explicit DataProcessor(
         int cardId,
@@ -58,7 +57,9 @@ public:
     // saving worker uses save=true; its sync worker uses displayAndRing=true.
     struct DeliveryResult {
         enum Save { NotRequested, Disabled, Queued, QueueFull, QueueFailure, Consumed, ConsumerFailure } save=NotRequested;
-        bool display=false,ring=false,publisher=false,exception=false;
+        bool saveAccepted=false, displayAccepted=false, imagingAccepted=false;
+        bool publisherAccepted=false, exception=false;
+        ImagingSubmitResult imagingDropReason=ImagingSubmitResult::Disabled;
     };
     DeliveryResult deliverAssembled(const TriggerGroupPtr&,bool save,bool displayAndRing);
     // Set before starting source workers. No second saving queue in this path.

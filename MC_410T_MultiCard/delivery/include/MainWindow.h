@@ -20,6 +20,7 @@
 #include <condition_variable>
 #include <thread>
 #include <cmath>
+#include <memory>
 #include "qcustomplot.h"
 #include "DataTypes.h"
 #include "CardStatusFormatting.h"
@@ -40,6 +41,8 @@ class ImagingController;
 class RingConfigDialog;
 class ImagingDisplayWindow;
 class RingBlockAssembler;
+class ImagingBypass;
+enum class ImagingSubmitResult : std::uint8_t;
 
 // 命令行开关：--target-ips <ip,ip,...> 指定固定目标采集卡 IP 列表
 // （真机固定 IP 与同机 UDP 联调均可用；省略时自动执行网段扫描）
@@ -186,7 +189,7 @@ private:
     QTimer *m_diagnosticStatusTimer;
     QTimer *m_displayTimer;   // 30fps pull 定时器
     QTimer *m_ringTimeoutTimer = nullptr;   // 超时重置到点检测（触发即保存 PNG）
-    bool    m_ringTimeoutSaveDone = false;  // 本次空闲超时只保存一次
+    std::atomic<bool> m_ringTimeoutSaveDone{false};  // 成像 worker 写，UI 定时器读
 
     // 状态标志
     bool m_isListening;
@@ -255,22 +258,13 @@ private:
     RingConfigDialog *m_ringConfigDialog = nullptr;   // 环形扫描参数设定窗口
     ImagingDisplayWindow *m_imagingDisplayWindow = nullptr;   // 线性扫描实时成像独立弹窗
     RingBlockAssembler *m_ringAssembler = nullptr;   // 阶段B：真实采集组包器
-    bool m_ringAssemblerConfigured = false;
+    mutable std::mutex m_ringAssemblerMutex;          // 仅保护成像组包器，不与采集/保存共享
+    std::atomic<bool> m_ringAssemblerConfigured{false};
     bool m_restartRingOnSvcStop = false;   // 运行中修改环形参数后，待停止完成时自动重启
 
-    // 环形实时馈送工作线程：DataProcessor 每触发入队，工作线程消费后送入组包器，
-    // 与 UI 主线程解耦，避免 latest-only 显示缓冲在高触发率下丢触发
-    struct RingFeedLine {
-        int cardId = 0;
-        uint16_t triggerSeq = 0;
-        std::vector<float> freqA;
-        std::vector<float> freqB;
-    };
-    std::mutex               m_ringFeedMutex;
-    std::condition_variable  m_ringFeedCv;
-    std::deque<RingFeedLine> m_ringFeedQueue;
-    std::atomic<bool>        m_ringFeedStop{false};
-    std::thread              m_ringFeedThread;
+    // 独立有界成像旁路。队列持有共享只读触发帧，不复制整卡 A/B 数据。
+    std::unique_ptr<ImagingBypass> m_imagingBypass;
+    std::atomic<bool> m_imagingServiceReady{false};
 
     // 成像状态
     bool m_imagingEnabled;
@@ -297,9 +291,7 @@ private:
     void feedImagingPulse();           // 单次成像馈送
     void startRingFeedWorker();        // 环形模式：独立工作线程消费触发队列→组包器
     void stopRingFeedWorker();
-    void ringFeedSink(int cardId, uint16_t triggerSeq,
-                      const std::vector<float>& freqA,
-                      const std::vector<float>& freqB);
+    ImagingSubmitResult ringFeedSink(const TriggerGroupConstPtr& frame);
     void configureRingAssembler();     // 按控制器环形配置初始化组包器
     bool loadTestImagingData();        // 加载测试数据bin文件
 

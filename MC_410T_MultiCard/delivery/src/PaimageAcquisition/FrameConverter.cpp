@@ -26,6 +26,7 @@ TriggerGroupPtr FrameConverter::convert(Frame frame){
     std::call_once(entry->once,[&]{
         auto group=std::make_shared<TriggerGroup>();group->cardId=frame->card;group->triggerSeq=frame->trigger;
         group->sessionGen=entry->saveSession;
+        group->measurementSession=frame->measurementSession;
         group->isComplete=frame->complete;group->sourceIPv4=frame->sourceIPv4;
         auto ms=std::int64_t(wallMs_)+(frame->first-monotonic_)/1000000;
         group->timestamp_ms=ms>0?std::uint64_t(ms):0;

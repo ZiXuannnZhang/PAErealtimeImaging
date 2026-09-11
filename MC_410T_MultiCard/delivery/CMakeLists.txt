@@ -18,9 +18,9 @@ option(USE_ZEROMQ "Enable ZeroMQ FramePublisher extension" OFF)
 # Qt 6 组件
 # ============================================================
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets PrintSupport OpenGL OpenGLWidgets Svg Concurrent)
-execute_process(COMMAND git rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+execute_process(COMMAND git -c safe.directory=${CMAKE_CURRENT_SOURCE_DIR}/../.. rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     OUTPUT_VARIABLE PAIMAGE_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(COMMAND git status --porcelain --untracked-files=no WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+execute_process(COMMAND git -c safe.directory=${CMAKE_CURRENT_SOURCE_DIR}/../.. status --porcelain --untracked-files=no WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     OUTPUT_VARIABLE PAIMAGE_TRACKED_STATUS OUTPUT_STRIP_TRAILING_WHITESPACE)
 set(PAIMAGE_TRACKED_DIRTY false)
 if(PAIMAGE_TRACKED_STATUS)
@@ -45,6 +45,7 @@ set(SOURCES
     src/NetworkController.cpp
     src/MainWindow.cpp
     src/ImagingController.cpp
+    src/ImagingBypass.cpp
     src/RingConfigDialog.cpp
     src/ImagingDisplayWindow.cpp
     src/RingImageWidget.cpp
@@ -75,6 +76,7 @@ set(HEADERS
     include/ImagingParams.h
     include/ImagingSharedMemory.h
     include/ImagingController.h
+    include/ImagingBypass.h
     include/RingConfigDialog.h
     include/ImagingDisplayWindow.h
     include/RingImageWidget.h

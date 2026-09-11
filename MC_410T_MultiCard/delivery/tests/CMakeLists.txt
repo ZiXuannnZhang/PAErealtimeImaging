@@ -3,6 +3,7 @@ project(diagnostic_recorder_test LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_AUTOMOC ON)
 
 add_executable(ring_block_assembler_test
     ring_block_assembler_test.cpp
@@ -11,6 +12,21 @@ target_include_directories(ring_block_assembler_test PRIVATE ../include)
 target_compile_features(ring_block_assembler_test PRIVATE cxx_std_17)
 enable_testing()
 add_test(NAME ring_block_assembler_test COMMAND ring_block_assembler_test)
+
+add_executable(imaging_bypass_test imaging_bypass_test.cpp ../src/ImagingBypass.cpp)
+target_include_directories(imaging_bypass_test PRIVATE ../include)
+target_compile_features(imaging_bypass_test PRIVATE cxx_std_17)
+add_test(NAME imaging_bypass_test COMMAND imaging_bypass_test)
+
+add_executable(data_processor_imaging_isolation_test
+    data_processor_imaging_isolation_test.cpp
+    ../src/ImagingBypass.cpp
+    ../src/DataProcessor.cpp ../include/DataProcessor.h
+    ../src/FramePublisher.cpp ../include/FramePublisher.h)
+target_include_directories(data_processor_imaging_isolation_test PRIVATE ../include)
+target_compile_definitions(data_processor_imaging_isolation_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(data_processor_imaging_isolation_test PRIVATE Qt6::Core)
+add_test(NAME data_processor_imaging_isolation_test COMMAND data_processor_imaging_isolation_test)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Concurrent Widgets)
 

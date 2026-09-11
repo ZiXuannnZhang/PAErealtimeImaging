@@ -45,5 +45,9 @@ int main(){
         require(started&&delivered&&evicted==1);require(order==std::vector<int>({0,99,2,3,4,5}));
         require(outputs.syncPriorityError()==0);
     }
+    {std::atomic<int> consumed{0};OutputWorkers outputs(1,2,[&](Frame){++consumed;},[](const SyncFrame&){});
+        outputs.start();outputs.setSavingEnabled(true);for(int i=0;i<20;++i)outputs.pushCard(frame(0,i));outputs.stop();
+        auto s=outputs.snapshot();require(consumed==20&&s.saveEnqueued==20&&s.saveDequeued==20&&s.saveCurrentDepth==0);
+    }
     std::cout<<"PASS worker boundaries: per-card saturation, measurement restart preservation, startup priority, whole-block eviction\n";
 }

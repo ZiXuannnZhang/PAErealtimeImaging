@@ -31,6 +31,7 @@ struct TriggerGroup {
     bool     isComplete   = true;     // 是否收到全部包（无丢包）
     uint32_t sourceIPv4   = 0;        // 数据源 IP（uint32 大端序，比较用）
     uint64_t sessionGen   = 0;        // 自动保存会话代（0=手动/无会话代；DataProcessor 入队前打标）
+    uint64_t measurementSession = 0;  // 采集会话令牌；成像旁路用来拒绝旧会话帧
 
     //  完整采样数据（float32，sampleCount 个点）
     std::vector<float> freqA;         // A 通道瞬时频率（kHz）
@@ -52,6 +53,7 @@ struct TriggerGroup {
         cardId = -1; triggerSeq = 0; sampleCount = 0;
         timestamp_ms = 0; isComplete = true; sourceIPv4 = 0;
         sessionGen = 0;
+        measurementSession = 0;
         freqA.clear(); freqB.clear();
         phaseA_display.clear(); phaseB_display.clear();
         freqA_display.clear();  freqB_display.clear();
@@ -59,6 +61,7 @@ struct TriggerGroup {
 };
 
 using TriggerGroupPtr = std::shared_ptr<TriggerGroup>;
+using TriggerGroupConstPtr = std::shared_ptr<const TriggerGroup>;
 
 // ============================================================
 // SyncFrame  多卡同步帧（FramePublisher  ZeroMQ 发布）

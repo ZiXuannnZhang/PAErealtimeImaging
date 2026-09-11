@@ -34,9 +34,10 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
         require(sendto(hardware[c],reinterpret_cast<const char*>(bytes.data()),int(bytes.size()),0,reinterpret_cast<sockaddr*>(&dst),sizeof(dst))==int(bytes.size()),"hardware data send");};
     NetworkController controller;std::atomic<int> rings{0};std::atomic<bool> values{true};int started=0;bool stopped=false;
     QObject::connect(&controller,&NetworkController::errorOccurred,[](const QString& error){std::cerr<<error.toStdString()<<'\n';});
-    controller.setRingFeedSink([&](int c,std::uint16_t,const auto& a,const auto& b){
+    controller.setRingFeedSink([&](const TriggerGroupConstPtr& frame){
+        if(!frame)return ImagingSubmitResult::InvalidFrame;const int c=frame->cardId;const auto& a=frame->freqA;const auto& b=frame->freqB;
         if(stress){if(a.empty()||b.empty()||a.front()!=c+1||a.back()!=c+1||b.front()!=-c-1||b.back()!=-c-1)values=false;}
-        else for(std::size_t i=0;i<a.size();++i)if(a[i]!=c+1||b[i]!=-c-1)values=false;++rings;});
+        else for(std::size_t i=0;i<a.size();++i)if(a[i]!=c+1||b[i]!=-c-1)values=false;++rings;return ImagingSubmitResult::Accepted;});
     QObject::connect(&controller,&NetworkController::measurementStarted,[&]{++started;});
     QObject::connect(&controller,&NetworkController::stopped,[&]{stopped=true;});
     require(controller.start(config),"production listen");

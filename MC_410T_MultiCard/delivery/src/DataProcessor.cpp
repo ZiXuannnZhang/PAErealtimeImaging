@@ -471,6 +471,7 @@ void DataProcessor::flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf) {
     group->cardId = m_cardId;
     try {
         assemblyBuf.exportTo(*group, m_config);
+        group->measurementSession = m_activeSessionToken.load(std::memory_order_acquire);
 
         if (group->isComplete)
             m_stats.triggersComplete.fetch_add(1, std::memory_order_relaxed);
@@ -502,6 +503,7 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
         if (save) result.save = DeliveryResult::Disabled;
         if (save && m_directSaveSink) {
             result.save = m_directSaveSink(group) ? DeliveryResult::Consumed : DeliveryResult::ConsumerFailure;
+            result.saveAccepted = result.save == DeliveryResult::Consumed;
         } else if (save && m_saveEnabled.load(std::memory_order_acquire) && m_saveQueue) {
             // 自动保存会话代打标：入队前读取当前会话代（UI 线程在边界空闲期
             // 提前推进），保存器按代路由目录，实现逐触发严格分界
@@ -509,6 +511,7 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
             if (m_saveQueue->size_approx() < MAX_SAVE_QUEUE) {
                 if (m_saveQueue->enqueue(group)) {
                     result.save = DeliveryResult::Queued;
+                    result.saveAccepted = true;
                 } else {
                     result.save = DeliveryResult::QueueFailure;
                     m_stats.saveQueueDiscards.fetch_add(1, std::memory_order_relaxed);
@@ -527,7 +530,7 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
         //  FramePublisher（可选扩展）
         if (m_framePublisher) {
             m_framePublisher->submit(group);
-            result.publisher = true;
+            result.publisherAccepted = true;
         }
 
         //  降采样 + DisplayBuffer 更新
@@ -535,13 +538,18 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
         if (m_displayBuffer) {
             m_displayBuffer->update(group);
             m_displayBuffer->updateFullRes(group);  // 存储全分辨率频率供成像
-            result.display = true;
+            result.displayAccepted = true;
         }
         // 环形实时馈送：每触发直接入队（独立工作线程消费），
         // 避免 DisplayBuffer latest-only + 主线程轮询在高触发率下丢触发
         if (m_ringFeedSink) {
-            m_ringFeedSink(m_cardId, group->triggerSeq, group->freqA, group->freqB);
-            result.ring = true;
+            try {
+                result.imagingDropReason = m_ringFeedSink(group);
+                result.imagingAccepted = result.imagingDropReason == ImagingSubmitResult::Accepted;
+            } catch (...) {
+                result.imagingDropReason = ImagingSubmitResult::CallbackFailed;
+                result.exception = true;
+            }
         }
     } catch (const std::bad_alloc&) {
         // 显示/存储热路径仍可能因瞬时内存压力分配失败，丢弃本帧但保持线程存活。

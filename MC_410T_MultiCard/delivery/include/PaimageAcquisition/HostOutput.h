@@ -25,6 +25,7 @@ public:
     bool savingApplied(std::uint64_t g)const{return workers_.savingConfigurationApplied(g);}
     void requestClose();
     unsigned cardDepth(int card){return workers_.cardDepth(card);}
+    OutputWorkers::Snapshot stats() const noexcept{return workers_.snapshot();}
 private:
     void consumeCard(Frame);void consumeSync(const SyncFrame&);
     void observe(Frame,std::uint8_t stage,std::uint8_t reason,std::uint32_t value=0);

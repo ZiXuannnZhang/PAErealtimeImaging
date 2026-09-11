@@ -8,6 +8,7 @@
 #include "RingConfigDialog.h"
 #include "ImagingDisplayWindow.h"
 #include "RingBlockAssembler.h"
+#include "ImagingBypass.h"
 #include "DiagnosticRecorder.h"
 #include "DiagnosticExportDialog.h"
 #include "Constants.h"
@@ -469,47 +470,57 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     // 阶段B：环形真实采集组包器（UDP 频率数据 → 环形块 → 重建）
+    m_imagingBypass = std::make_unique<ImagingBypass>(256);
+    m_imagingBypass->start();
     m_ringAssembler = new RingBlockAssembler();
     m_ringAssembler->setBlockCallback(
         [this](std::vector<float> &&raw, std::vector<float> &&angles,
                std::vector<uint8_t> &&channels, int blockSeq) {
-            // 回调运行在环形馈送工作线程：计数原子化，日志切回 UI 线程
+            // 回调运行在独立成像 worker；只提交成像服务并更新原子统计。
             m_ringBlockCounter.fetch_add(1, std::memory_order_relaxed);
-            QMetaObject::invokeMethod(this, [this]() {
-                updateRingImagingStatus();
-            }, Qt::QueuedConnection);
             const int alines = static_cast<int>(channels.size());
-            QMetaObject::invokeMethod(this, [this, blockSeq, alines]() {
-                logMessage(QString("[环形采集] 提交块 seq=%1 alines=%2")
-                           .arg(blockSeq).arg(alines));
-            }, Qt::QueuedConnection);
             QVector<float> rawQ(raw.begin(), raw.end());
             QVector<float> angQ(angles.begin(), angles.end());
             QVector<quint8> chQ(channels.begin(), channels.end());
-            if (m_imagingController)
-                m_imagingController->submitRingBlock(rawQ, angQ, chQ, blockSeq);
+            bool submitted = false;
+            try {
+                submitted = m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire)
+                    && m_imagingController->submitRingBlock(rawQ, angQ, chQ, blockSeq);
+                if (m_imagingBypass) m_imagingBypass->observeBlockResult(submitted);
+            } catch (...) {
+                if (m_imagingBypass) m_imagingBypass->observeBlockException();
+            }
+            Q_UNUSED(alines);
         });
-    // 每个触发脉冲到达即刷新状态：首个脉冲就把“等待数据”切换为计数显示
-    m_ringAssembler->setProgressCallback([this]() {
-        QMetaObject::invokeMethod(this, [this]() {
-            m_ringTimeoutSaveDone = false;   // 新触发到来：允许下一次空闲超时再保存
-            updateRingImagingStatus();
-        }, Qt::QueuedConnection);
-    });
+    m_ringAssembler->setProgressCallback([this]() { m_ringTimeoutSaveDone = false; });
     // 停机超时判定新一圈：组包器触发级检测，通知子进程清空重建累积，
     // 输出帧计数从新一圈重新计算
     // （自动保存的会话代推进在超时到点定时器中提前完成，不在此处处理）
     m_ringAssembler->setTimeoutCallback([this]() {
-        if (m_imagingController) m_imagingController->sendRingReset();
-        QMetaObject::invokeMethod(this, [this]() {
-            m_imagingFrameCount = 0;
-            updateRingImagingStatus();
-        }, Qt::QueuedConnection);
+        if (m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire))
+            m_imagingController->sendRingReset();
+    });
+    m_imagingBypass->setConsumer([this](const TriggerGroupConstPtr& frame,
+                                        const std::array<bool, 8>& enabled) {
+        if (!frame || !m_ringAssembler || !m_ringAssemblerConfigured) return false;
+        std::lock_guard<std::mutex> assemblerLock(m_ringAssemblerMutex);
+        if (!m_ringAssemblerConfigured) return false;
+        const int chA = frame->cardId * 2;
+        const int chB = chA + 1;
+        if (enabled[chA])
+            m_ringAssembler->pushChannelLine(chA, frame->triggerSeq, frame->freqA.data(),
+                                             static_cast<int>(frame->freqA.size()));
+        if (enabled[chB])
+            m_ringAssembler->pushChannelLine(chB, frame->triggerSeq, frame->freqB.data(),
+                                             static_cast<int>(frame->freqB.size()));
+        return true;
     });
     connect(m_imagingController, &ImagingController::svcStopped, this, [this]() {
-        stopRingFeedWorker();   // 先停工作线程，避免与 reset 并发
+        m_imagingServiceReady.store(false, std::memory_order_release);
+        if (m_imagingBypass) m_imagingBypass->setServiceReady(false);
         m_ringAssemblerConfigured = false;
-        if (m_ringAssembler) m_ringAssembler->reset();
+        { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+          if (m_ringAssembler) m_ringAssembler->reset(); }
         if (m_imagingController && m_imagingController->isRingMode())
             m_imagingTimer->stop();
 
@@ -533,10 +544,13 @@ MainWindow::MainWindow(QWidget *parent)
         // 先停馈送线程并清空组包器，避免重启期间继续提交旧尺寸的块
         stopRingFeedWorker();
         m_ringAssemblerConfigured = false;
-        if (m_ringAssembler) m_ringAssembler->reset();
+        { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+          if (m_ringAssembler) m_ringAssembler->reset(); }
         m_imagingController->stopSvc();
     });
     connect(m_imagingController, &ImagingController::svcReady, this, [this]() {
+        m_imagingServiceReady.store(true, std::memory_order_release);
+        if (m_imagingBypass) m_imagingBypass->setServiceReady(true);
         // 环形模式：配置组包器并启动独立馈送工作线程（不再依赖主线程 5ms 定时器）
         if (m_imagingController && m_imagingController->isRingMode()) {
             configureRingAssembler();
@@ -561,9 +575,13 @@ MainWindow::MainWindow(QWidget *parent)
         if (!m_imagingEnabled || !m_ringAssembler || !m_ringAssemblerConfigured
             || !m_reconSaveEnabled || m_reconSaveDir.isEmpty())
             return;
-        if (m_ringAssembler->timeoutResetSec() <= 0.0) return;
-        if (m_ringAssembler->idleSeconds() > m_ringAssembler->timeoutResetSec()
-            && !m_ringTimeoutSaveDone) {
+        double timeoutResetSec = 0.0;
+        double idleSeconds = 0.0;
+        { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+          timeoutResetSec = m_ringAssembler->timeoutResetSec();
+          idleSeconds = m_ringAssembler->idleSeconds(); }
+        if (timeoutResetSec <= 0.0) return;
+        if (idleSeconds > timeoutResetSec && !m_ringTimeoutSaveDone) {
             m_ringTimeoutSaveDone = true;
             if (m_imagingDisplayWindow)
                 m_imagingDisplayWindow->saveWindowPngs(
@@ -606,8 +624,7 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    // 先停环形馈送工作线程，再关闭成像子进程
-    stopRingFeedWorker();
+    if (m_imagingBypass) m_imagingBypass->stop();
 
     // 关闭成像子进程
     if (m_imagingController) {
@@ -1825,9 +1842,8 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
     recordAcquisitionSnapshot(onlineIPs, QStringLiteral("listen_starting"));
     // 环形实时馈送回调：DataProcessor 每触发直连入队（须在 start() 之前设置）
     m_netController->setRingFeedSink(
-        [this](int cardId, uint16_t triggerSeq,
-               const std::vector<float>& freqA, const std::vector<float>& freqB) {
-            ringFeedSink(cardId, triggerSeq, freqA, freqB);
+        [this](const TriggerGroupConstPtr& frame) {
+            return ringFeedSink(frame);
         });
     connect(m_netController, &NetworkController::statusMessage, this, &MainWindow::logMessage);
     connect(m_netController, &NetworkController::errorOccurred, this, &MainWindow::logMessage);
@@ -1859,6 +1875,8 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
     });
     connect(m_netController, &NetworkController::measurementStarted,
             this, [this](const QString& sessionId) {
+        // 会话建立时先清掉旧成像旁路；首个新帧携带的源 session 会成为新锚点。
+        if (m_imagingBypass) m_imagingBypass->beginSession(0);
         m_isMeasuring = true;
         setBtnText(ui->btnStartMeasure, "停止测量");
         ui->btnStartMeasure->setProperty("state", "measuring");
@@ -2248,6 +2266,9 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
             m_ringConfigDialog->setAcquisitionParams(
                 m_sampleIntervalNs, ui->edtDataTime->text().toInt());
             m_ringConfigDialog->applyConfig();
+            // 请求成像即打开旁路门控；服务连接完成前帧明确记为 ServiceNotReady。
+            configureRingAssembler();
+            startRingFeedWorker();
         }
         const bool alreadyRunning = m_imagingController->isRunning();
         if (m_imagingController->startSvc()) {
@@ -2286,12 +2307,14 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
                 }
             });
         } else {
+            stopRingFeedWorker();
             m_chkRealtimeImaging->setEnabled(true);
             setImagingParamControlsEnabled(true);   // 启动失败：立即恢复
         }
     } else {
         // 停止成像
         m_chkRealtimeImaging->setEnabled(false);
+        stopRingFeedWorker();
         // 取消勾选时清除参数变更的自动重启意图，避免停止过程中服务又自动重启、
         // 导致控件无法恢复（R2 风险）
         m_restartRingOnSvcStop = false;
@@ -2646,6 +2669,38 @@ void MainWindow::onUpdateStatistics()
 {
     // 告警冷却递减（每 2s timer tick 减 1）
     if (m_saveWarnCooldown > 0) --m_saveWarnCooldown;
+
+    if (m_imagingBypass) {
+        const auto s = m_imagingBypass->snapshot();
+        if (auto *recorder = DiagnosticRecorder::instance()) {
+            recorder->recordEvent(QStringLiteral("imaging.bypass"),
+                                  QStringLiteral("imaging_queue_snapshot"),
+                                  DiagnosticRecorder::Severity::Info,
+                {{QStringLiteral("session"), QString::number(s.activeSession)},
+                 {QStringLiteral("enqueueAttempts"), QString::number(s.attempts)},
+                 {QStringLiteral("enqueued"), QString::number(s.accepted)},
+                 {QStringLiteral("dequeued"), QString::number(s.dequeued)},
+                 {QStringLiteral("currentDepth"), QString::number(s.currentDepth)},
+                 {QStringLiteral("peakDepth"), QString::number(s.peakDepth)},
+                 {QStringLiteral("processed"), QString::number(s.processed)},
+                 {QStringLiteral("processFailed"), QString::number(s.processFailed)},
+                 {QStringLiteral("dropDisabled"), QString::number(s.droppedDisabled)},
+                 {QStringLiteral("dropQueueFull"), QString::number(s.droppedQueueFull)},
+                 {QStringLiteral("dropQueueBusy"), QString::number(s.droppedQueueBusy)},
+                 {QStringLiteral("dropStopping"), QString::number(s.droppedStopping)},
+                 {QStringLiteral("dropInvalidFrame"), QString::number(s.droppedInvalidFrame)},
+                 {QStringLiteral("dropStaleSession"), QString::number(s.droppedStaleSession)},
+                 {QStringLiteral("dropServiceNotReady"), QString::number(s.droppedServiceNotReady)},
+                 {QStringLiteral("dropCallbackFailed"), QString::number(s.droppedCallbackFailed)},
+                 {QStringLiteral("dropOnClear"), QString::number(s.droppedOnClear)},
+                 {QStringLiteral("blocksFormed"), QString::number(s.blocksFormed)},
+                 {QStringLiteral("blocksSubmitted"), QString::number(s.blocksSubmitted)},
+                 {QStringLiteral("blocksSkipped"), QString::number(s.blocksSkipped)},
+                 {QStringLiteral("blockExceptions"), QString::number(s.blockExceptions)},
+                 {QStringLiteral("maxSubmitNs"), QString::number(s.maxSubmitNs)},
+                 {QStringLiteral("maxWorkerNs"), QString::number(s.maxWorkerNs)}});
+        }
+    }
 
     // 检测保存状态意外停止（如磁盘满）并同步 UI
     if (m_netController && m_isListening) {
@@ -4259,6 +4314,8 @@ void MainWindow::onImagingImageReady(const QImage &image, int seq)
 
 void MainWindow::onImagingError(const QString &error)
 {
+    m_imagingServiceReady.store(false, std::memory_order_release);
+    if (m_imagingBypass) m_imagingBypass->setServiceReady(false);
     logMessage(QString("成像错误: %1").arg(error));
     m_imagingTimer->stop();
     m_imagingEnabled = false;
@@ -4501,77 +4558,23 @@ void MainWindow::feedImagingPulse()
 // =====================================================================
 void MainWindow::startRingFeedWorker()
 {
-    stopRingFeedWorker();   // 幂等：先停旧线程再启动
-    {
-        std::lock_guard<std::mutex> lk(m_ringFeedMutex);
-        m_ringFeedStop.store(false);
-        m_ringFeedQueue.clear();
-    }
-    m_ringFeedThread = std::thread([this]() {
-#ifdef _WIN32
-        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
-#endif
-        while (true) {
-            RingFeedLine line;
-            {
-                std::unique_lock<std::mutex> lk(m_ringFeedMutex);
-                m_ringFeedCv.wait_for(lk, std::chrono::milliseconds(50), [this]() {
-                    return m_ringFeedStop.load() || !m_ringFeedQueue.empty();
-                });
-                if (m_ringFeedStop.load() && m_ringFeedQueue.empty()) break;
-                if (m_ringFeedQueue.empty()) continue;
-                line = std::move(m_ringFeedQueue.front());
-                m_ringFeedQueue.pop_front();
-            }
-            if (!m_ringAssembler) continue;
-            const int chA = line.cardId * 2;
-            const int chB = line.cardId * 2 + 1;
-            m_ringAssembler->pushChannelLine(
-                chA, line.triggerSeq, line.freqA.data(),
-                static_cast<int>(line.freqA.size()));
-            m_ringAssembler->pushChannelLine(
-                chB, line.triggerSeq, line.freqB.data(),
-                static_cast<int>(line.freqB.size()));
-        }
-    });
+    if (!m_imagingBypass) return;
+    m_imagingBypass->clear(ImagingSubmitResult::StaleSession);
+    m_imagingBypass->setEnabled(true);
+    m_imagingBypass->setServiceReady(m_imagingServiceReady.load(std::memory_order_acquire));
 }
 
 void MainWindow::stopRingFeedWorker()
 {
-    {
-        std::lock_guard<std::mutex> lk(m_ringFeedMutex);
-        m_ringFeedStop.store(true);
-    }
-    m_ringFeedCv.notify_all();
-    if (m_ringFeedThread.joinable()) m_ringFeedThread.join();
-    {
-        std::lock_guard<std::mutex> lk(m_ringFeedMutex);
-        m_ringFeedQueue.clear();
-    }
+    if (!m_imagingBypass) return;
+    m_imagingBypass->setEnabled(false);
+    m_imagingBypass->clear(ImagingSubmitResult::Disabled);
 }
 
-void MainWindow::ringFeedSink(int cardId, uint16_t triggerSeq,
-                              const std::vector<float>& freqA,
-                              const std::vector<float>& freqB)
+ImagingSubmitResult MainWindow::ringFeedSink(const TriggerGroupConstPtr& frame)
 {
-    // 由各卡 DataProcessor 线程调用；队列满时丢弃，绝不阻塞采集线程
-    if (m_ringFeedStop.load()) return;
-    RingFeedLine line;
-    line.cardId = cardId;
-    line.triggerSeq = triggerSeq;
-    line.freqA = freqA;
-    line.freqB = freqB;
-    bool dropped = false;
-    {
-        std::lock_guard<std::mutex> lk(m_ringFeedMutex);
-        constexpr size_t kRingFeedQueueLimit = 2048;   // 100Hz×4卡≈400行/秒，≈5秒缓冲
-        if (m_ringFeedQueue.size() < kRingFeedQueueLimit)
-            m_ringFeedQueue.push_back(std::move(line));
-        else
-            dropped = true;
-    }
-    if (dropped) return;
-    m_ringFeedCv.notify_one();
+    return m_imagingBypass ? m_imagingBypass->tryPush(frame)
+                           : ImagingSubmitResult::Disabled;
 }
 
 void MainWindow::configureRingAssembler()
@@ -4584,13 +4587,19 @@ void MainWindow::configureRingAssembler()
 
     int enabled[8];
     for (int i = 0; i < 8; ++i) enabled[i] = cfg.enabledChannels[i] ? 1 : 0;
+    if (m_imagingBypass) {
+        std::array<bool, 8> channelMask{};
+        for (int i = 0; i < 8; ++i) channelMask[i] = enabled[i] != 0;
+        m_imagingBypass->setEnabledChannels(channelMask);
+    }
     const double sectorWidth = 360.0 / cfg.enabledChannelCount;
     const double step = sectorWidth / cfg.alinesPerChannelPerFrame;
 
-    m_ringAssembler->configure(enabled, cfg.alinesPerChannelPerBlock,
-                               cfg.sampDepth, cfg.sectorStartDeg, sectorWidth,
-                               step, cfg.alinesPerChannelPerFrame,
-                               cfg.triggerWlOdd, cfg.timeoutResetSec);
+    { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+      m_ringAssembler->configure(enabled, cfg.alinesPerChannelPerBlock,
+                                 cfg.sampDepth, cfg.sectorStartDeg, sectorWidth,
+                                 step, cfg.alinesPerChannelPerFrame,
+                                 cfg.triggerWlOdd, cfg.timeoutResetSec); }
     m_ringAssemblerConfigured = true;
     m_ringTimeoutSaveDone = false;   // 新会话：允许超时到点保存
     logMessage(QString("[环形采集] 组包器已配置: 通道=%1 每块=%2 step=%3°")
@@ -4613,7 +4622,9 @@ void MainWindow::updateRingImagingStatus()
     const QString amberStyle =
         "color: #FFAA00; background: transparent; padding: 2px 8px;"
         "font-size: 12px;";
-    const std::pair<int, int> prog = m_ringAssembler->blockProgress();
+    std::pair<int, int> prog;
+    { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+      prog = m_ringAssembler->blockProgress(); }
     const int pulses = prog.first;
     const int perBlock = prog.second;
     if (perBlock <= 0) {
