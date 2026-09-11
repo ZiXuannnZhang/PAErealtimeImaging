@@ -2,6 +2,7 @@
 #include "SourceCore.h"
 #include "TraceWriter.h"
 #include "TimingWriter.h"
+#include "LoopLog.h"
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -13,7 +14,7 @@ class SocketReceiver {
 public:
     struct Endpoint {std::uint16_t port=0;std::string bindIp;};
     SocketReceiver(Config,std::vector<Endpoint>,Endpoint feedback,std::vector<std::string> targets,
-        TraceWriter*,TimingWriter*,SourceCore::CardSink,SourceCore::SyncSink);
+        TraceWriter*,TimingWriter*,LoopLog*,SourceCore::CardSink,SourceCore::SyncSink);
     ~SocketReceiver();
     bool start(std::string& error);
     void stop();
@@ -31,9 +32,13 @@ public:
     int lastSocketError()const{return lastSocketError_.load();}
     int priorityResult()const{return priorityResult_.load();}
     int actualPriority()const{return actualPriority_.load();}
-    std::function<void(int,int)> feedbackSink;
+    std::function<void(int,int,Time)> feedbackSink;
     SourceCore::Observer observationSink;
     std::function<void(int,const TraceRecord&)> ingressSink;
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+    // Test-only fault injection point; never defined in delivery builds.
+    std::function<void(std::uint64_t)> testLoopHook;
+#endif
     Counters counters()const{std::lock_guard<std::mutex> lock(coreMutex_);return core_.counters();}
     static Time now();
 private:
@@ -46,7 +51,7 @@ private:
     std::vector<std::uintptr_t> sockets_;std::vector<int> receiveBuffers_;
     int feedbackReceiveBuffer_=-1;
     std::uintptr_t feedbackSocket_=~std::uintptr_t(0);
-    TraceWriter* trace_;TimingWriter* timing_;SourceCore core_;mutable std::mutex coreMutex_;
+    TraceWriter* trace_;TimingWriter* timing_;LoopLog* loopLog_;SourceCore core_;mutable std::mutex coreMutex_;
     std::atomic<bool> running_{false};std::atomic<std::uint64_t> session_{0},ingress_{0},hardErrors_{0};
     std::atomic<int> priorityResult_{-1},actualPriority_{-1};std::thread worker_;
     std::atomic<int> lastSocketError_{0};

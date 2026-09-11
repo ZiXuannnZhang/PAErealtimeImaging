@@ -1,6 +1,7 @@
 #include "PaimageAcquisition/TraceBundle.h"
 #include "PaimageAcquisition/TraceWriter.h"
 #include "PaimageAcquisition/TimingWriter.h"
+#include "PaimageAcquisition/LoopLog.h"
 #include "DiagnosticRecorder.h"
 #include <QDir>
 #include <QFile>
@@ -20,8 +21,9 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
         // reads, writer flush waits, filtering and hashing run in the exporter.
         auto cuts=TraceWriter::captureCuts();
         auto timingCuts=TimingWriter::captureCuts();
+        auto loopCuts=LoopLog::captureCuts();
         auto dirs=QDir(root).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name);
-        return [root,toolsDirectory,start,end,cuts=std::move(cuts),timingCuts=std::move(timingCuts),dirs=std::move(dirs)]
+        return [root,toolsDirectory,start,end,cuts=std::move(cuts),timingCuts=std::move(timingCuts),loopCuts=std::move(loopCuts),dirs=std::move(dirs)]
             (const DiagnosticRecorder::BundleSink& sink,QString* error){
             QJsonArray runs,files;bool bundleIncomplete=false;
             auto write=[&](const QString& name,const QByteArray& bytes){
@@ -72,16 +74,44 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 if(!write(prefix+"run-config.json",QJsonDocument(metadata).toJson())||
                    !write(prefix+"trace-summary.json",QJsonDocument(exported).toJson()))return false;
                 if(!timingSummary.isEmpty()){timingSummary.insert("exportFlushCompleted",timingFlushed);timingSummary.insert("recordsWritten",double(timingSelected));timingSummary.insert("timingIncomplete",timingSummary.value("timingIncomplete").toBool()||!timingFlushed||(timingBoundary&&timingSelected!=timingBoundary));if(!write(prefix+"timing-summary.json",QJsonDocument(timingSummary).toJson()))return false;}
+                bool loopFlushed=true,loopIncomplete=false,loopBudgetExhausted=false,loopWriteFailed=false;
+                quint64 loopBoundary=0,loopDropped=0,loopFreezeEpoch=0;
+                for(const auto& cut:loopCuts)if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){
+                    loopBoundary=cut.sequence;loopDropped=cut.dropped;loopFreezeEpoch=cut.freezeEpoch;
+                    loopIncomplete=cut.incomplete;loopBudgetExhausted=cut.budgetExhausted;loopWriteFailed=cut.writeFailed;
+                    loopFlushed=cut.flush();break;}
+                auto loopSummary=object(QDir(path).filePath("looplog-summary.json"));
+                if(loopSummary.isEmpty()&&loopBoundary)loopSummary=QJsonObject{{"schemaVersion",1},{"recordBytes",80},
+                    {"recordsIssued",double(loopBoundary)},{"queueDropped",double(loopDropped)},
+                    {"budgetExhausted",loopBudgetExhausted},{"writeFailed",loopWriteFailed},
+                    {"burstMarkEpochs",double(loopFreezeEpoch)}};
+                auto loopNames=QDir(path).entryList({"looplog-*.bin"},QDir::Files,QDir::Name);int loopPart=0;quint64 loopSelected=0,loopFiltered=0;
+                for(const auto& name:loopNames){
+                    QByteArray bytes=read(QDir(path).filePath(name)),chosen;if(bytes.size()%80)incomplete=true;
+                    for(qsizetype at=0;at+80<=bytes.size();at+=80){LoopRecord r;std::memcpy(&r,bytes.constData()+at,80);
+                        if(loopBoundary&&r.sequence>loopBoundary)continue;
+                        const qint64 time=anchorKnown?wall+(qint64(r.timeNs)-mono)/1000000:0;
+                        if(anchorKnown&&(time<start||time>end)){++loopFiltered;continue;}
+                        chosen.append(bytes.constData()+at,80);++loopSelected;}
+                    if(!chosen.isEmpty()){const QString out=QString("paimage/%1/looplog-%2.bin").arg(dir).arg(loopPart++);
+                        if(!write(out,chosen))return false;runFiles.append(out);}}
+                if(!loopSummary.isEmpty()){loopSummary.insert("exportFlushCompleted",loopFlushed);
+                    loopSummary.insert("recordsWritten",double(loopSelected));loopSummary.insert("exportFilteredRecords",double(loopFiltered));
+                    loopSummary.insert("loopLogIncomplete",loopSummary.value("loopLogIncomplete").toBool(loopIncomplete)||loopIncomplete||!loopFlushed||(loopBoundary&&loopSelected+loopFiltered!=loopBoundary));
+                    if(!write(prefix+"looplog-summary.json",QJsonDocument(loopSummary).toJson()))return false;}
+                incomplete=incomplete||loopIncomplete||!loopFlushed||(loopBoundary&&loopSelected+loopFiltered!=loopBoundary);
                 runs.append(QJsonObject{{"runId",metadata.value("runId")},{"recordBoundary",double(boundary)},
                     {"recordsIncluded",double(selected)},{"recordsOutsideWindow",double(filtered)},
                     {"traceIncomplete",incomplete},{"anchorKnown",anchorKnown},{"files",runFiles},
                     {"firstIncludedMs",anchorKnown?QJsonValue(double(firstMs)):QJsonValue()},
                     {"lastIncludedMs",anchorKnown?QJsonValue(double(lastMs)):QJsonValue()}});
             }
-            for(const auto& name:{QString("paimage_trace_analyze.py"),QString("paimage-trace-schema.md"),QString("receiver_system_capture.ps1")}){
+            for(const auto& name:{QString("paimage_trace_analyze.py"),QString("paimage-trace-schema.md"),
+                                   QString("startup-looplog-schema.md"),QString("receiver_system_capture.ps1"),
+                                   QString("startup_ingress_capture.ps1"),QString("startup_ingress_capture_stop.ps1")}){
                 auto bytes=read(QDir(toolsDirectory).filePath(name));
-                // An optional system helper is not evidence of lost application records.
-                if(bytes.isEmpty()){if(name!="receiver_system_capture.ps1")bundleIncomplete=true;}else if(!write("paimage/tools/"+name,bytes))return false;
+                // Optional system helpers are not evidence of lost records.
+                if(bytes.isEmpty()){if(!name.endsWith(".ps1"))bundleIncomplete=true;}else if(!write("paimage/tools/"+name,bytes))return false;
             }
             QJsonObject manifest{{"schemaVersion",2},{"backendId","paimage-derived"},
                 {"requestedStartMs",double(start)},{"fixedEndMs",double(end)},{"traceIncomplete",bundleIncomplete},

@@ -7,7 +7,9 @@ namespace CardStatusFormatting {
 
 inline QString text(int cardNumber, const CardStats::Snapshot& stats)
 {
-    return QStringLiteral("卡%1 | 丢失: %2")
+    // triggersPartial counts triggers that arrived partially (closed by
+    // trigger switch or timeout), not triggers the card never received.
+    return QStringLiteral("卡%1 | 报文不完整触发: %2")
         .arg(cardNumber)
         .arg(QString::number(static_cast<qulonglong>(stats.triggersPartial)));
 }
@@ -16,7 +18,7 @@ inline QString tooltip(const CardStats::Snapshot& stats)
 {
     return QStringLiteral(
         "触发完成: %1\n"
-        "缺失: %2\n"
+        "不完整触发缺包数: %2\n"
         "处队: %3\n"
         "存队: %4\n"
         "Socket接收: %5\n"

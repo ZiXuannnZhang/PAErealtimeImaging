@@ -17,7 +17,8 @@ enum class Decision : std::uint16_t { Accepted, Short, Disabled, RecentTrigger,
     StartupOverflow, StartupConfirmed, SyncExpired, StopTruncated, StartupBuffered,
     CardOutput, SyncOutput, InvalidCard, StartupOverflowDiscard, StopBufferedDiscard,
     ListenerActiveDiscard, ListenerBufferedDiscard, ListenerPendingSyncDiscard,
-    StartPendingSyncDiscard, StartActiveDiscard, StartupActiveDiscard, StartupPendingSyncDiscard };
+    StartPendingSyncDiscard, StartActiveDiscard, StartupActiveDiscard, StartupPendingSyncDiscard,
+    CompleteStartPendingSyncDiscard, CompleteStartActiveDiscard };
 struct Observation {
     Decision decision{}; int card=-1; std::uint16_t trigger=0, packet=0;
     std::uint32_t count=0; Time time=0; std::uint64_t firstIngressId=0;
@@ -48,7 +49,7 @@ public:
     using SyncSink=std::function<void(std::uint16_t,const std::vector<Frame>&,bool startupRelease)>;
     SourceCore(Config,CardSink,SyncSink,Observer={});
     void prepareStart(std::uint64_t diagnosticSession=0,Time now=0);
-    void completeStart(bool success);
+    void completeStart(bool success, Time now);
     void prepareStop();
     void completeStop(bool success,Time now);
     Decision ingest(int card,const std::uint8_t*,std::size_t,Time,std::uint64_t ingressId=0,std::uint32_t sourceIPv4=0);

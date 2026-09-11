@@ -30,14 +30,14 @@ int main(int argc, char** argv)
 
     const QString text = CardStatusFormatting::text(1, stats);
     const QString tooltip = CardStatusFormatting::tooltip(stats);
-    bool ok = check(text == QStringLiteral("卡1 | 丢失: 3"),
-                    QStringLiteral("resident status text contains only loss"));
+    bool ok = check(text == QStringLiteral("卡1 | 报文不完整触发: 3"),
+                    QStringLiteral("resident status text clarifies partial-trigger wording"));
     ok = check(!text.contains(QStringLiteral("缺失"))
                    && !text.contains(QStringLiteral("处队"))
                    && !text.contains(QStringLiteral("存队"))
                    && !text.contains(QStringLiteral("丢弃")),
                QStringLiteral("resident status text is compact")) && ok;
-    for (const QString& key : {QStringLiteral("缺失: 7"), QStringLiteral("处队: 100"),
+    for (const QString& key : {QStringLiteral("不完整触发缺包数: 7"), QStringLiteral("处队: 100"),
                                QStringLiteral("存队: 5"), QStringLiteral("Socket接收: 1000"),
                                QStringLiteral("Processor出队: 900"),
                                QStringLiteral("批边界丢弃: 0")})

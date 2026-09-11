@@ -15,7 +15,8 @@ not NIC ingress. Correlation is the raw ingress ID. Stage 2 is source decision:
 18 startup overflow discard, 19 Stop buffered discard, 20 listener active discard,
 21 listener buffered discard; 22 listener pending sync discard; 23 START pending sync
 discard; 24 START active discard; 25 startup reset active discard; 26 startup reset
-pending sync discard. Object events correlate to the object's first raw ID.
+pending sync discard; 27 completeStart pending sync discard; 28 completeStart
+active discard. Object events correlate to the object's first raw ID.
 
 Stage 3: feedback classification (1 ready/18 bytes, 2 ACK/60 bytes, 0 unknown).
 Stage 4: historical replay adapter boundary; never proves GUI host delivery.

@@ -29,6 +29,10 @@ struct AcqConfig {
     int  delayA          = 1000;     // A 通道延时（ns）
     int  delayB          = 1000;     // B 通道延时（ns）
     int  displayPoints   = 1000;     // UI 显示点数（降采样后）
+    // Startup admission policy in milliseconds: 0 = bypass (diagnostic
+    // default, no startup cache/idle filter), 1000 = legacy regression.
+    // Single source of truth for both Backend Settings and diagnostic logs.
+    int  startupIdleMs   = 0;
     bool enablePublisher = false;    // 是否启用 ZeroMQ FramePublisher
     bool diagnosticTraceEnabled = true; // Production default; deterministic replay comparison may disable.
     // 0=原始入口轨迹，1=轻量接收时序，2=轻量时序+外部系统抓取索引。

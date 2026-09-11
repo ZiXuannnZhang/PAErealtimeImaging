@@ -13,7 +13,7 @@ std::vector<std::uint8_t> packet(int seq,int trigger,int bytes=1440){
 struct Harness {
     std::vector<Frame> output;std::vector<std::uint16_t> sync;std::vector<Observation> events;
     Config cfg;SourceCore core;
-    Harness(Config c):cfg(c),core(c,[this](Frame f){output.push_back(f);},[this](std::uint16_t t,const auto&,bool){sync.push_back(t);},[this](const Observation& o){events.push_back(o);}){core.prepareStart();core.completeStart(true);}
+    Harness(Config c):cfg(c),core(c,[this](Frame f){output.push_back(f);},[this](std::uint16_t t,const auto&,bool){sync.push_back(t);},[this](const Observation& o){events.push_back(o);}){core.prepareStart();core.completeStart(true,0);}
     void trigger(int t,Time at,int missing=-1,int onlyCard=-1){int size=cfg.samples*(cfg.bits==32?8:4),n=(size+1439)/1440;
         for(int c=0;c<cfg.cards;++c)if(onlyCard<0||c==onlyCard)for(int i=0;i<n;++i)if(i!=missing){auto p=packet(i,t,std::min(1440,size-i*1440));core.ingest(c,p.data(),p.size(),at+i);}}
 };
@@ -28,7 +28,7 @@ int main(){try{
     {Harness h({4,5000,32,1000});for(int t=0;t<20;++t)h.trigger(t,ms+t*25*ms);check(h.output.empty()&&!h.core.confirmed(),"startup 475ms remains buffered");h.trigger(20,501*ms);check(h.core.confirmed()&&h.output.size()==84&&h.sync.size()==21,"startup confirmation releases all buffered output");}
     {Harness h({4,5000,32,1000});h.trigger(1,ms);h.core.poll(1002*ms);check(h.output.empty()&&h.core.counters().startupFilteredCards==4&&h.core.counters().startupFilteredSync==1,"idle filter units");h.trigger(1,1003*ms);check(h.core.startupCardCount()==0,"idle clear preserves recent dedup window");}
     {Harness h({4,5000,32,1000});h.trigger(1,ms,7);h.core.poll(102*ms);check(h.output.empty()&&h.core.counters().startupIncomplete==4,"startup partial is not complete");h.core.prepareStop();h.core.completeStop(true,103*ms);check(h.core.counters().stopBufferedCards==4,"stop buffered partial count");}
-    {Harness h({1,5000,32,0});for(int i=0;i<100;++i){h.core.prepareStart();auto p=packet(0,i);check(h.core.ingest(0,p.data(),p.size(),ms)==Decision::Disabled,"start gap disabled");h.core.completeStart(false);check(!h.core.enabled(),"failed start stays disabled");h.core.completeStart(true);h.trigger(i,ms);h.core.prepareStop();h.core.completeStop(true,2*ms);}check(h.output.size()==100,"100 starts single delivery");}
+    {Harness h({1,5000,32,0});for(int i=0;i<100;++i){h.core.prepareStart();auto p=packet(0,i);check(h.core.ingest(0,p.data(),p.size(),ms)==Decision::Disabled,"start gap disabled");h.core.completeStart(false,0);check(!h.core.enabled(),"failed start stays disabled");h.core.completeStart(true,0);h.trigger(i,ms);h.core.prepareStop();h.core.completeStop(true,2*ms);}check(h.output.size()==100,"100 starts single delivery");}
     {Harness h({1,5000,32,0});auto p=packet(0,1);h.core.ingest(0,p.data(),p.size(),ms);h.core.prepareStop();h.core.completeStop(false,2*ms);check(h.core.enabled(),"failed stop restores admission");h.core.prepareStop();h.core.completeStop(true,3*ms);check(h.output.empty()&&h.core.counters().stopActiveCards==1,"stop truncation not silently flushed");}
     {Harness h({4,1,32,1000});for(int i=0;i<=4096;++i)h.trigger(i,ms+i, -1,0);check(!h.core.enabled(),"4096 startup buffer cap pauses source");check(h.core.counters().startupFilteredCards==4096,"overflow filtered cards");}
     {auto c=configCommand(20000,1000,2000);check(c[4]==2&&c[7]==1&&c[8]==244&&c[10]==19&&c[11]==136&&c[14]==250,"CONFIG golden bytes");auto s=startCommand(),e=stopCommand();check(s[0]==250&&s[4]==3&&s[10]==8&&s[57]==1&&e[57]==0,"START STOP golden bytes");check(feedbackType(c.data(),18)==1&&feedbackType(c.data(),60)==2&&feedbackType(c.data(),58)==0,"source feedback classifier");}
@@ -36,7 +36,7 @@ int main(){try{
         const std::vector<int> keys={0,64,128,192,8,16,24,32,40};
         const std::vector<std::vector<int>> golden={{32,24,16,8,0,64,128,192,40},{192,128,64,0,8,16,24,32,40}};
         for(int pass=0;pass<2;++pass){
-            h.core.prepareStart();h.core.completeStart(true);h.events.clear();
+            h.core.prepareStart();h.core.completeStart(true,0);h.events.clear();
             for(int key:keys)h.trigger(key,ms,-1,0);
             h.trigger(1000,252*ms,-1,0);std::vector<int> expired;
             for(const auto& event:h.events)if(event.decision==Decision::SyncExpired)expired.push_back(event.trigger);

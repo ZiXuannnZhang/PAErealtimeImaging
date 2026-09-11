@@ -37,8 +37,14 @@ void SourceCore::prepareStart(std::uint64_t diagnosticSession,Time now) {
     confirmed_=config_.startupIdleMs<=0;startupCards_.clear();startupSync_.clear();
     startupBytes_=0;lastStartup_=firstSync_=0;
 }
-void SourceCore::completeStart(bool success) {
+void SourceCore::completeStart(bool success, Time now) {
     if(!success)return;
+    // Evidence for the cleanup that completeStart performs: the decision
+    // events below cover assemblies and sync candidates discarded here.
+    for(const auto& p:pending_)for(const auto& f:p.cards)if(f)
+        event(Decision::CompleteStartPendingSyncDiscard,f->card,f->trigger,0,f->unique,now,f->firstIngressId);
+    for(int c=0;c<config_.cards;++c)if(cards_[c].active)
+        event(Decision::CompleteStartActiveDiscard,c,cards_[c].trigger,0,cards_[c].unique,now,cards_[c].firstIngressId);
     pending_.clear();for(auto& a:cards_)clearAssembly(a,true);enabled_=true;
 }
 void SourceCore::prepareStop(){enabled_=false;}

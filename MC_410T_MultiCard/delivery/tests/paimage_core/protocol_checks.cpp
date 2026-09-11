@@ -22,9 +22,9 @@ int main(){try{
     require(control.open("127.0.0.1",{"127.0.0.1"},19080,error),"control bind");
     require(control.localPort()!=0&&control.timeoutOptionError()==0,"control socket parameters");
     std::atomic<unsigned> ready{0},ack{0},frames{0};
-    SocketReceiver receiver({1,16,32,0},{{19001,"127.0.0.1"}},{19000,"127.0.0.1"},{"127.0.0.1"},nullptr,nullptr,
+    SocketReceiver receiver({1,16,32,0},{{19001,"127.0.0.1"}},{19000,"127.0.0.1"},{"127.0.0.1"},nullptr,nullptr,nullptr,
         [&](Frame f){require(f->bytes.size()==128&&f->complete,"feedback data output");++frames;},{});
-    receiver.feedbackSink=[&](int card,int type){if(card==0){if(type==1)++ready;if(type==2)++ack;}};
+    receiver.feedbackSink=[&](int card,int type,long long){if(card==0){if(type==1)++ready;if(type==2)++ack;}};
     require(receiver.start(error),"receiver bind");require(receiver.feedbackReceiveBuffer()==67108864,"feedback 64MiB buffer");
     ControlState state(1,[&](const Command& cmd,const auto& cards){return control.send(cmd,cards);},SocketReceiver::now);
     state.setListening(true);

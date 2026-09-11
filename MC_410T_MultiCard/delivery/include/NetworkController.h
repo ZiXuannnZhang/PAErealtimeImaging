@@ -159,6 +159,7 @@ signals:
 
 private slots:
     void onStatsTimer();
+    void pollPaimageLoopMonitor();
 
 private:
     friend class NetworkDiagnosticTestAccess;
@@ -171,16 +172,24 @@ private:
     bool createPaimageBackend(QString&);
     std::unique_ptr<paimage::TraceWriter> m_paimageTrace;
     std::unique_ptr<paimage::TimingWriter> m_paimageTiming;
+    std::unique_ptr<paimage::LoopLog> m_paimageLoopLog;
     std::unique_ptr<paimage::Backend> m_paimage;
     QTimer* m_paimageTimer=nullptr;
+    QTimer* m_paimageLoopMonitorTimer=nullptr;
     bool m_paimageStartPending=false;
     bool m_paimageConfigReported=false;
     quint64 m_paimageGeneration=0;
     QString m_paimageSaveDir,m_paimageSaveSuffix;
     int m_paimageSaveCount=1000;
     bool m_paimageSavingRequested=false;
+    quint64 m_paimageSaveGeneration=0;
+    bool m_paimageSaveAppliedLogged=false;
     std::vector<std::uint64_t> m_paimageLastBytes;
+    quint64 m_paimageLastBurstEpoch=0;
+    qint64 m_paimageLastStallWarnMs=0;
+    QString m_paimageRunId;
     void recordPaimageSnapshot();
+    void writeSystemCaptureNotification(quint64 epoch, qint64 burstNs);
 
     // UDP 控制命令底层实现
     bool initControlSocket();

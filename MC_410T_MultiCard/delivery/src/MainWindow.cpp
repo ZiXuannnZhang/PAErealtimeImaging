@@ -13,6 +13,7 @@
 #include "DiagnosticExportDialog.h"
 #include "Constants.h"
 #include "AcqConfig.h"
+#include "StartupPolicy.h"
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMenu>
@@ -1930,6 +1931,9 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
         cfg.diagnosticLevel = qBound(0, settings.value("Diagnostics/Level", 1).toInt(), 2);
         cfg.diagnosticTraceEnabled = settings.value("Diagnostics/RawIngressTrace", true).toBool();
     }
+    // Startup admission policy from the command line: --startup-policy=legacy
+    // restores the 1000 ms startup filter; the diagnostic default bypasses it.
+    cfg.startupIdleMs = startupIdleMsFor(startupPolicy());
 
     // ── 路线A（WinSock）：start() 同步完成，直接在调用后更新按钮 ──
     if (!m_netController->start(cfg)) {
@@ -2254,6 +2258,12 @@ void MainWindow::onEnableDisplayToggled(bool checked)
 void MainWindow::onRealtimeImagingToggled(bool checked)
 {
     if (!m_imagingController) return;
+    const auto imagingToggleNs = paimage::SocketReceiver::now();
+    recordDiagnosticAction(checked ? QStringLiteral("imaging_start_requested")
+                                   : QStringLiteral("imaging_stop_requested"),
+        {{"monotonicNs", QString::number(imagingToggleNs)},
+         {"ringMode", m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1},
+         {"serviceRunning", m_imagingController->isRunning()}});
     if (checked) {
         // 启动成像：线性扫描启动线性重建，环形扫描先下发环形参数再启动环形重建
         m_chkRealtimeImaging->setEnabled(false);
@@ -2292,6 +2302,8 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
             *conn = connect(m_imagingController, &ImagingController::svcReady,
                             this, [this, conn]() {
                 disconnect(*conn);
+                recordDiagnosticAction(QStringLiteral("imaging_service_ready"),
+                    {{"monotonicNs", QString::number(paimage::SocketReceiver::now())}});
                 m_imagingEnabled = true;
                 if (!(m_imagingController && m_imagingController->isRingMode()))
                     m_imagingTimer->start();   // 环形模式由独立工作线程馈送
@@ -2303,10 +2315,15 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
                 if (m_chkRealtimeImaging && !m_chkRealtimeImaging->isEnabled()) {
                     disconnect(*conn);
                     m_imagingEnabled = m_imagingController->isRunning();
+                    recordDiagnosticAction(QStringLiteral("imaging_service_ready_timeout"),
+                        {{"monotonicNs", QString::number(paimage::SocketReceiver::now())},
+                         {"serviceRunning", m_imagingEnabled}});
                     m_chkRealtimeImaging->setEnabled(true);
                 }
             });
         } else {
+            recordDiagnosticAction(QStringLiteral("imaging_start_failed"),
+                {{"monotonicNs", QString::number(paimage::SocketReceiver::now())}});
             stopRingFeedWorker();
             m_chkRealtimeImaging->setEnabled(true);
             setImagingParamControlsEnabled(true);   // 启动失败：立即恢复
@@ -2322,6 +2339,8 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
         *conn = connect(m_imagingController, &ImagingController::svcStopped,
                         this, [this, conn]() {
             disconnect(*conn);
+            recordDiagnosticAction(QStringLiteral("imaging_service_stopped"),
+                {{"monotonicNs", QString::number(paimage::SocketReceiver::now())}});
             m_imagingTimer->stop();
             m_imagingEnabled = false;
             setImagingParamControlsEnabled(true);   // svcStopped 后恢复（停止完成前保持锁定）
@@ -4559,16 +4578,30 @@ void MainWindow::feedImagingPulse()
 void MainWindow::startRingFeedWorker()
 {
     if (!m_imagingBypass) return;
+    const auto beginNs = paimage::SocketReceiver::now();
     m_imagingBypass->clear(ImagingSubmitResult::StaleSession);
     m_imagingBypass->setEnabled(true);
     m_imagingBypass->setServiceReady(m_imagingServiceReady.load(std::memory_order_acquire));
+    const auto endNs = paimage::SocketReceiver::now();
+    recordDiagnosticAction(QStringLiteral("imaging_queue_initialized"),
+        {{"startMonotonicNs", QString::number(beginNs)},
+         {"endMonotonicNs", QString::number(endNs)},
+         {"durationNs", QString::number(endNs - beginNs)},
+         {"clearReason", QStringLiteral("stale_session")}});
 }
 
 void MainWindow::stopRingFeedWorker()
 {
     if (!m_imagingBypass) return;
+    const auto beginNs = paimage::SocketReceiver::now();
     m_imagingBypass->setEnabled(false);
     m_imagingBypass->clear(ImagingSubmitResult::Disabled);
+    const auto endNs = paimage::SocketReceiver::now();
+    recordDiagnosticAction(QStringLiteral("imaging_queue_cleared"),
+        {{"startMonotonicNs", QString::number(beginNs)},
+         {"endMonotonicNs", QString::number(endNs)},
+         {"durationNs", QString::number(endNs - beginNs)},
+         {"clearReason", QStringLiteral("disabled")}});
 }
 
 ImagingSubmitResult MainWindow::ringFeedSink(const TriggerGroupConstPtr& frame)
@@ -4580,6 +4613,7 @@ ImagingSubmitResult MainWindow::ringFeedSink(const TriggerGroupConstPtr& frame)
 void MainWindow::configureRingAssembler()
 {
     if (!m_imagingController || !m_ringAssembler) return;
+    const auto configureBeginNs = paimage::SocketReceiver::now();
     const RingReconCudaConfig &cfg = m_imagingController->ringConfig();
     if (cfg.enabledChannelCount <= 0 || cfg.alinesPerChannelPerBlock <= 0 ||
         cfg.sampDepth <= 0 || cfg.alinesPerChannelPerFrame <= 0)
@@ -4602,6 +4636,13 @@ void MainWindow::configureRingAssembler()
                                  cfg.triggerWlOdd, cfg.timeoutResetSec); }
     m_ringAssemblerConfigured = true;
     m_ringTimeoutSaveDone = false;   // 新会话：允许超时到点保存
+    const auto configureEndNs = paimage::SocketReceiver::now();
+    recordDiagnosticAction(QStringLiteral("imaging_assembler_initialized"),
+        {{"startMonotonicNs", QString::number(configureBeginNs)},
+         {"endMonotonicNs", QString::number(configureEndNs)},
+         {"durationNs", QString::number(configureEndNs - configureBeginNs)},
+         {"enabledChannels", cfg.enabledChannelCount},
+         {"alinesPerChannelPerBlock", cfg.alinesPerChannelPerBlock}});
     logMessage(QString("[环形采集] 组包器已配置: 通道=%1 每块=%2 step=%3°")
                .arg(cfg.enabledChannelCount)
                .arg(cfg.alinesPerChannelPerBlock)

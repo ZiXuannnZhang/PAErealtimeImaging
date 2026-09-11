@@ -488,14 +488,27 @@ void NetworkController::startSaving(const QString& directory,
                                      int triggersPerFile,
                                      const QString& suffix) {
     if(m_paimage){m_paimageSaveDir=directory;m_paimageSaveCount=triggersPerFile;m_paimageSaveSuffix=suffix;
-        m_paimageSavingRequested=true;m_paimage->output().startSaving(directory,triggersPerFile,suffix);return;}
+        m_paimageSavingRequested=true;
+        const auto generation=m_paimage->output().startSaving(directory,triggersPerFile,suffix);
+        m_paimageSaveGeneration=generation;m_paimageSaveAppliedLogged=false;
+        recordDiagnosticEvent("paimage.save","save_start_requested",DiagnosticRecorder::Severity::Info,
+            {{"directory",directory},{"triggersPerFile",triggersPerFile},{"suffix",suffix},
+             {"generation",QString::number(generation)},
+             {"requestedMonotonicNs",QString::number(paimage::SocketReceiver::now())}});
+        return;}
     for (auto& p : m_processors) p->setSaveEnabled(true);
     for (auto& s : m_savers)
         s->startSaving(directory, triggersPerFile, suffix);
 }
 
 void NetworkController::stopSaving() {
-    if(m_paimage){m_paimageSavingRequested=false;m_paimage->output().stopSaving();return;}
+    if(m_paimage){m_paimageSavingRequested=false;
+        const auto generation=m_paimage->output().stopSaving();
+        recordDiagnosticEvent("paimage.save","save_stop_requested",DiagnosticRecorder::Severity::Info,
+            {{"generation",QString::number(generation)},
+             {"requestedMonotonicNs",QString::number(paimage::SocketReceiver::now())},
+             {"directory",m_paimageSaveDir}});
+        return;}
     for (auto& p : m_processors) p->setSaveEnabled(false);
     for (auto& s : m_savers) s->stopSaving();
 }

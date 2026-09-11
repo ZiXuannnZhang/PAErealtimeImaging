@@ -17,8 +17,8 @@ double processCpuSeconds(){FILETIME created{},exited{},kernel{},user{};
     u.LowPart=user.dwLowDateTime;u.HighPart=user.dwHighDateTime;return double(k.QuadPart+u.QuadPart)/1e7;}
 int main(int argc,char**argv){
     auto wallBegin=std::chrono::steady_clock::now();auto cpuBegin=processCpuSeconds();
-    int seconds=2,samples=5000,missing=-1,hz=40,timingLevel=1;bool diagnostics=true;std::filesystem::path out="replay";
-    for(int i=1;i+1<argc;i+=2){std::string key=argv[i],value=argv[i+1];if(key=="--seconds")seconds=std::stoi(value);else if(key=="--samples")samples=std::stoi(value);else if(key=="--hz")hz=std::stoi(value);else if(key=="--timing")timingLevel=std::stoi(value);else if(key=="--missing")missing=std::stoi(value);else if(key=="--trace")diagnostics=std::stoi(value)!=0;else if(key=="--out")out=value;else return 2;}
+    int seconds=2,samples=5000,missing=-1,hz=40,timingLevel=1,startupIdleMs=1000,stallEvery=0,stallMs=50,rounds=1,gapMs=3000;bool diagnostics=true,looplogEnabled=true;std::filesystem::path out="replay";
+    for(int i=1;i+1<argc;i+=2){std::string key=argv[i],value=argv[i+1];if(key=="--seconds")seconds=std::stoi(value);else if(key=="--samples")samples=std::stoi(value);else if(key=="--hz")hz=std::stoi(value);else if(key=="--timing")timingLevel=std::stoi(value);else if(key=="--missing")missing=std::stoi(value);else if(key=="--trace")diagnostics=std::stoi(value)!=0;else if(key=="--startup-idle-ms")startupIdleMs=std::stoi(value);else if(key=="--stall-every")stallEvery=std::stoi(value);else if(key=="--stall-ms")stallMs=std::stoi(value);else if(key=="--rounds")rounds=std::stoi(value);else if(key=="--gap-ms")gapMs=std::stoi(value);else if(key=="--looplog")looplogEnabled=std::stoi(value)!=0;else if(key=="--out")out=value;else return 2;}
     if(seconds<1||hz<1||hz>1000||samples<1)return 2;std::filesystem::create_directories(out);
     std::unique_ptr<TraceWriter> trace;if(diagnostics)trace=std::make_unique<TraceWriter>(out/"trace");
     std::atomic<std::uint64_t> cards{0},sync{0},partial{0},badSamples{0};
@@ -30,22 +30,39 @@ int main(int argc,char**argv){
         [&](OutputWorkers::Result result,Frame f){if(trace&&f){TraceRecord r;r.stage=5;r.reason=std::uint8_t(result);r.monotonicNs=SocketReceiver::now();r.session=f->measurementSession;r.correlation=f->firstIngressId;r.threadId=GetCurrentThreadId();r.card=std::int16_t(f->card);r.trigger=f->trigger;trace->push(r);}});
     outputs.start();outputs.setSavingEnabled(true);outputs.beginSession(1);
     std::unique_ptr<TimingWriter> timing;if(diagnostics&&timingLevel)timing=std::make_unique<TimingWriter>(out/"timing");
-    SocketReceiver receiver({4,samples,32,1000},endpoints,{18000,"127.0.0.1"},{"127.0.0.1"},trace.get(),timing.get(),
+    std::unique_ptr<LoopLog> loopLog;if(diagnostics&&looplogEnabled)loopLog=std::make_unique<LoopLog>(out/"looplog");
+    SocketReceiver receiver({4,samples,32,startupIdleMs},endpoints,{18000,"127.0.0.1"},{"127.0.0.1"},trace.get(),timing.get(),loopLog.get(),
         [&](Frame f){outputs.pushCard(std::move(f));},
         [&](std::uint16_t trigger,const auto& frames,bool startup){outputs.pushSync(trigger,frames,startup);});
-    std::string error;if(!receiver.start(error)){std::cerr<<error;return 2;}receiver.prepareStart(1);receiver.completeStart(true);
+    // Fault injection for the stall-correlation check; test build only.
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+    if(stallEvery>0)receiver.testLoopHook=[stallEvery,stallMs](std::uint64_t id){if(id%std::uint64_t(stallEvery)==0)Sleep(DWORD(stallMs));};
+#endif
+    std::string error;if(!receiver.start(error)){std::cerr<<error;return 2;}
     SOCKET sender=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);if(sender==INVALID_SOCKET)return 2;
     sockaddr_in target{};target.sin_family=AF_INET;inet_pton(AF_INET,"127.0.0.1",&target.sin_addr);
     int byteCount=samples*8,n=(byteCount+1439)/1440;std::vector<std::vector<std::uint8_t>> packets;
     for(int p=0;p<n;++p){int bytes=std::min(1440,byteCount-p*1440);std::vector<std::uint8_t>b(bytes+4);b[0]=p&255;b[1]=(p>>8)&255;
         for(int i=0;i+8<=bytes;i+=8){std::int32_t x=-10000-p*180-i/8,y=20000+p*180+i/8;std::memcpy(b.data()+4+i,&x,4);std::memcpy(b.data()+8+i,&y,4);}packets.push_back(std::move(b));}
-    auto start=std::chrono::steady_clock::now();std::uint64_t sent=0,sendErrors=0;double maxLateMs=0;
-    for(int t=0;t<seconds*hz;++t){auto due=start+std::chrono::microseconds(t*(1000000ll/hz));std::this_thread::sleep_until(due);auto now=std::chrono::steady_clock::now();maxLateMs=std::max(maxLateMs,std::chrono::duration<double,std::milli>(now-due).count());
-        for(int c=0;c<4;++c){target.sin_port=htons(std::uint16_t(18001+c));for(int p=0;p<n;++p){if(t==0&&p==missing)continue;auto&b=packets[p];b[2]=t&255;b[3]=(t>>8)&255;int actual=sendto(sender,reinterpret_cast<char*>(b.data()),int(b.size()),0,reinterpret_cast<sockaddr*>(&target),sizeof(target));if(actual==int(b.size()))++sent;else ++sendErrors;}}}
-    closesocket(sender);std::this_thread::sleep_for(std::chrono::milliseconds(200));receiver.prepareStop();receiver.completeStop(true);receiver.stop();outputs.stop();if(trace)trace->stop();if(timing)timing->stop();
-    auto expectedCards=std::uint64_t(seconds)*hz*4;auto expectedSync=std::uint64_t(seconds)*hz-(missing>=0?1:0);
-    bool ok=sendErrors==0&&receiver.ingress()==sent&&cards==expectedCards&&sync==expectedSync&&badSamples==0&&receiver.hardErrors()==0&&(!trace||!trace->incomplete())&&(!timing||!timing->incomplete());
-    std::ofstream result(out/"result.json");result<<"{\"testScope\":\"socket/source/component-adapter, not production GUI\",\"samples\":"<<samples<<",\"seconds\":"<<seconds<<",\"plannedHz\":"<<hz<<",\"sent\":"<<sent<<",\"sendErrors\":"<<sendErrors<<",\"ingress\":"<<receiver.ingress()<<",\"cardOutputs\":"<<cards.load()<<",\"syncOutputs\":"<<sync.load()<<",\"partialOutputs\":"<<partial.load()<<",\"badSamples\":"<<badSamples.load()<<",\"hardErrors\":"<<receiver.hardErrors()<<",\"maxSenderLateMs\":"<<maxLateMs<<",\"prioritySetError\":"<<receiver.priorityResult()<<",\"actualPriority\":"<<receiver.actualPriority()<<",\"traceIncomplete\":"<<(trace&&trace->incomplete()?"true":"false")<<",\"passed\":"<<(ok?"true":"false")<<"}\n";
+    std::uint64_t sent=0,sendErrors=0;double maxLateMs=0;
+    // Each round performs STOP then START on the same listener; the idle gap
+    // between rounds lets the receive thread keep logging round-two leading
+    // packets, exercising repeated acquisition start without a listener
+    // restart.
+    for(int round=0;round<rounds;++round){
+        if(round>0)Sleep(DWORD(gapMs));
+        receiver.prepareStart(std::uint64_t(round+1));
+        receiver.completeStart(true);
+        auto roundStart=std::chrono::steady_clock::now();
+        for(int t=0;t<seconds*hz;++t){auto due=roundStart+std::chrono::microseconds(t*(1000000ll/hz));std::this_thread::sleep_until(due);auto now=std::chrono::steady_clock::now();maxLateMs=std::max(maxLateMs,std::chrono::duration<double,std::milli>(now-due).count());
+            for(int c=0;c<4;++c){target.sin_port=htons(std::uint16_t(18001+c));for(int p=0;p<n;++p){if(t==0&&p==missing)continue;auto&b=packets[p];b[2]=(t+round*1000)&255;b[3]=(t+round*1000)>>8;int actual=sendto(sender,reinterpret_cast<char*>(b.data()),int(b.size()),0,reinterpret_cast<sockaddr*>(&target),sizeof(target));if(actual==int(b.size()))++sent;else ++sendErrors;}}}
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        receiver.prepareStop();receiver.completeStop(true);
+    }
+    closesocket(sender);receiver.stop();outputs.stop();if(trace)trace->stop();if(timing)timing->stop();if(loopLog)loopLog->stop();
+    auto expectedCards=std::uint64_t(rounds)*seconds*hz*4;auto expectedSync=std::uint64_t(rounds)*(std::uint64_t(seconds)*hz-(missing>=0?1:0));
+    bool ok=sendErrors==0&&receiver.ingress()==sent&&cards==expectedCards&&sync==expectedSync&&badSamples==0&&receiver.hardErrors()==0&&(!trace||!trace->incomplete())&&(!timing||!timing->incomplete())&&(!loopLog||!loopLog->incomplete());
+    std::ofstream result(out/"result.json");result<<"{\"testScope\":\"socket/source/component-adapter, not production GUI\",\"samples\":"<<samples<<",\"seconds\":"<<seconds<<",\"plannedHz\":"<<hz<<",\"startupIdleMs\":"<<startupIdleMs<<",\"stallEvery\":"<<stallEvery<<",\"stallMs\":"<<stallMs<<",\"sent\":"<<sent<<",\"sendErrors\":"<<sendErrors<<",\"ingress\":"<<receiver.ingress()<<",\"cardOutputs\":"<<cards.load()<<",\"syncOutputs\":"<<sync.load()<<",\"partialOutputs\":"<<partial.load()<<",\"badSamples\":"<<badSamples.load()<<",\"hardErrors\":"<<receiver.hardErrors()<<",\"maxSenderLateMs\":"<<maxLateMs<<",\"prioritySetError\":"<<receiver.priorityResult()<<",\"actualPriority\":"<<receiver.actualPriority()<<",\"traceIncomplete\":"<<(trace&&trace->incomplete()?"true":"false")<<",\"loopLogIncomplete\":"<<(loopLog&&loopLog->incomplete()?"true":"false")<<",\"passed\":"<<(ok?"true":"false")<<"}\n";
     result.close();
     std::ofstream metrics(out/"process-metrics.json");
     auto wallSeconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-wallBegin).count();

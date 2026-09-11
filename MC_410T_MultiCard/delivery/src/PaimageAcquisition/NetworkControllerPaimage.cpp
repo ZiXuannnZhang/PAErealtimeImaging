@@ -1,4 +1,5 @@
 #include "NetworkController.h"
+#include "StartupPolicy.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QDateTime>
@@ -41,7 +42,10 @@ QJsonArray interfaceIdentity(const std::string& localIp){
 
 bool NetworkController::createPaimageBackend(QString& error){
     paimage::Backend::Settings settings;
-    settings.acquisition={m_config.nCards,m_config.samplesPerTrig(),m_config.bitsPerChannel,1000};
+    // Single configuration source: AcqConfig.startupIdleMs decides the
+    // startup admission policy actually passed to the receiver; the identity
+    // below records both the requested policy and the effective value.
+    settings.acquisition={m_config.nCards,m_config.samplesPerTrig(),m_config.bitsPerChannel,m_config.startupIdleMs};
     settings.localIp=m_config.localBindIP;
     for(const auto& ip:m_targetIPs)settings.targets.push_back(ip.toStdString());
     std::vector<DataProcessor*> processors;std::vector<FileSaver*> savers;
@@ -55,6 +59,8 @@ bool NetworkController::createPaimageBackend(QString& error){
             m_paimageTrace=std::make_unique<paimage::TraceWriter>(std::filesystem::path(tracePath.toStdWString()));
         if(m_config.diagnosticLevel>=1)
             m_paimageTiming=std::make_unique<paimage::TimingWriter>(std::filesystem::path(tracePath.toStdWString()));
+        if(m_config.diagnosticLevel>=1)
+            m_paimageLoopLog=std::make_unique<paimage::LoopLog>(std::filesystem::path(tracePath.toStdWString()));
         QJsonArray targets;for(const auto& ip:m_targetIPs)targets.append(ip);
         QJsonObject identity{{"runId",id},{"backendId","paimage-receiver-diagnostics"},{"schemaVersion",3},
             {"wallAnchorMs",double(QDateTime::currentMSecsSinceEpoch())},{"monotonicAnchorNs",QString::number(paimage::SocketReceiver::now())},
@@ -63,14 +69,18 @@ bool NetworkController::createPaimageBackend(QString& error){
             {"diagnosticModes",QJsonObject{{"0","raw-ingress only"},{"1","raw-ingress plus lightweight timing"},{"2","lightweight timing plus externally managed system capture index"}}},
             {"listenId",m_diagnosticListenId},{"configId",m_currentConfigId},{"samples",m_config.samplesPerTrig()},
             {"bits",m_config.bitsPerChannel},{"cards",m_config.nCards},{"dataPort",8001},{"feedbackPort",8000},
-            {"targets",targets},{"startupIdleMs",1000},{"localBindIP",QString::fromStdString(m_config.localBindIP)},
+            {"targets",targets},{"startupPolicy",m_config.startupIdleMs>0?"legacy":"bypass"},
+            {"startupIdleMsRequested",m_config.startupIdleMs>0?1000:0},
+            {"startupIdleMsEffective",m_config.startupIdleMs},
+            {"localBindIP",QString::fromStdString(m_config.localBindIP)},
             {"interfaces",interfaceIdentity(m_config.localBindIP)},{"osVersion",QSysInfo::prettyProductName()},
             {"processId",double(QCoreApplication::applicationPid())},{"receiverThreadIdStatus","recorded in timing thread-life records"},
             {"driverProviderVersionStatus","unknown unless Windows adapter APIs expose it; system capture manifest retains tool output"}};
         QFile metadata(QDir(tracePath).filePath("run-config.json"));
         if(!metadata.open(QIODevice::WriteOnly)||metadata.write(QJsonDocument(identity).toJson())<0)throw std::runtime_error("trace identity write failed");
         metadata.close();
-        m_paimage=std::make_unique<paimage::Backend>(settings,processors,savers,m_paimageTrace.get(),m_paimageTiming.get());
+        m_paimage=std::make_unique<paimage::Backend>(settings,processors,savers,m_paimageTrace.get(),m_paimageTiming.get(),m_paimageLoopLog.get());
+        m_paimageRunId=id;
         const int expected=m_config.packetsPerTrig();
         m_paimage->receiver().ingressSink=[this](int card,const paimage::TraceRecord& r){
             if(card>=0&&card<int(m_processors.size())){auto& stats=m_processors[card]->stats();
@@ -91,12 +101,21 @@ bool NetworkController::createPaimageBackend(QString& error){
             }
         };
         const auto generation=++m_paimageGeneration;
-        m_paimage->feedbackSink=[this,generation](int card,int type){
-            QMetaObject::invokeMethod(this,[this,generation,card,type]{
+        m_paimage->feedbackSink=[this,generation](int card,int type,qint64 receivedNs){
+            QMetaObject::invokeMethod(this,[this,generation,card,type,receivedNs]{
                 if(!m_running||!m_paimage||m_paimageGeneration!=generation)return;
+                const auto dispatchBegin=paimage::SocketReceiver::now();
                 m_paimage->feedback(card,type);
+                const auto dispatchEnd=paimage::SocketReceiver::now();
                 if(type==1){m_cardsReady.at(card)=true;emit cardReady(card);if(isAllCardsReady())emit allCardsReady();}
                 if(type==2)emit configAcked(card);
+                recordDiagnosticEvent("paimage.control","feedback_dispatched",
+                    DiagnosticRecorder::Severity::Info,
+                    {{"card",card},{"feedbackType",type},{"receiveMonotonicNs",QString::number(receivedNs)},
+                     {"dispatchStartNs",QString::number(dispatchBegin)},
+                     {"dispatchEndNs",QString::number(dispatchEnd)},
+                     {"uiCallbackSpanNs",QString::number(dispatchEnd-dispatchBegin)},
+                     {"uiDispatchLatencyNs",QString::number(dispatchBegin>=receivedNs?dispatchBegin-receivedNs:0)}});
                 pollPaimage();
             },Qt::QueuedConnection);
         };
@@ -145,13 +164,23 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
     }
     QString error;if(!createPaimageBackend(error)){
         if(m_publisher){m_publisher->requestInterruption();m_publisher->wait();m_publisher.reset();}
-        m_paimageTrace.reset();emit errorOccurred("PAimage-derived 监听失败："+error);if(onFailed)onFailed();return false;
+        if(m_paimageTrace)m_paimageTrace->stop();
+        if(m_paimageTiming)m_paimageTiming->stop();
+        if(m_paimageLoopLog)m_paimageLoopLog->stop();
+        m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();
+        emit errorOccurred("PAimage-derived 监听失败："+error);if(onFailed)onFailed();return false;
     }
     m_running=true;m_lastStatsMs=QDateTime::currentMSecsSinceEpoch();m_lastRuntimeSnapshotMs=0;m_lastIngressSnapshotMs=0;
     m_paimageTimer=new QTimer(this);connect(m_paimageTimer,&QTimer::timeout,this,&NetworkController::pollPaimage);m_paimageTimer->start(20);
+    m_paimageLoopMonitorTimer=new QTimer(this);connect(m_paimageLoopMonitorTimer,&QTimer::timeout,this,&NetworkController::pollPaimageLoopMonitor);m_paimageLoopMonitorTimer->start(100);
+    m_paimageLastBurstEpoch=0;m_paimageLastStallWarnMs=0;
     m_statsTimer=new QTimer(this);connect(m_statsTimer,&QTimer::timeout,this,&NetworkController::onStatsTimer);m_statsTimer->start(STATS_UPDATE_MS);
     recordDiagnosticEvent("paimage.lifecycle","listener_started",DiagnosticRecorder::Severity::Info,
-        {{"backendId","paimage-derived"},{"localBindIP",QString::fromStdString(m_config.localBindIP)},{"startupIdleMs",1000}});
+        {{"backendId","paimage-derived"},{"localBindIP",QString::fromStdString(m_config.localBindIP)},
+         {"startupPolicy",m_config.startupIdleMs>0?"legacy":"bypass"},
+         {"startupIdleMsRequested",m_config.startupIdleMs>0?1000:0},
+         {"startupIdleMsEffective",m_config.startupIdleMs},
+         {"startupTrialId",QString::fromStdString(startupTrialId())}});
     emit statusMessage(QStringLiteral("PAimage-derived：单接收线程及两个源输出线程已启动"));if(onStarted)onStarted();return true;
 }
 
@@ -188,16 +217,80 @@ void NetworkController::recordPaimageSnapshot(){
     recordDiagnosticEvent("paimage.snapshot","source_snapshot",DiagnosticRecorder::Severity::Info,fields);
 }
 
+void NetworkController::pollPaimageLoopMonitor(){
+    if(!m_running||!m_paimage||!m_paimageLoopLog)return;
+    const auto nowNs=paimage::SocketReceiver::now();
+    const auto progress=m_paimageLoopLog->lastProgressNs();
+    // 100 ms sampling cannot observe every 20 ms stall and this hint alone
+    // never proves CPU preemption; WPR scheduling evidence must match.
+    if(m_paimage->receiver().isRunning()&&progress&&nowNs-progress>20*1000000){
+        paimage::LoopRecord stalled;stalled.timeNs=nowNs;stalled.spanNs=nowNs-progress;
+        stalled.kind=std::uint16_t(paimage::LoopKind::Stalled);stalled.threadId=quint32(quintptr(QThread::currentThreadId()));
+        stalled.payloadA=progress;m_paimageLoopLog->push(stalled);
+        const auto nowMs=QDateTime::currentMSecsSinceEpoch();
+        if(nowMs-m_paimageLastStallWarnMs>=5000){m_paimageLastStallWarnMs=nowMs;
+            recordDiagnosticEvent("paimage.loop","loop_stall_hint",DiagnosticRecorder::Severity::Warning,
+                {{"progressMonotonicNs",QString::number(progress)},
+                 {"stalledNs",QString::number(nowNs-progress)},
+                 {"samplingIntervalMs",100},
+                 {"note","100ms sampler cannot observe every 20ms stall and does not prove CPU preemption"}});}
+    }
+    const auto epoch=m_paimageLoopLog->freezeEpoch();
+    if(epoch!=m_paimageLastBurstEpoch){
+        m_paimageLastBurstEpoch=epoch;
+        recordDiagnosticEvent("paimage.loop","receive_burst_detected",DiagnosticRecorder::Severity::Info,
+            {{"freezeEpoch",QString::number(epoch)},{"trialId",QString::fromStdString(startupTrialId())},
+             {"runId",m_paimageRunId},{"detectMonotonicNs",QString::number(nowNs)},
+             {"note","burst marker only; session handling, assembly cleanup and round attribution are unchanged"}});
+        // The notification is emitted 10 s after the burst so a system
+        // capture keeps covering the burst itself. The receive thread only
+        // writes its loop stream and never waits for any script response.
+        QTimer::singleShot(10000,this,[this,epoch,nowNs]{
+            if(!m_paimageLoopLog||m_paimageLoopLog->freezeEpoch()<epoch)return;
+            writeSystemCaptureNotification(epoch,nowNs);
+        });
+    }
+    if(m_paimageSaveGeneration&&!m_paimageSaveAppliedLogged&&
+       m_paimage->output().savingApplied(m_paimageSaveGeneration)){
+        m_paimageSaveAppliedLogged=true;
+        recordDiagnosticEvent("paimage.save","save_configuration_applied",DiagnosticRecorder::Severity::Info,
+            {{"generation",QString::number(m_paimageSaveGeneration)},
+             {"appliedMonotonicNs",QString::number(nowNs)},
+             {"directory",m_paimageSaveDir}});
+    }
+}
+
+void NetworkController::writeSystemCaptureNotification(quint64 epoch, qint64 burstNs){
+    const QString channel=QString::fromStdString(systemCaptureChannelDir());
+    const QString trial=QString::fromStdString(startupTrialId());
+    QDir().mkpath(channel);
+    const QJsonObject note{{"kind","burst"},{"trialId",trial},{"runId",m_paimageRunId},
+        {"freezeEpoch",QString::number(epoch)},{"burstMonotonicNs",QString::number(burstNs)},
+        {"notifiedMonotonicNs",QString::number(paimage::SocketReceiver::now())},
+        {"notifiedWallMs",QDateTime::currentMSecsSinceEpoch()}};
+    const QString path=QDir(channel).filePath(QString("burst-%1-%2.json").arg(qulonglong(epoch)).arg(m_paimageRunId));
+    QFile file(path);
+    const bool wrote=file.open(QIODevice::WriteOnly|QIODevice::Truncate)&&
+        file.write(QJsonDocument(note).toJson(QJsonDocument::Compact))>=0;
+    if(wrote)file.close();
+    recordDiagnosticEvent("paimage.loop",wrote?"burst_notification_written":"burst_notification_write_failed",
+        DiagnosticRecorder::Severity::Info,
+        {{"freezeEpoch",QString::number(epoch)},{"trialId",trial},{"runId",m_paimageRunId},
+         {"path",path},{"written",wrote}});
+}
+
 void NetworkController::stopPaimage(){
     if(!m_running)return;recordPaimageSnapshot();m_running=false;m_paimageStartPending=false;
     if(m_paimageTimer){m_paimageTimer->stop();m_paimageTimer->deleteLater();m_paimageTimer=nullptr;}
+    if(m_paimageLoopMonitorTimer){m_paimageLoopMonitorTimer->stop();m_paimageLoopMonitorTimer->deleteLater();m_paimageLoopMonitorTimer=nullptr;}
     if(m_statsTimer){m_statsTimer->stop();m_statsTimer->deleteLater();m_statsTimer=nullptr;}
     if(m_paimage)m_paimage->requestStop();if(m_publisher)m_publisher->requestInterruption();
     m_stopThread=std::thread([this]{
         if(m_paimage)m_paimage->stop();if(m_publisher)m_publisher->wait();if(m_paimageTrace)m_paimageTrace->stop();if(m_paimageTiming)m_paimageTiming->stop();
+        if(m_paimageLoopLog)m_paimageLoopLog->stop();
         QMetaObject::invokeMethod(this,[this]{
             if(m_stopThread.joinable())m_stopThread.join();
-            m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_processors.clear();m_savers.clear();m_displayBuffers.clear();m_publisher.reset();
+            m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();m_processors.clear();m_savers.clear();m_displayBuffers.clear();m_publisher.reset();
             m_measurementRunning=false;m_paimageSavingRequested=false;emit stopped();
         },Qt::QueuedConnection);
     });
@@ -210,7 +303,11 @@ bool NetworkController::configurePaimage(int ns,int a,int b,const QString& trigg
         // Source 141c70 copies configuration only while listener is stopped.
         // Preserve host workflow by rebuilding that immutable source listener.
         if(m_paimageSavingRequested)m_paimage->output().prepareConfigurationRestart();
-        m_paimage->stop();m_paimage.reset();if(m_paimageTrace)m_paimageTrace->stop();m_paimageTrace.reset();if(m_paimageTiming)m_paimageTiming->stop();m_paimageTiming.reset();m_config.acqTimeNs=ns;
+        m_paimage->stop();m_paimage.reset();
+        if(m_paimageTrace)m_paimageTrace->stop();m_paimageTrace.reset();
+        if(m_paimageTiming)m_paimageTiming->stop();m_paimageTiming.reset();
+        if(m_paimageLoopLog)m_paimageLoopLog->stop();m_paimageLoopLog.reset();
+        m_config.acqTimeNs=ns;
         QString error;if(!createPaimageBackend(error)){emit errorOccurred(error);stopPaimage();return false;}
         if(m_paimageSavingRequested)m_paimage->output().resumeSaving();
         recordDiagnosticEvent("paimage.lifecycle","configuration_listener_restart",DiagnosticRecorder::Severity::Info,{{"samples",m_config.samplesPerTrig()}});

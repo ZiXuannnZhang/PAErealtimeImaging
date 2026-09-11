@@ -31,7 +31,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         auto save=output.startSaving(dir.path(),100,"golden");require(until([&]{return output.savingApplied(save);}));
         SourceCore source({4,samples,32,0},[&](Frame f){output.card(f);},
             [&](auto t,const auto& f,bool s){output.sync(t,f,s);});
-        source.prepareStart(1);source.completeStart(true);
+        source.prepareStart(1);source.completeStart(true,0);
         const int size=samples*8;
         for(int card=0;card<4;++card)for(int offset=0;offset<size;offset+=1440){
             const int n=std::min(1440,size-offset),seq=offset/1440;std::vector<std::uint8_t> p(n+4);

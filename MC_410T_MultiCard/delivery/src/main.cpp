@@ -23,6 +23,7 @@
 #include "MainWindow.h"
 #include "Constants.h"
 #include "DiagnosticRecorder.h"
+#include "StartupPolicy.h"
 
 QStringList g_targetIPs;
 
@@ -119,6 +120,51 @@ static bool parseTargetIPs(int argc, char* argv[], QStringList* parsed, QString*
                              .arg(MAX_CARDS);
                 return false;
             }
+        }
+    }
+    return true;
+}
+
+static bool parseStartupArguments(int argc, char* argv[], StartupPolicy* policy,
+                                  QString* trialId, QString* channelDir, QString* error)
+{
+    for (int i = 1; i < argc; ++i) {
+        const QString argument = QString::fromLocal8Bit(argv[i]);
+        QString name, value;
+        bool inlineValue = false;
+        const int equals = argument.indexOf(QLatin1Char('='));
+        if (argument.startsWith(QLatin1String("--")) && equals > 2) {
+            name = argument.left(equals);
+            value = argument.mid(equals + 1);
+            inlineValue = true;
+        }
+        auto matches = [&](const char* option) {
+            return argument == QLatin1String(option)
+                || (inlineValue && name == QLatin1String(option));
+        };
+        auto nextValue = [&](const char* option) -> bool {
+            if (inlineValue) return true;
+            if (i + 1 >= argc) {
+                *error = QStringLiteral("%1 requires a value").arg(QLatin1String(option));
+                return false;
+            }
+            value = QString::fromLocal8Bit(argv[++i]);
+            return true;
+        };
+        if (matches("--startup-policy")) {
+            if (!nextValue("--startup-policy")) return false;
+            StartupPolicy parsed = StartupPolicy::Bypass;
+            if (!parseStartupPolicy(value.toStdString(), &parsed)) {
+                *error = QStringLiteral("--startup-policy requires bypass or legacy, got '%1'").arg(value);
+                return false;
+            }
+            *policy = parsed;
+        } else if (matches("--startup-trial-id")) {
+            if (!nextValue("--startup-trial-id")) return false;
+            *trialId = value.trimmed();
+        } else if (matches("--system-capture-channel")) {
+            if (!nextValue("--system-capture-channel")) return false;
+            *channelDir = value.trimmed();
         }
     }
     return true;
@@ -423,6 +469,14 @@ int main(int argc, char* argv[]) {
         std::fprintf(stderr, "error: %s\n", errorBytes.constData());
         return 2;
     }
+    StartupPolicy startupPolicyValue = StartupPolicy::Bypass;
+    QString startupTrialIdValue, startupChannelValue, startupArgumentsError;
+    if (!parseStartupArguments(argc, argv, &startupPolicyValue, &startupTrialIdValue,
+                               &startupChannelValue, &startupArgumentsError)) {
+        const QByteArray errorBytes = startupArgumentsError.toLocal8Bit();
+        std::fprintf(stderr, "error: %s\n", errorBytes.constData());
+        return 2;
+    }
 #ifdef _WIN32
     // ── 最优先：重定向日志到 app_log.txt ─────────────────
     redirectStdioToFile();
@@ -437,6 +491,10 @@ int main(int argc, char* argv[]) {
     app.setApplicationName("PAimage接收诊断版");
     app.setApplicationVersion("1.1.0-receiver-diagnostics");
     app.setOrganizationName("PAimageReceiverDiagnostics");
+    const std::string captureChannelPath = startupChannelValue.isEmpty()
+        ? (QCoreApplication::applicationDirPath() + "/system-capture-channel").toStdString()
+        : startupChannelValue.toStdString();
+    configureStartupDiagnostics(startupPolicyValue,startupTrialIdValue.toStdString(),captureChannelPath);
 
     QString diagnosticError;
     const bool copiedLegacyParameters=seedPaimageSettings();
@@ -464,6 +522,9 @@ int main(int argc, char* argv[]) {
         {"os", QSysInfo::prettyProductName()}, {"architecture", QSysInfo::currentCpuArchitecture()},
         {"processId", static_cast<double>(QCoreApplication::applicationPid())},
         {"arguments", QJsonArray::fromStringList(QCoreApplication::arguments())},
+        {"startupPolicy", startupPolicyName(startupPolicy())},
+        {"startupTrialId", QString::fromStdString(startupTrialId())},
+        {"systemCaptureChannelDir", QString::fromStdString(systemCaptureChannelDir())},
         {"targetIPs", QJsonArray::fromStringList(g_targetIPs)}, {"workingDirectory", QDir::currentPath()}};
     if (recorder) recorder->recordSettingsSnapshot(identity);
     auto identityJob = QtConcurrent::run([executablePath, identity]() mutable {

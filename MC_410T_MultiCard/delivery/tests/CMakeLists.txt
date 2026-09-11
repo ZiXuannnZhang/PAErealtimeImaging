@@ -95,6 +95,7 @@ if(WIN32)
         ../src/NetworkController.cpp ../include/NetworkController.h
         ../src/MeasurementSession.cpp ../include/MeasurementSession.h
         ../src/NetworkDiagnostics.cpp ../src/DiagnosticRecorder.cpp
+        ../src/StartupPolicy.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
         ../src/FileSaver.cpp ../include/FileSaver.h
         ../src/MultiPortReceiver.cpp ../include/MultiPortReceiver.h
