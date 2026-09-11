@@ -30,3 +30,10 @@ recvfrom timing records carry the drain ID with flags bit 1 set instead.
 Burst marking only marks receive-burst windows; it never changes session
 handling, assembly cleanup or physical round attribution. ACK/ready feedback
 is not sampling data.
+
+Ten seconds after a burst, the UI thread writes `burst-<epoch>-<runId>.json`
+to the configured system-capture channel. When the independent capture script
+has written a still-valid `active-trial.json`, its per-round `trialId` is used;
+otherwise the command-line trial ID is used. The notification records
+`trialIdSource` and `commandLineTrialId`. The receive thread never reads either
+file and never waits for this exchange.

@@ -60,6 +60,19 @@ if($state.pktmonStarted){
         Add-File $files $drops 'pktmon-drop-pcapng'
     }
 }
+
+# Remove only the active identity created for this round, and only when its
+# contents still name this state file's trial. A newer round therefore cannot
+# be disturbed by a delayed manual stop.
+if($state.activeTrialPath -and (Test-Path -LiteralPath $state.activeTrialPath)){
+    try{
+        $active=Get-Content -Raw -LiteralPath $state.activeTrialPath | ConvertFrom-Json
+        if($active.trialId -eq $state.trialId){Remove-Item -LiteralPath $state.activeTrialPath -Force}
+    } catch {
+        $failed=$true
+        $failureReasons.Add('active trial identity cleanup failed: '+$_.Exception.Message)
+    }
+}
 if($state.wprStarted){
     $wprEtl=Join-Path $root 'startup-wpr.etl'
     $wprStop=Invoke-Tool 'wpr.exe' @('-stop',$wprEtl) 'stop WPR session created by this task'

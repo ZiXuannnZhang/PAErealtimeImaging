@@ -262,12 +262,25 @@ void NetworkController::pollPaimageLoopMonitor(){
 
 void NetworkController::writeSystemCaptureNotification(quint64 epoch, qint64 burstNs){
     const QString channel=QString::fromStdString(systemCaptureChannelDir());
-    const QString trial=QString::fromStdString(startupTrialId());
+    QString trial=QString::fromStdString(startupTrialId());
+    QString trialSource=QStringLiteral("command_line");
+    const qint64 nowWallMs=QDateTime::currentMSecsSinceEpoch();
+    QFile activeTrial(QDir(channel).filePath(QStringLiteral("active-trial.json")));
+    if(activeTrial.open(QIODevice::ReadOnly)){
+        const QJsonObject active=QJsonDocument::fromJson(activeTrial.readAll()).object();
+        const qint64 started=active.value(QStringLiteral("startedWallMs")).toVariant().toLongLong();
+        const qint64 expires=active.value(QStringLiteral("expiresWallMs")).toVariant().toLongLong();
+        const QString requested=active.value(QStringLiteral("trialId")).toString().trimmed();
+        if(!requested.isEmpty()&&started>0&&started<=nowWallMs&&expires>=nowWallMs){
+            trial=requested;trialSource=QStringLiteral("active_system_capture");
+        }
+    }
     QDir().mkpath(channel);
     const QJsonObject note{{"kind","burst"},{"trialId",trial},{"runId",m_paimageRunId},
         {"freezeEpoch",QString::number(epoch)},{"burstMonotonicNs",QString::number(burstNs)},
         {"notifiedMonotonicNs",QString::number(paimage::SocketReceiver::now())},
-        {"notifiedWallMs",QDateTime::currentMSecsSinceEpoch()}};
+        {"notifiedWallMs",nowWallMs},{"trialIdSource",trialSource},
+        {"commandLineTrialId",QString::fromStdString(startupTrialId())}};
     const QString path=QDir(channel).filePath(QString("burst-%1-%2.json").arg(qulonglong(epoch)).arg(m_paimageRunId));
     QFile file(path);
     const bool wrote=file.open(QIODevice::WriteOnly|QIODevice::Truncate)&&
@@ -276,7 +289,7 @@ void NetworkController::writeSystemCaptureNotification(quint64 epoch, qint64 bur
     recordDiagnosticEvent("paimage.loop",wrote?"burst_notification_written":"burst_notification_write_failed",
         DiagnosticRecorder::Severity::Info,
         {{"freezeEpoch",QString::number(epoch)},{"trialId",trial},{"runId",m_paimageRunId},
-         {"path",path},{"written",wrote}});
+         {"trialIdSource",trialSource},{"path",path},{"written",wrote}});
 }
 
 void NetworkController::stopPaimage(){

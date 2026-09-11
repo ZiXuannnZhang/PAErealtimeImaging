@@ -57,7 +57,7 @@ if($failureReasons.Count -gt 0){
     $state=[ordered]@{trialId=$TrialId;outputDirectory=$root;pktmonStarted=$false;wprStarted=$false;
         filterNames=@();commands=$commands;failureReasons=$failureReasons;status='failed'}
     $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $root 'capture-state.json') -Encoding utf8
-    Write-Error ("capture start failed: " + ($failureReasons -join '; '))
+    [Console]::Error.WriteLine("capture start failed: " + ($failureReasons -join '; '))
     exit 2
 }
 
@@ -108,7 +108,7 @@ if(-not $pktmonStarted){
     $state=[ordered]@{trialId=$TrialId;outputDirectory=$root;pktmonStarted=$false;wprStarted=$false;
         filterNames=@();commands=$commands;failureReasons=$failureReasons;status='failed'}
     $state | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $root 'capture-state.json') -Encoding utf8
-    Write-Error ("capture start failed: " + ($failureReasons -join '; '))
+    [Console]::Error.WriteLine("capture start failed: " + ($failureReasons -join '; '))
     exit 2
 }
 if(-not $SkipWpr -and -not $wprStarted){
@@ -116,6 +116,34 @@ if(-not $SkipWpr -and -not $wprStarted){
         filterNames=$filterNames;ports=$Ports;cardIPs=$CardIPs;wprProfile=$WprProfile;
         maxWaitSeconds=$MaxWaitSeconds;startedUtc=$startedUtc.ToString('o');startedQpc=$startedQpc;
         applicationRunId=$null;applicationWallAnchorMs=$null;notification=$null;
+        stoppedBy='startup-failure';components=$components;commands=$commands;failureReasons=$failureReasons}
+    $statePath=Join-Path $root 'capture-state.json'
+    $state | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $statePath -Encoding utf8
+    & (Join-Path $PSScriptRoot 'startup_ingress_capture_stop.ps1') -StatePath $statePath
+    exit 2
+}
+
+# Publish the per-round identity for the already-running application. This
+# permits a second START on the same listener to use a distinct trialId. The
+# UI-thread notification reads this small file 10 s after detecting the burst;
+# the receive thread never performs file I/O or waits for the script.
+$activeTrialPath=$null
+if($ChannelDir){
+    try{
+        New-Item -ItemType Directory -Path $ChannelDir -Force | Out-Null
+        $activeTrialPath=Join-Path ([IO.Path]::GetFullPath($ChannelDir)) 'active-trial.json'
+        [ordered]@{trialId=$TrialId;startedWallMs=$startedUtcMs;
+            expiresWallMs=($startedUtcMs+($MaxWaitSeconds+20)*1000)} |
+            ConvertTo-Json | Set-Content -LiteralPath $activeTrialPath -Encoding utf8
+    } catch {
+        $failureReasons.Add('failed to publish the active trial identity: '+$_.Exception.Message)
+    }
+}
+if($failureReasons.Count -gt 0){
+    $state=[ordered]@{trialId=$TrialId;outputDirectory=$root;pktmonStarted=$pktmonStarted;wprStarted=$wprStarted;
+        filterNames=$filterNames;ports=$Ports;cardIPs=$CardIPs;wprProfile=$WprProfile;
+        maxWaitSeconds=$MaxWaitSeconds;startedUtc=$startedUtc.ToString('o');startedQpc=$startedQpc;
+        activeTrialPath=$activeTrialPath;applicationRunId=$null;applicationWallAnchorMs=$null;notification=$null;
         stoppedBy='startup-failure';components=$components;commands=$commands;failureReasons=$failureReasons}
     $statePath=Join-Path $root 'capture-state.json'
     $state | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $statePath -Encoding utf8
@@ -157,6 +185,7 @@ $state=[ordered]@{
     cardIPs=$CardIPs
     wprProfile=$WprProfile
     maxWaitSeconds=$MaxWaitSeconds
+    activeTrialPath=$activeTrialPath
     startedUtc=$startedUtc.ToString('o')
     startedQpc=$startedQpc
     applicationRunId=if($notification){ $notification.runId } else { $null }
