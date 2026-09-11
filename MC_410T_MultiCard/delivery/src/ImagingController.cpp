@@ -16,6 +16,17 @@
 #include <cmath>
 #include <chrono>
 #include <cstring>
+#include <limits>
+#include <algorithm>
+
+namespace {
+std::uint64_t nextRingServiceGeneration()
+{
+    static std::atomic<std::uint64_t> counter{0};
+    const auto now = ring_shm_obs::wallNowUs();
+    return (now << 16) ^ counter.fetch_add(1, std::memory_order_relaxed) ^ 0x52494E4733ULL;
+}
+}
 
 // ZMQ IPC 端点（与 ImagingSvc 子进程约定一致）
 static const char *ZMQ_IPC_ENDPOINT = "tcp://127.0.0.1:5555";
@@ -89,8 +100,15 @@ bool ImagingController::startSvc()
         m_ringDisplayStep = 1;
         m_ringDisplayNx = nx;
         m_ringDisplayFrameSize = frameSize;
-        size_t ringTotal = ringImagingShmTotalSizeV2(blockSize, frameSize, alines,
-                                                     m_ringDisplayFrameSize);
+        size_t slotStride = 0, frameOffset = 0, ringTotal = 0;
+        if (!ringV3ComputeLayout(m_ringConfig.alinesPerChannelPerBlock,
+                                 m_ringConfig.enabledChannelCount,
+                                 m_ringConfig.sampDepth, frameSize,
+                                 slotStride, frameOffset, ringTotal)) {
+            emit svcError("环形 v3 共享内存布局计算溢出或参数非法");
+            return false;
+        }
+        m_ringServiceGeneration = nextRingServiceGeneration();
         emit svcStatus(QString("[诊断] startSvc(RING): blockSize=%1 frameSize=%2 nx=%3")
                            .arg(blockSize).arg(frameSize).arg(nx), 0);
         emit svcStatus(QString("环形共享内存 %1 MB, blockSize=%2 frameSize=%3")
@@ -305,6 +323,7 @@ void ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
         }
     }
     m_ringMode   = true;
+    ++m_ringConfigVersion;
     const int nx = static_cast<int>(std::ceil(m_ringConfig.fov / m_ringConfig.gridSize));
     m_ringAlineCount = m_ringConfig.enabledChannelCount * m_ringConfig.alinesPerChannelPerBlock;
     m_ringBlockSize = m_ringConfig.sampDepth * m_ringAlineCount;
@@ -326,52 +345,117 @@ bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
                                   const QVector<quint8> &channels,
                                   int blockSeq)
 {
-    if (rawBlock.size() != m_ringBlockSize) {
-        emit svcError(QString("环形块大小错误：期望 %1，实际 %2")
-                          .arg(m_ringBlockSize).arg(rawBlock.size()));
-        return false;
+    RingBlock block;
+    block.serviceGeneration = m_ringServiceGeneration;
+    block.configVersion = m_ringConfigVersion;
+    block.blockSeq = static_cast<std::uint64_t>(std::max(0, blockSeq));
+    block.roundId = 1;
+    block.startPosition = block.blockSeq *
+        static_cast<std::uint64_t>(std::max(1, m_ringConfig.alinesPerChannelPerBlock));
+    block.positionCount = static_cast<std::uint32_t>(
+        std::max(1, m_ringConfig.alinesPerChannelPerBlock));
+    block.channelCount = static_cast<std::uint32_t>(m_ringConfig.enabledChannelCount);
+    block.sampDepth = static_cast<std::uint32_t>(m_ringConfig.sampDepth);
+    block.validPositionBits = block.positionCount >= 64
+        ? std::numeric_limits<std::uint64_t>::max()
+        : ((std::uint64_t(1) << block.positionCount) - 1u);
+    block.raw.assign(rawBlock.cbegin(), rawBlock.cend());
+    block.anglesDeg.assign(anglesDeg.cbegin(), anglesDeg.cend());
+    block.channels.assign(channels.cbegin(), channels.cend());
+    block.wavelengths.assign(static_cast<size_t>(m_ringAlineCount), 0xff);
+    block.wavelengthAssumed = true;
+    block.quality.qualityUnknown = false;
+    block.quality.assemblyComplete = true;
+    block.quality.packetCoverageComplete = true;
+    block.quality.packetLengthValid = true;
+    block.quality.sampleLengthValid = true;
+    return submitRingBlock(block) == ImagingSubmitResult::Accepted;
+}
+
+ImagingSubmitResult ImagingController::submitRingBlock(const RingBlock &block)
+{
+    if (!m_ringSharedMemory || !m_running.load(std::memory_order_acquire))
+        return ImagingSubmitResult::ServiceNotReady;
+    const int capacity = std::max(1, m_ringConfig.alinesPerChannelPerBlock);
+    const int channels = std::max(1, m_ringConfig.enabledChannelCount);
+    const int depth = std::max(1, m_ringConfig.sampDepth);
+    const size_t expectedRaw = static_cast<size_t>(capacity) * channels * depth;
+    const size_t expectedLines = static_cast<size_t>(capacity) * channels;
+    if (block.serviceGeneration != 0 && block.serviceGeneration != m_ringServiceGeneration)
+        return ImagingSubmitResult::StaleGeneration;
+    if (block.configVersion != 0 && block.configVersion != m_ringConfigVersion)
+        return ImagingSubmitResult::VersionMismatch;
+    if (block.positionCount < 1 || block.positionCount > static_cast<std::uint32_t>(capacity) ||
+        block.channelCount != static_cast<std::uint32_t>(channels) ||
+        block.sampDepth != static_cast<std::uint32_t>(depth) ||
+        block.raw.size() != expectedRaw || block.anglesDeg.size() != expectedLines ||
+        block.channels.size() != expectedLines || block.wavelengths.size() != expectedLines)
+        return ImagingSubmitResult::InvalidPayload;
+
+    if (!m_ringSharedMemory->lock()) return ImagingSubmitResult::QueueBusy;
+    auto *h = static_cast<RingImagingShmV3Header *>(m_ringSharedMemory->data());
+    if (!h || h->magic != RING_IMAGING_SHM_V3_MAGIC ||
+        h->version != RING_IMAGING_SHM_V3_VERSION || h->slot_count != 2 ||
+        h->service_generation != m_ringServiceGeneration ||
+        h->config_version != m_ringConfigVersion) {
+        m_ringSharedMemory->unlock();
+        return ImagingSubmitResult::VersionMismatch;
+    }
+    int selected = -1;
+    for (int slot = 0; slot < static_cast<int>(h->slot_count); ++slot) {
+        auto *sh = reinterpret_cast<RingImagingShmV3SlotHeader *>(
+            reinterpret_cast<std::uint8_t *>(h) + ringV3SlotHeaderOffset(slot));
+        if (sh->state == static_cast<uint32_t>(RingImagingV3SlotState::Free)) {
+            selected = slot;
+            break;
+        }
+    }
+    if (selected < 0) {
+        m_ringSharedMemory->unlock();
+        emit svcStatus("[RingSHMObs] BusySlots: 两个输入槽均为 Ready，未覆盖且未等待", 0);
+        return ImagingSubmitResult::BusySlots;
     }
 
-    const uint64_t submitWallUs = ring_shm_obs::wallNowUs();
-    uint8_t previousReady = 0;
-    uint32_t previousSeq = 0;
-    m_ringSharedMemory->lock();
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    previousReady = h->block_ready;
-    previousSeq = h->block_seq;
-    auto *blockBuf = reinterpret_cast<float *>(h + 1);
-    std::memcpy(blockBuf, rawBlock.constData(),
-                static_cast<size_t>(m_ringBlockSize) * sizeof(float));
-    auto *angleBuf = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) + ringAnglesOffset(m_ringBlockSize));
-    auto *chanBuf = reinterpret_cast<uint8_t *>(reinterpret_cast<uint8_t *>(h + 1) + ringChannelsOffset(m_ringBlockSize, m_ringAlineCount));
-    std::memcpy(angleBuf, anglesDeg.constData(), static_cast<size_t>(m_ringAlineCount) * sizeof(float));
-    std::memcpy(chanBuf, channels.constData(), static_cast<size_t>(m_ringAlineCount));
-    h->alines = static_cast<uint32_t>(m_ringAlineCount);
-    h->block_seq   = static_cast<uint32_t>(blockSeq);
-    h->block_ready = 1;
+    auto *sh = reinterpret_cast<RingImagingShmV3SlotHeader *>(
+        reinterpret_cast<std::uint8_t *>(h) + ringV3SlotHeaderOffset(selected));
+    const size_t rawBytes = expectedRaw * sizeof(float);
+    const size_t angleBytes = expectedLines * sizeof(float);
+    const size_t payload = ringV3SlotPayloadOffset(*h, selected);
+    auto *base = reinterpret_cast<std::uint8_t *>(h);
+    std::memcpy(base + payload, block.raw.data(), rawBytes);
+    std::memcpy(base + ringV3AnglesOffset(*h, selected), block.anglesDeg.data(), angleBytes);
+    std::memcpy(base + ringV3ChannelsOffset(*h, selected), block.channels.data(), expectedLines);
+    std::memcpy(base + ringV3WavelengthsOffset(*h, selected), block.wavelengths.data(), expectedLines);
+    sh->service_generation = block.serviceGeneration == 0 ? m_ringServiceGeneration : block.serviceGeneration;
+    sh->round_id = block.roundId;
+    sh->config_version = block.configVersion == 0 ? m_ringConfigVersion : block.configVersion;
+    sh->block_seq = block.blockSeq;
+    sh->start_position = block.startPosition;
+    sh->position_count = block.positionCount;
+    sh->channel_count = block.channelCount;
+    sh->samp_depth = block.sampDepth;
+    sh->raw_float_count = static_cast<uint32_t>(expectedRaw);
+    sh->raw_bytes = static_cast<uint32_t>(rawBytes);
+    sh->angle_bytes = static_cast<uint32_t>(angleBytes);
+    sh->channel_bytes = static_cast<uint32_t>(expectedLines);
+    sh->wavelength_bytes = static_cast<uint32_t>(expectedLines);
+    sh->valid_position_bits = block.validPositionBits;
+    sh->position_confidence = static_cast<uint8_t>(block.positionConfidence);
+    sh->wavelength_assumed = block.wavelengthAssumed ? 1 : 0;
+    // Publish only after every fixed-width payload and identity field is in place.
+    sh->state = static_cast<uint32_t>(RingImagingV3SlotState::Ready);
     m_ringSharedMemory->unlock();
 
-    const auto event = m_ringObs.observeProducerSubmit(
-        previousReady, previousSeq, static_cast<uint32_t>(blockSeq), submitWallUs);
     QJsonObject ready;
     ready[QStringLiteral("cmd")] = QStringLiteral("ring_block_ready");
-    ready[QStringLiteral("seq")] = blockSeq;
-    ready[QStringLiteral("submit_index")] = static_cast<qint64>(event.submitIndex);
-    ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(event.submitWallUs);
+    ready[QStringLiteral("slot")] = selected;
+    ready[QStringLiteral("service_generation")] = QString::number(m_ringServiceGeneration);
+    ready[QStringLiteral("round_id")] = QString::number(block.roundId);
+    ready[QStringLiteral("config_version")] = QString::number(m_ringConfigVersion);
+    ready[QStringLiteral("block_seq")] = QString::number(block.blockSeq);
+    ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(ring_shm_obs::wallNowUs());
     sendCommand(ready);
-
-    if (event.slotBusy || event.periodicDue) {
-        QJsonObject diag = makeRingObservation(event.slotBusy ? "producer_overwrite" : "periodic",
-                                               m_ringObs.snapshot());
-        diag[QStringLiteral("previous_ready")] = static_cast<int>(previousReady);
-        diag[QStringLiteral("previous_seq")] = static_cast<qint64>(previousSeq);
-        diag[QStringLiteral("new_seq")] = static_cast<qint64>(event.newSeq);
-        diag[QStringLiteral("submit_interval_us")] = static_cast<qint64>(event.submitIntervalUs);
-        const QJsonDocument doc(diag);
-        emit svcStatus(QStringLiteral("[RingSHMObs] ")
-                           + QString::fromUtf8(doc.toJson(QJsonDocument::Compact)), 0);
-    }
-    return true;
+    return ImagingSubmitResult::Accepted;
 }
 
 void ImagingController::sendRingReset()
@@ -388,9 +472,14 @@ bool ImagingController::setupRingSharedMemory(int blockSize, int frameSize, int 
         m_ringSharedMemory = nullptr;
     }
 
-    const size_t totalSize = ringImagingShmTotalSizeV2(blockSize, frameSize, alines,
-                                                       m_ringDisplayFrameSize);
-    m_ringSharedMemory = new QSharedMemory("MC_410T_RingShm", this);
+    const int blockCapacity = m_ringConfig.alinesPerChannelPerBlock;
+    const int channelCount = m_ringConfig.enabledChannelCount;
+    const int sampDepth = m_ringConfig.sampDepth;
+    size_t slotStride = 0, frameOffset = 0, totalSize = 0;
+    if (!ringV3ComputeLayout(blockCapacity, channelCount, sampDepth, frameSize,
+                             slotStride, frameOffset, totalSize))
+        return false;
+    m_ringSharedMemory = new QSharedMemory("MC_410T_RingShmV3", this);
     if (!m_ringSharedMemory->create(static_cast<int>(totalSize))) {
         if (m_ringSharedMemory->error() == QSharedMemory::AlreadyExists) {
             if (!m_ringSharedMemory->attach()) {
@@ -400,7 +489,7 @@ bool ImagingController::setupRingSharedMemory(int blockSize, int frameSize, int 
                 m_ringSharedMemory = nullptr;
                 return false;
             }
-            // v2 强校验：陈旧/尺寸不匹配的残留 SHM 一律拒绝，避免越界读写
+            // v3 强校验：陈旧/尺寸不匹配的残留 SHM 一律拒绝，避免越界读写
             if (!ringShmMatches(blockSize, frameSize, alines, nx, totalSize)) {
                 emit svcError("环形共享内存校验失败：存在旧版本或尺寸不匹配的残留共享内存，"
                               "请先关闭残留 ImagingSvc 进程后重试");
@@ -420,19 +509,39 @@ bool ImagingController::setupRingSharedMemory(int blockSize, int frameSize, int 
 
     m_ringSharedMemory->lock();
     std::memset(m_ringSharedMemory->data(), 0, totalSize);
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    h->magic       = 0x52494E47;  // "RING"
-    h->version     = 2;
-    h->block_size  = static_cast<uint32_t>(blockSize);
-    h->alines      = static_cast<uint32_t>(alines);
-    h->frame_size  = static_cast<uint32_t>(frameSize);
-    h->nx          = static_cast<uint16_t>(nx);
-    h->ny          = static_cast<uint16_t>(nx);
-    h->display_nx  = static_cast<uint16_t>(m_ringDisplayNx);
-    h->display_ny  = static_cast<uint16_t>(m_ringDisplayNx);
+    auto *h = static_cast<RingImagingShmV3Header *>(m_ringSharedMemory->data());
+    h->magic = RING_IMAGING_SHM_V3_MAGIC;
+    h->version = RING_IMAGING_SHM_V3_VERSION;
+    h->header_bytes = sizeof(RingImagingShmV3Header);
+    h->slot_count = RING_IMAGING_SHM_V3_SLOT_COUNT;
+    h->block_capacity = static_cast<uint32_t>(blockCapacity);
+    h->channel_count = static_cast<uint32_t>(channelCount);
+    h->samp_depth = static_cast<uint32_t>(sampDepth);
+    h->alines_capacity = static_cast<uint32_t>(alines);
+    h->raw_float_count = static_cast<uint32_t>(blockSize);
+    h->angle_count = static_cast<uint32_t>(alines);
+    h->channel_bytes = static_cast<uint32_t>(alines);
+    h->wavelength_bytes = static_cast<uint32_t>(alines);
+    h->frame_size = static_cast<uint32_t>(frameSize);
+    h->nx = static_cast<uint16_t>(nx);
+    h->ny = static_cast<uint16_t>(nx);
     h->display_frame_size = static_cast<uint32_t>(m_ringDisplayFrameSize);
-    h->snapshot_step      = static_cast<uint32_t>(m_ringDisplayStep);
-    h->flags              = 0;
+    h->display_nx = static_cast<uint16_t>(m_ringDisplayNx);
+    h->display_ny = static_cast<uint16_t>(m_ringDisplayNx);
+    h->slot_header_bytes = sizeof(RingImagingShmV3SlotHeader);
+    h->slot_stride_bytes = static_cast<uint32_t>(slotStride);
+    h->frame_offset_bytes = static_cast<uint32_t>(frameOffset);
+    h->total_bytes = static_cast<uint32_t>(totalSize);
+    h->frame_seq = 0;
+    h->service_generation = m_ringServiceGeneration;
+    h->config_version = m_ringConfigVersion;
+    h->round_id = 1;
+    for (int slot = 0; slot < 2; ++slot) {
+        auto *sh = reinterpret_cast<RingImagingShmV3SlotHeader *>(
+            reinterpret_cast<std::uint8_t *>(h) + ringV3SlotHeaderOffset(slot));
+        sh->slot_index = static_cast<uint32_t>(slot);
+        sh->state = static_cast<uint32_t>(RingImagingV3SlotState::Free);
+    }
     m_ringSharedMemory->unlock();
     return true;
 }
@@ -444,19 +553,24 @@ bool ImagingController::ringShmMatches(int blockSize, int frameSize, int alines,
     if (static_cast<size_t>(m_ringSharedMemory->size()) != expectedTotal) return false;
 
     m_ringSharedMemory->lock();
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
+    auto *h = static_cast<RingImagingShmV3Header *>(m_ringSharedMemory->data());
     const bool ok = h != nullptr
-        && h->magic == 0x52494E47u
-        && h->version == 2u
-        && h->block_size == static_cast<uint32_t>(blockSize)
-        && h->alines == static_cast<uint32_t>(alines)
+        && h->magic == RING_IMAGING_SHM_V3_MAGIC
+        && h->version == RING_IMAGING_SHM_V3_VERSION
+        && h->slot_count == RING_IMAGING_SHM_V3_SLOT_COUNT
+        && h->block_capacity == static_cast<uint32_t>(m_ringConfig.alinesPerChannelPerBlock)
+        && h->channel_count == static_cast<uint32_t>(m_ringConfig.enabledChannelCount)
+        && h->samp_depth == static_cast<uint32_t>(m_ringConfig.sampDepth)
+        && h->raw_float_count == static_cast<uint32_t>(blockSize)
+        && h->alines_capacity == static_cast<uint32_t>(alines)
         && h->frame_size == static_cast<uint32_t>(frameSize)
         && h->nx == static_cast<uint16_t>(nx)
         && h->ny == static_cast<uint16_t>(nx)
         && h->display_nx == static_cast<uint16_t>(m_ringDisplayNx)
         && h->display_ny == static_cast<uint16_t>(m_ringDisplayNx)
         && h->display_frame_size == static_cast<uint32_t>(m_ringDisplayFrameSize)
-        && h->snapshot_step == static_cast<uint32_t>(m_ringDisplayStep);
+        && h->service_generation == m_ringServiceGeneration
+        && h->config_version == m_ringConfigVersion;
     m_ringSharedMemory->unlock();
     return ok;
 }
@@ -548,11 +662,11 @@ void ImagingController::processRingFrame(int seq)
     if (m_dispBuf[target].size() != frameSize * 2)
         m_dispBuf[target].assign(frameSize * 2, 0.0f);
 
-    shm->lock();
-    auto *h = static_cast<RingImagingShmHeader *>(shm->data());
+    if (!shm->lock()) return;
+    auto *h = static_cast<RingImagingShmV3Header *>(shm->data());
     if (!h) { shm->unlock(); return; }
     auto *fb = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) +
-                                         ringFramesOffset(blockSize, alines));
+                                         ringV3FramesOffset(*h) - sizeof(RingImagingShmV3Header));
     std::memcpy(m_dispBuf[target].data(), fb, frameSize * 2 * sizeof(float));
     shm->unlock();
 
@@ -865,6 +979,9 @@ void ImagingController::sendConfigureAndStart()
         ring["sectorCcw"] = m_ringConfig.sectorCcw;
         ring["triggerWlOdd"] = m_ringConfig.triggerWlOdd;
         ring["timeoutResetSec"] = m_ringConfig.timeoutResetSec;
+        ring["ipcVersion"] = static_cast<int>(RING_IMAGING_SHM_V3_VERSION);
+        ring["serviceGeneration"] = QString::number(m_ringServiceGeneration);
+        ring["configVersion"] = QString::number(m_ringConfigVersion);
 
                 QJsonObject params;
         params["imagingMode"] = "ring";

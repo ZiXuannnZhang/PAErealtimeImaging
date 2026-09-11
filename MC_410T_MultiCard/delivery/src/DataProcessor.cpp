@@ -472,6 +472,8 @@ void DataProcessor::flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf) {
     try {
         assemblyBuf.exportTo(*group, m_config);
         group->measurementSession = m_activeSessionToken.load(std::memory_order_acquire);
+        group->identity.cardId = m_cardId;
+        group->identity.measurementSession = group->measurementSession;
 
         if (group->isComplete)
             m_stats.triggersComplete.fetch_add(1, std::memory_order_relaxed);
@@ -543,12 +545,16 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
         // 环形实时馈送：每触发直接入队（独立工作线程消费），
         // 避免 DisplayBuffer latest-only + 主线程轮询在高触发率下丢触发
         if (m_ringFeedSink) {
-            try {
-                result.imagingDropReason = m_ringFeedSink(group);
-                result.imagingAccepted = result.imagingDropReason == ImagingSubmitResult::Accepted;
-            } catch (...) {
-                result.imagingDropReason = ImagingSubmitResult::CallbackFailed;
-                result.exception = true;
+            if (!group->quality.inputUsable()) {
+                result.imagingDropReason = ImagingSubmitResult::InvalidPayload;
+            } else {
+                try {
+                    result.imagingDropReason = m_ringFeedSink(group);
+                    result.imagingAccepted = result.imagingDropReason == ImagingSubmitResult::Accepted;
+                } catch (...) {
+                    result.imagingDropReason = ImagingSubmitResult::CallbackFailed;
+                    result.exception = true;
+                }
             }
         }
     } catch (const std::bad_alloc&) {

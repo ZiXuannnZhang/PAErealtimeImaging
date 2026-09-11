@@ -51,6 +51,8 @@ set(SOURCES
     src/RingImageWidget.cpp
     src/RingColorBarWidget.cpp
     src/RingBlockAssembler.cpp
+    src/RingPipeline.cpp
+    src/RoundTracker.cpp
     qcustomplot/qcustomplot.cpp
 )
 
@@ -82,6 +84,9 @@ set(HEADERS
     include/RingImageWidget.h
     include/RingColorBarWidget.h
     include/RingBlockAssembler.h
+    include/RingPipeline.h
+    include/RingTypes.h
+    include/RoundTracker.h
     include/third_party/concurrentqueue.h
     qcustomplot/qcustomplot.h
 )

@@ -9,7 +9,7 @@
 using namespace std::chrono_literals;
 void require(bool v,const char* m){if(!v)throw std::runtime_error(m);}
 template<class P> bool until(P p){auto end=std::chrono::steady_clock::now()+3s;while(!p()&&std::chrono::steady_clock::now()<end)std::this_thread::sleep_for(1ms);return p();}
-TriggerGroupPtr makeFrame(int card,int trigger,std::uint64_t session,bool complete=true){auto f=std::make_shared<TriggerGroup>();f->cardId=card;f->triggerSeq=std::uint16_t(trigger);f->measurementSession=session;f->isComplete=complete;f->sampleCount=16;f->freqA.assign(16,float(card+1));f->freqB.assign(16,float(-card-1));return f;}
+TriggerGroupPtr makeFrame(int card,int trigger,std::uint64_t session,bool complete=true){auto f=std::make_shared<TriggerGroup>();f->cardId=card;f->triggerSeq=std::uint16_t(trigger);f->measurementSession=session;f->isComplete=complete;f->sampleCount=16;f->freqA.assign(16,float(card+1));f->freqB.assign(16,float(-card-1));f->quality.qualityUnknown=false;f->quality.assemblyComplete=complete;f->quality.packetCoverageComplete=complete;f->quality.packetLengthValid=complete;f->quality.sampleLengthValid=complete;return f;}
 int main(){
  ImagingBypass bypass(2);std::array<bool,8> channels{};channels[0]=true;bypass.setEnabledChannels(channels);bypass.start();
  require(bypass.tryPush(makeFrame(0,1,1))==ImagingSubmitResult::Disabled,"disabled");bypass.setEnabled(true);

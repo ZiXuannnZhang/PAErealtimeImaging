@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <limits>
 
 // =====================================================================
 // ImagingSharedMemory — 共享内存布局定义
@@ -96,4 +97,167 @@ inline size_t ringImagingShmTotalSizeV2(int blockSize, int frameSize, int alines
     return sizeof(RingImagingShmHeader)
          + ringDisplayFramesOffset(blockSize, alines, frameSize)
          + 2ULL * static_cast<size_t>(displayFrameSize) * sizeof(float);
+}
+
+// =====================================================================
+// Ring IPC v3: two bounded input slots.  The v2 layout remains available for
+// source compatibility, but the ring controller/service use only this ABI.
+// QSharedMemory::lock() provides the inter-process critical section; state is
+// a fixed-width value and never an in-process atomic or pointer.
+// =====================================================================
+constexpr uint32_t RING_IMAGING_SHM_V3_MAGIC = 0x52494E47u;
+constexpr uint32_t RING_IMAGING_SHM_V3_VERSION = 3u;
+constexpr uint32_t RING_IMAGING_SHM_V3_SLOT_COUNT = 2u;
+
+enum class RingImagingV3SlotState : uint32_t {
+    Free = 0,
+    Ready = 1
+};
+
+#pragma pack(push, 1)
+struct RingImagingShmV3Header {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t header_bytes;
+    uint32_t slot_count;
+    uint32_t block_capacity;
+    uint32_t channel_count;
+    uint32_t samp_depth;
+    uint32_t alines_capacity;
+    uint32_t raw_float_count;
+    uint32_t angle_count;
+    uint32_t channel_bytes;
+    uint32_t wavelength_bytes;
+    uint32_t frame_size;
+    uint16_t nx;
+    uint16_t ny;
+    uint32_t display_frame_size;
+    uint16_t display_nx;
+    uint16_t display_ny;
+    uint32_t slot_header_bytes;
+    uint32_t slot_stride_bytes;
+    uint32_t frame_offset_bytes;
+    uint32_t total_bytes;
+    uint32_t frame_seq;
+    uint64_t service_generation;
+    uint64_t config_version;
+    uint64_t round_id;
+    uint8_t reserved[20];
+};
+
+struct RingImagingShmV3SlotHeader {
+    uint32_t state;
+    uint32_t slot_index;
+    uint64_t service_generation;
+    uint64_t round_id;
+    uint64_t config_version;
+    uint64_t block_seq;
+    uint64_t start_position;
+    uint32_t position_count;
+    uint32_t channel_count;
+    uint32_t samp_depth;
+    uint32_t raw_float_count;
+    uint32_t raw_bytes;
+    uint32_t angle_bytes;
+    uint32_t channel_bytes;
+    uint32_t wavelength_bytes;
+    uint64_t valid_position_bits;
+    uint8_t position_confidence;
+    uint8_t wavelength_assumed;
+    uint8_t reserved[6];
+};
+#pragma pack(pop)
+
+static_assert(sizeof(RingImagingShmV3Header) == 128,
+              "RingImagingShmV3Header must be 128 bytes");
+static_assert(sizeof(RingImagingShmV3SlotHeader) == 96,
+              "RingImagingShmV3SlotHeader must be 96 bytes");
+
+inline bool ringV3CheckedAdd(size_t a, size_t b, size_t &out)
+{
+    if (b > std::numeric_limits<size_t>::max() - a) return false;
+    out = a + b;
+    return true;
+}
+
+inline bool ringV3CheckedMul(size_t a, size_t b, size_t &out)
+{
+    if (a != 0 && b > std::numeric_limits<size_t>::max() / a) return false;
+    out = a * b;
+    return true;
+}
+
+inline bool ringV3ComputeLayout(int blockCapacity, int channelCount, int sampDepth,
+                                int frameSize, size_t &slotStride, size_t &frameOffset,
+                                size_t &totalSize)
+{
+    if (blockCapacity < 1 || blockCapacity > 50 || channelCount < 1 ||
+        channelCount > 8 || sampDepth < 1 || frameSize < 1) return false;
+    size_t alines = 0, rawFloats = 0, rawBytes = 0, angleBytes = 0;
+    size_t channelBytes = 0, wavelengthBytes = 0, payload = 0;
+    if (!ringV3CheckedMul(static_cast<size_t>(blockCapacity),
+                          static_cast<size_t>(channelCount), alines) ||
+        !ringV3CheckedMul(alines, static_cast<size_t>(sampDepth), rawFloats) ||
+        !ringV3CheckedMul(rawFloats, sizeof(float), rawBytes) ||
+        !ringV3CheckedMul(alines, sizeof(float), angleBytes)) return false;
+    channelBytes = alines;
+    wavelengthBytes = alines;
+    if (!ringV3CheckedAdd(rawBytes, angleBytes, payload) ||
+        !ringV3CheckedAdd(payload, channelBytes, payload) ||
+        !ringV3CheckedAdd(payload, wavelengthBytes, payload) ||
+        !ringV3CheckedAdd(payload, 7u, payload)) return false;
+    slotStride = payload & ~static_cast<size_t>(7u);
+    size_t headers = 0;
+    if (!ringV3CheckedMul(RING_IMAGING_SHM_V3_SLOT_COUNT,
+                          sizeof(RingImagingShmV3SlotHeader), headers) ||
+        !ringV3CheckedAdd(sizeof(RingImagingShmV3Header), headers, frameOffset) ||
+        !ringV3CheckedMul(RING_IMAGING_SHM_V3_SLOT_COUNT, slotStride, payload) ||
+        !ringV3CheckedAdd(frameOffset, payload, frameOffset)) return false;
+    size_t frames = 0;
+    if (!ringV3CheckedMul(static_cast<size_t>(frameSize), sizeof(float), frames) ||
+        !ringV3CheckedMul(frames, 2u, frames) ||
+        !ringV3CheckedAdd(frameOffset, frames, totalSize)) return false;
+    return slotStride <= std::numeric_limits<uint32_t>::max() &&
+           frameOffset <= std::numeric_limits<uint32_t>::max() &&
+           totalSize <= std::numeric_limits<uint32_t>::max();
+}
+
+inline size_t ringV3SlotHeaderOffset(int slot)
+{
+    return sizeof(RingImagingShmV3Header) +
+           static_cast<size_t>(slot) * sizeof(RingImagingShmV3SlotHeader);
+}
+
+inline size_t ringV3SlotPayloadOffset(const RingImagingShmV3Header &header, int slot)
+{
+    return static_cast<size_t>(header.header_bytes) +
+           static_cast<size_t>(header.slot_count) * header.slot_header_bytes +
+           static_cast<size_t>(slot) * header.slot_stride_bytes;
+}
+
+inline size_t ringV3RawOffset(const RingImagingShmV3Header &header, int slot)
+{
+    return ringV3SlotPayloadOffset(header, slot);
+}
+
+inline size_t ringV3AnglesOffset(const RingImagingShmV3Header &header, int slot)
+{
+    return ringV3RawOffset(header, slot) +
+           static_cast<size_t>(header.raw_float_count) * sizeof(float);
+}
+
+inline size_t ringV3ChannelsOffset(const RingImagingShmV3Header &header, int slot)
+{
+    return ringV3AnglesOffset(header, slot) +
+           static_cast<size_t>(header.angle_count) * sizeof(float);
+}
+
+inline size_t ringV3WavelengthsOffset(const RingImagingShmV3Header &header, int slot)
+{
+    return ringV3ChannelsOffset(header, slot) + header.channel_bytes;
+}
+
+inline size_t ringV3FramesOffset(const RingImagingShmV3Header &header)
+{
+    return header.frame_offset_bytes;
 }

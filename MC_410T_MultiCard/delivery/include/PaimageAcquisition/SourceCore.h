@@ -29,6 +29,7 @@ struct CardFrame {
     Time first=0,last=0,closed=0; Decision reason{}; bool complete=false;
     std::uint64_t measurementSession=0,firstIngressId=0; // observation, never admission
     std::uint32_t sourceIPv4=0;
+    std::uint64_t expectedPayloadBytes=0;
     std::vector<std::uint16_t> lengths;
     std::vector<std::uint32_t> seen;
     std::vector<std::uint8_t> bytes; // zero-filled, fixed byte slots

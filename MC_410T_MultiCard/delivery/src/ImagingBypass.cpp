@@ -20,8 +20,12 @@ const char *imagingSubmitResultName(ImagingSubmitResult result) noexcept
     case ImagingSubmitResult::Disabled: return "Disabled";
     case ImagingSubmitResult::QueueFull: return "QueueFull";
     case ImagingSubmitResult::QueueBusy: return "QueueBusy";
+    case ImagingSubmitResult::BusySlots: return "BusySlots";
     case ImagingSubmitResult::Stopping: return "Stopping";
     case ImagingSubmitResult::InvalidFrame: return "InvalidFrame";
+    case ImagingSubmitResult::InvalidPayload: return "InvalidPayload";
+    case ImagingSubmitResult::VersionMismatch: return "VersionMismatch";
+    case ImagingSubmitResult::StaleGeneration: return "StaleGeneration";
     case ImagingSubmitResult::StaleSession: return "StaleSession";
     case ImagingSubmitResult::ServiceNotReady: return "ServiceNotReady";
     case ImagingSubmitResult::CallbackFailed: return "CallbackFailed";
@@ -121,6 +125,8 @@ ImagingSubmitResult ImagingBypass::tryPush(const TriggerGroupConstPtr &frame) no
     if (!frame || !frame->isComplete || frame->cardId < 0
         || frame->sampleCount <= 0 || frame->freqA.empty() || frame->freqB.empty())
         return finish(ImagingSubmitResult::InvalidFrame);
+    if (!frame->quality.inputUsable())
+        return finish(ImagingSubmitResult::InvalidPayload);
     if (stopping_.load(std::memory_order_acquire))
         return finish(ImagingSubmitResult::Stopping);
     if (!enabled_.load(std::memory_order_acquire))
@@ -205,8 +211,12 @@ void ImagingBypass::countDrop(ImagingSubmitResult result, std::uint64_t count) n
     case ImagingSubmitResult::Disabled: droppedDisabled_.fetch_add(count); break;
     case ImagingSubmitResult::QueueFull: droppedQueueFull_.fetch_add(count); break;
     case ImagingSubmitResult::QueueBusy: droppedQueueBusy_.fetch_add(count); break;
+    case ImagingSubmitResult::BusySlots: droppedBusySlots_.fetch_add(count); break;
     case ImagingSubmitResult::Stopping: droppedStopping_.fetch_add(count); break;
     case ImagingSubmitResult::InvalidFrame: droppedInvalidFrame_.fetch_add(count); break;
+    case ImagingSubmitResult::InvalidPayload: droppedInvalidPayload_.fetch_add(count); break;
+    case ImagingSubmitResult::VersionMismatch: droppedVersionMismatch_.fetch_add(count); break;
+    case ImagingSubmitResult::StaleGeneration: droppedStaleGeneration_.fetch_add(count); break;
     case ImagingSubmitResult::StaleSession: droppedStaleSession_.fetch_add(count); break;
     case ImagingSubmitResult::ServiceNotReady: droppedServiceNotReady_.fetch_add(count); break;
     case ImagingSubmitResult::CallbackFailed: droppedCallbackFailed_.fetch_add(count); break;
@@ -241,7 +251,11 @@ ImagingBypass::Snapshot ImagingBypass::snapshot() const noexcept
     s.blocksSkipped=blocksSkipped_.load();s.blockExceptions=blockExceptions_.load();
     s.droppedDisabled=droppedDisabled_.load();s.droppedQueueFull=droppedQueueFull_.load();
     s.droppedQueueBusy=droppedQueueBusy_.load();
+    s.droppedBusySlots=droppedBusySlots_.load();
     s.droppedStopping=droppedStopping_.load();s.droppedInvalidFrame=droppedInvalidFrame_.load();
+    s.droppedInvalidPayload=droppedInvalidPayload_.load();
+    s.droppedVersionMismatch=droppedVersionMismatch_.load();
+    s.droppedStaleGeneration=droppedStaleGeneration_.load();
     s.droppedStaleSession=droppedStaleSession_.load();
     s.droppedServiceNotReady=droppedServiceNotReady_.load();s.droppedOnClear=droppedOnClear_.load();
     s.droppedCallbackFailed=droppedCallbackFailed_.load();

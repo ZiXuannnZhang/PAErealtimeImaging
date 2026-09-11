@@ -13,6 +13,13 @@ target_compile_features(ring_block_assembler_test PRIVATE cxx_std_17)
 enable_testing()
 add_test(NAME ring_block_assembler_test COMMAND ring_block_assembler_test)
 
+add_executable(round_tracker_test
+    round_tracker_test.cpp
+    ../src/RoundTracker.cpp)
+target_include_directories(round_tracker_test PRIVATE ../include)
+target_compile_features(round_tracker_test PRIVATE cxx_std_17)
+add_test(NAME round_tracker_test COMMAND round_tracker_test)
+
 add_executable(imaging_bypass_test imaging_bypass_test.cpp ../src/ImagingBypass.cpp)
 target_include_directories(imaging_bypass_test PRIVATE ../include)
 target_compile_features(imaging_bypass_test PRIVATE cxx_std_17)
@@ -43,6 +50,11 @@ add_executable(ring_shm_observability_test ring_shm_observability_test.cpp)
 target_include_directories(ring_shm_observability_test PRIVATE ../include)
 target_link_libraries(ring_shm_observability_test PRIVATE Qt6::Core)
 add_test(NAME ring_shm_observability_test COMMAND ring_shm_observability_test)
+
+add_executable(ring_shm_v3_test ring_shm_v3_test.cpp)
+target_include_directories(ring_shm_v3_test PRIVATE ../include)
+target_compile_features(ring_shm_v3_test PRIVATE cxx_std_17)
+add_test(NAME ring_shm_v3_test COMMAND ring_shm_v3_test)
 
 add_executable(diagnostic_dialog_test diagnostic_dialog_test.cpp
     ../src/DiagnosticExportDialog.cpp ../src/DiagnosticRecorder.cpp)

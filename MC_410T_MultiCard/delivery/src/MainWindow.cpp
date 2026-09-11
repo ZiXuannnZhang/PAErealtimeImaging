@@ -7,7 +7,7 @@
 #include "ImagingController.h"
 #include "RingConfigDialog.h"
 #include "ImagingDisplayWindow.h"
-#include "RingBlockAssembler.h"
+#include "RingPipeline.h"
 #include "ImagingBypass.h"
 #include "DiagnosticRecorder.h"
 #include "DiagnosticExportDialog.h"
@@ -473,26 +473,19 @@ MainWindow::MainWindow(QWidget *parent)
     // 阶段B：环形真实采集组包器（UDP 频率数据 → 环形块 → 重建）
     m_imagingBypass = std::make_unique<ImagingBypass>(256);
     m_imagingBypass->start();
-    m_ringAssembler = new RingBlockAssembler();
-    m_ringAssembler->setBlockCallback(
-        [this](std::vector<float> &&raw, std::vector<float> &&angles,
-               std::vector<uint8_t> &&channels, int blockSeq) {
-            // 回调运行在独立成像 worker；只提交成像服务并更新原子统计。
-            m_ringBlockCounter.fetch_add(1, std::memory_order_relaxed);
-            const int alines = static_cast<int>(channels.size());
-            QVector<float> rawQ(raw.begin(), raw.end());
-            QVector<float> angQ(angles.begin(), angles.end());
-            QVector<quint8> chQ(channels.begin(), channels.end());
-            bool submitted = false;
-            try {
-                submitted = m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire)
-                    && m_imagingController->submitRingBlock(rawQ, angQ, chQ, blockSeq);
-                if (m_imagingBypass) m_imagingBypass->observeBlockResult(submitted);
-            } catch (...) {
-                if (m_imagingBypass) m_imagingBypass->observeBlockException();
-            }
-            Q_UNUSED(alines);
-        });
+    m_ringAssembler = new RingPipeline();
+    m_ringAssembler->setRingBlockCallback([this](RingBlock &&block) {
+        // 回调运行在独立成像 worker；块身份/缺口随固定契约进入 v3 槽。
+        m_ringBlockCounter.fetch_add(1, std::memory_order_relaxed);
+        bool submitted = false;
+        try {
+            if (m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire))
+                submitted = m_imagingController->submitRingBlock(block) == ImagingSubmitResult::Accepted;
+            if (m_imagingBypass) m_imagingBypass->observeBlockResult(submitted);
+        } catch (...) {
+            if (m_imagingBypass) m_imagingBypass->observeBlockException();
+        }
+    });
     m_ringAssembler->setProgressCallback([this]() { m_ringTimeoutSaveDone = false; });
     // 停机超时判定新一圈：组包器触发级检测，通知子进程清空重建累积，
     // 输出帧计数从新一圈重新计算
@@ -510,10 +503,12 @@ MainWindow::MainWindow(QWidget *parent)
         const int chB = chA + 1;
         if (enabled[chA])
             m_ringAssembler->pushChannelLine(chA, frame->triggerSeq, frame->freqA.data(),
-                                             static_cast<int>(frame->freqA.size()));
+                                             static_cast<int>(frame->freqA.size()),
+                                             frame->identity, frame->quality);
         if (enabled[chB])
             m_ringAssembler->pushChannelLine(chB, frame->triggerSeq, frame->freqB.data(),
-                                             static_cast<int>(frame->freqB.size()));
+                                             static_cast<int>(frame->freqB.size()),
+                                             frame->identity, frame->quality);
         return true;
     });
     connect(m_imagingController, &ImagingController::svcStopped, this, [this]() {
@@ -4634,6 +4629,10 @@ void MainWindow::configureRingAssembler()
                                  cfg.sampDepth, cfg.sectorStartDeg, sectorWidth,
                                  step, cfg.alinesPerChannelPerFrame,
                                  cfg.triggerWlOdd, cfg.timeoutResetSec); }
+    { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+      m_ringAssembler->setIdentityContext(m_imagingController->ringServiceGeneration(),
+                                           1, m_imagingController->ringConfigVersion(),
+                                           PositionConfidence::RelativeOnly); }
     m_ringAssemblerConfigured = true;
     m_ringTimeoutSaveDone = false;   // 新会话：允许超时到点保存
     const auto configureEndNs = paimage::SocketReceiver::now();

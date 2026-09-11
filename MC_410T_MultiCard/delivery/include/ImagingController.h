@@ -14,6 +14,8 @@
 #include <QTimer>
 #include <vector>
 #include "ImagingParams.h"
+#include "ImagingBypass.h"
+#include "RingTypes.h"
 #include "RingShmObservability.h"
 #include "ring_recon_cuda.h"
 
@@ -53,9 +55,12 @@ public:
                        const int (*sysDelayCh)[2] = nullptr);
     bool isRingMode() const { return m_ringMode; }
     const RingReconCudaConfig &ringConfig() const { return m_ringConfig; }
+    std::uint64_t ringServiceGeneration() const { return m_ringServiceGeneration; }
+    std::uint64_t ringConfigVersion() const { return m_ringConfigVersion; }
 
     // 环形扫描：提交一个原始 A-line 块（float32，sampDepth x alinesPerBlock，列主序）
     bool submitRingBlock(const QVector<float> &rawBlock, const QVector<float> &anglesDeg, const QVector<quint8> &channels, int blockSeq);
+    ImagingSubmitResult submitRingBlock(const RingBlock &block);
     // 超时判定新一圈：通知子进程清空重建累积（RingBlockAssembler 超时回调调用）
     void sendRingReset();
 
@@ -141,6 +146,8 @@ private:
     int                 m_ringDisplayNx = 0;        // 显示网格 dn
     int                 m_ringDisplayStep = 0;      // 显示降采样步长
     int                 m_ringDisplayFrameSize = 0; // dn*dn
+    std::uint64_t       m_ringServiceGeneration = 0;
+    std::uint64_t       m_ringConfigVersion = 1;
     ring_shm_obs::Tracker m_ringObs;
 
     QVector<float> m_latestFrame;

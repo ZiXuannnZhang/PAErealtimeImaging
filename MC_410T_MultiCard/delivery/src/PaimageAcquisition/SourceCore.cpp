@@ -142,6 +142,7 @@ void SourceCore::close(int c,Decision why,Time now){
     f->actual=a.actual;f->unique=a.unique;f->expected=expected_;f->first=a.first;f->last=a.last;f->closed=now;
     f->measurementSession=diagnosticSession_;f->firstIngressId=a.firstIngressId;
     f->sourceIPv4=a.sourceIPv4;
+    f->expectedPayloadBytes=bytes_;
     f->reason=why;f->complete=a.unique>=unsigned(expected_);f->lengths=a.lengths;f->seen=a.seen;f->bytes.resize(bytes_,0);
     for(int i=0;i<expected_;++i){auto at=std::size_t(i)*payload;auto length=std::min(std::size_t(a.lengths[i]),bytes_-at);
         if(length)std::memcpy(f->bytes.data()+at,a.bytes.data()+at,length);}

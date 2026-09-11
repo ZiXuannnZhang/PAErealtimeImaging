@@ -43,6 +43,9 @@ public:
             m_triggerSeq     = pkt.triggerSeq;
             m_basePacketSeq  = pkt.packetSeq;
             m_firstArrivalMs = currentTimeMs();
+            m_firstIngressId = pkt.ingressId;
+            m_firstReceiveMonotonicNs = pkt.firstReceiveMonotonicNs;
+            m_configVersion = pkt.configVersion;
         }
 
         // 计算触发内偏移序号（全局计数器 - 触发首包基序号 = 包内顺序号）
@@ -79,6 +82,52 @@ public:
         group.triggerSeq   = m_triggerSeq;
         group.timestamp_ms = m_firstArrivalMs;
         group.isComplete   = (m_receivedCount >= expected);
+        group.identity.wireTrigger = m_triggerSeq;
+        group.identity.ingressId = m_firstIngressId;
+        group.identity.firstReceiveMonotonicNs = m_firstReceiveMonotonicNs;
+        group.identity.configVersion = m_configVersion;
+        group.quality.schemaVersion = 1;
+        group.quality.qualityUnknown = false;
+        group.quality.assemblyComplete = group.isComplete;
+        group.quality.expectedPacketCount = static_cast<uint32_t>(std::max(0, expected));
+        group.quality.receivedPacketCount = static_cast<uint32_t>(std::max(0, m_receivedCount));
+        group.quality.expectedPayloadBytes = static_cast<uint64_t>(std::max(0, samplesPerTrig)) *
+                                             static_cast<uint64_t>(std::max(0, bytesPerPair));
+        group.quality.actualPayloadBytes = 0;
+        group.quality.packetCoverage.assign(static_cast<size_t>(std::max(0, expected)), 0);
+        const uint64_t expectedBytes = group.quality.expectedPayloadBytes;
+        bool lengthsValid = expected > 0 && bytesPerPair > 0;
+        for (int p = 0; p < expected; ++p) {
+            const int dataBytes = p < m_maxPackets ? static_cast<int>(m_dataSizes[p]) : 0;
+            if (dataBytes > 0 && p < static_cast<int>(group.quality.packetCoverage.size()))
+                group.quality.packetCoverage[static_cast<size_t>(p)] = 1;
+            group.quality.actualPayloadBytes += static_cast<uint64_t>(std::max(0, dataBytes));
+            const uint64_t offset = static_cast<uint64_t>(p) * UDP_PAYLOAD_BYTES;
+            const uint64_t expectedLength = expectedBytes > offset
+                ? std::min<uint64_t>(UDP_PAYLOAD_BYTES, expectedBytes - offset) : 0;
+            if (expectedLength == 0 || dataBytes != static_cast<int>(expectedLength))
+                lengthsValid = false;
+        }
+        // Count equality is not enough: a duplicate/out-of-range packet can
+        // replace a missing slot while keeping the historical isComplete
+        // counter true.  The downstream quality contract requires every
+        // expected slot to be present.
+        bool coverageComplete = expected > 0;
+        for (int p = 0; p < expected; ++p) {
+            if (p >= static_cast<int>(group.quality.packetCoverage.size()) ||
+                group.quality.packetCoverage[static_cast<size_t>(p)] == 0) {
+                coverageComplete = false;
+                break;
+            }
+        }
+        group.quality.packetCoverageComplete = coverageComplete;
+        group.quality.packetLengthValid = lengthsValid;
+        group.quality.sampleLengthValid = coverageComplete && lengthsValid &&
+                                          group.quality.actualPayloadBytes == expectedBytes;
+        group.quality.sampleOriginKnown = false;
+        if (!coverageComplete) group.quality.missingReason = "packet-coverage-incomplete";
+        else if (!lengthsValid) group.quality.missingReason = "packet-length-invalid";
+        else if (!group.quality.sampleLengthValid) group.quality.missingReason = "sample-length-invalid";
         group.allocate(samplesPerTrig, config.displayPoints);
 
         int sampleIdx = 0;
@@ -121,6 +170,9 @@ public:
         m_triggerSeq     = 0;
         m_basePacketSeq  = 0;
         m_firstArrivalMs = 0;
+        m_firstIngressId = 0;
+        m_firstReceiveMonotonicNs = 0;
+        m_configVersion = 0;
         std::fill(m_receivedMask32.begin(), m_receivedMask32.end(), 0);
         std::fill(m_dataSizes.begin(), m_dataSizes.end(), 0);
     }
@@ -139,6 +191,9 @@ private:
     uint16_t   m_triggerSeq        = 0;
     uint16_t   m_basePacketSeq     = 0;  // 当前触发第一包的全局计数器（减此值得触发内序号）
     uint64_t   m_firstArrivalMs    = 0;
+    uint64_t   m_firstIngressId = 0;
+    uint64_t   m_firstReceiveMonotonicNs = 0;
+    uint64_t   m_configVersion = 0;
     int        m_receivedCount     = 0;
     std::vector<uint32_t> m_receivedMask32;
     std::vector<uint16_t> m_dataSizes;

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <string>
 #include "Constants.h"
+#include "RingTypes.h"
 
 // ============================================================
 // DataPacket  Layer 2  Layer 3 的数据包（接收线程  处理线程）
@@ -18,6 +19,10 @@ struct DataPacket {
     uint8_t  data[UDP_PAYLOAD_BYTES] = {};         // 1440 字节原始载荷（B/A 交织 int16）
     // 由 DataProcessor::enqueuePacket 在进程侧打标。0 表示 gate 关闭期间的旧包。
     uint64_t measurementSessionToken = 0;
+    // 入口观测身份。旧接收器未提供时保持 0；不参与接收准入或组包决策。
+    uint64_t ingressId = 0;
+    uint64_t firstReceiveMonotonicNs = 0;
+    uint64_t configVersion = 0;
 };
 
 // ============================================================
@@ -32,6 +37,8 @@ struct TriggerGroup {
     uint32_t sourceIPv4   = 0;        // 数据源 IP（uint32 大端序，比较用）
     uint64_t sessionGen   = 0;        // 自动保存会话代（0=手动/无会话代；DataProcessor 入队前打标）
     uint64_t measurementSession = 0;  // 采集会话令牌；成像旁路用来拒绝旧会话帧
+    FrameIdentity identity;           // 追加身份，不覆盖既有 wire/session 字段
+    FrameQuality quality;             // 下游质量，不改变旧 isComplete/统计语义
 
     //  完整采样数据（float32，sampleCount 个点）
     std::vector<float> freqA;         // A 通道瞬时频率（kHz）
@@ -54,6 +61,8 @@ struct TriggerGroup {
         timestamp_ms = 0; isComplete = true; sourceIPv4 = 0;
         sessionGen = 0;
         measurementSession = 0;
+        identity = FrameIdentity{};
+        quality = FrameQuality{};
         freqA.clear(); freqB.clear();
         phaseA_display.clear(); phaseB_display.clear();
         freqA_display.clear();  freqB_display.clear();

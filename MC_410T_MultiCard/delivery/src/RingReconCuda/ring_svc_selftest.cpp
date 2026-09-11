@@ -24,6 +24,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -86,7 +87,7 @@ int main(int argc, char** argv) {
     const std::string dataPath = argStr(args, "--data");
     const int id = argInt(args, "--id", 11);
     const double gridMm = argDouble(args, "--grid-mm", 0.1);
-    const int perChBlock = argInt(args, "--block", 200);      // 每通道每块 A-line 数
+    const int perChBlock = argInt(args, "--block", 50);       // 每通道每块位置（v3上限50）
     const int chMask = argInt(args, "--channels", 0xFF);      // 勾选通道位图
     const double sectorStart = argDouble(args, "--sector-start", 180.0);
     const std::string outDir = argStr(args, "--out", "ring_svc_out");
@@ -103,7 +104,7 @@ int main(int argc, char** argv) {
     if (dataPath.empty() || svcPath.empty()) {
         std::fprintf(stderr,
             "usage: ring_svc_selftest --data <11.dat> --svc <ImagingSvc.exe> "
-            "[--id 11] [--grid-mm 0.1] [--block 200] [--channels 255] "
+            "[--id 11] [--grid-mm 0.1] [--block 50] [--channels 255] "
             "[--sector-start 180] [--out <dir>] "
             "[--radius-per-ch 6.57,6.55,...] [--splice 1] [--splice-blend 1.5] "
             "[--sos-radii-mm 3] [--sos 1490,1540] "
@@ -125,8 +126,8 @@ int main(int argc, char** argv) {
     for (int c = 0; c < 8; ++c)
         if (chMask & (1 << c)) { channels[c] = 1; ++cnt; }
     if (cnt == 0) { std::fprintf(stderr, "no channel selected\n"); return 2; }
-    if (perChBlock < 2 || perChBlock % 2 != 0) {
-        std::fprintf(stderr, "block must be positive even\n");
+    if (perChBlock < 2 || perChBlock > 50 || perChBlock % 2 != 0) {
+        std::fprintf(stderr, "block must be an even value in [2,50]\n");
         return 2;
     }
     std::error_code ec;
@@ -166,6 +167,14 @@ int main(int argc, char** argv) {
     const int frameSize = nx * nx;
     const double sectorWidth = (coverageDeg >= 359.9999) ? 360.0 / cnt : coverageDeg;
     const double step = sectorWidth / K;
+    const std::uint64_t serviceGeneration = 1;
+    const std::uint64_t configVersion = 1;
+    size_t slotStride = 0, frameOffset = 0, shmSize = 0;
+    if (!ringV3ComputeLayout(perChBlock, cnt, sampDepth, frameSize,
+                             slotStride, frameOffset, shmSize)) {
+        std::fprintf(stderr, "ring v3 layout invalid\n");
+        return 2;
+    }
 
     // ZMQ + 共享内存
     zmq::context_t ctx(1);
@@ -177,28 +186,45 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    QSharedMemory shm("MC_410T_RingShm");
-    if (!shm.create(static_cast<int>(
-            ringImagingShmTotalSizeV2(blockSize, frameSize, alines, frameSize)))) {
+    QSharedMemory shm("MC_410T_RingShmV3");
+    if (!shm.create(static_cast<int>(shmSize))) {
         if (shm.error() == QSharedMemory::AlreadyExists) shm.attach();
         else { std::fprintf(stderr, "ring shm create failed\n"); return 2; }
     }
     shm.lock();
-    std::memset(shm.data(), 0,
-                ringImagingShmTotalSizeV2(blockSize, frameSize, alines, frameSize));
-    auto* hdr = static_cast<RingImagingShmHeader*>(shm.data());
-    hdr->magic = 0x52494E47;
-    hdr->version = 2;   // 方案A：显示区=全分辨率区，display 字段与 v2 强校验一致
-    hdr->block_size = static_cast<uint32_t>(blockSize);
+    std::memset(shm.data(), 0, shmSize);
+    auto* hdr = static_cast<RingImagingShmV3Header*>(shm.data());
+    hdr->magic = RING_IMAGING_SHM_V3_MAGIC;
+    hdr->version = RING_IMAGING_SHM_V3_VERSION;
+    hdr->header_bytes = sizeof(RingImagingShmV3Header);
+    hdr->slot_count = RING_IMAGING_SHM_V3_SLOT_COUNT;
+    hdr->block_capacity = static_cast<uint32_t>(perChBlock);
+    hdr->channel_count = static_cast<uint32_t>(cnt);
+    hdr->samp_depth = static_cast<uint32_t>(sampDepth);
+    hdr->alines_capacity = static_cast<uint32_t>(alines);
+    hdr->raw_float_count = static_cast<uint32_t>(blockSize);
+    hdr->angle_count = static_cast<uint32_t>(alines);
+    hdr->channel_bytes = static_cast<uint32_t>(alines);
+    hdr->wavelength_bytes = static_cast<uint32_t>(alines);
     hdr->frame_size = static_cast<uint32_t>(frameSize);
-    hdr->alines = static_cast<uint32_t>(alines);
     hdr->nx = static_cast<uint16_t>(nx);
     hdr->ny = static_cast<uint16_t>(nx);
+    hdr->display_frame_size = static_cast<uint32_t>(frameSize);
     hdr->display_nx = static_cast<uint16_t>(nx);
     hdr->display_ny = static_cast<uint16_t>(nx);
-    hdr->display_frame_size = static_cast<uint32_t>(frameSize);
-    hdr->snapshot_step = 1;
-    hdr->flags = 0;
+    hdr->slot_header_bytes = sizeof(RingImagingShmV3SlotHeader);
+    hdr->slot_stride_bytes = static_cast<uint32_t>(slotStride);
+    hdr->frame_offset_bytes = static_cast<uint32_t>(frameOffset);
+    hdr->total_bytes = static_cast<uint32_t>(shmSize);
+    hdr->service_generation = serviceGeneration;
+    hdr->config_version = configVersion;
+    hdr->round_id = 1;
+    for (int slot = 0; slot < 2; ++slot) {
+        auto *slotHeader = reinterpret_cast<RingImagingShmV3SlotHeader *>(
+            reinterpret_cast<std::uint8_t *>(hdr) + ringV3SlotHeaderOffset(slot));
+        slotHeader->slot_index = static_cast<uint32_t>(slot);
+        slotHeader->state = static_cast<uint32_t>(RingImagingV3SlotState::Free);
+    }
     shm.unlock();
 
     QProcess svc;
@@ -324,6 +350,9 @@ int main(int argc, char** argv) {
     ring["sectorStartDeg"] = sectorStart;
     ring["sectorCcw"] = 1;
     ring["triggerWlOdd"] = 1;
+    ring["ipcVersion"] = 3;
+    ring["serviceGeneration"] = QString::number(serviceGeneration);
+    ring["configVersion"] = QString::number(configVersion);
 
     QJsonObject params;
     params["imagingMode"] = "ring";
@@ -351,24 +380,66 @@ int main(int argc, char** argv) {
         const uint64_t submitWallUs = ring_shm_obs::wallNowUs();
         uint8_t previousReady = 0;
         uint32_t previousSeq = 0;
-        shm.lock();
-        auto* h = static_cast<RingImagingShmHeader*>(shm.data());
-        previousReady = h->block_ready;
-        previousSeq = h->block_seq;
-        std::memcpy(reinterpret_cast<float*>(h + 1), raw.data(),
+        if (!shm.lock()) { std::fprintf(stderr, "ring v3 lock failed\n"); std::exit(2); }
+        auto* h = static_cast<RingImagingShmV3Header*>(shm.data());
+        int selected = -1;
+        for (int slot = 0; slot < 2; ++slot) {
+            auto *slotHeader = reinterpret_cast<RingImagingShmV3SlotHeader *>(
+                reinterpret_cast<std::uint8_t *>(h) + ringV3SlotHeaderOffset(slot));
+            if (slotHeader->state == static_cast<uint32_t>(RingImagingV3SlotState::Free)) {
+                selected = slot;
+                break;
+            }
+        }
+        if (selected < 0) {
+            shm.unlock();
+            std::fprintf(stderr, "ring v3 input slots busy at block %d\n", blockSeq);
+            std::exit(2);
+        }
+        auto *slotHeader = reinterpret_cast<RingImagingShmV3SlotHeader *>(
+            reinterpret_cast<std::uint8_t *>(h) + ringV3SlotHeaderOffset(selected));
+        previousReady = static_cast<uint8_t>(slotHeader->state);
+        previousSeq = static_cast<uint32_t>(slotHeader->block_seq);
+        const size_t rawOffset = ringV3RawOffset(*h, selected);
+        const size_t lines = static_cast<size_t>(alines);
+        std::vector<uint8_t> wavelengths(lines, 0xff);
+        std::memcpy(reinterpret_cast<uint8_t *>(h) + rawOffset, raw.data(),
                     static_cast<size_t>(blockSize) * sizeof(float));
-        std::memcpy(reinterpret_cast<uint8_t*>(h + 1) + ringAnglesOffset(blockSize),
-                    angles.data(), static_cast<size_t>(alines) * sizeof(float));
-        std::memcpy(reinterpret_cast<uint8_t*>(h + 1) + ringChannelsOffset(blockSize, alines),
-                    chIds.data(), static_cast<size_t>(alines));
-        h->block_seq = static_cast<uint32_t>(blockSeq);
-        h->block_ready = 1;
+        std::memcpy(reinterpret_cast<uint8_t *>(h) + ringV3AnglesOffset(*h, selected),
+                    angles.data(), lines * sizeof(float));
+        std::memcpy(reinterpret_cast<uint8_t *>(h) + ringV3ChannelsOffset(*h, selected),
+                    chIds.data(), lines);
+        std::memcpy(reinterpret_cast<uint8_t *>(h) + ringV3WavelengthsOffset(*h, selected),
+                    wavelengths.data(), lines);
+        slotHeader->service_generation = serviceGeneration;
+        slotHeader->round_id = 1;
+        slotHeader->config_version = configVersion;
+        slotHeader->block_seq = static_cast<uint64_t>(blockSeq);
+        slotHeader->start_position = static_cast<uint64_t>(blockSeq) * perChBlock;
+        slotHeader->position_count = static_cast<uint32_t>(perChBlock);
+        slotHeader->channel_count = static_cast<uint32_t>(cnt);
+        slotHeader->samp_depth = static_cast<uint32_t>(sampDepth);
+        slotHeader->raw_float_count = static_cast<uint32_t>(blockSize);
+        slotHeader->raw_bytes = static_cast<uint32_t>(blockSize * sizeof(float));
+        slotHeader->angle_bytes = static_cast<uint32_t>(lines * sizeof(float));
+        slotHeader->channel_bytes = static_cast<uint32_t>(lines);
+        slotHeader->wavelength_bytes = static_cast<uint32_t>(lines);
+        slotHeader->valid_position_bits = perChBlock >= 64
+            ? std::numeric_limits<uint64_t>::max()
+            : ((uint64_t(1) << perChBlock) - 1u);
+        slotHeader->position_confidence = static_cast<uint8_t>(PositionConfidence::RelativeOnly);
+        slotHeader->wavelength_assumed = 1;
+        slotHeader->state = static_cast<uint32_t>(RingImagingV3SlotState::Ready);
         shm.unlock();
         const auto producerEvent = producerObs.observeProducerSubmit(
             previousReady, previousSeq, static_cast<uint32_t>(blockSeq), submitWallUs);
         QJsonObject ready;
         ready[QStringLiteral("cmd")] = QStringLiteral("ring_block_ready");
-        ready[QStringLiteral("seq")] = blockSeq;
+        ready[QStringLiteral("slot")] = selected;
+        ready[QStringLiteral("service_generation")] = QString::number(serviceGeneration);
+        ready[QStringLiteral("round_id")] = QString::number(1);
+        ready[QStringLiteral("config_version")] = QString::number(configVersion);
+        ready[QStringLiteral("block_seq")] = QString::number(blockSeq);
         ready[QStringLiteral("submit_index")] = static_cast<qint64>(producerEvent.submitIndex);
         ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(producerEvent.submitWallUs);
         sendJson(sock, ready);
@@ -397,9 +468,9 @@ int main(int argc, char** argv) {
 
         std::vector<float> wl1(frameSize), wl2(frameSize);
         shm.lock();
-        h = static_cast<RingImagingShmHeader*>(shm.data());
-        auto* fb = reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(h + 1) +
-                                           ringFramesOffset(blockSize, alines));
+        h = static_cast<RingImagingShmV3Header*>(shm.data());
+        auto* fb = reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(h) +
+                                            ringV3FramesOffset(*h));
         std::memcpy(wl1.data(), fb, static_cast<size_t>(frameSize) * sizeof(float));
         std::memcpy(wl2.data(), fb + frameSize, static_cast<size_t>(frameSize) * sizeof(float));
         shm.unlock();

@@ -40,7 +40,7 @@ class NetworkController;
 class ImagingController;
 class RingConfigDialog;
 class ImagingDisplayWindow;
-class RingBlockAssembler;
+class RingPipeline;
 class ImagingBypass;
 enum class ImagingSubmitResult : std::uint8_t;
 
@@ -257,7 +257,7 @@ private:
     // 环形扫描控制台（M3）
     RingConfigDialog *m_ringConfigDialog = nullptr;   // 环形扫描参数设定窗口
     ImagingDisplayWindow *m_imagingDisplayWindow = nullptr;   // 线性扫描实时成像独立弹窗
-    RingBlockAssembler *m_ringAssembler = nullptr;   // 阶段B：真实采集组包器
+    RingPipeline *m_ringAssembler = nullptr;   // 环形下游唯一拥有者：轮次跟踪+位置组块
     mutable std::mutex m_ringAssemblerMutex;          // 仅保护成像组包器，不与采集/保存共享
     std::atomic<bool> m_ringAssemblerConfigured{false};
     bool m_restartRingOnSvcStop = false;   // 运行中修改环形参数后，待停止完成时自动重启

@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <vector>
 #include "ImagingParams.h"
+#include "RingTypes.h"
 #include "RingShmObservability.h"
 #include "ring_recon_cuda.h"
 
@@ -41,8 +42,10 @@ private:
     void processConfigure(const QJsonObject &params);
     void processRingConfigure(const QJsonObject &ring);
     void processPulse();
-    void processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
-                          uint64_t submitWallUs, bool notifySeqValid);
+    void processRingPulse(int notifySlot, uint64_t notifyGeneration,
+                          uint64_t notifyConfigVersion, uint64_t notifyBlockSeq,
+                          uint64_t submitIndex, uint64_t submitWallUs,
+                          bool notifyValid);
     void resetRingRecon();        // 圈末/超时共用：清空 CUDA 累积与跨圈边界状态
     void sendRingObservation(const char *kind,
                              const ring_shm_obs::Snapshot &snapshot,
@@ -82,6 +85,19 @@ private:
     int                 m_ringDisplayNx = 0;        // 方案A：= nx（显示=全分辨率）
     int                 m_ringDisplayStep = 1;
     int                 m_ringDisplayFrameSize = 0;
+    std::uint64_t       m_ringServiceGeneration = 0;
+    std::uint64_t       m_ringConfigVersion = 0;
+    std::uint64_t       m_ringLastRoundId = 0;
+    std::uint64_t       m_ringLastBlockSeq = 0;
+    std::uint64_t       m_ringMissingPositions = 0;
+    PositionConfidence  m_ringPositionConfidence = PositionConfidence::RelativeOnly;
+    bool                m_ringPrevWL2Valid[8] = {false};
+    std::uint64_t       m_ringPrevRoundId = 0;
+    std::uint64_t       m_ringPrevConfigVersion = 0;
+    std::uint64_t       m_ringPrevServiceGeneration = 0;
+    std::uint64_t       m_ringPrevEndPosition = 0;
+    std::uint64_t       m_ringPrevBlockSeq = 0;
+    bool                m_ringPrevBlockAdjacent = false;
     std::vector<float>  m_ringDisplay0;             // nx*nx 归一化显示帧
     std::vector<float>  m_ringDisplay1;
     int                 m_ringChannels[8] = {0};

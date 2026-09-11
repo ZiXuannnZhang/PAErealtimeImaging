@@ -17,8 +17,12 @@ enum class ImagingSubmitResult : std::uint8_t {
     Disabled,
     QueueFull,
     QueueBusy,
+    BusySlots,
     Stopping,
     InvalidFrame,
+    InvalidPayload,
+    VersionMismatch,
+    StaleGeneration,
     StaleSession,
     ServiceNotReady,
     CallbackFailed
@@ -44,8 +48,12 @@ public:
         std::uint64_t droppedDisabled = 0;
         std::uint64_t droppedQueueFull = 0;
         std::uint64_t droppedQueueBusy = 0;
+        std::uint64_t droppedBusySlots = 0;
         std::uint64_t droppedStopping = 0;
         std::uint64_t droppedInvalidFrame = 0;
+        std::uint64_t droppedInvalidPayload = 0;
+        std::uint64_t droppedVersionMismatch = 0;
+        std::uint64_t droppedStaleGeneration = 0;
         std::uint64_t droppedStaleSession = 0;
         std::uint64_t droppedServiceNotReady = 0;
         std::uint64_t droppedCallbackFailed = 0;
@@ -107,7 +115,10 @@ private:
     std::atomic<std::uint64_t> blocksSkipped_{0}, blockExceptions_{0};
     std::atomic<std::uint64_t> droppedDisabled_{0}, droppedQueueFull_{0};
     std::atomic<std::uint64_t> droppedQueueBusy_{0};
+    std::atomic<std::uint64_t> droppedBusySlots_{0};
     std::atomic<std::uint64_t> droppedStopping_{0}, droppedInvalidFrame_{0};
+    std::atomic<std::uint64_t> droppedInvalidPayload_{0}, droppedVersionMismatch_{0};
+    std::atomic<std::uint64_t> droppedStaleGeneration_{0};
     std::atomic<std::uint64_t> droppedStaleSession_{0}, droppedServiceNotReady_{0};
     std::atomic<std::uint64_t> droppedCallbackFailed_{0};
     std::atomic<std::uint64_t> droppedOnClear_{0}, depth_{0}, peakDepth_{0};

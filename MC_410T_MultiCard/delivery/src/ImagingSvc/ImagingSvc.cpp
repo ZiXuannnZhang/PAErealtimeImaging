@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstring>
 #include <chrono>
+#include <limits>
 
 // ZMQ IPC 端点（与主进程 ImagingController 约定一致）
 static const char *ZMQ_IPC_ENDPOINT = "tcp://127.0.0.1:5555";
@@ -110,6 +111,10 @@ void ImagingSvc::pollControlMessages()
             qWarning() << "ImagingSvc ZMQ recv error:" << e.what();
         }
     }
+    // Notification is only a wake-up hint. A bounded 10 ms scan also drains
+    // a Ready slot when the control message was duplicated or lost.
+    if (m_ringMode && m_running)
+        processRingPulse(-1, 0, 0, 0, 0, 0, false);
 }
 
 // =====================================================================
@@ -122,9 +127,21 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
     if (cmd == "configure") {
         processConfigure(msg["params"].toObject());
     } else if (cmd == "ring_block_ready") {
-        const ring_shm_obs::ReadyMetadata ready = ring_shm_obs::parseReadyMessage(msg);
-        m_ringObs.observeNotification(ready.seq, ready.submitIndex);
-        processRingPulse(ready.seq, ready.submitIndex, ready.submitWallUs, ready.hasSeq);
+        auto u64 = [&msg](const char *name) {
+            const QJsonValue value = msg[QString::fromLatin1(name)];
+            return value.isString() ? value.toString().toULongLong()
+                                    : value.toVariant().toULongLong();
+        };
+        const int slot = msg["slot"].toInt(-1);
+        const std::uint64_t generation = u64("service_generation");
+        const std::uint64_t configVersion = u64("config_version");
+        const std::uint64_t blockSeq = u64("block_seq");
+        const std::uint64_t submitIndex = u64("submit_index");
+        const std::uint64_t submitWallUs = u64("submit_wall_us");
+        if (blockSeq <= std::numeric_limits<uint32_t>::max())
+            m_ringObs.observeNotification(static_cast<uint32_t>(blockSeq), submitIndex);
+        processRingPulse(slot, generation, configVersion, blockSeq,
+                         submitIndex, submitWallUs, true);
     } else if (cmd == "ring_reset") {
         // 停机超时判定新一圈：清空重建累积（与圈末重置同一函数）
         sendRingObservation("epoch_reset", m_ringObs.snapshot());
@@ -135,10 +152,15 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
         m_running = true;
         m_pulseCount = 0;
         m_ringBlockIndex = 0;
+        m_ringLastRoundId = 0;
+        m_ringLastBlockSeq = 0;
+        m_ringMissingPositions = 0;
+        m_ringPositionConfidence = PositionConfidence::RelativeOnly;
         for (int c = 0; c < 8; ++c) {
             m_ringPrevWL2[c].clear();
             m_ringPrevAngle[c] = 0.0f;
             m_ringPrevRadius[c] = 0.0f;
+            m_ringPrevWL2Valid[c] = false;
         }
     } else if (cmd == "stop") {
         sendRingObservation("final", m_ringObs.snapshot());
@@ -363,6 +385,21 @@ void ImagingSvc::processConfigure(const QJsonObject &params)
 // =====================================================================
 void ImagingSvc::processRingConfigure(const QJsonObject &ring)
 {
+    if (ring["ipcVersion"].toInt(0) != static_cast<int>(RING_IMAGING_SHM_V3_VERSION)) {
+        sendError("环形 IPC 版本不匹配：需要 v3", 2012);
+        return;
+    }
+    auto jsonU64 = [&ring](const char *name) {
+        const QJsonValue value = ring[QString::fromLatin1(name)];
+        return value.isString() ? value.toString().toULongLong()
+                                : value.toVariant().toULongLong();
+    };
+    m_ringServiceGeneration = jsonU64("serviceGeneration");
+    m_ringConfigVersion = jsonU64("configVersion");
+    if (m_ringServiceGeneration == 0 || m_ringConfigVersion == 0) {
+        sendError("环形 IPC 身份为空", 2013);
+        return;
+    }
     RingReconCudaConfig cfg;
     ring_recon_cuda_set_defaults(&cfg);
 
@@ -517,25 +554,33 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
         delete m_ringSharedMemory;
         m_ringSharedMemory = nullptr;
     }
-    m_ringSharedMemory = new QSharedMemory("MC_410T_RingShm", this);
+    m_ringSharedMemory = new QSharedMemory("MC_410T_RingShmV3", this);
     if (!m_ringSharedMemory->attach()) {
         sendError("环形共享内存附接失败", 2007);
         return;
     }
-    // v2 强校验：显示参数与 SHM 头一致，避免尺寸漂移导致越界读写
-    m_ringSharedMemory->lock();
-    auto *hdr = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
+    // v3 强校验：显示参数、固定槽布局和本次服务代必须一致。
+    if (!m_ringSharedMemory->lock()) {
+        sendError("环形共享内存锁定失败", 2009);
+        return;
+    }
+    auto *hdr = static_cast<RingImagingShmV3Header *>(m_ringSharedMemory->data());
     const bool shmOk = hdr
-        && hdr->magic == 0x52494E47u
-        && hdr->version == 2u
+        && hdr->magic == RING_IMAGING_SHM_V3_MAGIC
+        && hdr->version == RING_IMAGING_SHM_V3_VERSION
+        && hdr->slot_count == RING_IMAGING_SHM_V3_SLOT_COUNT
+        && hdr->service_generation == m_ringServiceGeneration
+        && hdr->config_version == m_ringConfigVersion
         && hdr->frame_size == static_cast<uint32_t>(m_ringFrameSize)
+        && hdr->block_capacity == static_cast<uint32_t>(cfg.alinesPerChannelPerBlock)
+        && hdr->channel_count == static_cast<uint32_t>(cnt)
+        && hdr->samp_depth == static_cast<uint32_t>(cfg.sampDepth)
         && hdr->nx == static_cast<uint16_t>(nx)
         && hdr->display_nx == static_cast<uint16_t>(m_ringDisplayNx)
-        && hdr->display_frame_size == static_cast<uint32_t>(m_ringDisplayFrameSize)
-        && hdr->snapshot_step == static_cast<uint32_t>(m_ringDisplayStep);
+        && hdr->display_frame_size == static_cast<uint32_t>(m_ringDisplayFrameSize);
     m_ringSharedMemory->unlock();
     if (!shmOk) {
-        sendError("环形共享内存版本/显示参数不匹配（需要 v2 布局）", 2010);
+        sendError("环形共享内存版本/身份/显示参数不匹配（需要 v3 布局）", 2010);
         return;
     }
 
@@ -545,121 +590,232 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
              << "frameSize=" << m_ringFrameSize << "nx=" << nx;
 }
 
-void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
-                                  uint64_t submitWallUs, bool notifySeqValid)
+void ImagingSvc::processRingPulse(int notifySlot, uint64_t notifyGeneration,
+                                  uint64_t notifyConfigVersion, uint64_t notifyBlockSeq,
+                                  uint64_t submitIndex, uint64_t submitWallUs,
+                                  bool notifyValid)
 {
     const uint64_t processStartUs = ring_shm_obs::steadyNowUs();
     if (!m_running || !m_ringCuda[0] || !m_ringCuda[1] || !m_ringSharedMemory) return;
 
+    QVector<float> raw;
+    QVector<float> ang;
+    QVector<quint8> ch;
+    QVector<quint8> wavelengths;
+    std::uint64_t blockSeq = 0, roundId = 0, configVersion = 0,
+                  serviceGeneration = 0, startPosition = 0, validBits = 0;
+    std::uint32_t positionCount = 0;
+    std::uint8_t positionConfidence = static_cast<std::uint8_t>(PositionConfidence::Unknown);
+    std::uint8_t wavelengthAssumed = 1;
+    int selectedSlot = -1;
+
     const uint64_t copyStartUs = ring_shm_obs::steadyNowUs();
-    m_ringSharedMemory->lock();
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    const int blockSize = m_ringBlockSize;
-    const int alines    = m_ringAlineCount;
-    const uint8_t readyBeforeCopy = h->block_ready;
-    const uint32_t shmSeq = h->block_seq;
-    QVector<float> raw(blockSize);
-    QVector<float> ang(alines);
-    QVector<quint8> ch(alines);
-    std::memcpy(raw.data(), reinterpret_cast<float *>(h + 1),
-                static_cast<size_t>(blockSize) * sizeof(float));
-    std::memcpy(ang.data(),
-                reinterpret_cast<uint8_t *>(h + 1) + ringAnglesOffset(blockSize),
-                static_cast<size_t>(alines) * sizeof(float));
-    std::memcpy(ch.data(),
-                reinterpret_cast<uint8_t *>(h + 1) + ringChannelsOffset(blockSize, alines),
-                static_cast<size_t>(alines));
-    h->block_ready = 0;
+    if (!m_ringSharedMemory->lock()) return;
+    auto *h = static_cast<RingImagingShmV3Header *>(m_ringSharedMemory->data());
+    if (!h || h->magic != RING_IMAGING_SHM_V3_MAGIC ||
+        h->version != RING_IMAGING_SHM_V3_VERSION ||
+        h->service_generation != m_ringServiceGeneration ||
+        h->config_version != m_ringConfigVersion) {
+        m_ringSharedMemory->unlock();
+        return;
+    }
+
+    std::uint64_t bestSeq = std::numeric_limits<std::uint64_t>::max();
+    for (int slot = 0; slot < static_cast<int>(h->slot_count); ++slot) {
+        auto *sh = reinterpret_cast<RingImagingShmV3SlotHeader *>(
+            reinterpret_cast<std::uint8_t *>(h) + ringV3SlotHeaderOffset(slot));
+        if (sh->state != static_cast<uint32_t>(RingImagingV3SlotState::Ready)) continue;
+        if (sh->service_generation != m_ringServiceGeneration ||
+            sh->config_version != m_ringConfigVersion) {
+            sh->state = static_cast<uint32_t>(RingImagingV3SlotState::Free);
+            continue;
+        }
+        if (notifyValid && slot == notifySlot &&
+            (notifyGeneration == 0 || notifyGeneration == sh->service_generation) &&
+            (notifyConfigVersion == 0 || notifyConfigVersion == sh->config_version) &&
+            (notifyBlockSeq == 0 || notifyBlockSeq == sh->block_seq)) {
+            selectedSlot = slot;
+            break;
+        }
+        if (sh->block_seq < bestSeq) {
+            bestSeq = sh->block_seq;
+            selectedSlot = slot;
+        }
+    }
+    if (selectedSlot < 0) {
+        m_ringSharedMemory->unlock();
+        return;
+    }
+
+    auto *sh = reinterpret_cast<RingImagingShmV3SlotHeader *>(
+        reinterpret_cast<std::uint8_t *>(h) + ringV3SlotHeaderOffset(selectedSlot));
+    const std::size_t expectedRawFloats = static_cast<std::size_t>(h->raw_float_count);
+    const std::size_t expectedLines = static_cast<std::size_t>(h->angle_count);
+    const bool validHeader = sh->position_count > 0 &&
+        sh->position_count <= h->block_capacity &&
+        sh->channel_count == h->channel_count && sh->samp_depth == h->samp_depth &&
+        sh->raw_float_count == h->raw_float_count &&
+        sh->raw_bytes == expectedRawFloats * sizeof(float) &&
+        sh->angle_bytes == expectedLines * sizeof(float) &&
+        sh->channel_bytes == expectedLines && sh->wavelength_bytes == expectedLines;
+    if (!validHeader) {
+        sh->state = static_cast<uint32_t>(RingImagingV3SlotState::Free);
+        m_ringSharedMemory->unlock();
+        sendError("环形 v3 输入槽维度/字节长度非法", 2014);
+        return;
+    }
+    blockSeq = sh->block_seq;
+    roundId = sh->round_id;
+    configVersion = sh->config_version;
+    serviceGeneration = sh->service_generation;
+    startPosition = sh->start_position;
+    positionCount = sh->position_count;
+    validBits = sh->valid_position_bits;
+    positionConfidence = sh->position_confidence;
+    wavelengthAssumed = sh->wavelength_assumed;
+    raw.resize(static_cast<int>(expectedRawFloats));
+    ang.resize(static_cast<int>(expectedLines));
+    ch.resize(static_cast<int>(expectedLines));
+    wavelengths.resize(static_cast<int>(expectedLines));
+    auto *base = reinterpret_cast<std::uint8_t *>(h);
+    std::memcpy(raw.data(), base + ringV3RawOffset(*h, selectedSlot),
+                expectedRawFloats * sizeof(float));
+    std::memcpy(ang.data(), base + ringV3AnglesOffset(*h, selectedSlot),
+                expectedLines * sizeof(float));
+    std::memcpy(ch.data(), base + ringV3ChannelsOffset(*h, selectedSlot), expectedLines);
+    std::memcpy(wavelengths.data(), base + ringV3WavelengthsOffset(*h, selectedSlot), expectedLines);
+    sh->state = static_cast<uint32_t>(RingImagingV3SlotState::Free);
     m_ringSharedMemory->unlock();
 
     const uint64_t copyLockUs = ring_shm_obs::steadyNowUs() - copyStartUs;
     const auto observation = m_ringObs.observeConsumed(
-        notifySeq, notifySeqValid, shmSeq, readyBeforeCopy, submitWallUs,
-        ring_shm_obs::wallNowUs(), copyLockUs);
+        notifyBlockSeq <= std::numeric_limits<uint32_t>::max()
+            ? static_cast<uint32_t>(notifyBlockSeq) : 0,
+        notifyValid, blockSeq <= std::numeric_limits<uint32_t>::max()
+            ? static_cast<uint32_t>(blockSeq) : 0,
+        1, submitWallUs, ring_shm_obs::wallNowUs(), copyLockUs);
     if (observation.hasAnomaly()) {
         QJsonObject extra;
-        extra[QStringLiteral("notify_seq")] = static_cast<qint64>(notifySeq);
-        extra[QStringLiteral("shm_seq")] = static_cast<qint64>(shmSeq);
-        extra[QStringLiteral("ready_before_copy")] = static_cast<int>(readyBeforeCopy);
-        extra[QStringLiteral("submit_index")] = static_cast<qint64>(submitIndex);
+        extra[QStringLiteral("notify_slot")] = notifySlot;
+        extra[QStringLiteral("selected_slot")] = selectedSlot;
+        extra[QStringLiteral("notify_block_seq")] = QString::number(notifyBlockSeq);
+        extra[QStringLiteral("block_seq")] = QString::number(blockSeq);
+        extra[QStringLiteral("submit_index")] = QString::number(submitIndex);
         extra[QStringLiteral("notify_shm_mismatch")] = observation.notifyShmMismatch;
-        extra[QStringLiteral("ready_zero_before_copy")] = observation.readyZeroBeforeCopy;
         extra[QStringLiteral("duplicate_shm_seq")] = observation.duplicateShmSeq;
         extra[QStringLiteral("shm_seq_gap")] = observation.shmSeqGap;
         sendRingObservation("anomaly", m_ringObs.snapshot(), extra);
     }
 
-    const int sampDepth = m_ringConfig.sampDepth;
-    const int perCh = m_ringConfig.alinesPerChannelPerBlock;   // 每通道块内触发数
-    const int M = m_ringChannelCount;
-    const double sectorWidthDeg = (M > 0) ? 360.0 / M : 0.0;   // 拼接模式扇区宽度
-    const bool oddIsWl1 = (m_ringConfig.triggerWlOdd != 0);
+    if (m_ringLastRoundId != 0 &&
+        (m_ringLastRoundId != roundId || m_ringConfigVersion != configVersion ||
+         m_ringServiceGeneration != serviceGeneration))
+        resetRingRecon();
+    m_ringLastRoundId = roundId;
+    m_ringLastBlockSeq = blockSeq;
+    m_ringPositionConfidence = static_cast<PositionConfidence>(positionConfidence);
+    const std::uint64_t validMask = positionCount >= 64
+        ? std::numeric_limits<std::uint64_t>::max()
+        : ((std::uint64_t(1) << positionCount) - 1u);
+    const std::uint64_t missing = validMask & ~validBits;
+    std::uint64_t missingCount = 0;
+    for (std::uint64_t bits = missing; bits != 0; bits &= bits - 1) ++missingCount;
+    m_ringMissingPositions += missingCount;
+    const bool blockHasGap = missing != 0;
+    const bool previousAdjacent = m_ringPrevBlockAdjacent &&
+        m_ringPrevRoundId == roundId && m_ringPrevConfigVersion == configVersion &&
+        m_ringPrevServiceGeneration == serviceGeneration &&
+        m_ringPrevEndPosition == startPosition &&
+        m_ringPrevBlockSeq + 1 == blockSeq;
+    if (!previousAdjacent) {
+        for (int c = 0; c < 8; ++c) m_ringPrevWL2Valid[c] = false;
+    }
 
+    const int sampDepth = static_cast<int>(h->samp_depth);
+    const int M = m_ringChannelCount;
+    const double sectorWidthDeg = M > 0 ? 360.0 / M : 0.0;
     int selIdx[8];
     int si = 0;
     for (int c = 0; c < 8; ++c) selIdx[c] = -1;
-    for (int c = 0; c < 8; ++c)
-        if (m_ringChannels[c]) selIdx[c] = si++;
+    for (int c = 0; c < 8; ++c) if (m_ringChannels[c]) selIdx[c] = si++;
 
-    // 每波长：所有选中通道的预处理后 A-line（各自独立长度 nt）
     std::vector<std::vector<float>> wlData[2];
-    std::vector<float> wlAng[2];
-    std::vector<float> wlRad[2];   // 每根 A-line 的重建半径（多扫描半径配准，m）
-    std::vector<float> wlSecTh0[2]; // 每根 A-line 的扇区起点（度，拼接模式）
-
+    std::vector<float> wlAng[2], wlRad[2], wlSecTh0[2];
     for (int c = 0; c < 8; ++c) {
         if (!m_ringChannels[c]) continue;
         std::vector<std::vector<float>> lists[2];
-        std::vector<float> angs[2];
-        std::vector<float> rads[2];
-        std::vector<float> secs[2];
-        const double chSectorStartDeg =
-            m_ringConfig.sectorStartDeg + static_cast<double>(selIdx[c]) * sectorWidthDeg;
-
-        for (int j = 0; j < perCh; ++j) {
-            const int pos = j * M + selIdx[c];
-            const bool isWl1 = oddIsWl1 ? (j % 2 == 0) : (j % 2 == 1);
-            const int w = isWl1 ? 0 : 1;
-
+        std::vector<float> angs[2], rads[2], secs[2];
+        std::vector<float> currentPrev;
+        float currentPrevAngle = 0.0f, currentPrevRadius = 0.0f;
+        bool currentPrevValid = false;
+        const double chSectorStartDeg = m_ringConfig.sectorStartDeg +
+                                        static_cast<double>(selIdx[c]) * sectorWidthDeg;
+        for (std::uint32_t j = 0; j < positionCount; ++j) {
+            if ((validBits & (std::uint64_t(1) << j)) == 0) continue;
+            const int pos = static_cast<int>(j) * M + selIdx[c];
+            if (pos < 0 || static_cast<std::size_t>(pos) >= expectedLines) continue;
+            int w = wavelengths[pos] <= 1 ? wavelengths[pos] :
+                ((m_ringConfig.triggerWlOdd ? ((startPosition + j) % 2 == 0)
+                                             : ((startPosition + j) % 2 == 1)) ? 0 : 1);
             std::vector<double> d(sampDepth);
-            const float *src = raw.constData() + static_cast<size_t>(pos) * sampDepth;
+            const float *src = raw.constData() + static_cast<std::size_t>(pos) * sampDepth;
             for (int r = 0; r < sampDepth; ++r) d[r] = static_cast<double>(src[r]);
-
+            const int phCh = static_cast<int>(ch[pos]);
+            const int phIdx = phCh >= 0 && phCh < 8 ? phCh : 0;
             ringrecon::PreprocessParams pp;
-            const int phCh = static_cast<int>(ch[pos]);   // 该 A-line 的物理通道号
-            const int phIdx = (phCh >= 0 && phCh < 8) ? phCh : 0;
             pp.systemDelay = m_ringSysDelayCh[phIdx][w];
-            pp.dbrmaskExtra = (w == 1 ? m_ringSysDelayCh[phIdx][1] - m_ringSysDelayCh[phIdx][0] : 0);
+            pp.dbrmaskExtra = w == 1 ? m_ringSysDelayCh[phIdx][1] - m_ringSysDelayCh[phIdx][0] : 0;
             pp.maskLength = m_ringConfig.maskLength;
             pp.dbrRemove = m_ringConfig.dbrSigRemove != 0;
             pp.delayCut = m_ringConfig.delayCut != 0;
             pp.signalImpair = m_ringConfig.singalImpair != 0;
             pp.imValue = m_ringConfig.imValue[w];
-
-            lists[w].push_back(ringrecon::preprocessBlock(d, sampDepth, 1, pp));
-            angs[w].push_back(ang[pos]);
-            rads[w].push_back(static_cast<float>(
-                m_ringConfig.radiusPerChannel[(phCh >= 0 && phCh < 8) ? phCh : 0]));
+            auto processed = ringrecon::preprocessBlock(d, sampDepth, 1, pp);
+            const float angle = ang[pos];
+            const float radius = static_cast<float>(m_ringConfig.radiusPerChannel[phIdx]);
+            lists[w].push_back(std::move(processed));
+            angs[w].push_back(angle);
+            rads[w].push_back(radius);
             secs[w].push_back(static_cast<float>(chSectorStartDeg));
+            if (w == 1) {
+                currentPrev = lists[1].back();
+                currentPrevAngle = angle;
+                currentPrevRadius = radius;
+                currentPrevValid = true;
+            }
         }
 
-        // wl2 通道内跨块对齐：首块不偏移，后续块前插上一块末根
-        if (m_ringConfig.shiftWL2 && m_ringBlockIndex > 0 && !m_ringPrevWL2[c].empty()) {
-            lists[1].insert(lists[1].begin(), m_ringPrevWL2[c]);
-            lists[1].pop_back();
-            angs[1].insert(angs[1].begin(), m_ringPrevAngle[c]);
-            angs[1].pop_back();
-            rads[1].insert(rads[1].begin(), m_ringPrevRadius[c]);
-            rads[1].pop_back();
-            secs[1].insert(secs[1].begin(), static_cast<float>(chSectorStartDeg));
-            secs[1].pop_back();
+        const bool needHistory = m_ringConfig.shiftWL2 && startPosition > 0;
+        if (needHistory && previousAdjacent) {
+            if (m_ringPrevWL2Valid[c] && !lists[1].empty()) {
+                // Save currentPrev before insertion. The old implementation
+                // saved lists[1].back() after the shift, reusing the wrong row.
+                lists[1].insert(lists[1].begin(), m_ringPrevWL2[c]);
+                lists[1].pop_back();
+                angs[1].insert(angs[1].begin(), m_ringPrevAngle[c]);
+                angs[1].pop_back();
+                rads[1].insert(rads[1].begin(), m_ringPrevRadius[c]);
+                rads[1].pop_back();
+                secs[1].insert(secs[1].begin(), static_cast<float>(chSectorStartDeg));
+                secs[1].pop_back();
+            } else {
+                // History is required for WL2 alignment after the first
+                // block; an unavailable predecessor is invalid, not a reason
+                // to reuse an older block or silently shift phase.
+                lists[1].clear();
+                angs[1].clear();
+                rads[1].clear();
+                secs[1].clear();
+            }
         }
-        if (!lists[1].empty()) {
-            m_ringPrevWL2[c] = lists[1].back();
-            m_ringPrevAngle[c] = angs[1].back();
-            m_ringPrevRadius[c] = rads[1].back();
+        if (!blockHasGap && currentPrevValid) {
+            m_ringPrevWL2[c] = std::move(currentPrev);
+            m_ringPrevAngle[c] = currentPrevAngle;
+            m_ringPrevRadius[c] = currentPrevRadius;
+            m_ringPrevWL2Valid[c] = true;
+        } else {
+            m_ringPrevWL2Valid[c] = false;
         }
-
         for (int w = 0; w < 2; ++w) {
             for (size_t k = 0; k < lists[w].size(); ++k) {
                 wlData[w].push_back(std::move(lists[w][k]));
@@ -670,37 +826,43 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
         }
     }
 
-    // 展平并送入 CUDA（每根 A-line 独立角度 + 独立重建半径）
+    bool appended = false;
     std::vector<float> flat[2];
     int nd[2] = {0, 0};
     for (int w = 0; w < 2; ++w) {
         nd[w] = static_cast<int>(wlData[w].size());
-        for (auto &v : wlData[w])
-            flat[w].insert(flat[w].end(), v.begin(), v.end());
-        if (nd[w] == 0 || flat[w].empty()) {
-            sendError("波长数据为空", 2008);
-            return;
-        }
+        for (auto &v : wlData[w]) flat[w].insert(flat[w].end(), v.begin(), v.end());
+        if (nd[w] == 0 || flat[w].empty()) continue;
+        appended = true;
         const int nt = static_cast<int>(flat[w].size() / nd[w]);
         const int rc = m_ringConfig.spliceMode
             ? ring_recon_cuda_append_angles_radii_sector(
-                  m_ringCuda[w], flat[w].data(), nt, nd[w],
-                  wlAng[w].data(), wlRad[w].data(),
+                  m_ringCuda[w], flat[w].data(), nt, nd[w], wlAng[w].data(), wlRad[w].data(),
                   wlSecTh0[w].data(), static_cast<float>(sectorWidthDeg))
             : ring_recon_cuda_append_angles_radii(
-                  m_ringCuda[w], flat[w].data(), nt, nd[w],
-                  wlAng[w].data(), wlRad[w].data());
+                  m_ringCuda[w], flat[w].data(), nt, nd[w], wlAng[w].data(), wlRad[w].data());
         if (rc != 0) {
             const QString fn = m_ringConfig.spliceMode
                 ? QStringLiteral("ring_recon_cuda_append_angles_radii_sector")
                 : QStringLiteral("ring_recon_cuda_append_angles_radii");
-            sendError(QString("%1 failed: %2")
-                          .arg(fn, QString::fromUtf8(ring_recon_cuda_last_error())), 2009);
+            sendError(QString("%1 failed: %2").arg(fn, QString::fromUtf8(ring_recon_cuda_last_error())), 2009);
             return;
         }
     }
+    m_ringPrevRoundId = roundId;
+    m_ringPrevConfigVersion = configVersion;
+    m_ringPrevServiceGeneration = serviceGeneration;
+    m_ringPrevEndPosition = startPosition + positionCount;
+    m_ringPrevBlockSeq = blockSeq;
+    m_ringPrevBlockAdjacent = !blockHasGap;
+    ++m_ringBlockIndex;
+    if (!appended) {
+        sendRingObservation("invalid_block", m_ringObs.snapshot(),
+                            {{"block_seq", QString::number(blockSeq)},
+                             {"missing_positions", QString::number(missing)}});
+        return;
+    }
 
-    // 方案A：显示快照=全分辨率归一化帧（acc/accW），直接作为显示图像
     if (ring_recon_cuda_snapshot(m_ringCuda[0], m_ringDisplayNx, m_ringDisplayStep,
                                  m_ringDisplay0.data()) != 0 ||
         ring_recon_cuda_snapshot(m_ringCuda[1], m_ringDisplayNx, m_ringDisplayStep,
@@ -709,29 +871,24 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
                       .arg(QString::fromUtf8(ring_recon_cuda_last_error())), 2011);
         return;
     }
-    ++m_ringBlockIndex;
 
-    m_ringSharedMemory->lock();
-    h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    float *fb = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) +
-                                          ringFramesOffset(blockSize, alines));
-    std::memcpy(fb, m_ringDisplay0.data(),
-                static_cast<size_t>(m_ringFrameSize) * sizeof(float));
+    if (!m_ringSharedMemory->lock()) return;
+    h = static_cast<RingImagingShmV3Header *>(m_ringSharedMemory->data());
+    float *fb = reinterpret_cast<float *>(reinterpret_cast<std::uint8_t *>(h) +
+                                          ringV3FramesOffset(*h));
+    std::memcpy(fb, m_ringDisplay0.data(), static_cast<size_t>(m_ringFrameSize) * sizeof(float));
     std::memcpy(fb + m_ringFrameSize, m_ringDisplay1.data(),
                 static_cast<size_t>(m_ringFrameSize) * sizeof(float));
-    h->frame_seq++;
+    const std::uint32_t frameSeq = ++h->frame_seq;
     m_ringSharedMemory->unlock();
 
-    sendRingSnapshotToHost();     // 新链路：方案A 显示快照
-
+    sendRingSnapshotToHost();
     m_ringObs.recordProcessDuration(ring_shm_obs::steadyNowUs() - processStartUs);
     if (observation.periodicDue)
         sendRingObservation("periodic", m_ringObs.snapshot());
-
-    // 整圈完成：清零累积器，避免跨圈污染（PNG 保存由接收端窗口在圈末触发点执行）
-    if (m_ringBlocksPerFrame > 0 && m_ringBlockIndex % m_ringBlocksPerFrame == 0) {
+    if (m_ringBlocksPerFrame > 0 && m_ringBlockIndex % m_ringBlocksPerFrame == 0)
         resetRingRecon();
-    }
+    (void)frameSeq;
 }
 
 void ImagingSvc::sendRingObservation(const char *kind,
@@ -766,20 +923,33 @@ void ImagingSvc::resetRingRecon()
         m_ringPrevWL2[c].clear();
         m_ringPrevAngle[c] = 0.0f;
         m_ringPrevRadius[c] = 0.0f;
+        m_ringPrevWL2Valid[c] = false;
     }
+    m_ringPrevRoundId = 0;
+    m_ringPrevConfigVersion = 0;
+    m_ringPrevServiceGeneration = 0;
+    m_ringPrevEndPosition = 0;
+    m_ringPrevBlockSeq = 0;
+    m_ringPrevBlockAdjacent = false;
 }
 
 void ImagingSvc::sendRingSnapshotToHost()
 {
     if (!m_ringSharedMemory) return;
-    m_ringSharedMemory->lock();
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    const int seq = static_cast<int>(h->frame_seq);
+    if (!m_ringSharedMemory->lock()) return;
+    auto *h = static_cast<RingImagingShmV3Header *>(m_ringSharedMemory->data());
+    const std::uint32_t seq = h ? h->frame_seq : 0;
     m_ringSharedMemory->unlock();
 
     QJsonObject msg;
     msg["cmd"] = "ring_snapshot_ready";
-    msg["seq"] = seq;
+    msg["seq"] = static_cast<qint64>(seq);
+    msg["service_generation"] = QString::number(m_ringServiceGeneration);
+    msg["round_id"] = QString::number(m_ringLastRoundId);
+    msg["config_version"] = QString::number(m_ringConfigVersion);
+    msg["last_block_seq"] = QString::number(m_ringLastBlockSeq);
+    msg["missing_positions"] = QString::number(m_ringMissingPositions);
+    msg["position_confidence"] = static_cast<int>(m_ringPositionConfidence);
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
     zmq::message_t zmsg(static_cast<size_t>(data.size()));
