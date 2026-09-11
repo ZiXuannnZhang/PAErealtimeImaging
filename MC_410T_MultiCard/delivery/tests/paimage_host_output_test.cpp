@@ -38,11 +38,17 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             p[0]=seq;p[2]=9;for(int i=0;i<n;i+=8){int a=card+1,b=-a;std::memcpy(p.data()+4+i,&b,4);std::memcpy(p.data()+8+i,&a,4);}
             source.ingest(card,p.data(),p.size(),1000000+seq,card*100+seq+1,0x0100007f);
         }
-        require(until([&]{return rings==4 && savers[0]->savedCount()==1&&savers[1]->savedCount()==1&&savers[2]->savedCount()==1&&savers[3]->savedCount()==1;}));
+        require(until([&]{return rings==4 && savers[0]->acceptedCount()==1&&savers[1]->acceptedCount()==1&&savers[2]->acceptedCount()==1&&savers[3]->acceptedCount()==1;}));
         auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));output.stop();require(values);
+        for (auto &saver : savers) require(saver->writtenCount()==1);
         const std::uint16_t half[]={0x3c00,0x4000,0x4200,0x4400};
         for(int c=0;c<4;++c){require(!processors[c]->isRunning()&&!savers[c]->isRunning()&&savers[c]->queueDepth()==0);
             DisplayBuffer::Snapshot snap;require(displays[c]->tryRead(snap)&&snap.triggerSeq==9&&snap.sampleCount==samples);
+            QFile index(dir.filePath(QString("Card%1_ChA_golden_000.index.jsonl").arg(c+1)));
+            require(index.open(QIODevice::ReadOnly));
+            const auto indexBytes=index.readAll();
+            require(indexBytes.contains("\"kind\":\"data\"") && indexBytes.contains("\"kind\":\"commit\""));
+            require(QFile::exists(dir.filePath(QString("Card%1_ChA_golden_000.manifest.json").arg(c+1))));
             for(auto channel:{QString("A"),QString("B")}){QFile file(dir.filePath(QString("Card%1_Ch%2_golden_000.dat").arg(c+1).arg(channel)));
                 require(file.open(QIODevice::ReadOnly));auto bytes=file.readAll();require(bytes.size()==samples*2);
                 auto expected=std::uint16_t(half[c]|(channel=="B"?0x8000:0));
@@ -66,8 +72,9 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         auto make=[](int trigger){auto frame=std::make_shared<CardFrame>();frame->card=0;frame->trigger=trigger;frame->complete=true;frame->bytes.resize(40000);return frame;};
         output.card(make(1));require(until([&]{return entered.load();}));
         output.card(make(2));generation=2;output.card(make(3));release=true;
-        require(until([&]{return saver.savedCount()==3;}));
+        require(until([&]{return saver.acceptedCount()==3;}));
         auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));output.stop();
+        require(saver.writtenCount()==3);
         for(int g:{1,2})for(auto ch:{QString("A"),QString("B")}){
             QFile file(root.path()+QString("/gen%1/Card1_Ch%2_generation_000.dat").arg(g).arg(ch));
             require(file.open(QIODevice::ReadOnly));require(file.size()==(g==1?20000:10000));

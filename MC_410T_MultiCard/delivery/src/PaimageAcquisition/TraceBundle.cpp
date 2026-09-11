@@ -75,14 +75,17 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                    !write(prefix+"trace-summary.json",QJsonDocument(exported).toJson()))return false;
                 if(!timingSummary.isEmpty()){timingSummary.insert("exportFlushCompleted",timingFlushed);timingSummary.insert("recordsWritten",double(timingSelected));timingSummary.insert("timingIncomplete",timingSummary.value("timingIncomplete").toBool()||!timingFlushed||(timingBoundary&&timingSelected!=timingBoundary));if(!write(prefix+"timing-summary.json",QJsonDocument(timingSummary).toJson()))return false;}
                 bool loopFlushed=true,loopIncomplete=false,loopBudgetExhausted=false,loopWriteFailed=false;
-                quint64 loopBoundary=0,loopDropped=0,loopFreezeEpoch=0;
+                quint64 loopBoundary=0,loopDropped=0,loopFreezeEpoch=0,loopRetentionEvicted=0,loopFreezeRejected=0,loopExportTruncated=0;
                 for(const auto& cut:loopCuts)if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){
                     loopBoundary=cut.sequence;loopDropped=cut.dropped;loopFreezeEpoch=cut.freezeEpoch;
+                    loopRetentionEvicted=cut.retentionEvicted;loopFreezeRejected=cut.freezeRejected;loopExportTruncated=cut.exportTruncated;
                     loopIncomplete=cut.incomplete;loopBudgetExhausted=cut.budgetExhausted;loopWriteFailed=cut.writeFailed;
                     loopFlushed=cut.flush();break;}
                 auto loopSummary=object(QDir(path).filePath("looplog-summary.json"));
                 if(loopSummary.isEmpty()&&loopBoundary)loopSummary=QJsonObject{{"schemaVersion",1},{"recordBytes",80},
                     {"recordsIssued",double(loopBoundary)},{"queueDropped",double(loopDropped)},
+                    {"retentionEvicted",double(loopRetentionEvicted)},{"freezeRejected",double(loopFreezeRejected)},
+                    {"exportTruncated",double(loopExportTruncated)},
                     {"budgetExhausted",loopBudgetExhausted},{"writeFailed",loopWriteFailed},
                     {"burstMarkEpochs",double(loopFreezeEpoch)}};
                 auto loopNames=QDir(path).entryList({"looplog-*.bin"},QDir::Files,QDir::Name);int loopPart=0;quint64 loopSelected=0,loopFiltered=0;
@@ -96,6 +99,9 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     if(!chosen.isEmpty()){const QString out=QString("paimage/%1/looplog-%2.bin").arg(dir).arg(loopPart++);
                         if(!write(out,chosen))return false;runFiles.append(out);}}
                 if(!loopSummary.isEmpty()){loopSummary.insert("exportFlushCompleted",loopFlushed);
+                    loopSummary.insert("retentionEvicted",double(loopSummary.value("retentionEvicted").toDouble(loopRetentionEvicted)));
+                    loopSummary.insert("freezeRejected",double(loopSummary.value("freezeRejected").toDouble(loopFreezeRejected)));
+                    loopSummary.insert("exportTruncated",double(loopSummary.value("exportTruncated").toDouble(loopExportTruncated)));
                     loopSummary.insert("recordsWritten",double(loopSelected));loopSummary.insert("exportFilteredRecords",double(loopFiltered));
                     loopSummary.insert("loopLogIncomplete",loopSummary.value("loopLogIncomplete").toBool(loopIncomplete)||loopIncomplete||!loopFlushed||(loopBoundary&&loopSelected+loopFiltered!=loopBoundary));
                     if(!write(prefix+"looplog-summary.json",QJsonDocument(loopSummary).toJson()))return false;}

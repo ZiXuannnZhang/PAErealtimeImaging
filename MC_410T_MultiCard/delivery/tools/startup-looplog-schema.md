@@ -5,10 +5,15 @@ Each little-endian record is 80 bytes, Python struct
 value0..value3, payloadA..payloadC). Records are appended by the receive
 thread and low-rate monitoring producers into a preallocated bounded queue;
 no JSON, file I/O or system calls run on the receive path. The background
-writer emits looplog-N.bin segments plus looplog-summary.json
-(recordsIssued/Written, queueDropped, writerUnwritten, budgetExhausted,
-loopLogIncomplete, QPC/UTC anchors, burstMarkEpochs). Total budget is
-256 MiB; exhaustion is explicit and never back-pressures the receiver.
+writer emits looplog-N.bin segments plus looplog-summary.json. Segments rotate
+at 1 second or 8 MiB, retain up to 5 seconds, and protect up to eight merged
+freeze windows (five seconds before/after BurstMark, RecvFailure, or Stalled).
+The summary separates `retentionEvicted`, `queueDropped`, `freezeRejected`,
+`budgetExhausted`, `ioWriteFailed`, `exportTruncated`, and `writerUnwritten`;
+`loopLogIncomplete` is true whenever any coverage or durability qualifier is
+present. Total retained budget is 256 MiB; exhaustion is explicit and never
+back-pressures the receiver. Old segments are removed only within the current
+run and only when not frozen or held by an export cut.
 
 Kinds and field meanings:
 

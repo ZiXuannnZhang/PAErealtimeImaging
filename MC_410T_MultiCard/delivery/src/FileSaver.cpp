@@ -1,6 +1,9 @@
 #include "FileSaver.h"
 #include <QDir>
+#include <QFileInfo>
 #include <QDateTime>
+#include <QJsonDocument>
+#include <QJsonArray>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
@@ -93,12 +96,11 @@ FileSaver::FileSaver(int cardId, QObject* parent)
 
 FileSaver::~FileSaver() {
     if (isRunning()) {
-        // requestStop() 设置 m_running=false，run() 循环会在下一轮 msleep(1) 后退出
         requestStop();
-        if (!wait(500)) {
-            terminate();
-            wait();   // 确保线程真正结束后再析构 QThread，避免 qFatal
-        }
+        // The saver owns the only file-writing loop. Let it drain and close
+        // through its normal lifecycle; forceful thread termination can leave
+        // a half-written A/B pair and an uncommitted index tail.
+        wait();
     }
     closeFiles();
 }
@@ -121,6 +123,8 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
     m_fileSequence      = 0;
     m_currentFileTriggers = 0;
     m_currentSourceIPv4 = 0;
+    m_writeFailed = false;
+    m_lastWriteError.clear();
     m_saving.store(true, std::memory_order_release);
     emit statusMessage(QString("Card%1: 开始保存到 %2").arg(m_cardId + 1).arg(directory));
 }
@@ -135,7 +139,7 @@ void FileSaver::stopSaving() {
     m_accumTriggers = 0;
     m_currentFileTriggers = 0;
     emit statusMessage(QString("Card%1: 停止保存，共保存 %2 触发")
-                       .arg(m_cardId + 1).arg(m_savedCount.load()));
+                       .arg(m_cardId + 1).arg(m_writtenCount.load()));
 }
 
 void FileSaver::saveTriggerGroup(const TriggerGroupPtr& group) {
@@ -171,11 +175,18 @@ QString FileSaver::generateFileName(const QString& channel) const {
 void FileSaver::openNewFiles(uint32_t sourceIPv4) {
     closeFiles();
     m_currentSourceIPv4 = sourceIPv4;
+    m_fileOffsetA = 0;
+    m_fileOffsetB = 0;
+    m_pendingIndex.clear();
 
     QDir().mkpath(m_saveDirectory);
 
     m_fileChannelA = new QFile(generateFileName("A"));
     m_fileChannelB = new QFile(generateFileName("B"));
+    m_currentIndexPath = QFileInfo(m_fileChannelA->fileName()).path() + "/" +
+        QFileInfo(m_fileChannelA->fileName()).completeBaseName() + ".index.jsonl";
+    m_currentManifestPath = QFileInfo(m_fileChannelA->fileName()).path() + "/" +
+        QFileInfo(m_fileChannelA->fileName()).completeBaseName() + ".manifest.json";
 
     if (!m_fileChannelA->open(QIODevice::WriteOnly)) {
         emit errorOccurred(QString("Card%1: 无法打开文件 %2: %3")
@@ -189,11 +200,33 @@ void FileSaver::openNewFiles(uint32_t sourceIPv4) {
             .arg(m_fileChannelB->errorString()));
         delete m_fileChannelB; m_fileChannelB = nullptr;
     }
+    m_indexFile = new QFile(m_currentIndexPath);
+    if (!m_indexFile->open(QIODevice::WriteOnly)) {
+        emit errorOccurred(QString("Card%1: 无法打开索引 %2: %3")
+            .arg(m_cardId + 1).arg(m_indexFile->fileName())
+            .arg(m_indexFile->errorString()));
+        delete m_indexFile; m_indexFile = nullptr;
+    }
+    if (!m_fileChannelA || !m_fileChannelB || !m_indexFile) {
+        if (m_fileChannelA) { m_fileChannelA->close(); delete m_fileChannelA; m_fileChannelA=nullptr; }
+        if (m_fileChannelB) { m_fileChannelB->close(); delete m_fileChannelB; m_fileChannelB=nullptr; }
+        if (m_indexFile) { m_indexFile->close(); delete m_indexFile; m_indexFile=nullptr; }
+        markWriteFailure(QString("Card%1: A/B 文件或索引未能同时打开").arg(m_cardId + 1));
+    } else {
+        writeManifest(false);
+    }
     m_currentFileTriggers = 0;
 }
 
 void FileSaver::closeFiles() {
-    flushWriteBuffers();    // 关题前将尚未写盘的积累数据刷入文件
+    flushWriteBuffers();    // 关闭前将尚未写盘的积累数据刷入文件
+    if (!m_currentManifestPath.isEmpty()) writeManifest(true);
+    if (m_indexFile) {
+        m_indexFile->flush();
+        m_indexFile->close();
+        delete m_indexFile;
+        m_indexFile = nullptr;
+    }
     if (m_fileChannelA) {
         m_fileChannelA->close();
         delete m_fileChannelA;
@@ -204,23 +237,123 @@ void FileSaver::closeFiles() {
         delete m_fileChannelB;
         m_fileChannelB = nullptr;
     }
+    m_currentIndexPath.clear();
+    m_currentManifestPath.clear();
 }
 
 // 
 // 存储线程主循环
 // 
-void FileSaver::flushWriteBuffers()
+void FileSaver::markWriteFailure(const QString& message) {
+    if (!m_writeFailed) {
+        m_writeFailed = true;
+        m_lastWriteError = message;
+        emit errorOccurred(message);
+    }
+    m_saving.store(false, std::memory_order_release);
+}
+
+bool FileSaver::appendIndexLine(const QJsonObject& object) {
+    if (!m_indexFile || !m_indexFile->isOpen()) return false;
+    const QByteArray line = QJsonDocument(object).toJson(QJsonDocument::Compact) + '\n';
+    qint64 offset = 0;
+    while (offset < line.size()) {
+        const qint64 n = m_indexFile->write(line.constData() + offset, line.size() - offset);
+        if (n <= 0) return false;
+        offset += n;
+    }
+    return m_indexFile->flush();
+}
+
+void FileSaver::writeManifest(bool closed) {
+    if (m_currentManifestPath.isEmpty()) return;
+    QJsonObject manifest;
+    manifest["schemaVersion"] = 1;
+    manifest["card"] = m_cardId;
+    manifest["session"] = QString::number(m_currentGen);
+    manifest["sourceIPv4"] = QString::number(m_currentSourceIPv4);
+    manifest["closed"] = closed;
+    manifest["fileSequence"] = m_fileSequence;
+    manifest["acceptedTriggers"] = QString::number(m_acceptedCount.load(std::memory_order_relaxed));
+    manifest["writtenTriggers"] = QString::number(m_writtenCount.load(std::memory_order_relaxed));
+    manifest["channelA"] = m_fileChannelA ? m_fileChannelA->fileName() : QString();
+    manifest["channelB"] = m_fileChannelB ? m_fileChannelB->fileName() : QString();
+    manifest["index"] = m_currentIndexPath;
+    manifest["writeFailed"] = m_writeFailed;
+    manifest["lastWriteError"] = m_lastWriteError;
+    QFile file(m_currentManifestPath);
+    if (file.open(QIODevice::WriteOnly|QIODevice::Truncate)) {
+        file.write(QJsonDocument(manifest).toJson(QJsonDocument::Indented));
+        file.flush();
+        file.close();
+    }
+}
+
+bool FileSaver::flushWriteBuffers()
 {
-    if (m_accumTriggers == 0) return;
+    if (m_accumTriggers == 0) return !m_writeFailed;
     const qint64 bytesA = static_cast<qint64>(m_writeAccumA.size()) * sizeof(uint16_t);
     const qint64 bytesB = static_cast<qint64>(m_writeAccumB.size()) * sizeof(uint16_t);
-    if (m_fileChannelA && m_fileChannelA->isOpen() && bytesA > 0)
-        m_fileChannelA->write(reinterpret_cast<const char*>(m_writeAccumA.data()), bytesA);
-    if (m_fileChannelB && m_fileChannelB->isOpen() && bytesB > 0)
-        m_fileChannelB->write(reinterpret_cast<const char*>(m_writeAccumB.data()), bytesB);
+    auto writeAll=[](QFile* file,const char* data,qint64 size){
+        if(!file||!file->isOpen()||size<=0)return false;
+        qint64 offset=0;
+        while(offset<size){const qint64 n=file->write(data+offset,size-offset);if(n<=0)return false;offset+=n;}
+        return file->flush();
+    };
+    if (!writeAll(m_fileChannelA,reinterpret_cast<const char*>(m_writeAccumA.data()),bytesA) ||
+        !writeAll(m_fileChannelB,reinterpret_cast<const char*>(m_writeAccumB.data()),bytesB)) {
+        markWriteFailure(QString("Card%1: A/B 数据写入失败，未生成 commit").arg(m_cardId + 1));
+        m_writeAccumA.clear(); m_writeAccumB.clear(); m_pendingIndex.clear(); m_accumTriggers=0;
+        return false;
+    }
+
+    const std::uint64_t batchId = ++m_batchSequence;
+    for (const auto& record : m_pendingIndex) {
+        QJsonObject row;
+        row["kind"] = "data";
+        row["batchId"] = QString::number(batchId);
+        row["acceptSequence"] = QString::number(record.acceptSequence);
+        row["session"] = QString::number(record.session);
+        row["wireTrigger"] = QString::number(record.wireTrigger);
+        row["expandedTrigger"] = QString::number(record.expandedTrigger);
+        row["card"] = record.card;
+        row["sampleCount"] = record.sampleCount;
+        row["aOffset"] = QString::number(record.aOffset);
+        row["aBytes"] = QString::number(record.aBytes);
+        row["bOffset"] = QString::number(record.bOffset);
+        row["bBytes"] = QString::number(record.bBytes);
+        row["qualityUnknown"] = record.qualityUnknown;
+        row["assemblyComplete"] = record.assemblyComplete;
+        row["packetCoverageComplete"] = record.packetCoverageComplete;
+        row["missingReason"] = record.missingReason;
+        if (!appendIndexLine(row)) {
+            markWriteFailure(QString("Card%1: index.jsonl 写入失败，未生成 commit").arg(m_cardId + 1));
+            m_writeAccumA.clear(); m_writeAccumB.clear(); m_pendingIndex.clear(); m_accumTriggers=0;
+            return false;
+        }
+    }
+    QJsonObject commit;
+    commit["kind"] = "commit";
+    commit["batchId"] = QString::number(batchId);
+    commit["rows"] = static_cast<int>(m_pendingIndex.size());
+    commit["aOffset"] = QString::number(m_fileOffsetA);
+    commit["aBytes"] = QString::number(bytesA);
+    commit["bOffset"] = QString::number(m_fileOffsetB);
+    commit["bBytes"] = QString::number(bytesB);
+    if (!appendIndexLine(commit)) {
+        markWriteFailure(QString("Card%1: index commit 写入失败").arg(m_cardId + 1));
+        m_writeAccumA.clear(); m_writeAccumB.clear(); m_pendingIndex.clear(); m_accumTriggers=0;
+        return false;
+    }
+    m_fileOffsetA += bytesA;
+    m_fileOffsetB += bytesB;
+    m_writtenCount.fetch_add(static_cast<std::uint64_t>(m_pendingIndex.size()), std::memory_order_relaxed);
     m_writeAccumA.clear();
     m_writeAccumB.clear();
+    m_pendingIndex.clear();
     m_accumTriggers = 0;
+    writeManifest(false);
+    return true;
 }
 
 // 
@@ -261,7 +394,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     // 按新会话代查询目录（gen=0 保持当前目录，即手动模式）
     const uint64_t gen = group->sessionGen;
     if (gen != m_currentGen) {
-        flushWriteBuffers();
+        if (!flushWriteBuffers()) return false;
         closeFiles();
         m_currentGen = gen;
         m_fileSequence = 0;
@@ -320,9 +453,26 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         convertBatch(group->freqB.data(), m_writeAccumB.data() + offset, n);
         ++m_accumTriggers;
 
+        PendingIndexRecord record;
+        record.acceptSequence = ++m_acceptSequence;
+        record.session = group->measurementSession;
+        record.wireTrigger = group->identity.wireTrigger ? group->identity.wireTrigger : group->triggerSeq;
+        record.expandedTrigger = group->identity.expandedTrigger;
+        record.card = group->cardId;
+        record.sampleCount = n;
+        record.aOffset = m_fileOffsetA + static_cast<qint64>(offset * sizeof(uint16_t));
+        record.bOffset = m_fileOffsetB + static_cast<qint64>(offset * sizeof(uint16_t));
+        record.aBytes = static_cast<qint64>(n * sizeof(uint16_t));
+        record.bBytes = static_cast<qint64>(n * sizeof(uint16_t));
+        record.qualityUnknown = group->quality.qualityUnknown;
+        record.assemblyComplete = group->quality.assemblyComplete;
+        record.packetCoverageComplete = group->quality.packetCoverageComplete;
+        record.missingReason = QString::fromStdString(group->quality.missingReason);
+        m_pendingIndex.push_back(std::move(record));
+
         // 达到合并阈値时一次性写盘（WRITE_BUFFER_TRIGGERS 个触发合并为一条大 I/O）
-        if (m_accumTriggers >= WRITE_BUFFER_TRIGGERS)
-            flushWriteBuffers();
+        if (m_accumTriggers >= WRITE_BUFFER_TRIGGERS && !flushWriteBuffers())
+            return false;
 
     } catch (const std::bad_alloc&) {
         emit errorOccurred(QString("Card%1: 保存线程内存不足，已自动停止保存")
@@ -339,7 +489,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     }
 
     ++m_currentFileTriggers;
-    m_savedCount.fetch_add(1, std::memory_order_relaxed);
+    m_acceptedCount.fetch_add(1, std::memory_order_relaxed);
     return m_saving.load(std::memory_order_acquire);
 }
 

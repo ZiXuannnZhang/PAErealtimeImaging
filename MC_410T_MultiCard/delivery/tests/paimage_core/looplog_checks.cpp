@@ -53,6 +53,8 @@ int main(){try{
         for(int i=0;i<4096;++i){LoopRecord record;record.kind=std::uint16_t(LoopKind::Loop);record.timeNs=std::uint64_t(i+1);log.push(record);}
         log.stop();
         check(log.incomplete(),"budget or queue exhaustion is explicit");
+        check(log.retentionEvicted()>0 || log.budgetExhausted(),"retention/budget outcome is explicit");
+        check(log.ioWriteFailed()==0,"budget exhaustion is not an IO failure");
     }
     check(std::filesystem::exists(root/"budget"/"looplog-summary.json"),"incomplete summary written");
     std::filesystem::remove_all(root);

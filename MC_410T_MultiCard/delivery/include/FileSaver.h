@@ -1,6 +1,7 @@
 #pragma once
 #include <QThread>
 #include <QFile>
+#include <QJsonObject>
 #include <atomic>
 #include <functional>
 #include "DataTypes.h"
@@ -62,7 +63,12 @@ public:
     //  状态查询 
     bool     isSaving()      const { return m_saving.load(); }
     int      queueDepth()    const;
-    uint64_t savedCount()    const { return m_savedCount.load(); }
+    // savedCount/writtenCount advance only after both A/B files and the index
+    // commit have completed. acceptedCount is the earlier queue-consumption
+    // count used to diagnose a buffered-but-not-yet-written tail.
+    uint64_t savedCount()    const { return m_writtenCount.load(); }
+    uint64_t writtenCount()  const { return m_writtenCount.load(); }
+    uint64_t acceptedCount() const { return m_acceptedCount.load(); }
 
 signals:
     void statusMessage(const QString& message);
@@ -83,7 +89,7 @@ private:
     int      m_cardId;
     std::atomic<bool>     m_running{false};
     std::atomic<bool>     m_saving{false};
-    std::atomic<uint64_t> m_savedCount{0};
+    std::atomic<uint64_t> m_acceptedCount{0};
 
     QString  m_saveDirectory;
     QString  m_fileSuffix;
@@ -100,6 +106,23 @@ private:
 
     QFile*   m_fileChannelA = nullptr;
     QFile*   m_fileChannelB = nullptr;
+    QFile*   m_indexFile = nullptr;
+
+    struct PendingIndexRecord {
+        std::uint64_t acceptSequence=0;
+        std::uint64_t session=0,wireTrigger=0,expandedTrigger=0;
+        int card=-1,sampleCount=0;
+        qint64 aOffset=0,aBytes=0,bOffset=0,bBytes=0;
+        bool qualityUnknown=false,assemblyComplete=false,packetCoverageComplete=false;
+        QString missingReason;
+    };
+    std::vector<PendingIndexRecord> m_pendingIndex;
+    std::uint64_t m_acceptSequence=0,m_batchSequence=0;
+    qint64 m_fileOffsetA=0,m_fileOffsetB=0;
+    std::atomic<std::uint64_t> m_writtenCount{0};
+    bool m_writeFailed=false;
+    QString m_lastWriteError;
+    QString m_currentIndexPath,m_currentManifestPath;
 
     moodycamel::ConcurrentQueue<TriggerGroupPtr> m_saveQueue;
 
@@ -114,5 +137,8 @@ private:
     std::vector<uint16_t> m_writeAccumB;
     int m_accumTriggers = 0;
 
-    void flushWriteBuffers();  // 将积累缓冲写入当前打开的文件并清空
+    bool flushWriteBuffers();  // A/B 写成功后追加 index commit，再清空积累缓冲
+    bool appendIndexLine(const QJsonObject& object);
+    void writeManifest(bool closed);
+    void markWriteFailure(const QString& message);
 };
