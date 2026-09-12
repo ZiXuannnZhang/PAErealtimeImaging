@@ -34,20 +34,23 @@ def record(sequence: int, tick: int, session: int, correlation: int = 0, *, card
     )
 
 
-def starts(session: int, failed_card: int | None = None, sequence_start: int = 1) -> list[bytes]:
-    return [record(sequence_start + card, 100 + card * 10, session, card=card, stage=6, reason=3,
+def starts(session: int, failed_card: int | None = None, sequence_start: int = 1,
+           tick_base: int = 110) -> list[bytes]:
+    return [record(sequence_start + card, tick_base + card * 10, session, card=card, stage=6, reason=3,
                    length=0 if card == failed_card else 58, value=100 if card == failed_card else 0,
                    packet=1) for card in range(4)]
 
 
-def packet_triplet(sequence: int, session: int, correlation: int, *, card: int, trigger: int,
-                   packet: int, decision: int) -> list[bytes]:
-    return [
-        record(sequence, 150, session, correlation, card=card, stage=1, trigger=trigger,
-               packet=packet, length=1444),
-        record(sequence + 1, 151, session, correlation, card=card, stage=2, trigger=trigger,
-               packet=packet, reason=decision),
-    ]
+def packet_observations(sequence: int, session: int, correlation: int, *, card: int, trigger: int,
+                        packet: int, decisions: list[int], raw_tick: int = 150,
+                        decision_tick: int = 151) -> list[bytes]:
+    """One stage-1 ingress followed by many stage-2 observations."""
+    rows = [record(sequence, raw_tick, session, correlation, card=card, stage=1,
+                   trigger=trigger, packet=packet, length=1444)]
+    rows.extend(record(sequence + index + 1, decision_tick + index, session, correlation,
+                       card=card, stage=2, trigger=trigger, packet=packet, reason=decision)
+                for index, decision in enumerate(decisions))
+    return rows
 
 
 def write_fixture(root: Path, rows: list[bytes], *, dropped: int = 0) -> None:
@@ -81,31 +84,43 @@ def main() -> None:
 
         clean = root / "clean"
         rows = starts(1)
-        rows += packet_triplet(5, 1, 500, card=0, trigger=100, packet=0, decision=30)
-        rows += packet_triplet(7, 1, 500, card=0, trigger=100, packet=0, decision=31)
-        rows += packet_triplet(9, 1, 500, card=0, trigger=100, packet=0, decision=0)
+        rows += packet_observations(5, 1, 500, card=0, trigger=100, packet=0,
+                                    decisions=[30, 31, 0], raw_tick=100, decision_tick=101)
         write_fixture(clean, rows)
         result = analyze(clean)
         assert classification(result, 1) == "application_start_fence_clean"
-        assert result["startAdmissionEvidence"]["summary"]["heldIngressCount"] == 3
+        assert result["startAdmissionEvidence"]["summary"]["heldIngressCount"] == 1
+        assert result["startAdmissionEvidence"]["summary"]["releasedIngressCount"] == 1
+        assert result["startAdmissionEvidence"]["summary"]["missingStage2JoinCount"] == 0
+        assert result["startAdmissionEvidence"]["sessions"][0]["rawIngressAfterBoundaryCount"] == 0
 
         gate_drop = root / "gate-drop"
-        write_fixture(gate_drop, starts(2) + packet_triplet(5, 2, 600, card=0, trigger=100, packet=0, decision=2))
+        write_fixture(gate_drop, starts(2) + packet_observations(5, 2, 600, card=0, trigger=100,
+                                                                  packet=0, decisions=[2]))
         assert classification(analyze(gate_drop), 2) == "application_start_gate_drop_observed"
 
         failed = root / "failed"
         rows = starts(3, failed_card=2)
-        rows += packet_triplet(5, 3, 700, card=0, trigger=100, packet=0, decision=32)
+        rows += packet_observations(5, 3, 700, card=0, trigger=100, packet=0, decisions=[32])
         write_fixture(failed, rows)
         assert classification(analyze(failed), 3) == "application_start_fence_failed"
 
         incomplete = root / "incomplete"
-        write_fixture(incomplete, starts(4) + packet_triplet(5, 4, 800, card=0, trigger=700, packet=0, decision=0), dropped=1)
+        write_fixture(incomplete, starts(4) + packet_observations(5, 4, 800, card=0, trigger=700,
+                                                                   packet=0, decisions=[0]), dropped=1)
         assert classification(analyze(incomplete), 4) == "application_start_fence_inconclusive"
 
+        prestart = root / "pre-start"
+        write_fixture(prestart, starts(7) + packet_observations(5, 7, 850, card=0, trigger=701,
+                                                                  packet=0, decisions=[29], raw_tick=100))
+        result = analyze(prestart)
+        assert result["startAdmissionEvidence"]["summary"]["preStartDiscardCount"] == 1
+        assert result["startAdmissionEvidence"]["summary"]["missingStage2JoinCount"] == 0
+
         correlation = root / "session-correlation"
-        rows = starts(5) + packet_triplet(5, 5, 900, card=0, trigger=700, packet=0, decision=0)
-        rows += starts(6, sequence_start=7) + packet_triplet(11, 6, 900, card=0, trigger=700, packet=0, decision=2)
+        rows = starts(5) + packet_observations(5, 5, 900, card=0, trigger=700, packet=0, decisions=[0])
+        rows += starts(6, sequence_start=7) + packet_observations(11, 6, 900, card=0,
+                                                                    trigger=700, packet=0, decisions=[2])
         write_fixture(correlation, rows)
         result = analyze(correlation)
         assert classification(result, 5) == "application_start_fence_clean"

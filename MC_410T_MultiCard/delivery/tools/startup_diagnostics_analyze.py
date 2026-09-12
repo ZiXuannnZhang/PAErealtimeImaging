@@ -374,7 +374,7 @@ def start_admission_evidence(application: dict[str, Any]) -> dict[str, Any]:
         session_ingress = [item for item in ingress if int(item.get("session", 0)) == session]
         failures = [item for item in session_starts if int(item.get("length", 0) or 0) != 58 or int(item.get("error", 0) or 0) != 0]
         per_card = []
-        raw_after = direct_after = missing_after = disabled_after = held_after = released_after = prestart_discard = 0
+        raw_after = direct_after = admitted_after = missing_after = disabled_after = held_after = released_after = prestart_discard = 0
         has_gate_drop = False
         has_fence_failure = bool(failures)
         for card in range(expected_cards):
@@ -383,43 +383,52 @@ def start_admission_evidence(application: dict[str, Any]) -> dict[str, Any]:
             boundary = int(card_starts[0].get("steadyNs", 0)) if card_starts else None
             card_raw = [item for item in session_ingress if int(item.get("card", -1)) == card]
             decision_counts: dict[str, int] = defaultdict(int)
-            card_raw_after = card_direct = card_missing = card_disabled = card_held = card_released = card_prestart = 0
+            card_raw_after = card_direct = card_admitted = card_missing = card_disabled = card_held = card_released = card_prestart = 0
             for raw in card_raw:
                 joined = matches(raw)
+                reasons = {int(item.get("reason", -1)) for item in joined}
+                has_held = 30 in reasons
+                has_released = 31 in reasons
+                has_prestart = 29 in reasons
+                has_fence_failure_evidence = bool(reasons & FENCE_FAILURE_DECISIONS)
                 for decision in joined:
                     decision_counts[decision_name(int(decision.get("reason", -1)))] += 1
                     reason = int(decision.get("reason", -1))
                     if reason in FENCE_FAILURE_DECISIONS:
                         has_fence_failure = True
-                if boundary is not None and int(raw.get("steadyNs", 0)) < boundary:
-                    if any(int(item.get("reason", -1)) == 29 for item in joined):
-                        card_prestart += 1
-                    else:
-                        card_missing += 1
-                    continue
-                if boundary is None:
-                    card_missing += 1
-                    continue
-                card_raw_after += 1
                 direct = [item for item in joined if int(item.get("reason", -1)) in DIRECT_SOURCE_DECISIONS]
                 if direct:
                     card_direct += 1
                     if any(int(item.get("reason", -1)) == 2 for item in direct):
                         card_disabled += 1
+                if boundary is not None and int(raw.get("steadyNs", 0)) >= boundary:
+                    card_raw_after += 1
+                if has_held:
+                    card_held += 1
+                if has_released:
+                    card_released += 1
+                if has_prestart:
+                    card_prestart += 1
+                # Decision evidence has priority over the stage-6 result time.
+                # A raw ingress can be observed before that result while the
+                # receiver is in StartSendPending and therefore legitimately
+                # produce StartFenceHeld/Released/Accepted evidence.
+                if has_prestart or has_held or direct or has_fence_failure_evidence:
+                    card_admitted += int(has_held or bool(direct))
                 else:
                     card_missing += 1
-                if any(int(item.get("reason", -1)) == 30 for item in joined): card_held += 1
-                if any(int(item.get("reason", -1)) == 31 for item in joined): card_released += 1
             if card_disabled: has_gate_drop = True
-            raw_after += card_raw_after; direct_after += card_direct; missing_after += card_missing
+            raw_after += card_raw_after; direct_after += card_direct; admitted_after += card_admitted; missing_after += card_missing
             disabled_after += card_disabled; held_after += card_held; released_after += card_released; prestart_discard += card_prestart
             per_card.append({
                 "card": card,
+                "startSendResultNs": boundary,
                 "startSendNs": boundary,
                 "startSendSucceeded": bool(card_starts) and not any(item in failures for item in card_starts),
                 "startSendAttemptCount": len(card_starts),
                 "rawIngressAfterBoundaryCount": card_raw_after,
                 "matchedDirectDecisionCount": card_direct,
+                "admittedIngressCount": card_admitted,
                 "missingStage2JoinCount": card_missing,
                 "disabledIngressCount": card_disabled,
                 "heldIngressCount": card_held,
@@ -435,7 +444,7 @@ def start_admission_evidence(application: dict[str, Any]) -> dict[str, Any]:
             classification = "application_start_fence_inconclusive"
         elif has_gate_drop:
             classification = "application_start_gate_drop_observed"
-        elif raw_after == 0:
+        elif admitted_after == 0:
             classification = "application_start_fence_inconclusive"
         else:
             classification = "application_start_fence_clean"
@@ -444,7 +453,8 @@ def start_admission_evidence(application: dict[str, Any]) -> dict[str, Any]:
             "session": session, "classification": classification, "traceIncomplete": trace_incomplete,
             "expectedCardCount": expected_cards or None, "startSendCount": len(session_starts),
             "startSendSucceeded": send_complete, "sendFailures": failures,
-            "rawIngressAfterBoundaryCount": raw_after, "matchedDirectDecisionCount": direct_after,
+            "rawIngressCount": len(session_ingress), "rawIngressAfterBoundaryCount": raw_after,
+            "matchedDirectDecisionCount": direct_after, "admittedIngressCount": admitted_after,
             "missingStage2JoinCount": missing_after, "disabledIngressCount": disabled_after,
             "heldIngressCount": held_after, "releasedIngressCount": released_after,
             "preStartDiscardCount": prestart_discard, "negativeConclusionDowngraded": trace_incomplete,
@@ -459,17 +469,21 @@ def start_admission_evidence(application: dict[str, Any]) -> dict[str, Any]:
         "sessions": sessions,
         "summary": {
             "sessionCount": len(sessions), "startSendCount": len(starts),
+            "rawIngressCount": sum(int(item.get("rawIngressCount", 0)) for item in sessions),
             "rawIngressAfterBoundaryCount": sum(item["rawIngressAfterBoundaryCount"] for item in sessions),
             "matchedDirectDecisionCount": sum(item["matchedDirectDecisionCount"] for item in sessions),
+            "admittedIngressCount": sum(item["admittedIngressCount"] for item in sessions),
             "missingStage2JoinCount": sum(item["missingStage2JoinCount"] for item in sessions),
             "disabledIngressCount": sum(item["disabledIngressCount"] for item in sessions),
             "heldIngressCount": sum(item["heldIngressCount"] for item in sessions),
             "releasedIngressCount": sum(item["releasedIngressCount"] for item in sessions),
+            "preStartDiscardCount": sum(item["preStartDiscardCount"] for item in sessions),
             "classificationCounts": dict(sorted(classification_counts.items())),
         },
         "limitations": [
             "Only exact session/card/ingressId joins are treated as packet causality evidence.",
             "Trigger and packet numbers are descriptive and are never joined across sessions.",
+            "startSendNs is the START send-result observation time, not a unique admission lower boundary; joined decision evidence is evaluated first.",
             "Missing raw ingress cannot prove that a card or FPGA did not transmit.",
         ],
     }

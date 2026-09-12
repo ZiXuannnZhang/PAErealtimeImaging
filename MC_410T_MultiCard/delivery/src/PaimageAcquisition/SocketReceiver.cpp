@@ -215,9 +215,9 @@ bool SocketReceiver::completeStart(bool ok){auto begin=now();std::unique_lock<st
     if(startFenceActive_){
         // Component callers may use prepare/complete without ControlSocket.
         // Production Backend always supplies the per-card callbacks.
-        if(!startFenceCallbacksSeen_)
+        if(ok&&!startFenceCallbacksSeen_)
             for(auto& state:startCardStates_)state=StartCardState::StartSent;
-        fenceOk=!startFenceFailed_&&std::all_of(startCardStates_.begin(),startCardStates_.end(),
+        fenceOk=ok&&!startFenceFailed_&&std::all_of(startCardStates_.begin(),startCardStates_.end(),
                                                  [](StartCardState state){return state==StartCardState::StartSent;});
     }
     if(!fenceOk){

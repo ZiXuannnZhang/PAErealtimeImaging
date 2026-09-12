@@ -185,6 +185,18 @@ if(WIN32)
     add_test(NAME paimage_start_race
         COMMAND paimage_start_race_test --output "${CMAKE_CURRENT_BINARY_DIR}/start-race-artifacts")
     set_tests_properties(paimage_start_race PROPERTIES RUN_SERIAL TRUE)
+    add_executable(paimage_start_fence_regression_test paimage_start_fence_regression_test.cpp)
+    target_include_directories(paimage_start_fence_regression_test PRIVATE ../include)
+    target_compile_definitions(paimage_start_fence_regression_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(paimage_start_fence_regression_test PRIVATE paimage_socket ws2_32)
+    add_test(NAME paimage_start_fence_regression COMMAND paimage_start_fence_regression_test)
+    set_tests_properties(paimage_start_fence_regression PROPERTIES RUN_SERIAL TRUE)
+    add_executable(paimage_start_overflow_test paimage_start_overflow_test.cpp)
+    target_include_directories(paimage_start_overflow_test PRIVATE ../include)
+    target_compile_definitions(paimage_start_overflow_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(paimage_start_overflow_test PRIVATE paimage_socket ws2_32)
+    add_test(NAME paimage_start_overflow COMMAND paimage_start_overflow_test)
+    set_tests_properties(paimage_start_overflow PROPERTIES RUN_SERIAL TRUE)
     add_executable(paimage_host_output_test paimage_host_output_test.cpp
         ../src/PaimageAcquisition/HostOutput.cpp
         ../src/PaimageAcquisition/Backend.cpp
@@ -206,4 +218,14 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME startup_diagnostics_analyze_test
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/startup_diagnostics_analyze_test.py"
                 "${CMAKE_CURRENT_BINARY_DIR}/startup-diagnostics-fixtures")
+endif()
+
+if(WIN32 AND Python3_Interpreter_FOUND)
+    add_test(NAME paimage_start_race_analyzer
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/paimage_start_race_analyzer_test.py"
+                "${CMAKE_CURRENT_BINARY_DIR}/start-race-artifacts"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../tools/startup_diagnostics_analyze.py")
+    set_tests_properties(paimage_start_race_analyzer PROPERTIES
+        DEPENDS paimage_start_race
+        RUN_SERIAL TRUE)
 endif()
