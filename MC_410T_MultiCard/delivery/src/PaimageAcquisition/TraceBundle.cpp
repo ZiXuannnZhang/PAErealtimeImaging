@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QCryptographicHash>
+#include <QDirIterator>
 #include <cstring>
 #include <limits>
 namespace paimage {
@@ -64,13 +65,33 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 if(timingSummary.isEmpty()&&timingBoundary)incomplete=true;
                 auto timingNames=QDir(path).entryList({"timing-*.bin"},QDir::Files,QDir::Name);int timingPart=0;quint64 timingSelected=0;
                 for(const auto& name:timingNames){QByteArray bytes=read(QDir(path).filePath(name)),chosen;if(bytes.size()%64)incomplete=true;for(qsizetype at=0;at+64<=bytes.size();at+=64){TimingRecord r;std::memcpy(&r,bytes.constData()+at,64);if(timingBoundary&&r.sequence>timingBoundary)continue;chosen.append(bytes.constData()+at,64);++timingSelected;}if(!chosen.isEmpty()){const QString out=QString("paimage/%1/timing-%2.bin").arg(dir).arg(timingPart++);if(!write(out,chosen))return false;runFiles.append(out);}}
-                if(!selected)continue;
+                const QString prefix="paimage/"+dir+"/";
+                QJsonArray systemFiles;
+                bool systemCaptureIncomplete=false;
+                const QString systemRoot=QDir(path).filePath(QStringLiteral("system-capture"));
+                if(QDir(systemRoot).exists()){
+                    QDirIterator iterator(systemRoot,QDir::Files,QDirIterator::Subdirectories);
+                    while(iterator.hasNext()){
+                        const QString filePath=iterator.next();
+                        const QString relative=QDir(systemRoot).relativeFilePath(filePath);
+                        if(relative==QStringLiteral(".capture-session.lock"))continue;
+                        QString relativeUnix=relative;relativeUnix.replace('\\','/');
+                        const QString out=prefix+QStringLiteral("system-capture/")+relativeUnix;
+                        if(!write(out,read(filePath)))return false;
+                        systemFiles.append(out);
+                    }
+                    const auto systemManifest=object(QDir(systemRoot).filePath(QStringLiteral("system-capture-manifest.json")));
+                    if(systemManifest.isEmpty()
+                       ||systemManifest.value(QStringLiteral("status")).toString()!=QStringLiteral("complete"))
+                        systemCaptureIncomplete=true;
+                    incomplete=incomplete||systemCaptureIncomplete;
+                }
+                if(!selected&&systemFiles.isEmpty())continue;
                 if(!boundary)boundary=maxSequence;
                 incomplete=incomplete||filtered>0||selected!=boundary;bundleIncomplete|=incomplete;
                 auto exported=summary;exported.insert("recordsIssued",double(boundary));exported.insert("recordsWritten",double(selected));
                 exported.insert("traceIncomplete",incomplete);exported.insert("exportClipped",filtered>0);
                 exported.insert("exportFilteredRecords",double(filtered));exported.insert("exportFlushCompleted",flushed);
-                const QString prefix="paimage/"+dir+"/";
                 if(!write(prefix+"run-config.json",QJsonDocument(metadata).toJson())||
                    !write(prefix+"trace-summary.json",QJsonDocument(exported).toJson()))return false;
                 if(!timingSummary.isEmpty()){timingSummary.insert("exportFlushCompleted",timingFlushed);timingSummary.insert("recordsWritten",double(timingSelected));timingSummary.insert("timingIncomplete",timingSummary.value("timingIncomplete").toBool()||!timingFlushed||(timingBoundary&&timingSelected!=timingBoundary));if(!write(prefix+"timing-summary.json",QJsonDocument(timingSummary).toJson()))return false;}
@@ -103,12 +124,16 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 runs.append(QJsonObject{{"runId",metadata.value("runId")},{"recordBoundary",double(boundary)},
                     {"recordsIncluded",double(selected)},{"recordsOutsideWindow",double(filtered)},
                     {"traceIncomplete",incomplete},{"anchorKnown",anchorKnown},{"files",runFiles},
+                    {"systemCaptureFiles",systemFiles},{"systemCaptureIncomplete",systemCaptureIncomplete},
                     {"firstIncludedMs",anchorKnown?QJsonValue(double(firstMs)):QJsonValue()},
                     {"lastIncludedMs",anchorKnown?QJsonValue(double(lastMs)):QJsonValue()}});
             }
             for(const auto& name:{QString("paimage_trace_analyze.py"),QString("paimage-trace-schema.md"),
                                    QString("startup-looplog-schema.md"),QString("receiver_system_capture.ps1"),
-                                   QString("startup_ingress_capture.ps1"),QString("startup_ingress_capture_stop.ps1")}){
+                                   QString("startup_ingress_capture.ps1"),QString("startup_ingress_capture_stop.ps1"),
+                                   QString("system_capture_common.ps1"),QString("start_system_capture_admin.ps1"),
+                                   QString("stop_system_capture_admin.ps1"),QString("Open-AdminCapture.cmd"),
+                                   QString("startup_diagnostics_analyze.py")}){
                 auto bytes=read(QDir(toolsDirectory).filePath(name));
                 // Optional system helpers are not evidence of lost records.
                 if(bytes.isEmpty()){if(!name.endsWith(".ps1"))bundleIncomplete=true;}else if(!write("paimage/tools/"+name,bytes))return false;

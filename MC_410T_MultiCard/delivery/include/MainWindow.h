@@ -80,6 +80,7 @@ private slots:
     void onStartMeasureClicked();
     void onConfigParamsClicked(bool fromStartMeasure = false);
     void onExportDiagnosticClicked();
+    void onPrepareSystemCaptureClicked();
     void onSelectDirClicked();
     void onToggleSaveClicked();
     void onAutoSaveToggled(bool checked);   // 自动保存勾选切换（环形：触发开始/圈末或超时重置停止）
@@ -101,6 +102,7 @@ private slots:
     void onImagingError(const QString &error);
     void setImagingParamControlsEnabled(bool enable); // 实时成像期间锁定成像参数/采集控制，svcStopped 后恢复
     void onDiagnosticStatusTick();
+    void onSystemCaptureStatusTick();
 
 private:
     void setupUI();
@@ -139,6 +141,8 @@ private:
     void saveReconImage(const QImage &image, const QString &tag); // 实时重建图像 PNG 保存
     void updateRingImagingStatus(); // 环形模式成像运行状态反馈（当前块脉冲数，主线程调用）
     void startListeningWithIPs(const QVector<QString>& onlineIPs); // 网段扫描完成后：创建 controller 并启动监听（主线程）
+    void updateSystemCaptureStatus(const QString &status,
+                                   const QJsonObject &fields = QJsonObject());
 
     // UI 对象
     Ui::MainWindow *ui;
@@ -187,6 +191,7 @@ private:
     // 定时器
     QTimer *m_statsTimer;
     QTimer *m_diagnosticStatusTimer;
+    QTimer *m_systemCaptureStatusTimer;
     QTimer *m_displayTimer;   // 30fps pull 定时器
     QTimer *m_ringTimeoutTimer = nullptr;   // 超时重置到点检测（触发即保存 PNG）
     std::atomic<bool> m_ringTimeoutSaveDone{false};  // 成像 worker 写，UI 定时器读
@@ -208,6 +213,12 @@ private:
     quint64 m_diagnosticLastNoiseDropped = 0;
     quint64 m_diagnosticLastFallbackDropped = 0;
     int m_diagnosticStatusNoticeCount = 0;
+    QLabel *m_systemCaptureStatusLabel = nullptr;
+    QString m_systemCaptureRequestPath;
+    QString m_systemCaptureOutputDirectory;
+    QString m_systemCaptureTrialId;
+    QString m_systemCaptureSessionToken;
+    QString m_systemCaptureLastState;
 
     // 存储队列溢出告警跟踪
     uint64_t m_prevSaveDiscards[MAX_CARDS];  // 上次 onUpdateStatistics 时各卡的 saveQueueDiscards 值

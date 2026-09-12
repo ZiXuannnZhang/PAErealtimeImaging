@@ -16,6 +16,7 @@
 #include "StartupPolicy.h"
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QSaveFile>
 #include <QMenu>
 #include <QApplication>
 #include <QDir>
@@ -212,6 +213,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_netController(nullptr)
     , m_statsTimer(new QTimer(this))
     , m_diagnosticStatusTimer(new QTimer(this))
+    , m_systemCaptureStatusTimer(new QTimer(this))
     , m_displayTimer(new QTimer(this))
     , m_ringTimeoutTimer(new QTimer(this))
     , m_isListening(false)
@@ -272,6 +274,13 @@ MainWindow::MainWindow(QWidget *parent)
         recordAcquisitionSnapshot({},QStringLiteral("experiment_marker"));
         logMessage(QStringLiteral("实验标记：")+marker);
     });
+    auto* systemCaptureAction=menuBar()->addAction(QStringLiteral("准备系统抓取"));
+    systemCaptureAction->setObjectName(QStringLiteral("prepareSystemCaptureAction"));
+    connect(systemCaptureAction,&QAction::triggered,this,&MainWindow::onPrepareSystemCaptureClicked);
+    m_systemCaptureStatusLabel=new QLabel(QStringLiteral("系统抓取：未准备"),this);
+    m_systemCaptureStatusLabel->setAccessibleName(QStringLiteral("系统抓取状态"));
+    m_systemCaptureStatusLabel->setMinimumWidth(180);
+    statusBar()->addPermanentWidget(m_systemCaptureStatusLabel);
 
     // 工作七：主窗口可自由缩小，内容超出时自动出现滚动条
     {
@@ -569,6 +578,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_diagnosticStatusTimer, &QTimer::timeout,
             this, &MainWindow::onDiagnosticStatusTick);
     m_diagnosticStatusTimer->start();
+    m_systemCaptureStatusTimer->setInterval(500);
+    connect(m_systemCaptureStatusTimer,&QTimer::timeout,this,&MainWindow::onSystemCaptureStatusTick);
+    m_systemCaptureStatusTimer->start();
 
     // 超时重置到点检测：空闲超过超时值立即保存当前窗口 PNG（不等新触发）
     m_ringTimeoutTimer->setInterval(250);
@@ -1668,7 +1680,146 @@ void MainWindow::onExportDiagnosticClicked()
     watcher->setFuture(QtConcurrent::run(
         [request, targetPath]() mutable {
             return DiagnosticRecorder::exportTimeWindow(request, targetPath);
-        }));
+    }));
+}
+
+void MainWindow::onPrepareSystemCaptureClicked()
+{
+    if (!m_isListening || !m_netController) {
+        updateSystemCaptureStatus(QStringLiteral("app_only（请先开始监听）"),
+                                  {{QStringLiteral("reason"), QStringLiteral("listener_not_running")}});
+        QMessageBox::information(this, QStringLiteral("准备系统抓取"),
+                                 QStringLiteral("请先开始网络监听，再准备本次监听会话的系统抓取请求。"));
+        return;
+    }
+    const QString runId=m_netController->diagnosticRunId();
+    const QString runDirectory=m_netController->diagnosticRunDirectory();
+    if (runId.isEmpty()||runDirectory.isEmpty()) {
+        updateSystemCaptureStatus(QStringLiteral("app_only（应用运行目录未就绪）"),
+                                  {{QStringLiteral("reason"), QStringLiteral("diagnostic_run_not_ready")}});
+        return;
+    }
+    QVector<QString> targetIPs=m_netController->diagnosticTargetIPs();
+    if (targetIPs.isEmpty()) {
+        for (const std::string &ip : m_netController->config().targetIPs)
+            targetIPs.append(QString::fromStdString(ip));
+    }
+    if (targetIPs.isEmpty()) {
+        updateSystemCaptureStatus(QStringLiteral("app_only（目标 IP 为空）"),
+                                  {{QStringLiteral("reason"), QStringLiteral("empty_card_ips")}});
+        return;
+    }
+
+    QString channel=QString::fromStdString(systemCaptureChannelDir());
+    if (channel.isEmpty()) channel=QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("system-capture-channel"));
+    m_systemCaptureOutputDirectory=QDir(runDirectory).filePath(QStringLiteral("system-capture"));
+    m_systemCaptureTrialId=QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"))
+        + QStringLiteral("-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_systemCaptureSessionToken=QUuid::createUuid().toString(QUuid::WithoutBraces);
+    m_systemCaptureRequestPath=QDir(channel).filePath(QStringLiteral("capture-request-%1.json").arg(runId));
+    if (!QDir().mkpath(channel)||!QDir().mkpath(m_systemCaptureOutputDirectory)) {
+        updateSystemCaptureStatus(QStringLiteral("failed（无法创建请求目录）"),
+                                  {{QStringLiteral("reason"), QStringLiteral("create_request_directory_failed")}});
+        return;
+    }
+    QJsonArray cards,ports;
+    for (const QString &ip : targetIPs) cards.append(ip);
+    for (int port=8000;port<=8004;++port) ports.append(port);
+    const QJsonObject request{
+        {QStringLiteral("schemaVersion"),2},
+        {QStringLiteral("kind"),QStringLiteral("system-capture-request")},
+        {QStringLiteral("trialId"),m_systemCaptureTrialId},
+        {QStringLiteral("captureSessionToken"),m_systemCaptureSessionToken},
+        {QStringLiteral("runId"),runId},
+        {QStringLiteral("listenId"),m_diagnosticListenId},
+        {QStringLiteral("measurementSessionId"),m_netController->measurementSessionId()},
+        {QStringLiteral("cardIPs"),cards},
+        {QStringLiteral("ports"),ports},
+        {QStringLiteral("outputDirectory"),m_systemCaptureOutputDirectory},
+        {QStringLiteral("channelDirectory"),channel},
+        {QStringLiteral("createdUtc"),QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+        {QStringLiteral("applicationPid"),static_cast<double>(QCoreApplication::applicationPid())}
+    };
+    QSaveFile file(m_systemCaptureRequestPath);
+    if (!file.open(QIODevice::WriteOnly)
+        || file.write(QJsonDocument(request).toJson(QJsonDocument::Indented))<0
+        || !file.commit()) {
+        updateSystemCaptureStatus(QStringLiteral("failed（请求写入失败）"),
+                                  {{QStringLiteral("reason"),file.errorString()}});
+        return;
+    }
+    m_systemCaptureLastState.clear();
+    recordDiagnosticAction(QStringLiteral("system_capture_prepare"),
+                           {{QStringLiteral("trialId"),m_systemCaptureTrialId},
+                            {QStringLiteral("captureSessionToken"),m_systemCaptureSessionToken},
+                            {QStringLiteral("runId"),runId},
+                            {QStringLiteral("listenId"),m_diagnosticListenId},
+                            {QStringLiteral("outputDirectory"),m_systemCaptureOutputDirectory},
+                            {QStringLiteral("channelDirectory"),channel},
+                            {QStringLiteral("cardIPs"),cards},
+                            {QStringLiteral("ports"),ports},
+                            {QStringLiteral("autoElevation"),false}});
+    updateSystemCaptureStatus(QStringLiteral("app_only（等待管理员抓取）"),
+                              {{QStringLiteral("trialId"),m_systemCaptureTrialId},
+                               {QStringLiteral("requestPath"),m_systemCaptureRequestPath},
+                               {QStringLiteral("outputDirectory"),m_systemCaptureOutputDirectory}});
+    logMessage(QStringLiteral("已准备系统抓取请求；请在管理员终端运行 Open-AdminCapture.cmd，应用不会自动提权。"));
+}
+
+void MainWindow::updateSystemCaptureStatus(const QString &status,const QJsonObject &fields)
+{
+    if (m_systemCaptureStatusLabel) m_systemCaptureStatusLabel->setText(QStringLiteral("系统抓取：")+status);
+    if (m_systemCaptureLastState==status) return;
+    m_systemCaptureLastState=status;
+    QJsonObject eventFields=fields;
+    eventFields.insert(QStringLiteral("status"),status);
+    eventFields.insert(QStringLiteral("requestPath"),m_systemCaptureRequestPath);
+    eventFields.insert(QStringLiteral("outputDirectory"),m_systemCaptureOutputDirectory);
+    recordDiagnosticAction(QStringLiteral("system_capture_status"),eventFields);
+}
+
+void MainWindow::onSystemCaptureStatusTick()
+{
+    if (m_systemCaptureRequestPath.isEmpty()) {
+        updateSystemCaptureStatus(QStringLiteral("未准备"));
+        return;
+    }
+    const QString statePath=QDir(m_systemCaptureOutputDirectory).filePath(QStringLiteral("capture-state.json"));
+    QFile stateFile(statePath);
+    if (!stateFile.open(QIODevice::ReadOnly)) {
+        updateSystemCaptureStatus(QStringLiteral("app_only（等待管理员抓取）"),
+                                  {{QStringLiteral("reason"),QStringLiteral("capture_state_missing")},
+                                   {QStringLiteral("requestExists"),QFileInfo::exists(m_systemCaptureRequestPath)}});
+        return;
+    }
+    QJsonParseError parseError;
+    const QJsonDocument document=QJsonDocument::fromJson(stateFile.readAll(),&parseError);
+    if (!document.isObject()) {
+        updateSystemCaptureStatus(QStringLiteral("failed（状态文件不可解析）"),
+                                  {{QStringLiteral("reason"),parseError.errorString()}});
+        return;
+    }
+    const QJsonObject state=document.object();
+    const QString raw=state.value(QStringLiteral("status")).toString();
+    QString display;
+    if (raw==QStringLiteral("ready")||raw==QStringLiteral("collecting")) display=QStringLiteral("running（%1）").arg(raw);
+    else if (raw==QStringLiteral("stopping")||raw==QStringLiteral("validating")) display=QStringLiteral("captured（%1）").arg(raw);
+    else if (raw==QStringLiteral("complete")) {
+        display=state.value(QStringLiteral("analysisReady")).toBool(false)
+            &&state.value(QStringLiteral("targetPacketsPresent")).toBool(false)
+            ? QStringLiteral("verified") : QStringLiteral("captured");
+    } else if (raw==QStringLiteral("no_target_packets")) display=QStringLiteral("captured（no_target_packets）");
+    else if (raw==QStringLiteral("partial")) display=QStringLiteral("captured（partial）");
+    else if (raw==QStringLiteral("failed")) display=QStringLiteral("failed");
+    else display=raw.isEmpty()?QStringLiteral("app_only"):QStringLiteral("preparing（%1）").arg(raw);
+    QJsonObject fields{{QStringLiteral("rawState"),raw},
+                       {QStringLiteral("phase"),state.value(QStringLiteral("phase")).toString()},
+                       {QStringLiteral("trialId"),state.value(QStringLiteral("trialId")).toString()},
+                       {QStringLiteral("runId"),state.value(QStringLiteral("runId")).toString()},
+                       {QStringLiteral("analysisReady"),state.value(QStringLiteral("analysisReady"))},
+                       {QStringLiteral("targetPacketsPresent"),state.value(QStringLiteral("targetPacketsPresent"))},
+                       {QStringLiteral("manifestPath"),state.value(QStringLiteral("manifestPath"))}};
+    updateSystemCaptureStatus(display,fields);
 }
 
 // =====================================================================
@@ -1816,6 +1967,12 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
 {
     // 新监听会话：重置各卡触发去重序号，避免把首触发当作旧数据跳过
     for (int i = 0; i < MAX_CARDS; ++i) m_lastFeedSeq[i] = 0xFFFF;
+    m_systemCaptureRequestPath.clear();
+    m_systemCaptureOutputDirectory.clear();
+    m_systemCaptureTrialId.clear();
+    m_systemCaptureSessionToken.clear();
+    m_systemCaptureLastState.clear();
+    updateSystemCaptureStatus(QStringLiteral("未准备"));
 
     const QString targetSource = g_targetIPs.isEmpty()
         ? QStringLiteral("网段扫描")
@@ -1930,6 +2087,7 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
         QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
         cfg.diagnosticLevel = qBound(0, settings.value("Diagnostics/Level", 1).toInt(), 2);
         cfg.diagnosticTraceEnabled = settings.value("Diagnostics/RawIngressTrace", true).toBool();
+        cfg.socketTimestampMode = qBound(0, settings.value("Diagnostics/SocketTimestampMode", 0).toInt(), 3);
     }
     // Startup admission policy from the command line: --startup-policy=legacy
     // restores the 1000 ms startup filter; the diagnostic default bypasses it.

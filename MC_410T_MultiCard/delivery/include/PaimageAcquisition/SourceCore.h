@@ -7,6 +7,7 @@
 #include <memory>
 #include <list>
 #include <vector>
+#include "PaimageAcquisition/SocketTimestamp.h"
 
 // PAimage-derived: recovered names, not original symbols. See the behavior map.
 // Single receiver-thread ownership. No socket, host session fence, or old assembler.
@@ -36,7 +37,10 @@ struct CardFrame {
 using Frame=std::shared_ptr<const CardFrame>;
 // VA 0138bb defaults to 0; UI modes 0..4 set 1000 at 03ad80.
 // The caller must explicitly select the recovered UI-mode setting.
-struct Config { int cards=4, samples=5000, bits=32, startupIdleMs=0; };
+struct Config {
+    int cards=4, samples=5000, bits=32, startupIdleMs=0;
+    SocketTimestampMode socketTimestampMode=SocketTimestampMode::Off;
+};
 struct Counters {
     std::uint64_t startupFilteredCards=0,startupFilteredSync=0;
     std::uint64_t startupIncomplete=0,runtimeIncomplete=0,completeCards=0;

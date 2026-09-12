@@ -45,7 +45,10 @@ bool NetworkController::createPaimageBackend(QString& error){
     // Single configuration source: AcqConfig.startupIdleMs decides the
     // startup admission policy actually passed to the receiver; the identity
     // below records both the requested policy and the effective value.
-    settings.acquisition={m_config.nCards,m_config.samplesPerTrig(),m_config.bitsPerChannel,m_config.startupIdleMs};
+    const auto timestampMode=static_cast<paimage::SocketTimestampMode>(
+        qBound(0,m_config.socketTimestampMode,3));
+    settings.acquisition={m_config.nCards,m_config.samplesPerTrig(),m_config.bitsPerChannel,
+                          m_config.startupIdleMs,timestampMode};
     settings.localIp=m_config.localBindIP;
     for(const auto& ip:m_targetIPs)settings.targets.push_back(ip.toStdString());
     std::vector<DataProcessor*> processors;std::vector<FileSaver*> savers;
@@ -55,6 +58,7 @@ bool NetworkController::createPaimageBackend(QString& error){
         const QString id=QUuid::createUuid().toString(QUuid::WithoutBraces);
         const QString tracePath=QDir(QCoreApplication::applicationDirPath()).filePath("paimage-traces/"+id);
         if(!QDir().mkpath(tracePath))throw std::runtime_error("trace directory creation failed");
+        m_paimageTracePath=tracePath;
         if(m_config.diagnosticTraceEnabled)
             m_paimageTrace=std::make_unique<paimage::TraceWriter>(std::filesystem::path(tracePath.toStdWString()));
         if(m_config.diagnosticLevel>=1)
@@ -70,6 +74,8 @@ bool NetworkController::createPaimageBackend(QString& error){
             {"listenId",m_diagnosticListenId},{"configId",m_currentConfigId},{"samples",m_config.samplesPerTrig()},
             {"bits",m_config.bitsPerChannel},{"cards",m_config.nCards},{"dataPort",8001},{"feedbackPort",8000},
             {"targets",targets},{"startupPolicy",m_config.startupIdleMs>0?"legacy":"bypass"},
+            {"socketTimestampMode",paimage::socketTimestampModeName(timestampMode)},
+            {"socketTimestampDefaultOff",timestampMode==paimage::SocketTimestampMode::Off},
             {"startupIdleMsRequested",m_config.startupIdleMs>0?1000:0},
             {"startupIdleMsEffective",m_config.startupIdleMs},
             {"localBindIP",QString::fromStdString(m_config.localBindIP)},
@@ -120,6 +126,11 @@ bool NetworkController::createPaimageBackend(QString& error){
             },Qt::QueuedConnection);
         };
         std::string message;if(!m_paimage->listen(message)){error=QString::fromStdString(message);m_paimage.reset();return false;}
+        recordDiagnosticEvent("paimage.socket","timestamp_capability",DiagnosticRecorder::Severity::Info,
+            {{"requestedMode",paimage::socketTimestampModeName(timestampMode)},
+             {"enabled",m_paimage->receiver().socketTimestampEnabled()},
+             {"status",QString::fromStdString(m_paimage->receiver().socketTimestampStatus())},
+             {"wsaRecvMsgAvailable",m_paimage->receiver().socketTimestampFunctionAvailable()}});
         recordDiagnosticEvent("paimage.lifecycle","source_listener_created",DiagnosticRecorder::Severity::Info,
             {{"traceDirectory",tracePath},{"runId",id},{"samples",m_config.samplesPerTrig()}});
         scheduleNetworkSnapshot("paimage_listener_created","listening",m_currentConfigId);
@@ -167,7 +178,7 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
         if(m_paimageTrace)m_paimageTrace->stop();
         if(m_paimageTiming)m_paimageTiming->stop();
         if(m_paimageLoopLog)m_paimageLoopLog->stop();
-        m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();
+        m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();m_paimageTracePath.clear();
         emit errorOccurred("PAimage-derived 监听失败："+error);if(onFailed)onFailed();return false;
     }
     m_running=true;m_lastStatsMs=QDateTime::currentMSecsSinceEpoch();m_lastRuntimeSnapshotMs=0;m_lastIngressSnapshotMs=0;
@@ -204,6 +215,10 @@ void NetworkController::recordPaimageSnapshot(){
         {"receivePriorityActual",m_paimage->receiver().actualPriority()},
         {"receiveHardErrors",QString::number(m_paimage->receiver().hardErrors())},
         {"lastSocketError",m_paimage->receiver().lastSocketError()},
+        {"socketTimestampMode",paimage::socketTimestampModeName(m_paimage->receiver().socketTimestampMode())},
+        {"socketTimestampStatus",QString::fromStdString(m_paimage->receiver().socketTimestampStatus())},
+        {"socketTimestampedPackets",QString::number(m_paimage->receiver().socketTimestampedPackets())},
+        {"socketTimestampControlTruncated",QString::number(m_paimage->receiver().socketTimestampControlTruncated())},
         {"affinityQuery","unknown; no affinity request"},{"driverVersion","unknown"},
         {"sourceSyncBlockSize",50},
         {"savingRequested",m_paimageSavingRequested},{"legacyProcessorCountersNotApplicable",true},
@@ -264,6 +279,9 @@ void NetworkController::writeSystemCaptureNotification(quint64 epoch, qint64 bur
     const QString channel=QString::fromStdString(systemCaptureChannelDir());
     QString trial=QString::fromStdString(startupTrialId());
     QString trialSource=QStringLiteral("command_line");
+    QString captureSessionToken;
+    QString listenId=m_diagnosticListenId;
+    QString measurementSessionId=m_measurementSessionId;
     const qint64 nowWallMs=QDateTime::currentMSecsSinceEpoch();
     QFile activeTrial(QDir(channel).filePath(QStringLiteral("active-trial.json")));
     if(activeTrial.open(QIODevice::ReadOnly)){
@@ -271,12 +289,19 @@ void NetworkController::writeSystemCaptureNotification(quint64 epoch, qint64 bur
         const qint64 started=active.value(QStringLiteral("startedWallMs")).toVariant().toLongLong();
         const qint64 expires=active.value(QStringLiteral("expiresWallMs")).toVariant().toLongLong();
         const QString requested=active.value(QStringLiteral("trialId")).toString().trimmed();
-        if(!requested.isEmpty()&&started>0&&started<=nowWallMs&&expires>=nowWallMs){
+        const QString activeRunId=active.value(QStringLiteral("runId")).toString().trimmed();
+        if(!requested.isEmpty()&&started>0&&started<=nowWallMs&&expires>=nowWallMs
+           &&(activeRunId.isEmpty()||activeRunId==m_paimageRunId)){
             trial=requested;trialSource=QStringLiteral("active_system_capture");
+            captureSessionToken=active.value(QStringLiteral("captureSessionToken")).toString().trimmed();
+            listenId=active.value(QStringLiteral("listenId")).toString().trimmed();
+            measurementSessionId=active.value(QStringLiteral("measurementSessionId")).toString().trimmed();
         }
     }
     QDir().mkpath(channel);
     const QJsonObject note{{"kind","burst"},{"trialId",trial},{"runId",m_paimageRunId},
+        {"captureSessionToken",captureSessionToken},{"listenId",listenId},
+        {"measurementSessionId",measurementSessionId},
         {"freezeEpoch",QString::number(epoch)},{"burstMonotonicNs",QString::number(burstNs)},
         {"notifiedMonotonicNs",QString::number(paimage::SocketReceiver::now())},
         {"notifiedWallMs",nowWallMs},{"trialIdSource",trialSource},
@@ -289,6 +314,7 @@ void NetworkController::writeSystemCaptureNotification(quint64 epoch, qint64 bur
     recordDiagnosticEvent("paimage.loop",wrote?"burst_notification_written":"burst_notification_write_failed",
         DiagnosticRecorder::Severity::Info,
         {{"freezeEpoch",QString::number(epoch)},{"trialId",trial},{"runId",m_paimageRunId},
+         {"captureSessionToken",captureSessionToken},{"listenId",listenId},
          {"trialIdSource",trialSource},{"path",path},{"written",wrote}});
 }
 

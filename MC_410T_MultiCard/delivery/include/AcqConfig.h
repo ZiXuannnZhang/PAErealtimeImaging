@@ -37,6 +37,9 @@ struct AcqConfig {
     bool diagnosticTraceEnabled = true; // Production default; deterministic replay comparison may disable.
     // 0=原始入口轨迹，1=轻量接收时序，2=轻量时序+外部系统抓取索引。
     int diagnosticLevel = 1;
+    // Experimental per-socket timestamping: 0=off (default), 1=software,
+    // 2=hardware, 3=auto (hardware then explicit software fallback).
+    int socketTimestampMode = 0;
 
     // ══ 数据格式参数（真实采集固定 250 MSa/s 满速率，与 Constants.h 一致）══
     // 32bit Q16.16 差分相位，采样间隔 4.0 ns，不抽取。

@@ -101,6 +101,7 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/PaimageAcquisition/ControlState.cpp
     src/PaimageAcquisition/ControlSocket.cpp
     src/PaimageAcquisition/SocketReceiver.cpp
+    src/PaimageAcquisition/SocketTimestamp.cpp
     src/PaimageAcquisition/TraceWriter.cpp
     src/PaimageAcquisition/TimingWriter.cpp
     src/PaimageAcquisition/LoopLog.cpp
@@ -120,6 +121,11 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/receiver_system_capture.ps1"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/startup_ingress_capture.ps1"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/startup_ingress_capture_stop.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/system_capture_common.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/start_system_capture_admin.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/stop_system_capture_admin.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/Open-AdminCapture.cmd"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/startup_diagnostics_analyze.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/receiver-scheduling.wprp"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools")
 

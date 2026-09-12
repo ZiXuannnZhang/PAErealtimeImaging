@@ -119,6 +119,10 @@ public:
     bool isSaving()    const;
     int  activeCards() const { return m_config.nCards; }
     const AcqConfig& config() const { return m_config; }
+    QString diagnosticRunId() const { return m_paimageRunId; }
+    QString diagnosticRunDirectory() const { return m_paimageTracePath; }
+    QString measurementSessionId() const { return m_measurementSessionId; }
+    QVector<QString> diagnosticTargetIPs() const { return m_targetIPs; }
 
     //  卡就绪状态查询：卡上电 → FPGA 网络栈初始化 → 发送 18 字节就绪包后标记为就绪
     int  readyCardCount() const;
@@ -180,6 +184,7 @@ private:
     bool m_paimageConfigReported=false;
     quint64 m_paimageGeneration=0;
     QString m_paimageSaveDir,m_paimageSaveSuffix;
+    QString m_paimageTracePath;
     int m_paimageSaveCount=1000;
     bool m_paimageSavingRequested=false;
     quint64 m_paimageSaveGeneration=0;

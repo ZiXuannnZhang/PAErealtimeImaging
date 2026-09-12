@@ -2,10 +2,18 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <mswsock.h>
+#include <mstcpip.h>
 #include "PaimageAcquisition/SocketReceiver.h"
+#include "PaimageAcquisition/SocketTimestamp.h"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstring>
+
+#ifndef SO_TIMESTAMP
+#define SO_TIMESTAMP 0x300A
+#endif
 namespace paimage {
 Time SocketReceiver::now(){return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();}
 SocketReceiver::SocketReceiver(Config c,std::vector<Endpoint> e,Endpoint feedback,std::vector<std::string> targets,
@@ -30,6 +38,9 @@ bool SocketReceiver::start(std::string& error){
     // Setup observation: creation, nonblocking mode, receive buffer and bind
     // are each recorded with the effective value or error code, before the
     // receiver thread exists. These are observation points only.
+    timestampEnabled_=false;recvMsgFunction_=0;timestampStatus_=socketTimestampModeName(config_.socketTimestampMode);
+    bool timestampRequested=config_.socketTimestampMode!=SocketTimestampMode::Off;
+    bool timestampReady=true;
     auto make=[&](Endpoint e,bool buffer,bool feedback)->SOCKET{
         LoopRecord setup;setup.timeNs=now();setup.threadId=GetCurrentThreadId();
         setup.kind=std::uint16_t(LoopKind::SocketSetup);setup.value0=e.port;
@@ -40,6 +51,15 @@ bool SocketReceiver::start(std::string& error){
             if(loopLog_)loopLog_->push(setup);
             return s;}
         setup.value1=std::uint32_t(std::uintptr_t(s)&0xffffffffu);
+        if(timestampRequested){
+            const auto timestamp=configureSocketTimestamp(std::uintptr_t(s),config_.socketTimestampMode);
+            if(timestamp.enabled&&timestamp.recvMsgFunction){
+                recvMsgFunction_=timestamp.recvMsgFunction;
+                timestampStatus_=timestamp.status+(timestamp.fallback?" (fallback)":"");
+            }else{
+                timestampReady=false;timestampStatus_=timestamp.status;
+            }
+        }
         if(buffer){int bytes=64*1024*1024;
             if(setsockopt(s,SOL_SOCKET,SO_RCVBUF,reinterpret_cast<char*>(&bytes),sizeof(bytes))){firstError=WSAGetLastError();setup.flags|=4u;setup.value3=std::uint32_t(firstError);
                 error="SO_RCVBUF "+std::to_string(firstError);if(loopLog_)loopLog_->push(setup);
@@ -66,6 +86,9 @@ bool SocketReceiver::start(std::string& error){
         feedbackReceiveBuffer_=receiveBuffers_.back();receiveBuffers_.pop_back();}
     for(auto e:endpoints_){auto s=make(e,true,false);if(s==INVALID_SOCKET){if(error.empty())error="data socket setup failed";closeSockets();return false;}sockets_.push_back(s);}
     targetAddresses_.clear();for(auto& ip:targets_){in_addr addr{};inet_pton(AF_INET,ip.c_str(),&addr);targetAddresses_.push_back(addr.s_addr);}
+    timestampEnabled_=timestampRequested&&timestampReady&&recvMsgFunction_!=0;
+    if(timestampRequested&&!timestampEnabled_&&timestampStatus_.empty())
+        timestampStatus_="requested but not enabled on every socket";
     running_=true;worker_=std::thread(&SocketReceiver::run,this);return true;
 }
 void SocketReceiver::closeSockets(){for(auto s:sockets_)closesocket(SOCKET(s));sockets_.clear();if(feedbackSocket_!=INVALID_SOCKET){closesocket(SOCKET(feedbackSocket_));feedbackSocket_=INVALID_SOCKET;}if(wsa_){WSACleanup();wsa_=false;}}
@@ -108,11 +131,31 @@ void SocketReceiver::run(){
         timeval timeout{0,1000};const auto selectStart=now();int status=select(0,&read,nullptr,nullptr,&timeout);const auto selectEnd=now();++selectId;
         timing(TimingKind::Select,selectStart,selectEnd,-1,0,status<0?std::uint32_t(-status):std::uint32_t(status),std::uint32_t(sockets_.size()+(feedbackSocket_!=INVALID_SOCKET)),selectId,std::uint16_t(status==0?1:status<0?2:0),status>0);
         if(status==SOCKET_ERROR){lastSocketError_=WSAGetLastError();++hardErrors_;break;}
+        auto receivePacket=[&](SOCKET current,std::uint8_t* data,int capacity,sockaddr_in& source,int& sourceSize)->int{
+            if(!timestampEnabled_||!recvMsgFunction_)
+                return recvfrom(current,reinterpret_cast<char*>(data),capacity,0,reinterpret_cast<sockaddr*>(&source),&sourceSize);
+            auto recvMsg=reinterpret_cast<LPFN_WSARECVMSG>(recvMsgFunction_);
+            WSABUF payload{};payload.buf=reinterpret_cast<char*>(data);payload.len=static_cast<ULONG>(capacity);
+            std::array<char,WSA_CMSG_SPACE(sizeof(std::uint64_t))> control{};
+            WSAMSG message{};message.name=reinterpret_cast<sockaddr*>(&source);message.namelen=sourceSize;
+            message.lpBuffers=&payload;message.dwBufferCount=1;message.Control.buf=control.data();
+            message.Control.len=static_cast<ULONG>(control.size());message.dwFlags=0;
+            DWORD received=0;
+            const int result=recvMsg(current,&message,&received,nullptr,nullptr);
+            if(result==SOCKET_ERROR)return SOCKET_ERROR;
+            sourceSize=message.namelen;
+            if(message.dwFlags&MSG_CTRUNC)++timestampControlTruncated_;
+            for(auto cmsg=WSA_CMSG_FIRSTHDR(&message);cmsg;cmsg=WSA_CMSG_NXTHDR(&message,cmsg)){
+                if(cmsg->cmsg_level==SOL_SOCKET&&cmsg->cmsg_type==SO_TIMESTAMP&&
+                   cmsg->cmsg_len>=WSA_CMSG_LEN(sizeof(std::uint64_t))){++timestampedPackets_;break;}
+            }
+            return static_cast<int>(received);
+        };
         auto drain=[&](SOCKET socket,int card,std::uint16_t port,bool feedback){
             if(!FD_ISSET(socket,&read))return;
             const auto drainStart=now();const auto drainIdentifier=++drainId;std::uint32_t attempts=0,success=0,bytes=0,exitReason=1;std::uint64_t lastIngress=0;
             readyMask|=std::uint64_t(1)<<(feedback?0:1+card);
-            for(;;){++attempts;sockaddr_in source{};int sourceSize=sizeof(source);const auto recvStart=now();int n=recvfrom(socket,reinterpret_cast<char*>(buffer.data()),int(buffer.size()),0,reinterpret_cast<sockaddr*>(&source),&sourceSize);const auto recvEnd=now();
+            for(;;){++attempts;sockaddr_in source{};int sourceSize=sizeof(source);const auto recvStart=now();int n=receivePacket(socket,buffer.data(),int(buffer.size()),source,sourceSize);const auto recvEnd=now();
                 if(n==SOCKET_ERROR){const int error=WSAGetLastError();exitReason=error==WSAEWOULDBLOCK?1:2;
                     // The failed call has no ingress record: its timing
                     // correlation is the drain identifier with flags bit 1

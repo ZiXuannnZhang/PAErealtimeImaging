@@ -32,6 +32,12 @@ public:
     int lastSocketError()const{return lastSocketError_.load();}
     int priorityResult()const{return priorityResult_.load();}
     int actualPriority()const{return actualPriority_.load();}
+    SocketTimestampMode socketTimestampMode()const{return config_.socketTimestampMode;}
+    bool socketTimestampEnabled()const{return timestampEnabled_;}
+    bool socketTimestampFunctionAvailable()const{return recvMsgFunction_!=0;}
+    std::string socketTimestampStatus()const{return timestampStatus_;}
+    std::uint64_t socketTimestampedPackets()const{return timestampedPackets_.load();}
+    std::uint64_t socketTimestampControlTruncated()const{return timestampControlTruncated_.load();}
     std::function<void(int,int,Time)> feedbackSink;
     SourceCore::Observer observationSink;
     std::function<void(int,const TraceRecord&)> ingressSink;
@@ -55,6 +61,8 @@ private:
     std::atomic<bool> running_{false};std::atomic<std::uint64_t> session_{0},ingress_{0},hardErrors_{0};
     std::atomic<int> priorityResult_{-1},actualPriority_{-1};std::thread worker_;
     std::atomic<int> lastSocketError_{0};
+    bool timestampEnabled_=false;std::uintptr_t recvMsgFunction_=0;std::string timestampStatus_="disabled by configuration";
+    std::atomic<std::uint64_t> timestampedPackets_{0},timestampControlTruncated_{0};
     std::uint64_t correlation_=0;bool wsa_=false;
 };
 }
