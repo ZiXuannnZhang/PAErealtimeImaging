@@ -19,7 +19,10 @@ enum class Decision : std::uint16_t { Accepted, Short, Disabled, RecentTrigger,
     CardOutput, SyncOutput, InvalidCard, StartupOverflowDiscard, StopBufferedDiscard,
     ListenerActiveDiscard, ListenerBufferedDiscard, ListenerPendingSyncDiscard,
     StartPendingSyncDiscard, StartActiveDiscard, StartupActiveDiscard, StartupPendingSyncDiscard,
-    CompleteStartPendingSyncDiscard, CompleteStartActiveDiscard };
+    CompleteStartPendingSyncDiscard, CompleteStartActiveDiscard,
+    StartFencePreStartDiscard, StartFenceHeld, StartFenceReleased,
+    StartFenceFailedDiscard, StartFenceOverflow, StartFenceResetDiscard,
+    StartFenceStopDiscard, StartFenceShutdownDiscard };
 struct Observation {
     Decision decision{}; int card=-1; std::uint16_t trigger=0, packet=0;
     std::uint32_t count=0; Time time=0; std::uint64_t firstIngressId=0;
@@ -45,6 +48,10 @@ struct Counters {
     std::uint64_t startupFilteredCards=0,startupFilteredSync=0;
     std::uint64_t startupIncomplete=0,runtimeIncomplete=0,completeCards=0;
     std::uint64_t stopActiveCards=0,stopBufferedCards=0,stopBufferedSync=0;
+    std::uint64_t startFenceHeld=0,startFenceReleased=0;
+    std::uint64_t startFencePreStartDiscard=0,startFenceFailedDiscard=0;
+    std::uint64_t startFenceOverflow=0,startFenceResetDiscard=0;
+    std::uint64_t startFenceStopDiscard=0,startFenceShutdownDiscard=0;
 };
 class SourceCore {
 public:
@@ -57,6 +64,10 @@ public:
     void prepareStop();
     void completeStop(bool success,Time now);
     Decision ingest(int card,const std::uint8_t*,std::size_t,Time,std::uint64_t ingressId=0,std::uint32_t sourceIPv4=0);
+    // Record an admission decision made before ingest without manufacturing a
+    // second raw-ingress record or applying assembly logic.
+    void observeAdmission(Decision,int,std::uint16_t,std::uint16_t,std::uint32_t,Time,
+                          std::uint64_t firstIngressId=0);
     void poll(Time);
     void observeShutdown(Time); // observation only, no state transition
     bool enabled() const { return enabled_; }

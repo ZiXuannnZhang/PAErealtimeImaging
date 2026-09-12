@@ -21,6 +21,21 @@ SourceCore::SourceCore(Config c,CardSink out,SyncSink sync,Observer observe)
 void SourceCore::event(Decision d,int c,std::uint16_t t,std::uint16_t p,std::uint32_t n,Time at,std::uint64_t firstIngressId) {
     if(observer_) observer_({d,c,t,p,n,at,firstIngressId});
 }
+void SourceCore::observeAdmission(Decision d,int c,std::uint16_t t,std::uint16_t p,
+                                  std::uint32_t n,Time at,std::uint64_t firstIngressId) {
+    switch(d){
+    case Decision::StartFenceHeld: counts_.startFenceHeld+=n; break;
+    case Decision::StartFenceReleased: counts_.startFenceReleased+=n; break;
+    case Decision::StartFencePreStartDiscard: counts_.startFencePreStartDiscard+=n; break;
+    case Decision::StartFenceFailedDiscard: counts_.startFenceFailedDiscard+=n; break;
+    case Decision::StartFenceOverflow: counts_.startFenceOverflow+=n; break;
+    case Decision::StartFenceResetDiscard: counts_.startFenceResetDiscard+=n; break;
+    case Decision::StartFenceStopDiscard: counts_.startFenceStopDiscard+=n; break;
+    case Decision::StartFenceShutdownDiscard: counts_.startFenceShutdownDiscard+=n; break;
+    default: break;
+    }
+    event(d,c,t,p,n,at,firstIngressId);
+}
 void SourceCore::clearAssembly(Assembly& a,bool recent) {
     a.active=false;a.trigger=a.base=0;a.actual=a.unique=0;a.first=a.last=0;
     a.firstIngressId=0;

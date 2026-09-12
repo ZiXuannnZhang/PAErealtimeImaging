@@ -4,6 +4,7 @@ project(diagnostic_recorder_test LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+find_package(Python3 COMPONENTS Interpreter QUIET)
 
 add_executable(ring_block_assembler_test
     ring_block_assembler_test.cpp
@@ -177,6 +178,13 @@ if(WIN32)
     target_link_libraries(paimage_network_test PRIVATE paimage_socket Qt6::Core Qt6::Concurrent ws2_32 iphlpapi)
     add_test(NAME paimage_network_test COMMAND paimage_network_test)
     set_tests_properties(paimage_network_test PROPERTIES RUN_SERIAL TRUE)
+    add_executable(paimage_start_race_test paimage_start_race_test.cpp)
+    target_include_directories(paimage_start_race_test PRIVATE ../include)
+    target_compile_definitions(paimage_start_race_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(paimage_start_race_test PRIVATE paimage_socket ws2_32)
+    add_test(NAME paimage_start_race
+        COMMAND paimage_start_race_test --output "${CMAKE_CURRENT_BINARY_DIR}/start-race-artifacts")
+    set_tests_properties(paimage_start_race PROPERTIES RUN_SERIAL TRUE)
     add_executable(paimage_host_output_test paimage_host_output_test.cpp
         ../src/PaimageAcquisition/HostOutput.cpp
         ../src/PaimageAcquisition/Backend.cpp
@@ -192,4 +200,10 @@ if(WIN32)
     target_include_directories(paimage_trace_bundle_test PRIVATE ../include)
     target_link_libraries(paimage_trace_bundle_test PRIVATE paimage_socket Qt6::Core)
     add_test(NAME paimage_trace_bundle_test COMMAND paimage_trace_bundle_test)
+endif()
+
+if(Python3_Interpreter_FOUND)
+    add_test(NAME startup_diagnostics_analyze_test
+        COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/startup_diagnostics_analyze_test.py"
+                "${CMAKE_CURRENT_BINARY_DIR}/startup-diagnostics-fixtures")
 endif()

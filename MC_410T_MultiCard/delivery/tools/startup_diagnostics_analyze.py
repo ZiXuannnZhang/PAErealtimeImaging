@@ -69,12 +69,40 @@ def percentiles(values: Iterable[float]) -> dict[str, float | None]:
     }
 
 
+DECISION_NAMES = {
+    0: "Accepted", 1: "Short", 2: "Disabled", 3: "RecentTrigger",
+    4: "Duplicate", 5: "OffsetOutside", 6: "Complete",
+    7: "TriggerSwitch", 8: "Timeout", 9: "StartupIdleClear",
+    10: "StartupOverflow", 11: "StartupConfirmed", 12: "SyncExpired",
+    13: "StopTruncated", 14: "StartupBuffered", 15: "CardOutput",
+    16: "SyncOutput", 17: "InvalidCard", 18: "StartupOverflowDiscard",
+    19: "StopBufferedDiscard", 20: "ListenerActiveDiscard",
+    21: "ListenerBufferedDiscard", 22: "ListenerPendingSyncDiscard",
+    23: "StartPendingSyncDiscard", 24: "StartActiveDiscard",
+    25: "StartupActiveDiscard", 26: "StartupPendingSyncDiscard",
+    27: "CompleteStartPendingSyncDiscard", 28: "CompleteStartActiveDiscard",
+    29: "StartFencePreStartDiscard", 30: "StartFenceHeld",
+    31: "StartFenceReleased", 32: "StartFenceFailedDiscard",
+    33: "StartFenceOverflow", 34: "StartFenceResetDiscard",
+    35: "StartFenceStopDiscard", 36: "StartFenceShutdownDiscard",
+}
+DIRECT_SOURCE_DECISIONS = frozenset({0, 1, 2, 3, 4, 5, 17})
+FENCE_FAILURE_DECISIONS = frozenset({32, 33})
+FENCE_DECISIONS = frozenset(range(29, 37))
+
+
+def decision_name(reason: int) -> str:
+    return DECISION_NAMES.get(int(reason), f"Decision{int(reason)}")
+
+
 def parse_application(root: Path) -> dict[str, Any]:
     metadata = read_json(root / "run-config.json", {}) or {}
     summary = read_json(root / "trace-summary.json", {}) or {}
     ingress: list[dict[str, Any]] = []
     all_times: list[int] = []
     stage2_rejects: list[dict[str, Any]] = []
+    stage2_decisions: list[dict[str, Any]] = []
+    start_sends: list[dict[str, Any]] = []
     sequences: set[int] = set()
     malformed = 0
     records = 0
@@ -117,10 +145,23 @@ def parse_application(root: Path) -> dict[str, Any]:
                     "stage": stage,
                     "reason": reason,
                 })
-            elif stage == 2 and reason not in (6, 7, 8):
-                stage2_rejects.append({
-                    "steadyNs": tick, "session": session, "card": card,
-                    "trigger": trigger, "reason": reason, "count": value,
+            elif stage == 2:
+                stage2_decisions.append({
+                    "sequence": sequence, "steadyNs": tick, "session": session,
+                    "correlation": correlation, "card": card, "trigger": trigger,
+                    "packet": packet, "reason": reason, "decision": decision_name(reason),
+                    "count": value,
+                })
+                if reason not in (6, 7, 8) and reason not in FENCE_DECISIONS:
+                    stage2_rejects.append({
+                        "steadyNs": tick, "session": session, "card": card,
+                        "trigger": trigger, "reason": reason, "count": value,
+                    })
+            elif stage == 6 and reason == 3:
+                start_sends.append({
+                    "sequence": sequence, "steadyNs": tick, "session": session,
+                    "correlation": correlation, "card": card, "sourceIPv4": ip_from_uint32(source_ip),
+                    "length": length, "error": value, "reason": reason, "commandPacket": packet,
                 })
 
     issued = int(summary.get("recordsIssued", 0) or 0)
@@ -287,9 +328,150 @@ def parse_application(root: Path) -> dict[str, Any]:
         "startupConsistency": consistency, "rhythm25ms": rhythm,
         "earliestSteadyNs": earliest, "latestSteadyNs": latest,
         "missingStoredRecords": missing_stored_records, "malformedRecords": malformed,
-        "traceIncomplete": bool(missing_stored_records or malformed or summary.get("traceIncomplete", False)),
+        "traceIncomplete": bool(
+            not summary or missing_stored_records or malformed or summary.get("traceIncomplete", False)
+            or int(summary.get("queueDropped", 0) or 0) > 0
+            or int(summary.get("writerUnwritten", 0) or 0) > 0
+            or bool(summary.get("writeFailed", False))
+        ),
         "sourceRejectIndicators": stage2_rejects,
+        "stage2Decisions": stage2_decisions,
+        "startSends": start_sends,
         "loop": loop, "loopRecords": loop_records, "diagnostics": diagnostics,
+    }
+
+
+def start_admission_evidence(application: dict[str, Any]) -> dict[str, Any]:
+    """Correlate START sends, raw ingress, and stage-2 decisions.
+
+    Correlation identity is (session, card, ingressId). Trigger and packet are
+    checked as exact descriptive fields, never used as a cross-session key.
+    """
+    starts = sorted(application.get("startSends", []), key=lambda item: (item.get("steadyNs", 0), item.get("sequence", 0)))
+    ingress = [item for item in application.get("ingressPackets", []) if int(item.get("card", -1)) >= 0]
+    decisions = application.get("stage2Decisions", [])
+    by_key: dict[tuple[int, int, int], list[dict[str, Any]]] = defaultdict(list)
+    for item in decisions:
+        by_key[(int(item.get("session", 0)), int(item.get("correlation", 0)), int(item.get("card", -1)))].append(item)
+
+    def matches(raw: dict[str, Any]) -> list[dict[str, Any]]:
+        candidates = by_key.get((int(raw.get("session", 0)), int(raw.get("correlation", 0)), int(raw.get("card", -1))), [])
+        return [item for item in candidates if int(item.get("trigger", 0)) == int(raw.get("trigger", 0))
+                and int(item.get("packet", 0)) == int(raw.get("packet", 0))]
+
+    metadata = application.get("metadata", {}) or {}
+    try:
+        expected_cards = int(metadata.get("cards", 0) or 0)
+    except (TypeError, ValueError):
+        expected_cards = 0
+    observed_cards = {int(item.get("card", -1)) for item in starts + ingress if int(item.get("card", -1)) >= 0}
+    expected_cards = expected_cards or (max(observed_cards) + 1 if observed_cards else 0)
+    session_ids = sorted({int(item.get("session", 0)) for item in starts + ingress})
+    sessions = []
+    classification_counts: dict[str, int] = defaultdict(int)
+    for session in session_ids:
+        session_starts = [item for item in starts if int(item.get("session", 0)) == session]
+        session_ingress = [item for item in ingress if int(item.get("session", 0)) == session]
+        failures = [item for item in session_starts if int(item.get("length", 0) or 0) != 58 or int(item.get("error", 0) or 0) != 0]
+        per_card = []
+        raw_after = direct_after = missing_after = disabled_after = held_after = released_after = prestart_discard = 0
+        has_gate_drop = False
+        has_fence_failure = bool(failures)
+        for card in range(expected_cards):
+            card_starts = [item for item in session_starts if int(item.get("card", -1)) == card]
+            card_starts.sort(key=lambda item: (item.get("steadyNs", 0), item.get("sequence", 0)))
+            boundary = int(card_starts[0].get("steadyNs", 0)) if card_starts else None
+            card_raw = [item for item in session_ingress if int(item.get("card", -1)) == card]
+            decision_counts: dict[str, int] = defaultdict(int)
+            card_raw_after = card_direct = card_missing = card_disabled = card_held = card_released = card_prestart = 0
+            for raw in card_raw:
+                joined = matches(raw)
+                for decision in joined:
+                    decision_counts[decision_name(int(decision.get("reason", -1)))] += 1
+                    reason = int(decision.get("reason", -1))
+                    if reason in FENCE_FAILURE_DECISIONS:
+                        has_fence_failure = True
+                if boundary is not None and int(raw.get("steadyNs", 0)) < boundary:
+                    if any(int(item.get("reason", -1)) == 29 for item in joined):
+                        card_prestart += 1
+                    else:
+                        card_missing += 1
+                    continue
+                if boundary is None:
+                    card_missing += 1
+                    continue
+                card_raw_after += 1
+                direct = [item for item in joined if int(item.get("reason", -1)) in DIRECT_SOURCE_DECISIONS]
+                if direct:
+                    card_direct += 1
+                    if any(int(item.get("reason", -1)) == 2 for item in direct):
+                        card_disabled += 1
+                else:
+                    card_missing += 1
+                if any(int(item.get("reason", -1)) == 30 for item in joined): card_held += 1
+                if any(int(item.get("reason", -1)) == 31 for item in joined): card_released += 1
+            if card_disabled: has_gate_drop = True
+            raw_after += card_raw_after; direct_after += card_direct; missing_after += card_missing
+            disabled_after += card_disabled; held_after += card_held; released_after += card_released; prestart_discard += card_prestart
+            per_card.append({
+                "card": card,
+                "startSendNs": boundary,
+                "startSendSucceeded": bool(card_starts) and not any(item in failures for item in card_starts),
+                "startSendAttemptCount": len(card_starts),
+                "rawIngressAfterBoundaryCount": card_raw_after,
+                "matchedDirectDecisionCount": card_direct,
+                "missingStage2JoinCount": card_missing,
+                "disabledIngressCount": card_disabled,
+                "heldIngressCount": card_held,
+                "releasedIngressCount": card_released,
+                "preStartDiscardCount": card_prestart,
+                "decisionCounts": dict(sorted(decision_counts.items())),
+            })
+        send_complete = bool(session_starts) and not failures and len({int(item.get("card", -1)) for item in session_starts}) >= expected_cards
+        trace_incomplete = bool(application.get("traceIncomplete", True))
+        if has_fence_failure:
+            classification = "application_start_fence_failed"
+        elif not session_starts or not send_complete or trace_incomplete or missing_after:
+            classification = "application_start_fence_inconclusive"
+        elif has_gate_drop:
+            classification = "application_start_gate_drop_observed"
+        elif raw_after == 0:
+            classification = "application_start_fence_inconclusive"
+        else:
+            classification = "application_start_fence_clean"
+        classification_counts[classification] += 1
+        sessions.append({
+            "session": session, "classification": classification, "traceIncomplete": trace_incomplete,
+            "expectedCardCount": expected_cards or None, "startSendCount": len(session_starts),
+            "startSendSucceeded": send_complete, "sendFailures": failures,
+            "rawIngressAfterBoundaryCount": raw_after, "matchedDirectDecisionCount": direct_after,
+            "missingStage2JoinCount": missing_after, "disabledIngressCount": disabled_after,
+            "heldIngressCount": held_after, "releasedIngressCount": released_after,
+            "preStartDiscardCount": prestart_discard, "negativeConclusionDowngraded": trace_incomplete,
+            "perCard": per_card,
+        })
+    priority = ("application_start_fence_failed", "application_start_gate_drop_observed",
+                "application_start_fence_inconclusive", "application_start_fence_clean")
+    status = next((value for value in priority if classification_counts.get(value)), "application_start_fence_inconclusive")
+    return {
+        "status": status,
+        "traceIncomplete": bool(application.get("traceIncomplete", True)),
+        "sessions": sessions,
+        "summary": {
+            "sessionCount": len(sessions), "startSendCount": len(starts),
+            "rawIngressAfterBoundaryCount": sum(item["rawIngressAfterBoundaryCount"] for item in sessions),
+            "matchedDirectDecisionCount": sum(item["matchedDirectDecisionCount"] for item in sessions),
+            "missingStage2JoinCount": sum(item["missingStage2JoinCount"] for item in sessions),
+            "disabledIngressCount": sum(item["disabledIngressCount"] for item in sessions),
+            "heldIngressCount": sum(item["heldIngressCount"] for item in sessions),
+            "releasedIngressCount": sum(item["releasedIngressCount"] for item in sessions),
+            "classificationCounts": dict(sorted(classification_counts.items())),
+        },
+        "limitations": [
+            "Only exact session/card/ingressId joins are treated as packet causality evidence.",
+            "Trigger and packet numbers are descriptive and are never joined across sessions.",
+            "Missing raw ingress cannot prove that a card or FPGA did not transmit.",
+        ],
     }
 
 
@@ -409,7 +591,10 @@ def read_json_line(line: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def evidence_matrix(application: dict[str, Any], system: dict[str, Any], clocks: dict[str, Any], rounds: dict[str, Any]) -> list[dict[str, Any]]:
+def evidence_matrix(application: dict[str, Any], system: dict[str, Any], clocks: dict[str, Any], rounds: dict[str, Any],
+                    start: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    start = start or {}
+    start_status = start.get("status", "application_start_fence_inconclusive")
     return [
         {"evidence": "application_per_packet_ingress", "available": bool(application.get("ingressPackets")),
          "verified": not application.get("traceIncomplete", True),
@@ -426,6 +611,11 @@ def evidence_matrix(application: dict[str, Any], system: dict[str, Any], clocks:
         {"evidence": "clock_alignment", "available": clocks.get("status") == "known",
          "verified": clocks.get("status") == "known",
          "conclusion": "steady/QPC/UTC anchors are available" if clocks.get("status") == "known" else "clock alignment remains unknown"},
+        {"evidence": "application_start_admission",
+         "available": bool(application.get("startSends") or application.get("ingressPackets")),
+         "verified": start_status in ("application_start_gate_drop_observed", "application_start_fence_clean",
+                                      "application_start_fence_failed"),
+         "conclusion": f"START Fence evidence classification: {start_status}"},
     ]
 
 
@@ -458,6 +648,7 @@ def run(application_path: Path, system_path: Path | None, rounds_path: Path | No
     except Exception as exc:  # keep the startup evidence report inspectable
         legacy = {"error": f"reused parser failed: {exc}"}
     application = parse_application(trace_root)
+    start = start_admission_evidence(application)
     system = system_evidence(system_path)
     clocks = clock_evidence(application, system)
     round_result = rounds_evidence(rounds, application)
@@ -468,10 +659,11 @@ def run(application_path: Path, system_path: Path | None, rounds_path: Path | No
         "systemCapture": str(system_path) if system_path else None,
         "roundsJson": str(rounds_path) if rounds_path else None,
         "application": application,
+        "startAdmissionEvidence": start,
         "systemCaptureEvidence": system,
         "rounds": round_result,
         "clockAnchors": clocks,
-        "evidenceConclusionMatrix": evidence_matrix(application, system, clocks, round_result),
+        "evidenceConclusionMatrix": evidence_matrix(application, system, clocks, round_result, start),
         "reusedTraceAnalyzer": legacy,
         "limitations": [
             "A missing system packet is not evidence of card/NIC/cable failure.",
@@ -501,6 +693,8 @@ def main() -> int:
         "systemStatus": result["systemCaptureEvidence"].get("status"),
         "systemClassification": result["systemCaptureEvidence"].get("classification"),
         "storageLoss": result["rounds"].get("storageLoss"),
+        "startAdmissionStatus": result["startAdmissionEvidence"].get("status"),
+        "startAdmissionSessions": len(result["startAdmissionEvidence"].get("sessions", [])),
     }, ensure_ascii=False))
     return 0
 
