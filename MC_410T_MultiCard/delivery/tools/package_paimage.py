@@ -37,6 +37,8 @@ def main():
              'missing-middle-28':('303c1c23-76bc-46c9-9bf5-81a8952ed864','production-missing-analysis.json')}
     for label,(run,analysis) in samples.items():
         trace=root/'build/paimage-host-checks/paimage-traces'/run
+        if not trace.exists() or not (root/'build'/analysis).exists():
+            continue
         source=list(trace.glob('trace-*.bin'))+[trace/'run-config.json',trace/'trace-summary.json']
         manifest={'exampleKind':'offline replay snapshot; not GUI export or hardware evidence','runId':run,'files':[]}
         with zipfile.ZipFile(examples/(label+'.zip'),'w',zipfile.ZIP_DEFLATED,compresslevel=1) as z:
