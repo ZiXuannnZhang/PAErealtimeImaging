@@ -140,7 +140,9 @@ private:
     void updateNetworkInfoIndicator(); // 把只读网络信息汇总到感叹号悬停提示
     void saveReconImage(const QImage &image, const QString &tag); // 实时重建图像 PNG 保存
     void updateRingImagingStatus(); // 环形模式成像运行状态反馈（当前块脉冲数，主线程调用）
-    void startListeningWithIPs(const QVector<QString>& onlineIPs); // 网段扫描完成后：创建 controller 并启动监听（主线程）
+    // targetSourceKind: "explicit_target_ips" 或 "config_ack_discovery"
+    void startListeningWithIPs(const QVector<QString>& onlineIPs,
+                               const QString& targetSourceKind); // 发现/显式目标完成后：创建 controller 并启动监听（主线程）
     void updateSystemCaptureStatus(const QString &status,
                                    const QJsonObject &fields = QJsonObject());
 
@@ -202,6 +204,11 @@ private:
     bool m_highDataRateWarningShown;
     bool m_pendingAutoSave;  // 重新监听后需要自动恢复保存（停止监听前处于保存状态）
     bool m_scanning = false; // 网段扫描进行中（防止重复触发）
+
+    // CONFIG-ACK 动态发现会话：结果回主线程后按 discoveryId 接纳，取消标志供后台线程退出。
+    QString m_activeDiscoveryId;
+    std::shared_ptr<std::atomic<bool>> m_discoveryCancel;
+    QString m_activeTargetSource;   // 最近一次监听启动的目标来源（诊断快照用）
 
     // 诊断上下文：每次开始监听生成新的会话标识，随 UI 日志/网络快照传递。
     QString m_diagnosticListenId;

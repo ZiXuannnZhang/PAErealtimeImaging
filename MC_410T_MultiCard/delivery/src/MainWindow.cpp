@@ -14,6 +14,7 @@
 #include "Constants.h"
 #include "AcqConfig.h"
 #include "StartupPolicy.h"
+#include "PaimageAcquisition/CardDiscovery.h"
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QSaveFile>
@@ -1843,50 +1844,131 @@ void MainWindow::onStartListenClicked()
             QVector<QString> ips;
             for (const QString &ip : g_targetIPs) ips << ip;
             logMessage(QString("使用固定目标 IP 启动监听：%1").arg(ips.join(", ")));
-            startListeningWithIPs(ips);
+            startListeningWithIPs(ips, QStringLiteral("explicit_target_ips"));
             return;
         }
 
-        // ══ 网段扫描自动识别（后台线程异步执行，避免阻塞 UI）══
-        logMessage(QString("正在扫描设备（%1 起 %2 个IP，后台进行，请稍候...）")
+        // ══ CONFIG-ACK 动态发现（后台线程；只有本次会话内返回 60 字节
+        // CONFIG 确认的候选 IP 才能成为采集卡，ICMP/ARP 仅作诊断证据）══
+        logMessage(QString("开始动态发现：候选 %1 起 %2 个地址（ICMP/ARP 可达仅作诊断，采集卡身份以 60 字节 CONFIG 确认为准）")
                    .arg(m_scanBaseIP).arg(m_scanIPCount));
         m_scanning = true;
         ui->btnStartListen->setEnabled(false);
-        setBtnText(ui->btnStartListen, "正在扫描...");
+        setBtnText(ui->btnStartListen, "正在发现采集卡...");
+        // 发现参数在点击时取一次不可变快照；发现期间锁定相关参数控件
+        ui->edtDataTime->setEnabled(false);
+        ui->edtADelay->setEnabled(false);
+        ui->edtBDelay->setEnabled(false);
 
-        const QString scanBase = m_scanBaseIP;
-        const int    scanCount = m_scanIPCount;
+        paimage::DiscoveryOptions options;
+        options.baseIP = m_scanBaseIP;
+        options.candidateCount = m_scanIPCount;
+        options.localBindIP = m_localBindIP;
+        options.configDurationNs = ui->edtDataTime->text().toInt();
+        options.delayANs = ui->edtADelay->text().toInt();
+        options.delayBNs = ui->edtBDelay->text().toInt();
+        options.discoveryId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        {
+            QSettings discoverySettings(paimageSettingsPath(), QSettings::IniFormat);
+            options.ackWindowMs = discoverySettings.value("Discovery/AckWindowMs", 2000).toInt();
+            options.maxAttempts = discoverySettings.value("Discovery/MaxAttempts", 5).toInt();
+            options.finalGraceMs = discoverySettings.value("Discovery/FinalGraceMs", 500).toInt();
+            options.icmpTimeoutMs = discoverySettings.value("Discovery/IcmpTimeoutMs", 150).toInt();
+        }
+        QString normalizationNote;
+        options = paimage::sanitizeDiscoveryOptions(options, &normalizationNote);
+        if (!normalizationNote.isEmpty())
+            logMessage(QString("发现参数已规范化：%1").arg(normalizationNote));
+        logMessage(QString("发现参数：ACK 窗口 %1ms × 最多 %2 轮，末轮宽限 %3ms（总等待上限约 %4 s）")
+                   .arg(options.ackWindowMs).arg(options.maxAttempts)
+                   .arg(options.finalGraceMs)
+                   .arg((options.ackWindowMs * options.maxAttempts + options.finalGraceMs) / 1000.0,
+                        0, 'f', 1));
 
-        // 后台扫描只接收值参数；完成后由 QFutureWatcher 安全回到 UI。
-        // QPointer 使窗口在扫描完成前关闭时直接丢弃回调，避免访问悬空 this。
-        const QString listenId = m_diagnosticListenId;
+        // 后台发现只接收值快照与取消标志；完成后由 QFutureWatcher 回到 UI。
+        // QPointer 使窗口在发现完成前关闭时直接丢弃回调，避免访问悬空 this。
+        m_activeDiscoveryId = options.discoveryId;
+        m_discoveryCancel = std::make_shared<std::atomic<bool>>(false);
+        const paimage::DiscoveryOptions optionsSnapshot = options;
+        const auto cancelFlag = m_discoveryCancel;
+        const QString activeDiscoveryId = m_activeDiscoveryId;
         const QPointer<MainWindow> guard(this);
-        auto *watcher = new QFutureWatcher<QVector<QString>>(this);
+        auto *watcher = new QFutureWatcher<paimage::DiscoveryResult>(this);
         connect(watcher,
-                &QFutureWatcher<QVector<QString>>::finished,
+                &QFutureWatcher<paimage::DiscoveryResult>::finished,
                 this,
-                [guard, watcher]() {
-                    const QVector<QString> onlineIPs = watcher->result();
+                [guard, watcher, activeDiscoveryId, cancelFlag]() {
+                    const paimage::DiscoveryResult result = watcher->result();
                     watcher->deleteLater();
                     if (!guard) return;
                     MainWindow *window = guard.data();
                     window->m_scanning = false;
-                    if (onlineIPs.isEmpty()) {
-                        window->logMessage("❌ 未扫描到任何在线采集卡，请检查网线/交换机/采集卡上电状态");
+                    window->ui->edtDataTime->setEnabled(true);
+                    window->ui->edtADelay->setEnabled(true);
+                    window->ui->edtBDelay->setEnabled(true);
+                    const auto restoreButton = [window]() {
                         setBtnText(window->ui->btnStartListen, "开始监听");
                         window->ui->btnStartListen->setProperty("state", QVariant());
                         window->ui->btnStartListen->style()->unpolish(window->ui->btnStartListen);
                         window->ui->btnStartListen->style()->polish(window->ui->btnStartListen);
                         window->ui->btnStartListen->setEnabled(true);
+                    };
+                    // 旧发现会话的迟到结果不得覆盖新会话状态
+                    if (!paimage::canApplyDiscoveryResult(window->isEnabled(),
+                                                          activeDiscoveryId, result)) {
+                        if (window->isEnabled()) restoreButton();
                         return;
                     }
-                    window->logMessage(QString("✅ 扫描到 %1 张在线采集卡：%2 ~ %3")
-                                       .arg(onlineIPs.size()).arg(onlineIPs.first()).arg(onlineIPs.last()));
-                    window->startListeningWithIPs(onlineIPs);
+                    window->m_activeDiscoveryId.clear();
+                    if (!result.error.isEmpty()) {
+                        window->logMessage(QString("❌ 动态发现失败：%1（未修改卡数）")
+                                               .arg(result.error));
+                        restoreButton();
+                        return;
+                    }
+                    if (result.cancelled) {
+                        restoreButton();
+                        return;
+                    }
+                    int excludedLocal = 0, timedOut = 0, sendFailed = 0;
+                    for (const auto &candidate : result.candidates) {
+                        if (candidate.state == paimage::DiscoveryCandidateState::ExcludedLocal)
+                            ++excludedLocal;
+                        else if (candidate.state == paimage::DiscoveryCandidateState::TimedOut)
+                            ++timedOut;
+                        else if (candidate.state == paimage::DiscoveryCandidateState::SendFailed)
+                            ++sendFailed;
+                    }
+                    window->logMessage(
+                        QString("发现结果：候选 %1 个，本机地址排除 %2 个，CONFIG 已确认采集卡 %3 张，"
+                                "超时 %4 个，发送失败 %5 个")
+                            .arg(result.candidates.size())
+                            .arg(excludedLocal)
+                            .arg(result.verifiedIPs.size())
+                            .arg(timedOut)
+                            .arg(sendFailed));
+                    if (result.verifiedIPs.isEmpty()) {
+                        window->logMessage("❌ 未发现任何返回 60 字节 CONFIG 确认的采集卡，"
+                                           "请检查网线/交换机/采集卡上电状态");
+                        restoreButton();
+                        return;
+                    }
+                    for (const auto &candidate : result.candidates) {
+                        if (candidate.state != paimage::DiscoveryCandidateState::Verified)
+                            continue;
+                        window->logMessage(
+                            QString("✅ 采集卡确认：%1（第 %2 轮确认，首次发送到确认 %3 ms，重复确认 %4 次）")
+                                .arg(candidate.ip)
+                                .arg(candidate.verifiedRound)
+                                .arg((candidate.firstAckNs - candidate.firstSendNs + 500000) / 1000000)
+                                .arg(candidate.duplicateAck60Count));
+                    }
+                    window->startListeningWithIPs(result.verifiedIPs,
+                                                  QStringLiteral("config_ack_discovery"));
                 });
         watcher->setFuture(QtConcurrent::run(
-            [scanBase, scanCount, listenId]() {
-                return NetworkController::scanReachableIPs(scanBase, scanCount, listenId);
+            [optionsSnapshot, cancelFlag]() {
+                return paimage::runDiscovery(optionsSnapshot, *cancelFlag);
             }));
 
     } else {
@@ -1960,10 +2042,11 @@ void MainWindow::onStartListenClicked()
 }
 
 // =====================================================================
-// startListeningWithIPs — 网段扫描完成后：创建 controller 并启动监听
-// 仅在主线程（异步扫描完成回调）调用；onlineIPs 为按序排列的在线卡 IP
+// startListeningWithIPs — 显式目标或 CONFIG-ACK 发现完成后：创建 controller 并启动监听
+// 仅在主线程（异步发现完成回调）调用；onlineIPs 为按序排列的已确认卡 IP
 // =====================================================================
-void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
+void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
+                                       const QString& targetSourceKind)
 {
     // 新监听会话：重置各卡触发去重序号，避免把首触发当作旧数据跳过
     for (int i = 0; i < MAX_CARDS; ++i) m_lastFeedSeq[i] = 0xFFFF;
@@ -1974,11 +2057,13 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
     m_systemCaptureLastState.clear();
     updateSystemCaptureStatus(QStringLiteral("未准备"));
 
-    const QString targetSource = g_targetIPs.isEmpty()
-        ? QStringLiteral("网段扫描")
-        : QStringLiteral("显式 --target-ips");
-    logMessage(QString("监听启动目标来源：%1；物理采集卡数=%2（每卡 2 个通道）")
-               .arg(targetSource).arg(onlineIPs.size()));
+    const bool explicitTargets = targetSourceKind == QStringLiteral("explicit_target_ips");
+    const QString targetSourceLabel = explicitTargets
+        ? QStringLiteral("显式 --target-ips")
+        : QStringLiteral("CONFIG-ACK 动态发现");
+    m_activeTargetSource = targetSourceKind;
+    logMessage(QString("监听启动目标来源：%1（%2）；物理采集卡数=%3（每卡 2 个通道）")
+               .arg(targetSourceLabel, targetSourceKind).arg(onlineIPs.size()));
     for (int i = 0; i < onlineIPs.size(); ++i) {
         logMessage(QString("监听目标映射：物理卡%1 -> %2（通道 A/B）")
                    .arg(i + 1).arg(onlineIPs.at(i)));
@@ -1995,8 +2080,7 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
     m_netController = new NetworkController(this);
     m_netController->setDiagnosticContext(
         m_diagnosticListenId,
-        g_targetIPs.isEmpty() ? QStringLiteral("网段扫描")
-                              : QStringLiteral("显式 --target-ips"));
+        targetSourceKind);
     recordAcquisitionSnapshot(onlineIPs, QStringLiteral("listen_starting"));
     // 环形实时馈送回调：DataProcessor 每触发直连入队（须在 start() 之前设置）
     m_netController->setRingFeedSink(
@@ -3011,9 +3095,10 @@ QJsonObject MainWindow::diagnosticAcquisitionSnapshot(
     return {
         {QStringLiteral("kind"), QStringLiteral("acquisition")},
         {QStringLiteral("phase"), phase},
-        {QStringLiteral("source"), QStringLiteral("ui")},
-        {QStringLiteral("listenId"), m_diagnosticListenId},
-        {QStringLiteral("nCards"), effectiveTargets.isEmpty() ? m_nCards : effectiveTargets.size()},
+          {QStringLiteral("source"), QStringLiteral("ui")},
+          {QStringLiteral("listenId"), m_diagnosticListenId},
+          {QStringLiteral("targetSource"), m_activeTargetSource},
+          {QStringLiteral("nCards"), effectiveTargets.isEmpty() ? m_nCards : effectiveTargets.size()},
         {QStringLiteral("targetIPs"), targetArray},
         {QStringLiteral("localBindIP"), m_localBindIP},
         {QStringLiteral("scanBaseIP"), m_scanBaseIP},
@@ -3762,6 +3847,8 @@ void MainWindow::updateNetworkInfoIndicator()
 // =====================================================================
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    // 发现线程在短轮询间隔内检查取消标志并尽快退出（socket 由 RAII 关闭）
+    if (m_discoveryCancel) m_discoveryCancel->store(true);
     saveSettings();
 
     if (!m_netController) {

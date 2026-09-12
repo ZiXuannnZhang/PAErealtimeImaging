@@ -98,6 +98,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME PAimageReceiverDiag
 target_sources(${PROJECT_NAME} PRIVATE
     src/StartupPolicy.cpp
     src/PaimageAcquisition/SourceCore.cpp
+    src/PaimageAcquisition/CardDiscovery.cpp
     src/PaimageAcquisition/ControlState.cpp
     src/PaimageAcquisition/ControlSocket.cpp
     src/PaimageAcquisition/SocketReceiver.cpp
