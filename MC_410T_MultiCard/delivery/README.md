@@ -325,6 +325,15 @@ Set-Location <repo>\MC_410T_MultiCard\delivery
 .\build_mingw_debug.cmd
 ```
 
+线性成像运行库默认从 `libs/imaging` 读取。若 `cufft64_12.dll` 位于外部、已核验的部署包，先设置运行库目录再构建：
+
+```powershell
+$env:PAIMAGE_IMAGING_RUNTIME_DIR = 'D:\artifacts\CardDiscoveryFix'
+.\build_mingw_debug.cmd build
+```
+
+该目录必须同时包含 `pa_recon_core.dll` 和 `cufft64_12.dll`；大型 CUDA DLL 不需要提交到 Git。
+
 正式任务的具体构建与测试命令以 `TASKS/` 中当次任务文档为准。不要因为组件重放通过就推断真实 NIC/FPGA 链路无丢包。
 
 ## 当前验证边界

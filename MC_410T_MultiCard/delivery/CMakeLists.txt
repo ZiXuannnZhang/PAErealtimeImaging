@@ -212,6 +212,20 @@ endif()
 # ============================================================
 set(IMAGING_ZMQ_DIR "${CMAKE_SOURCE_DIR}/third_party/zeromq"
     CACHE PATH "ZeroMQ directory for imaging IPC")
+set(IMAGING_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libs/imaging"
+    CACHE PATH "Directory containing pa_recon_core.dll and cufft64_12.dll")
+set(IMAGING_RUNTIME_CORE_DLL "${IMAGING_RUNTIME_DIR}/pa_recon_core.dll")
+set(IMAGING_RUNTIME_CUFFT_DLL "${IMAGING_RUNTIME_DIR}/cufft64_12.dll")
+foreach(_imaging_runtime_file IN ITEMS
+    "${IMAGING_RUNTIME_CORE_DLL}"
+    "${IMAGING_RUNTIME_CUFFT_DLL}")
+    if(NOT EXISTS "${_imaging_runtime_file}")
+        message(FATAL_ERROR
+            "Missing imaging runtime file: ${_imaging_runtime_file}. "
+            "Set IMAGING_RUNTIME_DIR to the external imaging runtime bundle.")
+    endif()
+endforeach()
+message(STATUS "Imaging runtime directory: ${IMAGING_RUNTIME_DIR}")
 if(MSVC)
     set(IMAGING_ZMQ_IMPORT_LIB "${IMAGING_ZMQ_DIR}/lib/libzmq-v141-mt-4_3_5.lib")
 else()
@@ -224,10 +238,10 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         "${IMAGING_ZMQ_DIR}/bin/libzmq-v141-mt-4_3_5.dll"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_SOURCE_DIR}/libs/imaging/pa_recon_core.dll"
+        "${IMAGING_RUNTIME_CORE_DLL}"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_SOURCE_DIR}/libs/imaging/cufft64_12.dll"
+        "${IMAGING_RUNTIME_CUFFT_DLL}"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
     COMMENT "Deploying imaging runtime DLLs"
 )

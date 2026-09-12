@@ -60,6 +60,20 @@ target_link_libraries(ImagingSvc PRIVATE "${IMAGING_ZMQ_IMPORT_LIB}")
 # ============================================================
 # 成像算法库
 # ============================================================
+if(NOT IMAGING_RUNTIME_DIR)
+    set(IMAGING_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../libs/imaging")
+endif()
+set(IMAGING_RUNTIME_CORE_DLL "${IMAGING_RUNTIME_DIR}/pa_recon_core.dll")
+set(IMAGING_RUNTIME_CUFFT_DLL "${IMAGING_RUNTIME_DIR}/cufft64_12.dll")
+foreach(_imaging_runtime_file IN ITEMS
+    "${IMAGING_RUNTIME_CORE_DLL}"
+    "${IMAGING_RUNTIME_CUFFT_DLL}")
+    if(NOT EXISTS "${_imaging_runtime_file}")
+        message(FATAL_ERROR
+            "Missing imaging runtime file: ${_imaging_runtime_file}. "
+            "Set IMAGING_RUNTIME_DIR to the external imaging runtime bundle.")
+    endif()
+endforeach()
 target_link_libraries(ImagingSvc PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../libs/imaging/pa_recon_core.lib"
 )
@@ -81,10 +95,10 @@ set_target_properties(ImagingSvc PROPERTIES
 # ============================================================
 add_custom_command(TARGET ImagingSvc POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../libs/imaging/pa_recon_core.dll"
+        "${IMAGING_RUNTIME_CORE_DLL}"
         $<TARGET_FILE_DIR:ImagingSvc>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../libs/imaging/cufft64_12.dll"
+        "${IMAGING_RUNTIME_CUFFT_DLL}"
         $<TARGET_FILE_DIR:ImagingSvc>
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${IMAGING_ZMQ_DIR}/bin/libzmq-v141-mt-4_3_5.dll"

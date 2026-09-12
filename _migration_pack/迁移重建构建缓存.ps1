@@ -6,6 +6,7 @@
 # 用法（在新工作区中执行）：
 #   pwsh -ExecutionPolicy Bypass -File .\_migration_pack\迁移重建构建缓存.ps1
 #   pwsh -ExecutionPolicy Bypass -File .\_migration_pack\迁移重建构建缓存.ps1 -QtRoot "E:\Qt\Qt6.8.0"
+#   pwsh -ExecutionPolicy Bypass -File .\_migration_pack\迁移重建构建缓存.ps1 -ImagingRuntimeDir "D:\artifacts\CardDiscoveryFix"
 #
 # 说明：
 #   - 不删除旧 build，只改名 build_oldpath_<时间戳>，方便回看；
@@ -16,6 +17,7 @@ param(
     [string]$QtRoot = "D:\Qt\Qt6.8.0",
     [string]$CmakeExe = "",
     [string]$WorkspaceRoot = "",
+    [string]$ImagingRuntimeDir = "",
     [switch]$ForceStopApps,
     [switch]$CheckOnly
 )
@@ -30,10 +32,18 @@ $delivery = Join-Path $WorkspaceRoot "MC_410T_MultiCard\delivery"
 $buildDir = Join-Path $delivery "build\mingw_make"
 $prebuiltSrc = Join-Path $PSScriptRoot "prebuilt_cuda\bin"
 $prebuiltDst = Join-Path $delivery "third_party\ring_recon_cuda_prebuilt\bin"
+if (-not $ImagingRuntimeDir) {
+    $ImagingRuntimeDir = Join-Path $delivery "libs\imaging"
+}
+if (-not (Test-Path -LiteralPath $ImagingRuntimeDir -PathType Container)) {
+    throw "Imaging runtime directory missing: $ImagingRuntimeDir"
+}
+$ImagingRuntimeDir = (Resolve-Path -LiteralPath $ImagingRuntimeDir).Path
 
 Write-Host "== Reconfigure CMake build cache for new workspace =="
 Write-Host "WorkspaceRoot : $WorkspaceRoot"
 Write-Host "Delivery      : $delivery"
+Write-Host "ImagingRuntime: $ImagingRuntimeDir"
 
 if (-not (Test-Path -LiteralPath $delivery)) {
     throw "Delivery source directory missing: $delivery"
@@ -53,8 +63,8 @@ $required = @($preflightCmake,
     (Join-Path $delivery 'third_party\zeromq\lib\libzmq.dll.a'),
     (Join-Path $delivery 'third_party\zeromq\bin\libzmq-v141-mt-4_3_5.dll'),
     (Join-Path $delivery 'libs\imaging\pa_recon_core.lib'),
-    (Join-Path $delivery 'libs\imaging\pa_recon_core.dll'),
-    (Join-Path $delivery 'libs\imaging\cufft64_12.dll'),
+    (Join-Path $ImagingRuntimeDir 'pa_recon_core.dll'),
+    (Join-Path $ImagingRuntimeDir 'cufft64_12.dll'),
     (Join-Path $delivery 'CMakeLists.txt'),
     (Join-Path $WorkspaceRoot 'PALiveImagingSimSender\CMakeLists.txt'))
 foreach ($component in @('Core','Gui','Widgets','PrintSupport','OpenGL','OpenGLWidgets','Svg','Concurrent')) {
@@ -182,6 +192,7 @@ $configureArgs = @(
     "-DUSE_ZEROMQ=ON",
     "-DZMQ_INSTALL=$(Join-Path $delivery 'third_party\zeromq')",
     "-DIMAGING_ZMQ_DIR=$(Join-Path $delivery 'third_party\zeromq')",
+    "-DIMAGING_RUNTIME_DIR=$ImagingRuntimeDir",
     "-DRING_RECON_CUDA_IMPORT_LIB=$importLib",
     "-DRING_RECON_CUDA_BIN=$cudaBin"
 )

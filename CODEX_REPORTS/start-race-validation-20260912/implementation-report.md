@@ -43,3 +43,11 @@
 - 实现提交：`7a74d3666a7453776fd2e5692334a5fd4977a499`
 - 本报告随后作为独立提交加入同一分支；最终本地/远端 SHA 以推送后的交付回执为准。
 - 未 merge、未 rebase、未 force push。
+
+## Follow-up: environment limit remediation (2026-09-12)
+
+- Qt/MinGW test runtime deployment was fixed in `MC_410T_MultiCard/delivery/tests/CMakeLists.txt`: Qt6 Core/Gui/Widgets/Concurrent and MinGW runtime DLLs are copied beside every Qt-linked test executable. The full CTest run reached 31/32; all former `0xc0000135` failures passed.
+- The UDP discovery socket test passed after the authorized termination of PID 1528 (`PAimageReceiverDiagnostics`), which had occupied UDP 8000–8004.
+- Linear imaging runtime deployment now uses the cache variable `IMAGING_RUNTIME_DIR`, shared by the main target and `ImagingSvc`. `build_mingw_debug.cmd`, the migration rebuild script, and the README document external runtime-bundle injection. The verified bundle supplied `pa_recon_core.dll` and `cufft64_12.dll`; the latter SHA-256 is `2480D8AB849D7E9A375275F6C0278B8764C14AC0C1A3BDACAF256AE4A93C5590`.
+- Production MinGW Debug configure and build completed successfully, including `PAimageReceiverDiagnostics.exe`, `ImagingSvc.exe`, `ring_svc_selftest.exe`, and `ring_udp_replay.exe`.
+- The only remaining CTest failure is the pre-existing `paimage_trace_bundle_test`: its fixture still expects the old continuous `looplog-0.bin` behavior, while the current `LoopLog` implementation writes rolling burst-window files. This is independent of Qt DLL loading, UDP ports, and the imaging runtime dependency.

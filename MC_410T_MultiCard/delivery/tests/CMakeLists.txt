@@ -207,3 +207,58 @@ if(Python3_Interpreter_FOUND)
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/startup_diagnostics_analyze_test.py"
                 "${CMAKE_CURRENT_BINARY_DIR}/startup-diagnostics-fixtures")
 endif()
+
+# Keep Qt-linked tests self-contained. Relying on the caller's PATH makes a
+# single test appear healthy while the full CTest sequence can fail with
+# STATUS_DLL_NOT_FOUND on Windows. Deploy the Qt and MinGW runtime DLLs beside
+# every Qt test executable instead.
+if(WIN32)
+    set(_paimage_qt_runtime_files "$<TARGET_FILE:Qt6::Core>")
+    foreach(_paimage_qt_target IN ITEMS Qt6::Gui Qt6::Widgets Qt6::Concurrent)
+        if(TARGET ${_paimage_qt_target})
+            list(APPEND _paimage_qt_runtime_files "$<TARGET_FILE:${_paimage_qt_target}>")
+        endif()
+    endforeach()
+
+    set(_paimage_compiler_runtime_files)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        get_filename_component(_paimage_mingw_bin_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        list(APPEND _paimage_compiler_runtime_files
+            "${_paimage_mingw_bin_dir}/libgcc_s_seh-1.dll"
+            "${_paimage_mingw_bin_dir}/libstdc++-6.dll"
+            "${_paimage_mingw_bin_dir}/libwinpthread-1.dll")
+    endif()
+
+    function(paimage_deploy_qt_test_runtime _paimage_test_target)
+        if(TARGET ${_paimage_test_target})
+            add_custom_command(TARGET ${_paimage_test_target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${_paimage_qt_runtime_files}
+                    ${_paimage_compiler_runtime_files}
+                    "$<TARGET_FILE_DIR:${_paimage_test_target}>"
+                COMMAND_EXPAND_LISTS
+                VERBATIM)
+        endif()
+    endfunction()
+
+    foreach(_paimage_qt_test IN ITEMS
+        data_processor_imaging_isolation_test
+        diagnostic_recorder_test
+        ring_shm_observability_test
+        diagnostic_dialog_test
+        diagnostic_time_window_test
+        process_scheduling_test
+        network_ingress_observability_test
+        network_snapshot_test
+        network_diagnostics_test
+        measurement_session_transaction_test
+        session_boundary_test
+        session_boundary_receiver_test
+        data_processor_batch_test
+        card_status_formatting_test
+        paimage_network_test
+        paimage_host_output_test
+        paimage_trace_bundle_test)
+        paimage_deploy_qt_test_runtime(${_paimage_qt_test})
+    endforeach()
+endif()
