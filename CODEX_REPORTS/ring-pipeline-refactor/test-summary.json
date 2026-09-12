@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "buildDir": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\MC_410T_MultiCard\\delivery\\build\\refactor_tests",
+  "testCount": 30,
+  "failed": 0,
+  "results": [
+    {
+      "name": "ring_block_assembler_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-001-ring_block_assembler_test.log"
+    },
+    {
+      "name": "round_tracker_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-002-round_tracker_test.log"
+    },
+    {
+      "name": "imaging_bypass_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-003-imaging_bypass_test.log"
+    },
+    {
+      "name": "data_processor_imaging_isolation_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-004-data_processor_imaging_isolation_test.log"
+    },
+    {
+      "name": "diagnostic_recorder_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-005-diagnostic_recorder_test.log"
+    },
+    {
+      "name": "ring_shm_observability_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-006-ring_shm_observability_test.log"
+    },
+    {
+      "name": "ring_shm_v3_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-007-ring_shm_v3_test.log"
+    },
+    {
+      "name": "diagnostic_dialog_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-008-diagnostic_dialog_test.log"
+    },
+    {
+      "name": "diagnostic_time_window_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-009-diagnostic_time_window_test.log"
+    },
+    {
+      "name": "process_scheduling_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-010-process_scheduling_test.log"
+    },
+    {
+      "name": "network_ingress_observability_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-011-network_ingress_observability_test.log"
+    },
+    {
+      "name": "network_snapshot_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-012-network_snapshot_test.log"
+    },
+    {
+      "name": "network_diagnostics_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-013-network_diagnostics_test.log"
+    },
+    {
+      "name": "measurement_session_transaction_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-014-measurement_session_transaction_test.log"
+    },
+    {
+      "name": "session_boundary_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-015-session_boundary_test.log"
+    },
+    {
+      "name": "session_boundary_receiver_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-016-session_boundary_receiver_test.log"
+    },
+    {
+      "name": "data_processor_batch_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-017-data_processor_batch_test.log"
+    },
+    {
+      "name": "card_status_formatting_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-018-card_status_formatting_test.log"
+    },
+    {
+      "name": "paimage_network_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-019-paimage_network_test.log"
+    },
+    {
+      "name": "paimage_host_output_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-020-paimage_host_output_test.log"
+    },
+    {
+      "name": "paimage_trace_bundle_test",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-021-paimage_trace_bundle_test.log"
+    },
+    {
+      "name": "paimage_core_checks",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-022-paimage_core_checks.log"
+    },
+    {
+      "name": "paimage_output_checks",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-023-paimage_output_checks.log"
+    },
+    {
+      "name": "paimage_control_checks",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-024-paimage_control_checks.log"
+    },
+    {
+      "name": "paimage_socket_short",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-025-paimage_socket_short.log"
+    },
+    {
+      "name": "paimage_trace_checks",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-026-paimage_trace_checks.log"
+    },
+    {
+      "name": "paimage_worker_checks",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-027-paimage_worker_checks.log"
+    },
+    {
+      "name": "paimage_protocol_checks",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-028-paimage_protocol_checks.log"
+    },
+    {
+      "name": "paimage_conversion_checks",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-029-paimage_conversion_checks.log"
+    },
+    {
+      "name": "paimage_looplog_checks",
+      "exitCode": 0,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\_ring_pipeline_refactor_20260912\\CODEX_REPORTS\\ring-pipeline-refactor\\test-030-paimage_looplog_checks.log"
+    }
+  ]
+}
