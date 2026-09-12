@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory=$true)][string]$StatePath,
     [string]$AdapterPath = '',
     [switch]$StartFailure
@@ -119,8 +119,7 @@ try {
     }
     $lock = New-CaptureLock $root
     if ($null -eq $lock) {
-        Add-StopFailure 'capture session is already being stopped or started'
-        Save-StopState 'failed'
+        [Console]::Error.WriteLine('capture session is already being stopped or started; existing state was not changed')
         exit 2
     }
 
@@ -133,15 +132,21 @@ try {
     if ($stateResources.PSObject.Properties.Name -contains 'filterNames') { $stateFilterNames = @($stateResources.filterNames | ForEach-Object { [string]$_ }) }
     $cardIPs = @((Get-RequiredProperty $state 'cardIPs' @()) | ForEach-Object { [string]$_ })
     $ports = @((Get-RequiredProperty $state 'ports' @()) | ForEach-Object { [int]$_ })
-    $expectedFilters = if ($cardIPs.Count -gt 0 -and $ports.Count -gt 0) { @(New-CaptureFilterSpecs $cardIPs $ports) } else { @() }
+    $filterPrefix = [string](Get-RequiredProperty $state 'filterPrefix' 'StartupDiag')
+    $expectedFilters = if ($cardIPs.Count -gt 0 -and $ports.Count -gt 0) { @(New-CaptureFilterSpecs $cardIPs $ports $filterPrefix | Where-Object { $stateFilterNames -contains $_.name }) } else { @() }
 
     $pktmonStatusRecord = Invoke-StopCommand 'pktmon.exe' @('status') 'check pktmon ownership before stop' 15
     $pktmonState = Get-ToolState $pktmonStatusRecord 'pktmon'
     Set-StopProperty 'stopPktmonStatus' $pktmonState
     if ($hadPktmon -and $ownerVerified) {
         if ($pktmonState -eq 'running') {
-            $pktmonStopRecord = Invoke-StopCommand 'pktmon.exe' @('stop') 'stop owned pktmon session' 60
-            if (Test-CommandSucceeded $pktmonStopRecord) { $pktmonStopped = $true } else { Add-StopFailure 'pktmon stop command failed' }
+            $ownerFilters = Get-FilterInventory (Invoke-StopCommand 'pktmon.exe' @('filter','list') 'verify session-specific filters before stop' 15)
+            $postStart = @($commands | Where-Object { $_.description -eq 'confirm pktmon started' } | Select-Object -Last 1)
+            $sameStatus = $postStart.Count -eq 1 -and (Get-CaptureCommandText $postStart[0]).Trim() -eq (Get-CaptureCommandText $pktmonStatusRecord).Trim()
+            if ($filterPrefix -ne 'StartupDiag' -and $sameStatus -and (Test-FilterInventoryExact $ownerFilters $expectedFilters)) {
+                $pktmonStopRecord = Invoke-StopCommand 'pktmon.exe' @('stop') 'stop owned pktmon session' 60
+                if (Test-CommandSucceeded $pktmonStopRecord) { $pktmonStopped = $true } else { Add-StopFailure 'pktmon stop command failed' }
+            } else { Add-StopFailure 'pktmon ownership_unknown: session-specific filters or status no longer match; no global stop attempted' }
         } elseif ($pktmonState -eq 'stopped') {
             $pktmonStopped = $true
         } elseif ($pktmonState -eq 'unknown' -or $pktmonState -eq 'command_failed') {
@@ -152,12 +157,14 @@ try {
     }
 
     if ($hadWpr -and $ownerVerified) {
-        $wprStatusRecord = Invoke-StopCommand 'wpr.exe' @('-status') 'check WPR ownership before stop' 15
+        $wprInstance = [string](Get-RequiredProperty $state 'wprInstanceName' '')
+        if (-not $wprInstance) { throw 'WPR ownership_unknown: no named instance was recorded; no global stop attempted' }
+        $wprStatusRecord = Invoke-StopCommand 'wpr.exe' @('-status','-instancename',$wprInstance) 'check WPR ownership before stop' 15
         $wprState = Get-ToolState $wprStatusRecord 'wpr'
         Set-StopProperty 'stopWprStatus' $wprState
         if ($wprState -eq 'running') {
             $wprOutput = Join-Path $root 'wpr.etl'
-            $wprStopRecord = Invoke-StopCommand 'wpr.exe' @('-stop',$wprOutput) 'stop owned WPR session and save ETL' 60
+            $wprStopRecord = Invoke-StopCommand 'wpr.exe' @('-stop',$wprOutput,'-instancename',$wprInstance) 'stop owned WPR session and save ETL' 60
             if (Test-CommandSucceeded $wprStopRecord) { $wprStopped = $true } else { Add-StopFailure 'WPR stop command failed' }
         } elseif ($wprState -eq 'stopped') {
             $wprStopped = $true
@@ -169,11 +176,11 @@ try {
     $pktmonEtl = Join-Path $root 'pktmon.etl'
     $pktmonPcap = Join-Path $root 'pktmon.pcapng'
     $pktmonText = Join-Path $root 'pktmon.txt'
-    $pktmonDrop = Join-Path $root 'pktmon-drop.txt'
-    if (Test-Path -LiteralPath $pktmonEtl) {
-        $conversion.Add((Invoke-StopCommand 'pktmon.exe' @('etl2txt',$pktmonEtl,'-o',$pktmonText) 'convert pktmon ETL to text' 120))
-        $conversion.Add((Invoke-StopCommand 'pktmon.exe' @('etl2txt',$pktmonEtl,'-o',$pktmonDrop,'--drop-only') 'convert pktmon drop-only evidence' 120))
-        $conversion.Add((Invoke-StopCommand 'pktmon.exe' @('etl2pcap',$pktmonEtl,'-o',$pktmonPcap) 'convert pktmon ETL to PcapNG' 120))
+    $pktmonDrop = Join-Path $root 'pktmon-drop.pcapng'
+    if ($pktmonStopped -and (Test-Path -LiteralPath $pktmonEtl)) {
+        $conversion.Add((Invoke-StopCommand 'pktmon.exe' @('etl2txt',$pktmonEtl,'-o',$pktmonText) 'convert pktmon ETL to text' 60))
+        $conversion.Add((Invoke-StopCommand 'pktmon.exe' @('etl2pcap',$pktmonEtl,'-o',$pktmonDrop,'--drop-only') 'convert pktmon drop-only evidence' 60))
+        $conversion.Add((Invoke-StopCommand 'pktmon.exe' @('etl2pcap',$pktmonEtl,'-o',$pktmonPcap) 'convert pktmon ETL to PcapNG' 60))
     } else {
         Add-StopFailure 'pktmon ETL is missing after stop'
     }
@@ -187,9 +194,9 @@ try {
     if (Test-FilterInventoryEmpty $filterInventory) {
         $cleanupVerified = $true
         $filterCleanupStatus = 'already_empty'
-    } elseif ($ownerVerified -and $expectedFilters.Count -gt 0 -and (Test-FilterInventoryExact $filterInventory $expectedFilters)) {
+    } elseif ((-not $hadPktmon -or $pktmonStopped) -and $expectedFilters.Count -gt 0 -and (Test-FilterInventoryExact $filterInventory $expectedFilters)) {
         $removeHelp = Invoke-StopCommand 'pktmon.exe' @('filter','remove','help') 'check named pktmon filter removal support' 15
-        $namedRemoval = Test-CommandSucceeded $removeHelp
+        $namedRemoval = (Test-CommandSucceeded $removeHelp) -and (Get-CaptureCommandText $removeHelp) -match '(?i)filter\s+remove\s+(?:\[?<name>\]?|name)|筛选器删除\s+\[?<名称>\]?'
         if ($namedRemoval) {
             foreach ($filterName in @($stateFilterNames)) {
                 $removeRecord = Invoke-StopCommand 'pktmon.exe' @('filter','remove',$filterName) ('remove owned pktmon filter ' + $filterName) 15
@@ -197,8 +204,11 @@ try {
             }
         }
         if (-not $namedRemoval) {
-            $wholeRemove = Invoke-StopCommand 'pktmon.exe' @('filter','remove') 'remove exact owned pktmon filter set' 15
-            if (-not (Test-CommandSucceeded $wholeRemove)) { Add-StopFailure 'owned pktmon filter cleanup failed' }
+            $remaining = Get-FilterInventory (Invoke-StopCommand 'pktmon.exe' @('filter','list') 'recheck exact filter set immediately before global removal' 15)
+            if (Test-FilterInventoryExact $remaining $expectedFilters) {
+                $wholeRemove = Invoke-StopCommand 'pktmon.exe' @('filter','remove') 'remove exact owned pktmon filter set' 15
+                if (-not (Test-CommandSucceeded $wholeRemove)) { Add-StopFailure 'owned pktmon filter cleanup failed' }
+            } else { Add-StopFailure 'filter set changed; global removal was not attempted' }
         }
         $afterCleanup = Invoke-StopCommand 'pktmon.exe' @('filter','list') 'verify pktmon filters after cleanup' 15
         Set-StopProperty 'stopFilterInventoryAfterCleanup' (Get-FilterInventory $afterCleanup)
@@ -215,6 +225,7 @@ try {
     }
 
     $pcapValidation = Test-CapturePcapNg $pktmonPcap $cardIPs $ports
+    $dropValidation = Test-CapturePcapNg $pktmonDrop $cardIPs $ports
     $fileRecords = [System.Collections.Generic.List[object]]::new()
     Add-FileIfPresent $fileRecords $pktmonEtl 'pktmon_etl'
     Add-FileIfPresent $fileRecords $pktmonPcap 'pktmon_pcapng'
@@ -230,7 +241,7 @@ try {
 
     $pktmonCommandsSuccess = @($commands | Where-Object { $_.description -match 'pktmon' -and $_.description -notmatch 'ownership' } | Where-Object { -not (Test-CommandSucceeded $_) }).Count -eq 0
     $conversionSuccess = @($conversion | Where-Object { -not (Test-CommandSucceeded $_) }).Count -eq 0
-    $artifactValid = (-not $pktmonEtlRecord.missing -and -not $pktmonPcapRecord.missing -and [bool]$pcapValidation.parseable -and $conversionSuccess)
+    $artifactValid = (-not $pktmonEtlRecord.missing -and -not $pktmonPcapRecord.missing -and [bool]$pcapValidation.parseable -and [bool]$dropValidation.parseable -and $conversionSuccess)
     $wprSkipped = [bool](Get-RequiredProperty $state 'noWpr' $false)
     $wprArtifactValid = $wprSkipped -or (-not $wprRecord.missing -and [int64]$wprRecord.bytes -gt 0)
     if (-not $wprArtifactValid) { Add-StopFailure 'WPR ETL is missing or empty' }
@@ -239,6 +250,11 @@ try {
     $timeCoverage = if ($pcapValidation.parseable -and $null -ne $pcapValidation.firstTimestampNs -and $null -ne $pcapValidation.lastTimestampNs) { 'known' } else { 'unknown' }
     $lossStatus = if (Test-Path -LiteralPath $pktmonDrop) { 'drop_info_available_etw_loss_unknown' } else { 'unknown' }
     $layerCoverage = if ($wprSkipped) { 'pktmon_only_wpr_skipped' } elseif ($wprArtifactValid) { 'pktmon_plus_wpr' } else { 'pktmon_only_wpr_unknown' }
+    # analysisReady means the artifacts are sufficient for offline analysis:
+    # commands succeeded, artifacts parsed, target UDP headers present and the
+    # time window is known. Deeper conclusions (clock alignment, ETW loss,
+    # WPR scheduling coverage) belong to the offline analyzer, recorded in
+    # pendingAnalysisChecks.
     $analysisReady = ($commandSuccess -and $artifactValid -and [bool]$targetPacketsPresent -and $timeCoverage -ne 'unknown' -and $layerCoverage -ne 'pktmon_only_wpr_unknown')
 
     $stopUtc = Get-CaptureUtcNow
@@ -263,6 +279,9 @@ try {
         schemaVersion = 2
         status = 'validated'
         pcap = $pcapValidation
+        dropPcap = $dropValidation
+        simulation = [bool](Get-RequiredProperty $state 'simulation' $false)
+        pendingAnalysisChecks = @('clock_alignment_not_verified','etw_loss_unknown','wpr_thread_coverage_not_verified')
         commandSuccess = $commandSuccess
         artifactValid = $artifactValid
         targetPacketsPresent = $targetPacketsPresent
@@ -323,9 +342,9 @@ try {
     Set-StopProperty 'lossStatus' $lossStatus
     Set-StopProperty 'layerCoverage' $layerCoverage
     Set-StopProperty 'analysisReady' $analysisReady
-    $state.resources.pktmonStarted = $false
-    $state.resources.wprStarted = $false
-    $state.resources.filterNames = @()
+    $state.resources.pktmonStarted = $hadPktmon -and -not $pktmonStopped
+    $state.resources.wprStarted = $hadWpr -and -not $wprStopped
+    $state.resources.filterNames = if ($cleanupVerified) { @() } else { @($stateFilterNames) }
     $state.resources.ownerVerified = $ownerVerified
     Set-StopProperty 'completedUtc' ($stopUtc.ToString('o'))
     Set-StopProperty 'completedQpc' $stopQpc
@@ -342,7 +361,7 @@ try {
         $state.failureReasons = @($failures)
         Save-StopState 'failed'
     } catch {}
-    Write-Error $message
+    [Console]::Error.WriteLine($message)
     exit 2
 } finally {
     Release-CaptureLock $lock

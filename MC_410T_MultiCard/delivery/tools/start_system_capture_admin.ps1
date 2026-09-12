@@ -17,89 +17,29 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'system_capture_common.ps1')
 
-# When launched from Open-AdminCapture.cmd without arguments, consume the
-# newest application request. Explicit parameters still win and are recorded
-# in the state/command manifest.
+# Select one live application, never the most recently modified stale file.
 $appBinRoot = Split-Path $PSScriptRoot -Parent
-if (-not [string]::IsNullOrWhiteSpace($ApplicationRequestPath) -and (Test-Path -LiteralPath $ApplicationRequestPath)) {
-    $initialRequest = Read-CaptureJson $ApplicationRequestPath
-    if ($null -ne $initialRequest) {
-        if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = [string]$initialRequest.outputDirectory }
-        if ([string]::IsNullOrWhiteSpace($ChannelDir)) { $ChannelDir = [string]$initialRequest.channelDirectory }
-    }
-}
 if ([string]::IsNullOrWhiteSpace($ChannelDir)) {
     $ChannelDir = Join-Path $appBinRoot 'system-capture-channel'
 }
 $ChannelDir = Get-FullPathSafe $ChannelDir
-if ([string]::IsNullOrWhiteSpace($OutputDirectory) -and (Test-Path -LiteralPath $ChannelDir)) {
-    $requestCandidates = @(Get-ChildItem -LiteralPath $ChannelDir -Filter 'capture-request*.json' -File -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTimeUtc -Descending)
-    foreach ($candidate in $requestCandidates) {
-        $candidateValue = Read-CaptureJson $candidate.FullName
-        if ($null -ne $candidateValue -and -not [string]::IsNullOrWhiteSpace([string]$candidateValue.outputDirectory)) {
-            $OutputDirectory = [string]$candidateValue.outputDirectory
-            if ([string]::IsNullOrWhiteSpace($ApplicationRequestPath)) { $ApplicationRequestPath = $candidate.FullName }
-            break
-        }
-    }
-}
-if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
-    throw 'OutputDirectory is required, or an application capture-request*.json must be available in the capture channel'
+try {
+    $selectedRequest = Resolve-CaptureApplicationRequest $ChannelDir $ApplicationRequestPath $OutputDirectory $TrialId
+    $ApplicationRequestPath = $selectedRequest.path
+    $preflightRequest = $selectedRequest.request
+    if (-not $OutputDirectory) { $OutputDirectory = [string]$preflightRequest.outputDirectory }
+    if (-not $TrialId) { $TrialId = [string]$preflightRequest.trialId }
+    if (-not $CaptureSessionToken) { $CaptureSessionToken = [string]$preflightRequest.captureSessionToken }
+    $ChannelDir = Get-FullPathSafe ([string]$preflightRequest.channelDirectory)
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 2
 }
 $root = Get-FullPathSafe $OutputDirectory
-if ([string]::IsNullOrWhiteSpace($ChannelDir)) {
-    $artifactRoot = Split-Path (Split-Path $root -Parent) -Parent
-    $ChannelDir = Join-Path $artifactRoot 'system-capture-channel'
-    $ChannelDir = Get-FullPathSafe $ChannelDir
-}
-if ([string]::IsNullOrWhiteSpace($TrialId)) {
-    $trialCandidates = @()
-    if (-not [string]::IsNullOrWhiteSpace($ApplicationRequestPath) -and (Test-Path -LiteralPath $ApplicationRequestPath)) {
-        $trialCandidates = @(Get-Item -LiteralPath $ApplicationRequestPath)
-    } elseif (Test-Path -LiteralPath $ChannelDir) {
-        $trialCandidates = @(Get-ChildItem -LiteralPath $ChannelDir -Filter 'capture-request*.json' -File -ErrorAction SilentlyContinue |
-            Sort-Object LastWriteTimeUtc -Descending)
-    }
-    foreach ($candidate in $trialCandidates) {
-        $candidateRequest = Read-CaptureJson $candidate.FullName
-        if ($null -ne $candidateRequest -and -not [string]::IsNullOrWhiteSpace([string]$candidateRequest.trialId)) {
-            $TrialId = [string]$candidateRequest.trialId
-            break
-        }
-    }
-    if ([string]::IsNullOrWhiteSpace($TrialId)) { $TrialId = New-CaptureId }
-}
-# The operator entry point normally has no explicit CaptureSessionToken. If a
-# previous attempt already created the application request/state pair, adopt
-# that request token before checking output-directory ownership. Otherwise a
-# retry would manufacture a new token and reject its own resumable session.
-$preflightRequest = $null
-if (-not [string]::IsNullOrWhiteSpace($ApplicationRequestPath) -and (Test-Path -LiteralPath $ApplicationRequestPath)) {
-    $preflightRequest = Read-CaptureJson $ApplicationRequestPath
-} elseif (Test-Path -LiteralPath $ChannelDir) {
-    $preflightCandidates = @(Get-ChildItem -LiteralPath $ChannelDir -Filter 'capture-request*.json' -File -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTimeUtc -Descending)
-    foreach ($candidate in $preflightCandidates) {
-        $candidateRequest = Read-CaptureJson $candidate.FullName
-        if ($null -eq $candidateRequest) { continue }
-        $candidateTrialId = if ($candidateRequest.PSObject.Properties.Name -contains 'trialId') { [string]$candidateRequest.trialId } else { '' }
-        $candidateOutput = if ($candidateRequest.PSObject.Properties.Name -contains 'outputDirectory') { [string]$candidateRequest.outputDirectory } else { '' }
-        if (-not [string]::IsNullOrWhiteSpace($candidateTrialId) -and $candidateTrialId -ne $TrialId) { continue }
-        if (-not [string]::IsNullOrWhiteSpace($candidateOutput) -and (Get-FullPathSafe $candidateOutput) -ne $root) { continue }
-        $ApplicationRequestPath = $candidate.FullName
-        $preflightRequest = $candidateRequest
-        break
-    }
-}
-if ($null -ne $preflightRequest -and [string]::IsNullOrWhiteSpace($CaptureSessionToken) -and
-    $preflightRequest.PSObject.Properties.Name -contains 'captureSessionToken') {
-    $preflightToken = [string]$preflightRequest.captureSessionToken
-    if (-not [string]::IsNullOrWhiteSpace($preflightToken)) { $CaptureSessionToken = $preflightToken }
-}
 $statePath = Join-Path $root 'capture-state.json'
 $stopScript = Join-Path $PSScriptRoot 'stop_system_capture_admin.ps1'
 $sessionToken = if ([string]::IsNullOrWhiteSpace($CaptureSessionToken)) { [Guid]::NewGuid().ToString('N') } else { $CaptureSessionToken }
+if (-not $AdapterPath) { $AdapterPath = [Environment]::GetEnvironmentVariable('SYSTEM_CAPTURE_COMMAND_ADAPTER') }
 $adapterSimulation = -not [string]::IsNullOrWhiteSpace($AdapterPath)
 $commands = [System.Collections.Generic.List[object]]::new()
 $failures = [System.Collections.Generic.List[string]]::new()
@@ -143,26 +83,10 @@ function Fail-Start {
     Add-CaptureFailure $failures $Reason
     $state.failureReasons = $failures
     Save-State 'failed'
+    [Console]::Error.WriteLine("System capture FAILED: $Reason`nState: $statePath")
 }
 
 function Read-ApplicationHandshake {
-    if ([string]::IsNullOrWhiteSpace($ApplicationRequestPath)) {
-        $candidates = @()
-        if (Test-Path -LiteralPath $ChannelDir) {
-            $candidates = @(Get-ChildItem -LiteralPath $ChannelDir -Filter 'capture-request*.json' -File -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTimeUtc -Descending)
-        }
-        foreach ($candidate in $candidates) {
-            $value = Read-CaptureJson $candidate.FullName
-            if ($null -ne $value -and ([string]$value.trialId -eq $TrialId -or [string]::IsNullOrWhiteSpace([string]$value.trialId))) {
-                $script:resolvedApplicationRequestPath = $candidate.FullName
-                break
-            }
-        }
-    }
-    if ([string]::IsNullOrWhiteSpace($ApplicationRequestPath) -and -not [string]::IsNullOrWhiteSpace($script:resolvedApplicationRequestPath)) {
-        $ApplicationRequestPath = $script:resolvedApplicationRequestPath
-    }
     if ([string]::IsNullOrWhiteSpace($ApplicationRequestPath)) { return $null }
     $script:resolvedApplicationRequestPath = $ApplicationRequestPath
     $request = Read-CaptureJson $ApplicationRequestPath
@@ -192,6 +116,8 @@ function Stop-AfterStartFailure {
 try {
     if ([string]::IsNullOrWhiteSpace($root)) { throw 'output directory is required' }
     if (-not (Test-Path -LiteralPath $root)) { New-Item -ItemType Directory -Path $root -Force | Out-Null }
+    $lock = New-CaptureLock $root
+    if ($null -eq $lock) { throw 'capture session is already being started or stopped; existing state was not changed' }
     $existing = Read-CaptureJson $statePath
     if ($null -ne $existing) {
         # schemaVersion 2 uses captureSessionToken. Keep reading the old
@@ -203,14 +129,25 @@ try {
         } elseif ($existing.PSObject.Properties.Name -contains 'sessionToken') {
             $existingToken = [string]$existing.sessionToken
         }
-        $sameSession = ($existingToken -eq $sessionToken -and [string]$existing.trialId -eq $TrialId)
+        $sameSession = ($existingToken -eq $sessionToken -and [string](Get-CaptureProperty $existing 'trialId' '') -eq $TrialId)
         if (-not $sameSession) {
             $rejected = Join-Path $root ("capture-state-rejected-" + $TrialId + '.json')
             Write-CaptureAtomicJson $rejected ([ordered]@{schemaVersion=2;status='failed';reason='output_directory_belongs_to_another_session';trialId=$TrialId;captureSessionToken=$sessionToken;existingTrialId=$existing.trialId;existingCaptureSessionToken=$existingToken;createdUtc=(Get-CaptureUtcNow).ToString('o')})
             Write-Error 'output directory belongs to another capture session'
             exit 2
         }
-    } elseif (@(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue).Count -gt 0) {
+        # Only a failed preflight with no acquired resources can be retried.
+        # Completed/active trials and their evidence must never be overwritten.
+        $existingResources = Get-CaptureProperty $existing 'resources'
+        if ((Get-CaptureProperty $existing 'status' '') -ne 'failed' -or
+            (Get-CaptureProperty $existingResources 'pktmonStarted' $true) -or
+            (Get-CaptureProperty $existingResources 'wprStarted' $true) -or
+            @(Get-CaptureProperty $existingResources 'filterNames' @()).Count -gt 0 -or
+            (Test-Path -LiteralPath (Join-Path $root 'capture-ready.json'))) {
+            throw 'this trial is active or already used; prepare a NEW system capture in the application'
+        }
+        Copy-Item -LiteralPath $statePath -Destination (Join-Path $root ('capture-attempt-' + (New-CaptureId) + '.json'))
+    } elseif (@(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne '.capture-session.lock' }).Count -gt 0) {
         $rejected = Join-Path $root ("capture-state-rejected-" + $TrialId + '.json')
         Write-CaptureAtomicJson $rejected ([ordered]@{schemaVersion=2;status='failed';reason='output_directory_is_not_new';trialId=$TrialId;sessionToken=$sessionToken;createdUtc=(Get-CaptureUtcNow).ToString('o')})
         Write-Error 'output directory is not new and has no matching session token'
@@ -233,6 +170,7 @@ try {
         cardIPs = @($CardIPs)
         ports = @($Ports)
         wprProfile = $WprProfile
+        wprInstanceName = 'StartupDiag-' + ($sessionToken -replace '[^A-Za-z0-9]', '')
         noWpr = [bool]$NoWpr
         simulation = $adapterSimulation
         captureMode = if ($NoWpr) { 'pktmon-only' } else { 'pktmon+wpr' }
@@ -245,8 +183,6 @@ try {
         createdQpc = Get-CaptureQpc
     }
     Save-State 'idle'
-    $lock = New-CaptureLock $root
-    if ($null -eq $lock) { Fail-Start 'capture session is already being started or stopped'; exit 2 }
 
     Save-State 'preflight'
     if ($MaxWaitSeconds -lt 1) { Fail-Start 'max wait must be at least one second'; exit 2 }
@@ -264,6 +200,8 @@ try {
 
     $request = Read-ApplicationHandshake
     if ($null -eq $request) { Fail-Start 'application handshake request is missing or unreadable'; exit 2 }
+    $liveCheck = Test-CaptureRequestLive $request
+    if (-not $liveCheck.valid) { Fail-Start $liveCheck.reason; exit 2 }
     if (-not [string]::IsNullOrWhiteSpace($ApplicationRequestPath)) { $resolvedApplicationRequestPath = $ApplicationRequestPath }
     elseif (-not [string]::IsNullOrWhiteSpace($script:resolvedApplicationRequestPath)) { $resolvedApplicationRequestPath = $script:resolvedApplicationRequestPath }
     if (-not [string]::IsNullOrWhiteSpace([string]$request.trialId) -and [string]$request.trialId -ne $TrialId) { Fail-Start 'application handshake trialId does not match'; exit 2 }
@@ -278,6 +216,7 @@ try {
     if ([string]::IsNullOrWhiteSpace($ListenId)) { $ListenId = [string]$request.listenId }
     if ([string]::IsNullOrWhiteSpace($MeasurementSessionId)) { $MeasurementSessionId = [string]$request.measurementSessionId }
     if ([string]::IsNullOrWhiteSpace($RunId) -or [string]::IsNullOrWhiteSpace($ListenId)) { Fail-Start 'application handshake runId/listenId is missing'; exit 2 }
+    if ($RunId -ne [string]$request.runId -or $ListenId -ne [string]$request.listenId) { Fail-Start 'application handshake runId/listenId does not match'; exit 2 }
     $requestIPs = @(Resolve-StringArray $request.cardIPs)
     if ($requestIPs.Count -gt 0 -and (($requestIPs -join ',') -ne (@($CardIPs) -join ','))) { Fail-Start 'application handshake card IPs do not match requested filters'; exit 2 }
     $requestPorts = @($request.ports | ForEach-Object { [int]$_ })
@@ -303,6 +242,10 @@ try {
     if (-not $NoWpr) {
         $wprHelp = Add-Command (Invoke-CaptureProcess 'wpr.exe' @('-help') 'validate WPR command surface' 15 $AdapterPath)
         if ($wprHelp.timedOut -or $wprHelp.exitCode -ne 0) { Fail-Start 'WPR help command failed'; exit 2 }
+        $wprAdvanced = Add-Command (Invoke-CaptureProcess 'wpr.exe' @('-help','advanced') 'validate WPR named session support' 15 $AdapterPath)
+        if ($wprAdvanced.timedOut -or $wprAdvanced.exitCode -ne 0 -or (Get-CaptureCommandText $wprAdvanced) -notmatch '\-instancename') {
+            Fail-Start 'WPR help did not confirm named session support'; exit 2
+        }
     }
 
     $wprStateRecord = $null
@@ -329,7 +272,10 @@ try {
     Save-StateWithoutTransition
 
     Save-State 'starting'
-    $expectedFilters = New-CaptureFilterSpecs $CardIPs $Ports
+    $state.filterPrefix = 'StartupDiag-' + ($sessionToken -replace '[^A-Za-z0-9]', '')
+    $expectedFilters = New-CaptureFilterSpecs $CardIPs $Ports $state.filterPrefix
+    $state.expectedFilters = @($expectedFilters)
+    Save-StateWithoutTransition
     foreach ($filter in @($expectedFilters)) {
         $addRecord = Add-Command (Invoke-CaptureProcess 'pktmon.exe' ([string[]]$filter.arguments) ("add filter " + $filter.name) 15 $AdapterPath)
         if ($addRecord.timedOut -or $addRecord.exitCode -ne 0) {
@@ -366,14 +312,20 @@ try {
     Save-StateWithoutTransition
 
     if (-not $NoWpr) {
-        $wprStart = Add-Command (Invoke-CaptureProcess 'wpr.exe' @('-start',$WprProfile) ('start WPR memory profile ' + $WprProfile) 30 $AdapterPath)
+        $wprStart = Add-Command (Invoke-CaptureProcess 'wpr.exe' @('-start',$WprProfile,'-instancename',$state.wprInstanceName) ('start WPR memory profile ' + $WprProfile) 30 $AdapterPath)
         if ($wprStart.timedOut -or $wprStart.exitCode -ne 0) { Fail-Start 'WPR start failed; automatic NoWpr downgrade is not allowed'; $stopCode = Stop-AfterStartFailure; exit $stopCode }
         $wprStarted = $true; $state.resources.wprStarted = $true; Save-StateWithoutTransition
-        $postWprStatus = Add-Command (Invoke-CaptureProcess 'wpr.exe' @('-status') 'confirm WPR started' 15 $AdapterPath)
+        $postWprStatus = Add-Command (Invoke-CaptureProcess 'wpr.exe' @('-status','-instancename',$state.wprInstanceName) 'confirm WPR started' 15 $AdapterPath)
         $postWprState = Get-ToolState $postWprStatus 'wpr'
         if ($postWprState -ne 'running') { Fail-Start ('WPR post-start status is ' + $postWprState); $stopCode = Stop-AfterStartFailure; exit $stopCode }
     }
 
+    $readyRequest = Read-ApplicationHandshake
+    $liveCheck = Test-CaptureRequestLive $readyRequest
+    if (-not $liveCheck.valid) { Fail-Start $liveCheck.reason; $stopCode = Stop-AfterStartFailure; exit $stopCode }
+    if ($readyRequest.trialId -ne $TrialId -or $readyRequest.captureSessionToken -ne $sessionToken -or $readyRequest.runId -ne $RunId -or $readyRequest.listenId -ne $ListenId) {
+        Fail-Start 'application request changed during startup; readiness was not published'; $stopCode = Stop-AfterStartFailure; exit $stopCode
+    }
     $readyUtc = Get-CaptureUtcNow
     $readyQpc = Get-CaptureQpc
     $readyNs = Get-CaptureMonotonicNs
@@ -382,6 +334,7 @@ try {
     Write-CaptureAtomicJson (Join-Path $root 'capture-ready.json') ([ordered]@{schemaVersion=1;trialId=$TrialId;captureSessionToken=$sessionToken;runId=$RunId;listenId=$ListenId;measurementSessionId=$MeasurementSessionId;readyUtc=$readyUtc.ToString('o');readyQpc=$readyQpc;readyMonotonicNs=$readyNs;captureMode=$state.captureMode;wpr=if($NoWpr){'skipped_by_operator'}else{'started'}})
     Save-State 'ready'
     Save-State 'collecting'
+    Write-Host ("System capture READY / collecting. You may start physical triggers. Output: " + $root)
 
     $activeTrialPath = Join-Path $ChannelDir 'active-trial.json'
     if (-not (Test-Path -LiteralPath $ChannelDir)) { New-Item -ItemType Directory -Path $ChannelDir -Force | Out-Null }
@@ -433,7 +386,7 @@ try {
             & $stopScript -StatePath $statePath -AdapterPath $AdapterPath -StartFailure | Out-Host
         } catch {}
     }
-    Write-Error $message
+    [Console]::Error.WriteLine($message)
     exit 2
 } finally {
     Release-CaptureLock $lock

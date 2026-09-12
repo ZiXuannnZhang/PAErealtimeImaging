@@ -145,6 +145,7 @@ private:
                                const QString& targetSourceKind); // 发现/显式目标完成后：创建 controller 并启动监听（主线程）
     void updateSystemCaptureStatus(const QString &status,
                                    const QJsonObject &fields = QJsonObject());
+    bool invalidateSystemCaptureRequest();
 
     // UI 对象
     Ui::MainWindow *ui;

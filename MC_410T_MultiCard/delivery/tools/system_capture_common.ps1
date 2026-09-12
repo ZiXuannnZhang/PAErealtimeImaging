@@ -1,4 +1,4 @@
-Set-StrictMode -Version Latest
+﻿Set-StrictMode -Version Latest
 
 function Get-CaptureUtcNow {
     return [DateTime]::UtcNow
@@ -196,6 +196,74 @@ function Get-CaptureCommandText($Record) {
     return ([string]$Record.stdout + "`n" + [string]$Record.stderr)
 }
 
+function Get-CaptureProperty($Value, [string]$Name, $Default = $null) {
+    if ($null -eq $Value) { return $Default }
+    if ($Value -is [System.Collections.IDictionary]) {
+        if ($Value.Contains($Name)) { return $Value[$Name] }
+    } elseif ($Value.PSObject.Properties.Name -contains $Name) { return $Value.$Name }
+    return $Default
+}
+
+function Test-CaptureRequestLive($Request) {
+    # File mtime does not identify a running application. Also check creation
+    # time against process birth so a recycled PID cannot revive an old trial.
+    $result = [ordered]@{valid=$false;reason='application request is missing or invalid'}
+    if ($null -eq $Request) { return $result }
+    foreach ($name in @('trialId','captureSessionToken','runId','listenId','outputDirectory','channelDirectory')) {
+        if ([string]::IsNullOrWhiteSpace([string](Get-CaptureProperty $Request $name ''))) {
+            $result.reason = "application request is missing $name"; return $result
+        }
+    }
+    if ((Get-CaptureProperty $Request 'active' $true) -ne $true) {
+        $result.reason = 'application request is inactive; prepare system capture in the current listener'; return $result
+    }
+    $applicationPid = 0
+    $created = [DateTimeOffset]::MinValue
+    if (-not [int]::TryParse([string](Get-CaptureProperty $Request 'applicationPid' ''), [ref]$applicationPid) -or $applicationPid -le 0 -or
+        -not [DateTimeOffset]::TryParse([string](Get-CaptureProperty $Request 'createdUtc' ''), [ref]$created)) {
+        $result.reason = 'application process identity is missing; prepare a new request in the current application'; return $result
+    }
+    try {
+        $applicationProcess = Get-Process -Id $applicationPid -ErrorAction Stop
+        $birth = $applicationProcess.StartTime.ToUniversalTime()
+        if ($applicationProcess.HasExited -or $created.UtcDateTime -lt $birth -or $created -gt [DateTimeOffset]::UtcNow.AddSeconds(5)) {
+            $result.reason = "stale request: application PID $applicationPid was restarted"; return $result
+        }
+        $expectedExecutable = [string](Get-CaptureProperty $Request 'applicationExecutable' '')
+        if ($expectedExecutable -and (Get-FullPathSafe $applicationProcess.Path) -ne (Get-FullPathSafe $expectedExecutable)) {
+            $result.reason = 'application executable does not match the request'; return $result
+        }
+    } catch {
+        $result.reason = "stale or unverifiable request: application PID $applicationPid is not available; prepare system capture in the current application"
+        return $result
+    }
+    $result.valid = $true; $result.reason = ''; return $result
+}
+
+function Resolve-CaptureApplicationRequest {
+    param([string]$ChannelDir, [string]$RequestPath = '', [string]$OutputDirectory = '', [string]$TrialId = '')
+    $candidates = @()
+    if ($RequestPath) { $candidates = @(Get-FullPathSafe $RequestPath) }
+    elseif (Test-Path -LiteralPath $ChannelDir) {
+        $candidates = @(Get-ChildItem -LiteralPath $ChannelDir -Filter 'capture-request*.json' -File | ForEach-Object { $_.FullName })
+    }
+    $valid = [System.Collections.Generic.List[object]]::new()
+    $rejected = [System.Collections.Generic.List[string]]::new()
+    foreach ($path in $candidates) {
+        $value = Read-CaptureJson $path
+        if ($null -eq $value) { $rejected.Add("unreadable request: $path"); continue }
+        if ($TrialId -and [string](Get-CaptureProperty $value 'trialId' '') -ne $TrialId) { continue }
+        if ($OutputDirectory -and (Get-FullPathSafe ([string](Get-CaptureProperty $value 'outputDirectory' ''))) -ne (Get-FullPathSafe $OutputDirectory)) { continue }
+        $check = Test-CaptureRequestLive $value
+        if (-not $check.valid) { $rejected.Add($check.reason); continue }
+        $valid.Add([pscustomobject]@{path=$path;request=$value})
+    }
+    if ($valid.Count -eq 1) { return $valid[0] }
+    if ($valid.Count -gt 1) { throw 'multiple live capture requests; use the command shown by the intended application (ApplicationRequestPath)' }
+    $detail = (@($rejected | Select-Object -Unique) -join '; ')
+    throw ("No live capture request. Start listening and click Prepare system capture in the current application, then run Open-AdminCapture.cmd. " + $detail)
+}
+
 function Get-ToolState {
     param([Parameter(Mandatory=$true)]$Record, [Parameter(Mandatory=$true)][ValidateSet('pktmon','wpr')][string]$Tool)
     if ([bool]$Record.timedOut -or [int]$Record.exitCode -ne 0) { return 'command_failed' }
@@ -203,6 +271,11 @@ function Get-ToolState {
     if ($Tool -eq 'pktmon') {
         if ($text -match '(?im)\b(stopped|not\s+running|not\s+started)\b|已停止|未运行|未启动|没有运行') { return 'stopped' }
         if ($text -match '(?im)\b(running|recording|capturing|active)\b|正在运行|正在捕获|运行中') { return 'running' }
+        # Current Windows status uses a labeled table, not the word "running".
+        # Require both collection and logger fields; do not match a help page.
+        if (@($Record.arguments).Count -eq 1 -and $Record.arguments[0] -eq 'status' -and
+            $text -match '(?im)^\s*(Collected data|收集的数据)\s*[:：]' -and
+            $text -match '(?im)^\s*(Logger name|记录程序名称)\s*[:：]\s*PktMon\s*$') { return 'running' }
     } else {
         if ($text -match '(?im)WPR\s+is\s+not\s+recording|\b(not\s+recording|stopped)\b|未记录|已停止|未运行') { return 'stopped' }
         if ($text -match '(?im)\b(recording|running|active)\b|正在记录|正在运行|采集中') { return 'running' }
@@ -215,35 +288,45 @@ function Get-FilterInventory {
     $result = [ordered]@{ status = 'unknown'; names = @(); entries = @(); raw = (Get-CaptureCommandText $Record) }
     if ([bool]$Record.timedOut -or [int]$Record.exitCode -ne 0) { $result.status = 'command_failed'; return $result }
     $text = [string]$result.raw
-    $json = $null
-    try { $json = $text | ConvertFrom-Json } catch {}
-    if ($null -ne $json) {
-        $items = @()
-        if ($json.PSObject.Properties.Name -contains 'filters') { $items = @($json.filters) }
-        elseif ($json -is [System.Collections.IEnumerable] -and -not ($json -is [string])) { $items = @($json) }
+    if ($text.TrimStart().StartsWith('{') -or $text.TrimStart().StartsWith('[')) {
+        try { $json = ConvertFrom-Json -InputObject $text -NoEnumerate -ErrorAction Stop } catch { return $result }
+        $items = $null
+        if ($json -is [array]) { $items = $json }
+        elseif ($null -ne $json -and $json.PSObject.Properties.Name -contains 'filters' -and $json.filters -is [array]) { $items = $json.filters }
+        if ($null -eq $items) { return $result }
         foreach ($item in $items) {
-            $name = [string]$item.name
-            if ([string]::IsNullOrWhiteSpace($name)) { $name = [string]$item.filterName }
-            if (-not [string]::IsNullOrWhiteSpace($name)) {
-                $result.names += $name
-                $result.entries += [ordered]@{name=$name;protocol=[string]$item.protocol;port=[string]$item.port;ip=[string]$item.ip}
-            }
+            $name = [string](Get-CaptureProperty $item 'name' (Get-CaptureProperty $item 'filterName' ''))
+            if ([string]::IsNullOrWhiteSpace($name)) { return $result }
+            $result.names += $name
+            $result.entries += [ordered]@{name=$name;protocol=[string](Get-CaptureProperty $item 'protocol' 'unknown');port=[string](Get-CaptureProperty $item 'port' 'unknown');ip=[string](Get-CaptureProperty $item 'ip' 'unknown')}
         }
         if ($items.Count -eq 0) { $result.status = 'empty' } else { $result.status = 'ok' }
         return $result
     }
-    if ($text -match '(?im)^\s*(no\s+filters?|0\s+filters?|no\s+pktmon\s+filters?)\s*$|无筛选器|没有筛选器|筛选器数量\s*[:：]\s*0') {
+    # Match the entire output, including the localized title + indented empty
+    # row observed in the field. A foreign row after "None" must not be ignored.
+    if ($text -match '(?is)^\s*(?:(?:Packet\s+filters?|数据包筛选器)\s*[:：]\s*(?:None|无)|no\s+filters?\.?|0\s+filters?|no\s+pktmon\s+filters?|无筛选器|没有筛选器|筛选器数量\s*[:：]\s*0)\s*$') {
         $result.status = 'empty'; return $result
     }
-    $names = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in ($text -split "`r?`n")) {
-        if ($line -match '(?i)StartupDiag[-_A-Za-z0-9]+') { $names.Add($Matches[0]) }
+    $lines = @($text -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($lines.Count -gt 0 -and $lines[0] -match '^(?i:Packet\s+filters?|数据包筛选器)\s*[:：]$') { $lines = @($lines | Select-Object -Skip 1) }
+    if ($lines.Count -lt 2) { return $result }
+    $header = $lines[0] -replace '(?i)IP\s+Address(?:es)?|IP\s*地址', 'ip'
+    $header = $header -replace '(?i)\bName\b|名称', 'name' -replace '(?i)\bProtocol\b|协议', 'protocol' -replace '(?i)\bPorts?\b|端口', 'port'
+    $columns = @($header -split '\s+')
+    # Unknown extra filter fields cannot establish exclusive ownership.
+    if (($columns | Sort-Object) -join ',' -ne '#,ip,name,port,protocol') { return $result }
+    foreach ($line in @($lines | Select-Object -Skip 1)) {
+        if ($line -match '^[-\s]+$') { continue }
+        $cells = @($line -split '\s+')
+        if ($cells.Count -ne $columns.Count) { return $result }
+        $row = @{}
+        for ($i=0; $i -lt $columns.Count; ++$i) { $row[$columns[$i]] = $cells[$i] }
+        if ($row['#'] -notmatch '^\d+$') { return $result }
+        $result.names += $row.name
+        $result.entries += [ordered]@{name=$row.name;protocol=$row.protocol;ip=$row.ip;port=$row.port}
     }
-    if ($names.Count -gt 0) {
-        $result.status = 'ok'
-        $result.names = @($names | Select-Object -Unique)
-        foreach ($name in $result.names) { $result.entries += [ordered]@{name=$name;protocol='unknown';port='unknown';ip='unknown'} }
-    }
+    if ($result.entries.Count -gt 0) { $result.status = 'ok' }
     return $result
 }
 
@@ -255,6 +338,8 @@ function Test-FilterInventoryExact($Inventory, [object[]]$Expected) {
     if ($null -eq $Inventory -or $Inventory.status -ne 'ok') { return $false }
     $expectedNames = @($Expected | ForEach-Object { [string]$_.name })
     $actualNames = @($Inventory.names | ForEach-Object { [string]$_ })
+    if ($actualNames.Count -ne @($Expected).Count -or @($Inventory.entries).Count -ne @($Expected).Count -or
+        @($actualNames | Select-Object -Unique).Count -ne $actualNames.Count) { return $false }
     $actualKey = (($actualNames | Sort-Object) -join '|')
     $expectedKey = (($expectedNames | Sort-Object) -join '|')
     if ($actualKey -ne $expectedKey) { return $false }

@@ -14,7 +14,7 @@ cd <应用目录>\diagnostic-tools
 .\Open-AdminCapture.cmd -ApplicationRequestPath "<应用目录>\system-capture-channel\capture-request-<runId>.json"
 ```
 
-如果当前目录就是应用的 `diagnostic-tools`，也可以只执行 `.\Open-AdminCapture.cmd`，脚本会从默认 `system-capture-channel` 选择最新请求。需要跳过 WPR 时显式增加 `-NoWpr`；结果必须显示 `pktmon_only_wpr_skipped`，不应被解释成含 WPR 的完整证据。
+如果当前目录就是应用的 `diagnostic-tools`，也可以只执行 `.\Open-AdminCapture.cmd`，脚本会校验通道内请求的活性（字段完整、应用进程存活且与请求一致）后选用；上一轮失败会话遗留的旧请求不会被误用。需要跳过 WPR 时显式增加 `-NoWpr`；结果必须显示 `pktmon_only_wpr_skipped`，不应被解释成含 WPR 的完整证据。
 
 应用每 500 ms 读取输出目录的 `capture-state.json`，状态栏按证据状态显示：`app_only`、`running`、`captured`、`verified` 或 `failed`。burst 通知只是时间标记，不代表系统抓取成功。
 
@@ -24,11 +24,11 @@ cd <应用目录>\diagnostic-tools
 
 * `capture-state.json`：原子状态和生命周期；
 * `capture-ready.json`：Pktmon/WPR（或 NoWpr）及应用握手确认；
-* `pktmon.etl`、`pktmon.pcapng`、`pktmon.txt`、`pktmon-drop.txt`；
+* `pktmon.etl`、`pktmon.pcapng`、`pktmon.txt`、`pktmon-drop.pcapng`；
 * `wpr.etl`（启用 WPR 时）；
 * `validation-summary.json`、`clock-anchors.json`、`system-capture-manifest.json`。
 
-`complete` 只表示流程已收尾；只有 `commandSuccess=true`、`artifactValid=true`、`targetPacketsPresent=true`、时间覆盖有效且 `analysisReady=true` 时，应用才显示 `verified`。`no_target_packets`、`partial`、`failed` 保留为独立结论。
+`complete` 只表示流程已收尾。停止流程写入的 `analysisReady` 表示工件级可分析（命令成功、PcapNG 可解析且含目标 UDP、时间覆盖已知），同时保留 `pendingAnalysisChecks`（时钟对齐、ETW 丢事件、WPR 线程覆盖）供离线分析器核验；只有 `commandSuccess=true`、`artifactValid=true`、`targetPacketsPresent=true`、时间覆盖有效且 `analysisReady=true` 时，应用才显示 `verified`。`no_target_packets`、`partial`、`failed`、`ownership_unknown` 保留为独立结论。
 
 手动收尾使用：
 
@@ -37,6 +37,10 @@ cd <应用目录>\diagnostic-tools
 ```
 
 该命令对已完成状态幂等；仅清理本次精确登记的过滤器，无法确认归属时不执行整体清理。
+
+## 失败后的重试
+
+同一 trial 只有在状态为 `failed` 且未取得任何资源（未启动 Pktmon/WPR、无已登记过滤器、无 ready 文件）时才可在原输出目录续做；活动或已收尾的 trial 会被拒绝，并提示在应用中重新选择"准备系统抓取"生成新请求。入口脚本失败退出时 `Open-AdminCapture.cmd` 会显示原因；状态栏持续显示旧的"未准备"属于失效会话，重启应用并重新准备即可。
 
 ## 诊断分析与导出
 

@@ -66,7 +66,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 auto timingNames=QDir(path).entryList({"timing-*.bin"},QDir::Files,QDir::Name);int timingPart=0;quint64 timingSelected=0;
                 for(const auto& name:timingNames){QByteArray bytes=read(QDir(path).filePath(name)),chosen;if(bytes.size()%64)incomplete=true;for(qsizetype at=0;at+64<=bytes.size();at+=64){TimingRecord r;std::memcpy(&r,bytes.constData()+at,64);if(timingBoundary&&r.sequence>timingBoundary)continue;chosen.append(bytes.constData()+at,64);++timingSelected;}if(!chosen.isEmpty()){const QString out=QString("paimage/%1/timing-%2.bin").arg(dir).arg(timingPart++);if(!write(out,chosen))return false;runFiles.append(out);}}
                 const QString prefix="paimage/"+dir+"/";
-                QJsonArray systemFiles;
+                QJsonArray systemFiles,systemTrials;
                 bool systemCaptureIncomplete=false;
                 const QString systemRoot=QDir(path).filePath(QStringLiteral("system-capture"));
                 if(QDir(systemRoot).exists()){
@@ -74,16 +74,28 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     while(iterator.hasNext()){
                         const QString filePath=iterator.next();
                         const QString relative=QDir(systemRoot).relativeFilePath(filePath);
-                        if(relative==QStringLiteral(".capture-session.lock"))continue;
+                        if(QFileInfo(filePath).fileName()==QStringLiteral(".capture-session.lock")
+                           ||filePath.endsWith(QStringLiteral(".tmp")))continue;
                         QString relativeUnix=relative;relativeUnix.replace('\\','/');
                         const QString out=prefix+QStringLiteral("system-capture/")+relativeUnix;
                         if(!write(out,read(filePath)))return false;
                         systemFiles.append(out);
                     }
-                    const auto systemManifest=object(QDir(systemRoot).filePath(QStringLiteral("system-capture-manifest.json")));
-                    if(systemManifest.isEmpty()
-                       ||systemManifest.value(QStringLiteral("status")).toString()!=QStringLiteral("complete"))
-                        systemCaptureIncomplete=true;
+                    QStringList trialDirectories;
+                    if(QFileInfo::exists(QDir(systemRoot).filePath(QStringLiteral("capture-state.json")))) trialDirectories.append(systemRoot);
+                    for(const auto &trial:QDir(systemRoot).entryList(QDir::Dirs|QDir::NoDotAndDotDot|QDir::NoSymLinks))
+                        trialDirectories.append(QDir(systemRoot).filePath(trial));
+                    for(const auto &trialDirectory:trialDirectories){
+                        const auto state=object(QDir(trialDirectory).filePath(QStringLiteral("capture-state.json")));
+                        const auto manifest=object(QDir(trialDirectory).filePath(QStringLiteral("system-capture-manifest.json")));
+                        const bool finished=!manifest.isEmpty()&&manifest.value("status").toString()==QStringLiteral("complete");
+                        systemCaptureIncomplete|=!finished;
+                        systemTrials.append(QJsonObject{{"trialId",state.value("trialId")},
+                            {"path",QDir(systemRoot).relativeFilePath(trialDirectory)},
+                            {"status",state.value("status")},{"inProgress",QStringList{"idle","preflight","starting","ready","collecting","stopping","validating"}.contains(state.value("status").toString())},
+                            {"analysisReady",manifest.value("analysisReady")},{"manifestMissing",manifest.isEmpty()}});
+                    }
+                    if(trialDirectories.isEmpty())systemCaptureIncomplete=true;
                     incomplete=incomplete||systemCaptureIncomplete;
                 }
                 if(!selected&&systemFiles.isEmpty())continue;
@@ -124,7 +136,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 runs.append(QJsonObject{{"runId",metadata.value("runId")},{"recordBoundary",double(boundary)},
                     {"recordsIncluded",double(selected)},{"recordsOutsideWindow",double(filtered)},
                     {"traceIncomplete",incomplete},{"anchorKnown",anchorKnown},{"files",runFiles},
-                    {"systemCaptureFiles",systemFiles},{"systemCaptureIncomplete",systemCaptureIncomplete},
+                    {"systemCaptureFiles",systemFiles},{"systemCaptureTrials",systemTrials},{"systemCaptureIncomplete",systemCaptureIncomplete},
                     {"firstIncludedMs",anchorKnown?QJsonValue(double(firstMs)):QJsonValue()},
                     {"lastIncludedMs",anchorKnown?QJsonValue(double(lastMs)):QJsonValue()}});
             }
