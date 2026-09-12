@@ -28,7 +28,7 @@
 
 ## 制品
 
-打包目录：`artifacts/RingPipelineRefactor`。其中 `bin` 包含主程序、`ImagingSvc.exe`、`ring_svc_selftest.exe`、`ring_svc_replay.exe`、CUDA/Qt/ZeroMQ 运行库和插件；`build-manifest.json` 记录 baseline、实现 HEAD、编译器、Qt、IPC v3、依赖和 SHA256。
+打包目录：`artifacts/RingPipelineRefactor`。其中 `bin` 包含主程序、`ImagingSvc.exe`、`ring_svc_selftest.exe`、`ring_udp_replay.exe`、CUDA/Qt/ZeroMQ 运行库和插件；`build-manifest.json` 记录 baseline、实现 HEAD、编译器、Qt、IPC v3、依赖和 SHA256。
 
 ## 结论
 
