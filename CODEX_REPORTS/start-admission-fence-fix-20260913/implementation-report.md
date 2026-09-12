@@ -5,6 +5,7 @@
 - 任务文档：`TASKS/PAimage_START_admission语义修复_20260913-003112.md`
 - 基线：`main@f326056ee99e5f9c135635d7e97fe2027ee50fbc`
 - 实现分支：`codex/start-admission-fence-fix-20260913-003112`
+- 实现提交：`c75e2ee75c343fb9d83085fcdaa80301a3a43b12`
 - 本报告目录：`CODEX_REPORTS/start-admission-fence-fix-20260913/`
 
 ## 已完成实现
@@ -32,4 +33,4 @@
 ## 交付约束
 
 - 未修改原始脏工作区，未合并 validation 分支，未改写或强推历史。
-- 实现分支将推送到 GitHub，并在最终交付中核对本地提交 SHA 与远端分支 SHA 一致。
+- 实现分支已推送到 GitHub；最终交付已核对本地提交 SHA 与远端分支 SHA 一致。
