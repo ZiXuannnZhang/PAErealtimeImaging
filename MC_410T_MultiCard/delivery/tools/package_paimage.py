@@ -19,6 +19,11 @@ def main():
     if f'#define PAIMAGE_GIT_SHA "{sha}"' not in identity or '#define PAIMAGE_TRACKED_DIRTY false' not in identity:
         raise RuntimeError('reconfigure/rebuild committed sources first')
     out.mkdir(parents=True,exist_ok=True)
+    required_bins={'PAimageReceiverDiagnostics.exe','ImagingSvc.exe'}
+    built_bins={p.name for p in (build/'bin').glob('*.exe')}
+    missing=sorted(required_bins-built_bins)
+    if missing:
+        raise RuntimeError('incomplete build; missing required executable(s): '+','.join(missing))
     for path in (build/'bin').iterdir():
         if path.name in ('ring_svc_selftest.exe','ring_udp_replay.exe'):continue
         if path.is_dir():shutil.copytree(path,out/path.name,dirs_exist_ok=True)
