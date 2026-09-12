@@ -58,6 +58,9 @@ void testPositionOwnedGapAndExplicitWavelength()
     require(block.wavelengthAssumed == false, "explicit wavelength must be preserved");
     require(block.wavelengths[0] == 1 && block.wavelengths[4] == 0,
             "explicit wavelength vector");
+    require(!block.quality.qualityUnknown && !block.quality.assemblyComplete &&
+            !block.quality.packetCoverageComplete,
+            "block quality must retain known gap without claiming complete");
     require(block.raw[0] == 10.0f && block.raw[8] == 12.0f,
             "position raw layout");
     require(std::fabs(block.anglesDeg[0] - 11.0f) < 1e-6f &&

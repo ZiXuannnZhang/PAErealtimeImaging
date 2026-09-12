@@ -391,6 +391,10 @@ ImagingSubmitResult ImagingController::submitRingBlock(const RingBlock &block)
         block.raw.size() != expectedRaw || block.anglesDeg.size() != expectedLines ||
         block.channels.size() != expectedLines || block.wavelengths.size() != expectedLines)
         return ImagingSubmitResult::InvalidPayload;
+    const std::uint64_t allowedPositionBits =
+        (std::uint64_t(1) << block.positionCount) - std::uint64_t(1);
+    if ((block.validPositionBits & ~allowedPositionBits) != 0)
+        return ImagingSubmitResult::InvalidPayload;
 
     if (!m_ringSharedMemory->lock()) return ImagingSubmitResult::QueueBusy;
     auto *h = static_cast<RingImagingShmV3Header *>(m_ringSharedMemory->data());

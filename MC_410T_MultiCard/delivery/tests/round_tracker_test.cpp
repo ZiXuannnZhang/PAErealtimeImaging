@@ -61,7 +61,9 @@ void testTimeoutAndPublication()
     std::vector<RoundTracker::Metadata> drained;
     require(tracker.drain(drained) == 1 && drained.size() == 1, "metadata drain count");
     const auto first = tracker.observePublished(drained.front());
-    require(first.accepted, "published observation");
+    require(first.accepted && first.metadataDropped &&
+            first.positionConfidence == PositionConfidence::Unknown,
+            "metadata loss must lower position confidence");
     const auto timeout = observe(tracker, 5, 3'000'000'011ULL);
     require(timeout.newRound && timeout.round.closeReason == RoundCloseReason::IdleTimeout,
             "idle timeout round boundary");

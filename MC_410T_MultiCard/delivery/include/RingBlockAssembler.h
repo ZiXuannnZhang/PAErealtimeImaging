@@ -109,6 +109,7 @@ private:
     void appendPosition(const PendingTrigger *pending,
                         std::uint64_t position,
                         bool valid);
+    void mergeBlockQuality(const FrameQuality &quality);
     void emitCurrentBlock();
     void resetRoundState(bool advanceRound);
     std::vector<float> allocateRaw() const;
@@ -156,6 +157,8 @@ private:
     std::uint64_t m_validPositionBits = 0;
     bool m_blockHasInvalid = false;
     bool m_blockHasRichInput = false;
+    bool m_blockQualityInitialized = false;
+    FrameQuality m_blockQuality;
     bool m_blockWavelengthAssumed = true;
     std::uint64_t m_lateAfterSeal = 0;
     std::uint64_t m_invalidPositions = 0;

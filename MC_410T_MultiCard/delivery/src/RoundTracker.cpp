@@ -81,6 +81,7 @@ RoundTracker::Observation RoundTracker::observe(const FrameIdentity &identity,
                                                 std::uint64_t observedMonotonicNs)
 {
     Observation out;
+    const bool metadataLoss = metadataDropped_.load(std::memory_order_relaxed) != 0;
     out.round = current_;
     out.round.expectedCount = config_.expectedCount;
 
@@ -89,6 +90,12 @@ RoundTracker::Observation RoundTracker::observe(const FrameIdentity &identity,
         static_cast<double>(observedMonotonicNs - lastObservedNs_) / 1e9 > config_.timeoutResetSec) {
         beginRound(RoundCloseReason::IdleTimeout, false);
         out.newRound = true;
+    }
+    if (metadataLoss) {
+        current_.positionConfidence = PositionConfidence::Unknown;
+        current_.basis = "metadata-drop";
+        current_.unknownEpoch = true;
+        out.metadataDropped = true;
     }
 
     if (!hasLast_) {

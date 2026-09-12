@@ -53,21 +53,28 @@ void RingPipeline::observeTrigger(const FrameIdentity &identity)
 {
     if (std::find(observedWires_.begin(), observedWires_.end(),
                   identity.wireTrigger) != observedWires_.end()) return;
-    observedWires_.push_back(identity.wireTrigger);
-    while (observedWires_.size() > 256) observedWires_.pop_front();
-
     const auto now = identity.firstReceiveMonotonicNs != 0
         ? identity.firstReceiveMonotonicNs
         : static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
               std::chrono::steady_clock::now().time_since_epoch()).count());
-    const auto observation = tracker_.observe(identity, now);
-    if (observation.newRound) {
-        RingBlockAssembler::finishRound(observation.round.closeReason);
+    if (!tracker_.tryPublish({identity, now})) return;
+    std::vector<RoundTracker::Metadata> published;
+    tracker_.drain(published);
+    for (const auto &metadata : published) {
+        if (std::find(observedWires_.begin(), observedWires_.end(),
+                      metadata.identity.wireTrigger) != observedWires_.end())
+            continue;
+        observedWires_.push_back(metadata.identity.wireTrigger);
+        while (observedWires_.size() > 256) observedWires_.pop_front();
+        const auto observation = tracker_.observePublished(metadata);
+        if (observation.newRound) {
+            RingBlockAssembler::finishRound(observation.round.closeReason);
+        }
+        RingBlockAssembler::setIdentityContext(serviceGeneration_, observation.roundId,
+                                                metadata.identity.configVersion != 0
+                                                    ? metadata.identity.configVersion : configVersion_,
+                                                observation.positionConfidence);
     }
-    RingBlockAssembler::setIdentityContext(serviceGeneration_, observation.roundId,
-                                            identity.configVersion != 0
-                                                ? identity.configVersion : configVersion_,
-                                            observation.positionConfidence);
 }
 
 void RingPipeline::pushChannelLine(int channelId, std::uint16_t triggerSeq,

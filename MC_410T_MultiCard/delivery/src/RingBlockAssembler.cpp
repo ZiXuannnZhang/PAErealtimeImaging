@@ -73,6 +73,8 @@ void RingBlockAssembler::reset()
     m_validPositionBits = 0;
     m_blockHasInvalid = false;
     m_blockHasRichInput = false;
+    m_blockQualityInitialized = false;
+    m_blockQuality = FrameQuality{};
     m_blockWavelengthAssumed = false;
     m_lateAfterSeal = 0;
     m_invalidPositions = 0;
@@ -238,6 +240,7 @@ void RingBlockAssembler::pushChannelLineImpl(int channelId, uint16_t triggerSeq,
         pending.hasRichQuality = true;
         pending.identity = *identity;
         pending.quality = *quality;
+        mergeBlockQuality(*quality);
         pending.wavelengths[static_cast<std::size_t>(channelId)] =
             (wavelength == 0 || wavelength == 1)
                 ? static_cast<std::uint8_t>(wavelength) : kUnknownWavelength;
@@ -259,6 +262,35 @@ void RingBlockAssembler::pushChannelLineImpl(int channelId, uint16_t triggerSeq,
     it = m_pending.find(position);
     if (it != m_pending.end() && it->second.mask == m_allMask)
         publishReady(false);
+}
+
+void RingBlockAssembler::mergeBlockQuality(const FrameQuality &quality)
+{
+    if (!m_blockQualityInitialized) {
+        m_blockQuality = quality;
+        // Packet coverage is a per-trigger detail.  Keep the aggregate
+        // fixed-width block contract small while retaining the scalar result.
+        m_blockQuality.packetCoverage.clear();
+        m_blockQualityInitialized = true;
+        return;
+    }
+    m_blockQuality.qualityUnknown = m_blockQuality.qualityUnknown || quality.qualityUnknown;
+    m_blockQuality.assemblyComplete = m_blockQuality.assemblyComplete && quality.assemblyComplete;
+    m_blockQuality.packetCoverageComplete =
+        m_blockQuality.packetCoverageComplete && quality.packetCoverageComplete;
+    m_blockQuality.packetLengthValid = m_blockQuality.packetLengthValid && quality.packetLengthValid;
+    m_blockQuality.sampleLengthValid = m_blockQuality.sampleLengthValid && quality.sampleLengthValid;
+    m_blockQuality.sampleOriginKnown = m_blockQuality.sampleOriginKnown && quality.sampleOriginKnown;
+    m_blockQuality.expectedPacketCount = std::max(m_blockQuality.expectedPacketCount,
+                                                  quality.expectedPacketCount);
+    m_blockQuality.receivedPacketCount = std::min(m_blockQuality.receivedPacketCount,
+                                                  quality.receivedPacketCount);
+    m_blockQuality.expectedPayloadBytes = std::max(m_blockQuality.expectedPayloadBytes,
+                                                   quality.expectedPayloadBytes);
+    m_blockQuality.actualPayloadBytes = std::min(m_blockQuality.actualPayloadBytes,
+                                                 quality.actualPayloadBytes);
+    if (m_blockQuality.missingReason.empty() && !quality.missingReason.empty())
+        m_blockQuality.missingReason = quality.missingReason;
 }
 
 void RingBlockAssembler::publishReady(bool force)
@@ -357,13 +389,16 @@ void RingBlockAssembler::emitCurrentBlock()
         block.anglesDeg = std::move(m_angles);
         block.channels = std::move(m_channels);
         block.wavelengths = std::move(m_wavelengths);
-        block.quality.qualityUnknown = false;
-        block.quality.assemblyComplete = !m_blockHasInvalid;
-        block.quality.packetCoverageComplete = !m_blockHasInvalid;
-        block.quality.packetLengthValid = !m_blockHasInvalid;
-        block.quality.sampleLengthValid = !m_blockHasInvalid;
-        block.quality.sampleOriginKnown = false;
-        block.quality.missingReason = m_blockHasInvalid ? "position-gap-or-invalid-input" : "";
+        block.quality = m_blockQualityInitialized ? m_blockQuality : FrameQuality{};
+        block.quality.qualityUnknown = !m_blockQualityInitialized || block.quality.qualityUnknown;
+        block.quality.assemblyComplete = block.quality.assemblyComplete && !m_blockHasInvalid;
+        block.quality.packetCoverageComplete = block.quality.packetCoverageComplete && !m_blockHasInvalid;
+        block.quality.packetLengthValid = block.quality.packetLengthValid && !m_blockHasInvalid;
+        block.quality.sampleLengthValid = block.quality.sampleLengthValid && !m_blockHasInvalid;
+        if (m_blockHasInvalid)
+            block.quality.missingReason = "position-gap-or-invalid-input";
+        else if (!m_blockQualityInitialized)
+            block.quality.missingReason = "quality-unavailable";
         m_ringCallback(std::move(block));
     }
     ++m_blockSeq;
@@ -372,6 +407,8 @@ void RingBlockAssembler::emitCurrentBlock()
     m_validPositionBits = 0;
     m_blockHasInvalid = false;
     m_blockHasRichInput = false;
+    m_blockQualityInitialized = false;
+    m_blockQuality = FrameQuality{};
     m_blockWavelengthAssumed = false;
     m_raw = allocateRaw();
     const std::size_t lines = static_cast<std::size_t>(m_channelCount) *
@@ -406,9 +443,12 @@ void RingBlockAssembler::resetRoundState(bool advanceRound)
     m_haveWire = false;
     m_lastWire = 0;
     m_lastExpanded = 0;
+    m_lastTriggerUs.store(0, std::memory_order_relaxed);
     m_validPositionBits = 0;
     m_blockHasInvalid = false;
     m_blockHasRichInput = false;
+    m_blockQualityInitialized = false;
+    m_blockQuality = FrameQuality{};
     m_blockWavelengthAssumed = false;
     m_raw = allocateRaw();
     const std::size_t lines = static_cast<std::size_t>(m_channelCount) *
