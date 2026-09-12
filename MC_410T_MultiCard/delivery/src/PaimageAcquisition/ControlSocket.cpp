@@ -29,7 +29,11 @@ bool ControlSocket::send(const Command& command,const std::vector<int>& cards,Ob
         int count=sendto(SOCKET(socket_),reinterpret_cast<const char*>(command.data()),int(command.size()),0,reinterpret_cast<sockaddr*>(&target),sizeof(target));
         int error=count==int(command.size())?0:WSAGetLastError();
         if(count!=int(command.size()))success=false;
-        if(observer)observer(command,{card,count,error,targets_[card]});
+        const SendResult result{card,count,error,targets_[card]};
+        if(observer)observer(command,result);
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+        if(testSendHook_)testSendHook_(command,result);
+#endif
     }
     return success;
 }

@@ -69,12 +69,46 @@ def percentiles(values: Iterable[float]) -> dict[str, float | None]:
     }
 
 
+DECISION_NAMES = {
+    0: "Accepted", 1: "Short", 2: "Disabled", 3: "RecentTrigger",
+    4: "Duplicate", 5: "OffsetOutside", 6: "Complete",
+    7: "TriggerSwitch", 8: "Timeout", 9: "StartupIdleClear",
+    10: "StartupOverflow", 11: "StartupConfirmed", 12: "SyncExpired",
+    13: "StopTruncated", 14: "StartupBuffered", 15: "CardOutput",
+    16: "SyncOutput", 17: "InvalidCard", 18: "StartupOverflowDiscard",
+    19: "StopBufferedDiscard", 20: "ListenerActiveDiscard",
+    21: "ListenerBufferedDiscard", 22: "ListenerPendingSyncDiscard",
+    23: "StartPendingSyncDiscard", 24: "StartActiveDiscard",
+    25: "StartupActiveDiscard", 26: "StartupPendingSyncDiscard",
+    27: "CompleteStartPendingSyncDiscard", 28: "CompleteStartActiveDiscard",
+}
+DIRECT_SOURCE_DECISIONS = frozenset({0, 1, 2, 3, 4, 5, 17})
+
+
+def decision_name(reason: int) -> str:
+    return DECISION_NAMES.get(int(reason), f"Decision{int(reason)}")
+
+
 def parse_application(root: Path) -> dict[str, Any]:
     metadata = read_json(root / "run-config.json", {}) or {}
     summary = read_json(root / "trace-summary.json", {}) or {}
+    try:
+        data_port = int(metadata.get("dataPort", 18001) or 18001)
+    except (TypeError, ValueError):
+        data_port = 18001
+    try:
+        card_count = int(metadata.get("cards", 4) or 4)
+    except (TypeError, ValueError):
+        card_count = 4
+    target_cards: dict[str, int] = {}
+    for target in metadata.get("targets", []) or []:
+        if isinstance(target, dict) and target.get("ip") is not None and target.get("card") is not None:
+            target_cards[str(target["ip"])] = int(target["card"])
     ingress: list[dict[str, Any]] = []
     all_times: list[int] = []
     stage2_rejects: list[dict[str, Any]] = []
+    stage2_decisions: list[dict[str, Any]] = []
+    start_sends: list[dict[str, Any]] = []
     sequences: set[int] = set()
     malformed = 0
     records = 0
@@ -98,14 +132,26 @@ def parse_application(root: Path) -> dict[str, Any]:
                 else:
                     header_packet = packet
                     header_trigger = trigger
+                source_ipv4 = ip_from_uint32(source_ip)
+                observed_card = int(card)
+                if observed_card < 0 and data_port <= int(local_port) < data_port + card_count:
+                    observed_card = int(local_port) - data_port
+                if observed_card < 0:
+                    try:
+                        feedback_port = int(metadata.get("feedbackPort", 0) or 0)
+                    except (TypeError, ValueError):
+                        feedback_port = 0
+                    if feedback_port and int(local_port) == feedback_port:
+                        observed_card = target_cards.get(source_ipv4, -1)
                 ingress.append({
                     "sequence": sequence,
                     "steadyNs": tick,
                     "session": session,
                     "correlation": correlation,
                     "threadId": thread_id,
-                    "card": card,
-                    "sourceIPv4": ip_from_uint32(source_ip),
+                    "card": observed_card,
+                    "traceCard": card,
+                    "sourceIPv4": source_ipv4,
                     "localPort": local_port,
                     "sourcePort": source_port,
                     "trigger": trigger if trigger is not None else header_trigger,
@@ -117,10 +163,25 @@ def parse_application(root: Path) -> dict[str, Any]:
                     "stage": stage,
                     "reason": reason,
                 })
-            elif stage == 2 and reason not in (6, 7, 8):
-                stage2_rejects.append({
-                    "steadyNs": tick, "session": session, "card": card,
-                    "trigger": trigger, "reason": reason, "count": value,
+            elif stage == 2:
+                stage2_decisions.append({
+                    "sequence": sequence, "steadyNs": tick, "session": session,
+                    "correlation": correlation, "card": card, "trigger": trigger,
+                    "packet": packet, "reason": reason, "decision": decision_name(reason),
+                    "count": value,
+                })
+                if reason not in (6, 7, 8):
+                    stage2_rejects.append({
+                        "steadyNs": tick, "session": session, "card": card,
+                        "trigger": trigger, "reason": reason, "count": value,
+                    })
+            elif stage == 6 and reason == 3:
+                start_sends.append({
+                    "sequence": sequence, "steadyNs": tick, "session": session,
+                    "correlation": correlation, "card": card,
+                    "sourceIPv4": ip_from_uint32(source_ip), "sourceIPv4Value": source_ip,
+                    "length": length, "error": value, "reason": reason,
+                    "commandPacket": packet, "stage": stage,
                 })
 
     issued = int(summary.get("recordsIssued", 0) or 0)
@@ -287,9 +348,292 @@ def parse_application(root: Path) -> dict[str, Any]:
         "startupConsistency": consistency, "rhythm25ms": rhythm,
         "earliestSteadyNs": earliest, "latestSteadyNs": latest,
         "missingStoredRecords": missing_stored_records, "malformedRecords": malformed,
-        "traceIncomplete": bool(missing_stored_records or malformed or summary.get("traceIncomplete", False)),
+        "traceIncomplete": bool(
+            not summary
+            or missing_stored_records
+            or malformed
+            or summary.get("traceIncomplete", False)
+            or int(summary.get("queueDropped", 0) or 0) > 0
+            or int(summary.get("writerUnwritten", 0) or 0) > 0
+            or bool(summary.get("writeFailed", False))
+        ),
         "sourceRejectIndicators": stage2_rejects,
+        "stage2Decisions": stage2_decisions,
+        "startSends": start_sends,
         "loop": loop, "loopRecords": loop_records, "diagnostics": diagnostics,
+    }
+
+
+def _ingress_reference(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "sequence": item.get("sequence"), "steadyNs": item.get("steadyNs"),
+        "session": item.get("session"), "card": item.get("card"),
+        "correlation": item.get("correlation"), "trigger": item.get("trigger"),
+        "packet": item.get("packet"), "length": item.get("length"),
+    }
+
+
+def start_admission_evidence(application: dict[str, Any]) -> dict[str, Any]:
+    """Join START sends to raw ingress and the matching SourceCore decision.
+
+    The join deliberately uses the application-provided ingress correlation and
+    the measurement session.  Trigger/packet numbers are retained as evidence,
+    but are never used as the identity of a packet across sessions.
+    """
+    starts = sorted(
+        application.get("startSends", []),
+        key=lambda item: (int(item.get("steadyNs", 0)), int(item.get("sequence", 0))),
+    )
+    ingress = [
+        item for item in application.get("ingressPackets", [])
+        if int(item.get("card", -1)) >= 0
+    ]
+    decisions = application.get("stage2Decisions", [])
+    stage2_by_key: dict[tuple[int, int, int], list[dict[str, Any]]] = defaultdict(list)
+    for item in decisions:
+        key = (int(item.get("session", 0)), int(item.get("correlation", 0)),
+               int(item.get("card", -1)))
+        stage2_by_key[key].append(item)
+    for values in stage2_by_key.values():
+        values.sort(key=lambda item: (int(item.get("steadyNs", 0)),
+                                      int(item.get("sequence", 0))))
+
+    def join(raw: dict[str, Any]) -> tuple[dict[str, Any] | None, int, bool]:
+        key = (int(raw.get("session", 0)), int(raw.get("correlation", 0)),
+               int(raw.get("card", -1)))
+        candidates = stage2_by_key.get(key, [])
+        exact = [item for item in candidates
+                 if int(item.get("trigger", 0)) == int(raw.get("trigger", 0))
+                 and int(item.get("packet", 0)) == int(raw.get("packet", 0))]
+        direct = [item for item in exact
+                  if int(item.get("reason", -1)) in DIRECT_SOURCE_DECISIONS]
+        if direct:
+            return direct[0], len(candidates), True
+        if exact:
+            return exact[0], len(candidates), False
+        return None, len(candidates), False
+
+    by_session_starts: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    by_session_ingress: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for item in starts:
+        by_session_starts[int(item.get("session", 0))].append(item)
+    for item in ingress:
+        by_session_ingress[int(item.get("session", 0))].append(item)
+
+    metadata = application.get("metadata", {}) or {}
+    try:
+        metadata_cards = int(metadata.get("cards", 0) or 0)
+    except (TypeError, ValueError):
+        metadata_cards = 0
+    observed_cards = {
+        int(item.get("card", -1)) for item in starts + ingress
+        if int(item.get("card", -1)) >= 0
+    }
+    expected_cards = metadata_cards or (max(observed_cards) + 1 if observed_cards else 0)
+    session_ids = sorted(set(by_session_starts) | set(by_session_ingress))
+    sessions: list[dict[str, Any]] = []
+    classification_counts: dict[str, int] = defaultdict(int)
+
+    for session in session_ids:
+        session_starts = by_session_starts.get(session, [])
+        session_ingress = sorted(
+            by_session_ingress.get(session, []),
+            key=lambda item: (int(item.get("steadyNs", 0)), int(item.get("sequence", 0))),
+        )
+        joined = []
+        for raw in session_ingress:
+            selected, candidate_count, direct = join(raw)
+            joined.append((raw, selected, candidate_count, direct))
+
+        start_ns = min((int(item["steadyNs"]) for item in session_starts), default=None)
+        last_start_ns = max((int(item["steadyNs"]) for item in session_starts), default=None)
+        send_order = [int(item.get("card", -1)) for item in session_starts]
+        failures = [
+            {
+                "card": item.get("card"), "steadyNs": item.get("steadyNs"),
+                "sequence": item.get("sequence"), "bytes": item.get("length"),
+                "error": item.get("error"),
+            }
+            for item in session_starts
+            if int(item.get("length", 0) or 0) != 58 or int(item.get("error", 0) or 0) != 0
+        ]
+        per_card: list[dict[str, Any]] = []
+        session_raw_after_start = 0
+        session_raw_in_span = 0
+        session_matched = 0
+        session_direct = 0
+        session_missing = 0
+        session_disabled = 0
+        session_accepted = 0
+
+        card_ids = set(range(expected_cards)) | {
+            int(item.get("card", -1)) for item in session_starts + session_ingress
+            if int(item.get("card", -1)) >= 0
+        }
+        for card in sorted(card_ids):
+            card_starts = [item for item in session_starts if int(item.get("card", -1)) == card]
+            card_start_ns = min((int(item["steadyNs"]) for item in card_starts), default=None)
+            card_raw = [item for item in joined if int(item[0].get("card", -1)) == card]
+            after_start = [item for item in card_raw
+                           if card_start_ns is not None
+                           and int(item[0].get("steadyNs", 0)) >= card_start_ns]
+            in_start_span = [item for item in card_raw
+                             if start_ns is not None and last_start_ns is not None
+                             and start_ns <= int(item[0].get("steadyNs", 0)) <= last_start_ns]
+
+            def direct_decision(item: tuple[dict[str, Any], dict[str, Any] | None, int, bool]) -> int | None:
+                selected = item[1]
+                return int(selected["reason"]) if item[3] and selected is not None else None
+
+            def first_with_reason(items: list[tuple[dict[str, Any], dict[str, Any] | None, int, bool]],
+                                  reason: int) -> dict[str, Any] | None:
+                for raw, selected, _, direct in items:
+                    if direct and selected is not None and int(selected.get("reason", -1)) == reason:
+                        return _ingress_reference(raw) | {
+                            "decision": decision_name(reason), "reason": reason,
+                        }
+                return None
+
+            raw_after_count = len(after_start)
+            raw_span_count = len(in_start_span)
+            matched_after = sum(1 for _, _, candidates, _ in after_start if candidates)
+            direct_after = sum(1 for _, _, _, direct in after_start if direct)
+            missing_after = raw_after_count - direct_after
+            disabled_after = sum(1 for item in after_start if direct_decision(item) == 2)
+            accepted_after = sum(1 for item in after_start if direct_decision(item) == 0)
+            matched_span = sum(1 for _, _, candidates, _ in in_start_span if candidates)
+            direct_span = sum(1 for _, _, _, direct in in_start_span if direct)
+            missing_span = raw_span_count - direct_span
+            disabled_span = sum(1 for item in in_start_span if direct_decision(item) == 2)
+            accepted_span = sum(1 for item in in_start_span if direct_decision(item) == 0)
+
+            def decision_counts(items: list[tuple[dict[str, Any], dict[str, Any] | None, int, bool]]) -> dict[str, int]:
+                counts: dict[str, int] = defaultdict(int)
+                for item in items:
+                    reason = direct_decision(item)
+                    if reason is not None:
+                        counts[decision_name(reason)] += 1
+                return dict(sorted(counts.items()))
+
+            first_raw = _ingress_reference(after_start[0][0]) if after_start else None
+            per_card.append({
+                "card": card,
+                "startSendNs": card_start_ns,
+                "startSendSucceeded": bool(card_starts) and not any(
+                    int(item.get("length", 0) or 0) != 58 or int(item.get("error", 0) or 0) != 0
+                    for item in card_starts
+                ),
+                "startSendAttemptCount": len(card_starts),
+                "firstRawIngressAfterStartNs": first_raw.get("steadyNs") if first_raw else None,
+                "firstRawIngressAfterStartLatencyNs": (
+                    int(first_raw["steadyNs"]) - card_start_ns
+                    if first_raw is not None and card_start_ns is not None else None
+                ),
+                "firstRawIngressAfterStart": first_raw,
+                "firstDisabledIngress": first_with_reason(after_start, 2),
+                "firstAcceptedIngress": first_with_reason(after_start, 0),
+                "rawIngressAfterStartCount": raw_after_count,
+                "matchedStage2DecisionCount": matched_after,
+                "matchedDirectDecisionCount": direct_after,
+                "unmatchedDecisionCount": missing_after,
+                "disabledIngressCount": disabled_after,
+                "acceptedIngressCount": accepted_after,
+                "rawIngressInStartSpanCount": raw_span_count,
+                "matchedStage2InStartSpanCount": matched_span,
+                "matchedDisabledInStartSpanCount": disabled_span,
+                "matchedAcceptedInStartSpanCount": accepted_span,
+                "unmatchedInStartSpanCount": missing_span,
+                "decisionCountsAfterStart": decision_counts(after_start),
+                "decisionCountsInStartSpan": decision_counts(in_start_span),
+            })
+            session_raw_after_start += raw_after_count
+            session_raw_in_span += raw_span_count
+            session_matched += matched_after
+            session_direct += direct_after
+            session_missing += missing_after
+            session_disabled += disabled_after
+            session_accepted += accepted_after
+
+        missing_cards = [card for card in range(expected_cards)
+                         if card not in {int(item.get("card", -1)) for item in session_starts}]
+        send_complete = bool(session_starts) and not missing_cards
+        trace_incomplete = bool(application.get("traceIncomplete", True))
+        has_gate_drop = any(int(card["matchedDisabledInStartSpanCount"]) > 0 for card in per_card)
+        has_raw_and_direct = session_raw_after_start > 0 and session_direct > 0
+        if not session_starts:
+            classification = "start_trace_missing"
+        elif failures:
+            classification = "control_send_failed"
+        elif not send_complete:
+            classification = "start_trace_missing"
+        elif has_gate_drop:
+            classification = "application_start_gate_drop_observed"
+        elif trace_incomplete:
+            classification = "trace_incomplete"
+        elif has_raw_and_direct:
+            classification = "no_application_start_gate_drop_observed"
+        else:
+            classification = "unverifiable"
+        classification_counts[classification] += 1
+        sessions.append({
+            "session": session,
+            "classification": classification,
+            "traceIncomplete": trace_incomplete,
+            "expectedCardCount": expected_cards or None,
+            "startSendCount": len(session_starts),
+            "startSendSucceeded": send_complete and not failures,
+            "startSendNs": start_ns,
+            "lastStartSendNs": last_start_ns,
+            "startSendSpanNs": last_start_ns - start_ns if start_ns is not None and last_start_ns is not None else None,
+            "startSendSpanUs": ((last_start_ns - start_ns) / 1000.0
+                                 if start_ns is not None and last_start_ns is not None else None),
+            "cardSendOrder": send_order,
+            "missingStartCards": missing_cards,
+            "sendFailures": failures,
+            "rawIngressCount": session_raw_after_start,
+            "rawIngressInStartSpanCount": session_raw_in_span,
+            "matchedStage2DecisionCount": session_matched,
+            "matchedDirectDecisionCount": session_direct,
+            "missingStage2JoinCount": session_missing,
+            "disabledIngressCount": session_disabled,
+            "acceptedIngressCount": session_accepted,
+            "negativeConclusionDowngraded": trace_incomplete and not has_gate_drop,
+            "perCard": per_card,
+        })
+
+    priority = (
+        "application_start_gate_drop_observed", "control_send_failed",
+        "start_trace_missing", "trace_incomplete",
+        "no_application_start_gate_drop_observed", "unverifiable",
+    )
+    status = next((value for value in priority if classification_counts.get(value)), "start_trace_missing")
+    return {
+        "status": status,
+        "traceIncomplete": bool(application.get("traceIncomplete", True)),
+        "sessions": sessions,
+        "summary": {
+            "sessionCount": len(sessions),
+            "sessionsWithStartTrace": sum(bool(by_session_starts.get(session)) for session in session_ids),
+            "startSendCount": len(starts),
+            "startSendFailureCount": sum(
+                int(item.get("length", 0) or 0) != 58 or int(item.get("error", 0) or 0) != 0
+                for item in starts
+            ),
+            "rawIngressCount": sum(item["rawIngressCount"] for item in sessions),
+            "rawIngressInStartSpanCount": sum(item["rawIngressInStartSpanCount"] for item in sessions),
+            "matchedStage2DecisionCount": sum(item["matchedStage2DecisionCount"] for item in sessions),
+            "matchedDirectDecisionCount": sum(item["matchedDirectDecisionCount"] for item in sessions),
+            "missingStage2JoinCount": sum(item["missingStage2JoinCount"] for item in sessions),
+            "disabledIngressCount": sum(item["disabledIngressCount"] for item in sessions),
+            "acceptedIngressCount": sum(item["acceptedIngressCount"] for item in sessions),
+            "classificationCounts": dict(sorted(classification_counts.items())),
+        },
+        "limitations": [
+            "Only stage 1 raw ingress with an exact session/card/correlation match to stage 2 can prove an application START-gate drop.",
+            "Trigger and packet numbers are descriptive evidence and are never joined across measurement sessions.",
+            "Missing stage 1 evidence does not prove that a card or FPGA did not transmit.",
+            "When the application trace is incomplete, absence of Disabled decisions is classified as unknown or unverifiable.",
+        ],
     }
 
 
@@ -409,7 +753,10 @@ def read_json_line(line: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def evidence_matrix(application: dict[str, Any], system: dict[str, Any], clocks: dict[str, Any], rounds: dict[str, Any]) -> list[dict[str, Any]]:
+def evidence_matrix(application: dict[str, Any], system: dict[str, Any], clocks: dict[str, Any],
+                    rounds: dict[str, Any], start: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    start = start or {}
+    start_status = start.get("status", "start_trace_missing")
     return [
         {"evidence": "application_per_packet_ingress", "available": bool(application.get("ingressPackets")),
          "verified": not application.get("traceIncomplete", True),
@@ -426,6 +773,12 @@ def evidence_matrix(application: dict[str, Any], system: dict[str, Any], clocks:
         {"evidence": "clock_alignment", "available": clocks.get("status") == "known",
          "verified": clocks.get("status") == "known",
          "conclusion": "steady/QPC/UTC anchors are available" if clocks.get("status") == "known" else "clock alignment remains unknown"},
+        {"evidence": "application_start_admission",
+         "available": bool(application.get("startSends") or application.get("ingressPackets")),
+         "verified": start_status in ("application_start_gate_drop_observed",
+                                      "no_application_start_gate_drop_observed",
+                                      "control_send_failed"),
+         "conclusion": f"START admission evidence classification: {start_status}"},
     ]
 
 
@@ -458,6 +811,7 @@ def run(application_path: Path, system_path: Path | None, rounds_path: Path | No
     except Exception as exc:  # keep the startup evidence report inspectable
         legacy = {"error": f"reused parser failed: {exc}"}
     application = parse_application(trace_root)
+    start = start_admission_evidence(application)
     system = system_evidence(system_path)
     clocks = clock_evidence(application, system)
     round_result = rounds_evidence(rounds, application)
@@ -468,10 +822,11 @@ def run(application_path: Path, system_path: Path | None, rounds_path: Path | No
         "systemCapture": str(system_path) if system_path else None,
         "roundsJson": str(rounds_path) if rounds_path else None,
         "application": application,
+        "startAdmissionEvidence": start,
         "systemCaptureEvidence": system,
         "rounds": round_result,
         "clockAnchors": clocks,
-        "evidenceConclusionMatrix": evidence_matrix(application, system, clocks, round_result),
+        "evidenceConclusionMatrix": evidence_matrix(application, system, clocks, round_result, start),
         "reusedTraceAnalyzer": legacy,
         "limitations": [
             "A missing system packet is not evidence of card/NIC/cable failure.",
@@ -501,6 +856,8 @@ def main() -> int:
         "systemStatus": result["systemCaptureEvidence"].get("status"),
         "systemClassification": result["systemCaptureEvidence"].get("classification"),
         "storageLoss": result["rounds"].get("storageLoss"),
+        "startAdmissionStatus": result["startAdmissionEvidence"].get("status"),
+        "startAdmissionSessions": len(result["startAdmissionEvidence"].get("sessions", [])),
     }, ensure_ascii=False))
     return 0
 

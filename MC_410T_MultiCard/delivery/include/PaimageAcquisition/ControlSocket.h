@@ -1,6 +1,8 @@
 #pragma once
 #include "SourceCore.h"
+#include <functional>
 #include <string>
+#include <utility>
 namespace paimage {
 // 137360 / 1505b0: local-interface-bound, ephemeral source port, blocking
 // datagram send with 500ms SO_SNDTIMEO, target port from source field 0x50.
@@ -14,9 +16,18 @@ public:
     bool send(const Command&,const std::vector<int>& cards,Observer={});
     std::uint16_t localPort()const{return localPort_;}
     int timeoutOptionError()const{return timeoutOptionError_;}
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+    // TEST ONLY: called after each real sendto(), before ControlSocket::send
+    // advances to the next card. Delivery targets never compile this seam.
+    using TestSendHook=std::function<void(const Command&,const SendResult&)>;
+    void setTestSendHook(TestSendHook hook){testSendHook_=std::move(hook);}
+#endif
 private:
     std::uintptr_t socket_=~std::uintptr_t(0);
     std::vector<std::uint32_t> targets_;std::uint16_t targetPort_=0,localPort_=0;
     int timeoutOptionError_=-1;bool wsa_=false;
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+    TestSendHook testSendHook_;
+#endif
 };
 }
