@@ -1,36 +1,96 @@
 # START Fence 语义修复执行报告
 
-## 任务与基线
+## 任务与 Git 基线
 
-- 任务文档：`TASKS/PAimage_START_admission语义修复_20260913-003112.md`
-- 基线：`main@f326056ee99e5f9c135635d7e97fe2027ee50fbc`
+- 初始任务文档：`TASKS/PAimage_START_admission语义修复_20260913-003112.md`
+- 追加整改文档：`TASKS/PAimage_START_admission验收整改追加_20260913-021700.md`
+- 追加整改开始前远端 HEAD：`30987c183b7f7cb172ae0137d7132dea884c812d`
+- `origin/main` 基线：`f326056ee99e5f9c135635d7e97fe2027ee50fbc`
 - 实现分支：`codex/start-admission-fence-fix-20260913-003112`
-- 实现提交：`c75e2ee75c343fb9d83085fcdaa80301a3a43b12`
-- 本报告目录：`CODEX_REPORTS/start-admission-fence-fix-20260913/`
+- 本次整改实现提交：`2903a2b4851f9f668f202dfff77ec88678441e22`
+- 本报告路径：`CODEX_REPORTS/start-admission-fence-fix-20260913/implementation-report.md`
 
-## 已完成实现
+追加整改沿用原分支和起始远端 HEAD；未新建分支、rebase、merge validation、修改 main 或 force-push。
 
-1. `SocketReceiver` 负责生产 START Fence：按卡维护 `AwaitingStart / StartSendPending / StartSent / StartFailed`，在每卡真实 `sendto()` 前后更新边界。
-2. 原始 stage1 ingress 仍只记录一次；边界内数据复制到有上限的 hold 队列，START 成功后按原顺序、原始时间和 ingress id 释放一次；发送失败、队列溢出、停止、关闭和新 START 重置均显式记录并 fail-closed。
-3. `ControlSocket` 增加生产前后观察回调；发送结果以实际字节数和错误码判定。故障注入 seam 仅在 `PAIMAGE_SOCKET_TEST_SEAM` 下编译。
-4. START Fence 决策加入 SourceCore observation/counters，并在诊断 trace 中保留 `(session, card, ingressId, trigger, packet)` 关联。
-5. `startup_diagnostics_analyze.py` 增加 START 发送、stage1、stage2 的精确关联，区分 clean、gate drop、fence failed 和 inconclusive；trace 丢失时不作肯定结论。
+## 本次整改
 
-## 验证结果
+### A. `completeStart(false)` 失败闭环
 
-以下均在干净工作副本、上述实现分支上执行：
+`SocketReceiver::completeStart` 现在始终把 `ok=false` 视为失败：只有 `ok=true` 且没有收到 per-card callback 时，才保留无 callback 的兼容标记；最终 `fenceOk` 同时要求 `ok`、未失败以及所有卡为 `StartSent`。因此直接回归中的 `prepareStart(sessionA); completeStart(false)` 返回 false，SourceCore 保持 disabled，后续数据不会产生 frame/sync/release；`completeStart(true)` 的无 callback 兼容路径仍可恢复。
 
-- `python -m py_compile MC_410T_MultiCard/delivery/tools/startup_diagnostics_analyze.py`：通过。
-- `startup_diagnostics_analyze_test.py`：通过 clean、gate-drop、failed、incomplete、session-correlation 五类夹具。
-- `cmake --build build/tests_release --parallel 2`：通过，179/179。
-- `ctest --test-dir build/tests_release/paimage_core --output-on-failure`：通过，11/11。
-- `ctest --test-dir build/tests_release -R '^paimage_start_race$' --output-on-failure`：通过，1/1。夹具执行 61 个会话（3 类时序各 20 个，另含一次发送失败恢复）；最新 `result.json` 显示 `passed=true`、`hardSocketErrors=0`、`emulatorSendErrors=0`、`traceQueueDropped=0`、`traceIncomplete=false`，首个会话验证 `rawPre=heldPre=releasedPre=32` 且 `preStartDiscard=1`。
-- `ctest --test-dir build/tests_release -R '^paimage_network_test$' --output-on-failure`：通过，1/1。
-- `cmake --build build/mingw_debug --parallel 2`：通过，主程序与 `ImagingSvc` 完整链接及 Qt 部署步骤完成。构建使用工作区已有 `_migration_pack/prebuilt_cuda/bin`；缺失的本地 `cufft64_12.dll` 仅作为未跟踪构建依赖临时复制，未进入提交。
+### B. 诊断分析器采用 decision-first 语义
 
-整个 `tests_release` 目录的串行 CTest 调度中，17 个既有 Qt 目标报告 Windows `0xc0000135`，而同一目标逐项执行可通过；该现象属于当前 CTest/DLL 运行环境，不影响上述任务相关目标。未进行真实 FPGA/NIC 硬件采集或 system capture 验证。
+`startup_diagnostics_analyze.py` 对 `(session, correlation, card, trigger, packet, ingressId)` 做精确关联，并先解释 stage2 decision：同一 ingress 出现 `StartFenceHeld` 即表示合法 pending window，即使 raw ingress 时间早于 START stage6 result observation time；`StartFencePreStartDiscard` 明确记为 stale，直接 `Disabled` 记为 gate-drop。只有没有可解释证据时才记为 missing/inconclusive。`startSendNs` 明确是发送结果观察时间，不再被误用成唯一 admission lower boundary。
 
-## 交付约束
+### C. 验收回归接入
 
-- 未修改原始脏工作区，未合并 validation 分支，未改写或强推历史。
-- 实现分支已推送到 GitHub；最终交付已核对本地提交 SHA 与远端分支 SHA 一致。
+- 新增无 callback 的 false-start 回归：确认失败闭环和下一次兼容启动恢复。
+- 新增 hold overflow 回归：9000 个 datagram 触发生产 hold 上限，确认 overflow、failed discard、无 release/输出及恢复。
+- 扩充真实 UDP race trace：60 个成功 session（whole/prefix/normal 各 20），包含 pre-start stale、wrap-near trigger、失败 session 和恢复 session；记录 raw/held/released、Disabled、frame、sync、cross-session leak、double release。
+- 新增自动化 CTest `paimage_start_race_analyzer`，依赖 `paimage_start_race`，直接分析最新真实 trace 并把数值证据写入 `result.json`。
+- 失败场景在注入 START failure 前先确认至少一笔 pre-trigger ingress 已进入 fence，随后等待失败 ingress drain，避免测试 harness 因线程调度互等。
+
+## 验收数值证据
+
+以下为最后一次通过 CTest 生成的真实 trace 结果；临时 build/artifact 目录已在验证后清理。
+
+| 指标 | 结果 |
+| --- | --- |
+| session 总数 / 成功 session | 61 / 60 |
+| whole / prefix / normal | 20 / 20 / 20 |
+| wrap-near session | 6 |
+| 成功 session raw / held / released | 3841 / 880 / 880 |
+| post-boundary Disabled | 0 |
+| complete / partial frame | 480 / 0 |
+| sync frame | 120 |
+| cross-session frame leak / double release | 0 / 0 |
+| hard socket error / emulator send error | 0 / 0 |
+| trace queue dropped / trace incomplete | 0 / false |
+
+失败 session 最新值为：`startReturnedFalse=true`、`fenceReturnedFalse=true`、`heldCount=10`、`failedDiscardCount=11`、`releasedCount=0`、`cardFrameCount=0`、`syncFrameCount=0`、`recoverySessionPassed=true`。失败期间的 held/failed-discard 数量随 in-flight UDP 到达顺序变化，但没有 release 或输出。
+
+真实 trace analyzer 的结果为：`successSessionCount=60`、`cleanSessionCount=61`（含 recovery session）、`failedSessionCount=1`、`inconclusiveSuccessSessions=0`、`gateDropSuccessSessions=0`、`missingStage2JoinCount=0`、`rawIngressCount=3937`、`heldIngressCount=890`、`releasedIngressCount=880`、`traceIncomplete=false`。
+
+合成 analyzer fixture 另外验证了：clean case 的 `held=1`、`released=1`、`missing=0`；pre-start stale case 的 `preStartDiscard=1` 且 `missing=0`。overflow 回归输出 `overflowCount=1`、`failedDiscardCount=9000`、`releasedCount=0`、`cardFrameCount=0`、`syncFrameCount=0`、`recoveryPassed=true`。无 callback false-start 回归输出 `completeStartFalseReturnedFalse=true`、`sourceRemainedDisabled=true`、`releasedCount=0`、`cardFrameCount=0`、`syncFrameCount=0`、`nextCompatibilityStartPassed=true`。
+
+## 验证命令与结果
+
+- Python `py_compile`：通过 analyzer、synthetic fixture 和 CTest analyzer 脚本语法检查。
+- `startup_diagnostics_analyze_test.py`：通过 clean、gate-drop、failed、incomplete、session-correlation、pre-start fixture。
+- tests build：`cmake --build <tests-build> --parallel 2`，通过。
+- 任务相关 CTest：`paimage_network_test`、`paimage_start_race`、`paimage_start_fence_regression`、`paimage_start_overflow`、`startup_diagnostics_analyze_test`、`paimage_start_race_analyzer`，6/6 通过。
+- `paimage_core` CTest：11/11 通过。
+- `paimage_start_race` 连续稳定性复测：5/5 通过。
+- 生产 MinGW Debug 构建：主程序、`ImagingSvc`、Ring/CUDA 依赖部署及 Qt 部署步骤通过（57/57）。构建所需的 `cufft64_12.dll` 仅从原工作区临时复制到干净副本，验证后已删除，未进入提交。
+
+历史全套 Qt CTest 调度中有既有目标报告 Windows `0xc0000135`，而相关目标逐项执行可通过；本次门禁采用任务相关目标和 `paimage_core` 全集。未进行真实 FPGA/NIC 硬件采集或 system capture 验证。
+
+## Git 交付凭据
+
+实现提交 `2903a2b4851f9f668f202dfff77ec88678441e22` 相对 `origin/main` 的变更统计：
+
+```text
+15 files changed, 1480 insertions(+), 26 deletions(-)
+```
+
+变更路径：
+
+```text
+A  CODEX_REPORTS/start-admission-fence-fix-20260913/implementation-report.md
+M  MC_410T_MultiCard/delivery/include/PaimageAcquisition/ControlSocket.h
+M  MC_410T_MultiCard/delivery/include/PaimageAcquisition/SocketReceiver.h
+M  MC_410T_MultiCard/delivery/include/PaimageAcquisition/SourceCore.h
+M  MC_410T_MultiCard/delivery/src/PaimageAcquisition/Backend.cpp
+M  MC_410T_MultiCard/delivery/src/PaimageAcquisition/ControlSocket.cpp
+M  MC_410T_MultiCard/delivery/src/PaimageAcquisition/SocketReceiver.cpp
+M  MC_410T_MultiCard/delivery/src/PaimageAcquisition/SourceCore.cpp
+M  MC_410T_MultiCard/delivery/tests/CMakeLists.txt
+A  MC_410T_MultiCard/delivery/tests/paimage_start_fence_regression_test.cpp
+A  MC_410T_MultiCard/delivery/tests/paimage_start_overflow_test.cpp
+A  MC_410T_MultiCard/delivery/tests/paimage_start_race_analyzer_test.py
+A  MC_410T_MultiCard/delivery/tests/paimage_start_race_test.cpp
+A  MC_410T_MultiCard/delivery/tests/startup_diagnostics_analyze_test.py
+M  MC_410T_MultiCard/delivery/tools/startup_diagnostics_analyze.py
+```
+
+报告提交后将再次核对：工作树 clean、实现分支本地 HEAD 与 GitHub 同名远端分支 HEAD 相同；原始脏工作区保持不变。
