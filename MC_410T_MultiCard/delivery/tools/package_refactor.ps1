@@ -9,8 +9,23 @@ $ErrorActionPreference = 'Stop'
 $Product = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Repo = (Resolve-Path (Join-Path $Product '..\..')).Path
 $build = Join-Path $Product ('build\refactor_' + $Configuration.ToLowerInvariant() + '\bin')
-$artifact = Join-Path $Repo 'artifacts\RingPipelineRefactor\bin'
+$artifactRoot = Join-Path $Repo 'artifacts\RingPipelineRefactor'
+$artifact = Join-Path $artifactRoot 'bin'
 if (-not (Test-Path -LiteralPath $build)) { throw ('missing build output: ' + $build) }
+
+# The artifact directory is generated output owned by this script.  Recreate
+# it so repeated packaging cannot nest a previous plugin directory into the
+# new package.
+if (Test-Path -LiteralPath $artifact) {
+    $resolvedArtifact = (Resolve-Path -LiteralPath $artifact).Path
+    $expectedArtifact = [System.IO.Path]::GetFullPath($artifact)
+    if (-not $resolvedArtifact.Equals($expectedArtifact, [System.StringComparison]::OrdinalIgnoreCase) -or
+        (Split-Path $resolvedArtifact -Leaf) -ne 'bin' -or
+        (Split-Path (Split-Path $resolvedArtifact -Parent) -Leaf) -ne 'RingPipelineRefactor') {
+        throw ('refusing to clean unexpected artifact path: ' + $resolvedArtifact)
+    }
+    Remove-Item -LiteralPath $resolvedArtifact -Recurse -Force
+}
 New-Item -ItemType Directory -Force -Path $artifact | Out-Null
 Get-ChildItem -LiteralPath $build -File | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $artifact $_.Name) -Force
