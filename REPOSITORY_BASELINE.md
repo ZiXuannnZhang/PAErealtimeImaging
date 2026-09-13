@@ -6,6 +6,19 @@
 
 The complete project source history previously carried on `codex/diagnostic-log-export-20260907` has been merged into `main` with history preserved. That historical branch is retained for traceability only and must not be used as the base of future implementation work.
 
+## Repository-level operating documents
+
+Before starting any implementation, build, validation, or delivery task, Codex Desktop must read the latest versions from `origin/main`:
+
+```text
+REPOSITORY_BASELINE.md
+BUILD_STANDARD.md
+```
+
+`REPOSITORY_BASELINE.md` governs branch/history usage. `BUILD_STANDARD.md` governs the default build toolchain, CMake presets, CUDA/runtime dependencies, artifact packaging, build identity, and delivery evidence for all subsequent work.
+
+A task document may define task-specific overrides, but Codex must identify those overrides explicitly rather than silently bypassing the repository-level standards.
+
 ## Branch roles
 
 ### `main`
