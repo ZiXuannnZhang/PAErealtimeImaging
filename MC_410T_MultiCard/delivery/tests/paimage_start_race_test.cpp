@@ -271,8 +271,16 @@ private:
             failure_.releasedCount=metrics.releasedIngress;failure_.cardFrameCount=metrics.completeFrames+metrics.partialFrames;
             failure_.syncFrameCount=metrics.syncFrames;
         }
+        require(failure_.startReturnedFalse,"failure session did not return START=false");
+        require(failure_.fenceReturnedFalse,"failure session fence did not return false");
+        require(failure_.heldCount>0,"failure session produced no held ingress");
+        require(failure_.failedDiscardCount>0,"failure session produced no failed discard");
+        require(failure_.releasedCount==0,"failure session released held ingress");
+        require(failure_.cardFrameCount==0,"failure session produced CardFrame output");
+        require(failure_.syncFrameCount==0,"failure session produced SyncFrame output");
         Plan recovery;recovery.session=9001;recovery.scenario=Scenario::NormalAfterStart;recovery.firstTrigger=0;recovery.secondTrigger=1;recovery.prePackets=0;
         SessionResult result=runOne(recovery);failure_.recoverySessionPassed=result.passed;
+        require(failure_.recoverySessionPassed,"recovery session did not pass after START failure");
         require(result.passed,"recovery session failed after START failure raw="+std::to_string(result.rawIngress)+
             " held="+std::to_string(result.heldIngress)+" released="+std::to_string(result.releasedIngress)+
             " disabled="+std::to_string(result.postBoundaryDisabled)+" complete="+std::to_string(result.completeFrames)+
