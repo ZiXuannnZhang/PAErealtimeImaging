@@ -1,0 +1,110 @@
+[
+  {
+    "id": 561053996,
+    "name": "local-evidence-01.zip",
+    "size": 265771513,
+    "sha256": "61c6f646fa0b78e618fac4f0e7d77e54029a8b064dc38043f383f22d85c4823e",
+    "remote_digest": "sha256:61c6f646fa0b78e618fac4f0e7d77e54029a8b064dc38043f383f22d85c4823e",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-01.zip",
+    "verified": true
+  },
+  {
+    "id": 561053995,
+    "name": "local-evidence-02.zip",
+    "size": 79476364,
+    "sha256": "2a615e3c1e3384389500ac1bf030e3f960ad334e194076f3df6c085024d46069",
+    "remote_digest": "sha256:2a615e3c1e3384389500ac1bf030e3f960ad334e194076f3df6c085024d46069",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-02.zip",
+    "verified": true
+  },
+  {
+    "id": 561054984,
+    "name": "local-evidence-03.zip",
+    "size": 112699325,
+    "sha256": "7d3095cb7199ec46b398dbee46f5094b0d9eb4fbbd2989512fe51a3bd03e896a",
+    "remote_digest": "sha256:7d3095cb7199ec46b398dbee46f5094b0d9eb4fbbd2989512fe51a3bd03e896a",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-03.zip",
+    "verified": true
+  },
+  {
+    "id": 561056031,
+    "name": "local-evidence-04.zip",
+    "size": 89071637,
+    "sha256": "dea4ed5dcf62d8aff149e79ebd1e5bd2db4bdf501dab214ba64b06824cd5dbb6",
+    "remote_digest": "sha256:dea4ed5dcf62d8aff149e79ebd1e5bd2db4bdf501dab214ba64b06824cd5dbb6",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-04.zip",
+    "verified": true
+  },
+  {
+    "id": 561056809,
+    "name": "local-evidence-05.zip",
+    "size": 86027262,
+    "sha256": "c26175517607a7f5fd4418c767a6c477e85607903133ec0001da823a54d000d8",
+    "remote_digest": "sha256:c26175517607a7f5fd4418c767a6c477e85607903133ec0001da823a54d000d8",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-05.zip",
+    "verified": true
+  },
+  {
+    "id": 561056927,
+    "name": "local-evidence-06.zip",
+    "size": 89824978,
+    "sha256": "325d98b83b9086610fe626227c3e5ed394d71b34b651feab33b874235a77599d",
+    "remote_digest": "sha256:325d98b83b9086610fe626227c3e5ed394d71b34b651feab33b874235a77599d",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-06.zip",
+    "verified": true
+  },
+  {
+    "id": 561057332,
+    "name": "local-evidence-07.zip",
+    "size": 87228058,
+    "sha256": "3c44c6dfafb7217c00e1492eec8ed5194abfeeaf5d6bf7329b16f9beaa89f2da",
+    "remote_digest": "sha256:3c44c6dfafb7217c00e1492eec8ed5194abfeeaf5d6bf7329b16f9beaa89f2da",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-07.zip",
+    "verified": true
+  },
+  {
+    "id": 561057355,
+    "name": "local-evidence-08.zip",
+    "size": 64421255,
+    "sha256": "18fcf68a19910f0a6bf44e36e03deb89c7a7037d52d02a3b46a8e90b51acfcfb",
+    "remote_digest": "sha256:18fcf68a19910f0a6bf44e36e03deb89c7a7037d52d02a3b46a8e90b51acfcfb",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-08.zip",
+    "verified": true
+  },
+  {
+    "id": 561057643,
+    "name": "local-evidence-09.zip",
+    "size": 48603521,
+    "sha256": "297eb45d5f174b67dbab07033d8c7e88ba75368a976da3f9a82e2c88002b8ab8",
+    "remote_digest": "sha256:297eb45d5f174b67dbab07033d8c7e88ba75368a976da3f9a82e2c88002b8ab8",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-09.zip",
+    "verified": true
+  },
+  {
+    "id": 561058392,
+    "name": "local-evidence-10.zip",
+    "size": 67010182,
+    "sha256": "5c4f9eb69892300cb11f8d066d4ead288157dd4d9cbf095fa7a36c34fb627c5b",
+    "remote_digest": "sha256:5c4f9eb69892300cb11f8d066d4ead288157dd4d9cbf095fa7a36c34fb627c5b",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-10.zip",
+    "verified": true
+  },
+  {
+    "id": 561058589,
+    "name": "local-evidence-11.zip",
+    "size": 309460108,
+    "sha256": "a601a3e56a904199061bb784287e1c689dd0525722304e6b7a630c88d4b126ad",
+    "remote_digest": "sha256:a601a3e56a904199061bb784287e1c689dd0525722304e6b7a630c88d4b126ad",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-evidence-11.zip",
+    "verified": true
+  },
+  {
+    "id": 561059219,
+    "name": "local-history-complete.bundle",
+    "size": 872111519,
+    "sha256": "1eda3dc9b18fb42e6b90841592624c24a9d9a2e7665d55f57b221c6a2ec10c77",
+    "remote_digest": "sha256:1eda3dc9b18fb42e6b90841592624c24a9d9a2e7665d55f57b221c6a2ec10c77",
+    "url": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/download/archive/local-development-20260913/local-history-complete.bundle",
+    "verified": true
+  }
+]

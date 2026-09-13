@@ -1,0 +1,1332 @@
+[
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 71,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/backup/cf-dmas-pcf-20260816",
+    "remote_sha": "40760b42fd5494ddd476a2bbc91ce09da4587365",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/backup/main-pre-diagnostics-20260912",
+    "remote_sha": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 18,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/backup/sysdelay-per-channel-20260817",
+    "remote_sha": "e3c4bd46a47458fa033d946adb401909e946539a",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/baseline-role-ack-20260907-132500",
+    "remote_sha": "2873e8156cc4c1663a65c265ead2088c425b0a5b",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 9,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/diagnostic-log-export-20260907",
+    "remote_sha": "3c88239afaa1ac9993ad1db9eda4cfd61f242747",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 3,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/diagnostics-enhancement-20260912",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 58,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/host-ingress-protection-experiment-20260908",
+    "remote_sha": "4001e3aff938d86d93783c9cfaf8c9791fd80d7a",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 22,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/network-ingress-observability-20260907",
+    "remote_sha": "38b0244e0fb07ff611849bd32cc5c669be363629",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 21,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/ring-pipeline-refactor-20260912",
+    "remote_sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 59,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/ssh-unattended-test",
+    "remote_sha": "7e53d33bb50e160862eac91e08a45799f7c33d6d",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 2,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/start-admission-fence-fix-20260913-003112",
+    "remote_sha": "6313540f72544c0f68820c4815903abaa0b8c1e1",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 66,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/start-race-validation-20260912-205615",
+    "remote_sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 64,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/startup-ingress-diagnostics-20260911",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 58,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/codex/task-docs",
+    "remote_sha": "6f4acba0d20866500999e30801327defa1a7e3fb",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 23,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/docs/readme-main-architecture-20260912",
+    "remote_sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 60,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/main",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 71,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/master",
+    "remote_sha": "219188a914f892d67314094b43998a89ca860993",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "original-master",
+    "sha": "9342af13a9a7d7e632d0aba3d9e0d3726e275468",
+    "remote": "origin/safety/pre-shm-observability-20260907-155459",
+    "remote_sha": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "merge_base": null,
+    "local_only": 62,
+    "remote_only": 7,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 71,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/backup/cf-dmas-pcf-20260816",
+    "remote_sha": "40760b42fd5494ddd476a2bbc91ce09da4587365",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/backup/main-pre-diagnostics-20260912",
+    "remote_sha": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 18,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/backup/sysdelay-per-channel-20260817",
+    "remote_sha": "e3c4bd46a47458fa033d946adb401909e946539a",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/baseline-role-ack-20260907-132500",
+    "remote_sha": "2873e8156cc4c1663a65c265ead2088c425b0a5b",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 9,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/diagnostic-log-export-20260907",
+    "remote_sha": "3c88239afaa1ac9993ad1db9eda4cfd61f242747",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 3,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/diagnostics-enhancement-20260912",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 58,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/host-ingress-protection-experiment-20260908",
+    "remote_sha": "4001e3aff938d86d93783c9cfaf8c9791fd80d7a",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 22,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/network-ingress-observability-20260907",
+    "remote_sha": "38b0244e0fb07ff611849bd32cc5c669be363629",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 21,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/ring-pipeline-refactor-20260912",
+    "remote_sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 59,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/ssh-unattended-test",
+    "remote_sha": "7e53d33bb50e160862eac91e08a45799f7c33d6d",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 2,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/start-admission-fence-fix-20260913-003112",
+    "remote_sha": "6313540f72544c0f68820c4815903abaa0b8c1e1",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 66,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/start-race-validation-20260912-205615",
+    "remote_sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 64,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/startup-ingress-diagnostics-20260911",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 58,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/codex/task-docs",
+    "remote_sha": "6f4acba0d20866500999e30801327defa1a7e3fb",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 23,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/docs/readme-main-architecture-20260912",
+    "remote_sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 60,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/main",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 71,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/master",
+    "remote_sha": "219188a914f892d67314094b43998a89ca860993",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "tracked-workspace",
+    "sha": "d5523a69d1853c7489bbe9a1fe322a32e242c452",
+    "remote": "origin/safety/pre-shm-observability-20260907-155459",
+    "remote_sha": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 7,
+    "relation": "unrelated"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 1,
+    "remote_only": 11,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/backup/cf-dmas-pcf-20260816",
+    "remote_sha": "40760b42fd5494ddd476a2bbc91ce09da4587365",
+    "merge_base": null,
+    "local_only": 61,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/backup/main-pre-diagnostics-20260912",
+    "remote_sha": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 43,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/backup/sysdelay-per-channel-20260817",
+    "remote_sha": "e3c4bd46a47458fa033d946adb401909e946539a",
+    "merge_base": null,
+    "local_only": 61,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/baseline-role-ack-20260907-132500",
+    "remote_sha": "2873e8156cc4c1663a65c265ead2088c425b0a5b",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 54,
+    "remote_only": 2,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/diagnostic-log-export-20260907",
+    "remote_sha": "3c88239afaa1ac9993ad1db9eda4cfd61f242747",
+    "merge_base": "b0d654fbfca6838fb17cc8e80dc346bfffb37a9e",
+    "local_only": 59,
+    "remote_only": 1,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/diagnostics-enhancement-20260912",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 3,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/host-ingress-protection-experiment-20260908",
+    "remote_sha": "4001e3aff938d86d93783c9cfaf8c9791fd80d7a",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 43,
+    "remote_only": 4,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/network-ingress-observability-20260907",
+    "remote_sha": "38b0244e0fb07ff611849bd32cc5c669be363629",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 43,
+    "remote_only": 3,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/ring-pipeline-refactor-20260912",
+    "remote_sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 8,
+    "remote_only": 6,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/ssh-unattended-test",
+    "remote_sha": "7e53d33bb50e160862eac91e08a45799f7c33d6d",
+    "merge_base": "9eab2dff5a319d6214e7f93c5d61b96be2c99401",
+    "local_only": 60,
+    "remote_only": 1,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/start-admission-fence-fix-20260913-003112",
+    "remote_sha": "6313540f72544c0f68820c4815903abaa0b8c1e1",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 1,
+    "remote_only": 6,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/start-race-validation-20260912-205615",
+    "remote_sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 1,
+    "remote_only": 4,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/startup-ingress-diagnostics-20260911",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 3,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/codex/task-docs",
+    "remote_sha": "6f4acba0d20866500999e30801327defa1a7e3fb",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 54,
+    "remote_only": 16,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/docs/readme-main-architecture-20260912",
+    "remote_sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 1,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/main",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 1,
+    "remote_only": 11,
+    "relation": "diverged"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/master",
+    "remote_sha": "219188a914f892d67314094b43998a89ca860993",
+    "merge_base": null,
+    "local_only": 61,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "deleted-docs",
+    "sha": "c3cc9faa7b9c28aaf0dc1c72d4056a38815b6c46",
+    "remote": "origin/safety/pre-shm-observability-20260907-155459",
+    "remote_sha": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 54,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 6,
+    "remote_only": 18,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/backup/cf-dmas-pcf-20260816",
+    "remote_sha": "40760b42fd5494ddd476a2bbc91ce09da4587365",
+    "merge_base": null,
+    "local_only": 59,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/backup/main-pre-diagnostics-20260912",
+    "remote_sha": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 41,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/backup/sysdelay-per-channel-20260817",
+    "remote_sha": "e3c4bd46a47458fa033d946adb401909e946539a",
+    "merge_base": null,
+    "local_only": 59,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/baseline-role-ack-20260907-132500",
+    "remote_sha": "2873e8156cc4c1663a65c265ead2088c425b0a5b",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 52,
+    "remote_only": 2,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/diagnostic-log-export-20260907",
+    "remote_sha": "3c88239afaa1ac9993ad1db9eda4cfd61f242747",
+    "merge_base": "b0d654fbfca6838fb17cc8e80dc346bfffb37a9e",
+    "local_only": 57,
+    "remote_only": 1,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/diagnostics-enhancement-20260912",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 6,
+    "remote_only": 5,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/host-ingress-protection-experiment-20260908",
+    "remote_sha": "4001e3aff938d86d93783c9cfaf8c9791fd80d7a",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 41,
+    "remote_only": 4,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/network-ingress-observability-20260907",
+    "remote_sha": "38b0244e0fb07ff611849bd32cc5c669be363629",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 41,
+    "remote_only": 3,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/ring-pipeline-refactor-20260912",
+    "remote_sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "merge_base": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "local_only": 0,
+    "remote_only": 0,
+    "relation": "equal"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/ssh-unattended-test",
+    "remote_sha": "7e53d33bb50e160862eac91e08a45799f7c33d6d",
+    "merge_base": "9eab2dff5a319d6214e7f93c5d61b96be2c99401",
+    "local_only": 58,
+    "remote_only": 1,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/start-admission-fence-fix-20260913-003112",
+    "remote_sha": "6313540f72544c0f68820c4815903abaa0b8c1e1",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 6,
+    "remote_only": 13,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/start-race-validation-20260912-205615",
+    "remote_sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 6,
+    "remote_only": 11,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/startup-ingress-diagnostics-20260911",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 6,
+    "remote_only": 5,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/codex/task-docs",
+    "remote_sha": "6f4acba0d20866500999e30801327defa1a7e3fb",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 52,
+    "remote_only": 16,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/docs/readme-main-architecture-20260912",
+    "remote_sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 6,
+    "remote_only": 7,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/main",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 6,
+    "remote_only": 18,
+    "relation": "diverged"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/master",
+    "remote_sha": "219188a914f892d67314094b43998a89ca860993",
+    "merge_base": null,
+    "local_only": 59,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "ring-refactor",
+    "sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "remote": "origin/safety/pre-shm-observability-20260907-155459",
+    "remote_sha": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 52,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 0,
+    "remote_only": 13,
+    "relation": "ancestor"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/backup/cf-dmas-pcf-20260816",
+    "remote_sha": "40760b42fd5494ddd476a2bbc91ce09da4587365",
+    "merge_base": null,
+    "local_only": 58,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/backup/main-pre-diagnostics-20260912",
+    "remote_sha": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 40,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/backup/sysdelay-per-channel-20260817",
+    "remote_sha": "e3c4bd46a47458fa033d946adb401909e946539a",
+    "merge_base": null,
+    "local_only": 58,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/baseline-role-ack-20260907-132500",
+    "remote_sha": "2873e8156cc4c1663a65c265ead2088c425b0a5b",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 51,
+    "remote_only": 2,
+    "relation": "diverged"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/diagnostic-log-export-20260907",
+    "remote_sha": "3c88239afaa1ac9993ad1db9eda4cfd61f242747",
+    "merge_base": "b0d654fbfca6838fb17cc8e80dc346bfffb37a9e",
+    "local_only": 56,
+    "remote_only": 1,
+    "relation": "diverged"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/diagnostics-enhancement-20260912",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 0,
+    "remote_only": 0,
+    "relation": "equal"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/host-ingress-protection-experiment-20260908",
+    "remote_sha": "4001e3aff938d86d93783c9cfaf8c9791fd80d7a",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 40,
+    "remote_only": 4,
+    "relation": "diverged"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/network-ingress-observability-20260907",
+    "remote_sha": "38b0244e0fb07ff611849bd32cc5c669be363629",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 40,
+    "remote_only": 3,
+    "relation": "diverged"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/ring-pipeline-refactor-20260912",
+    "remote_sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 5,
+    "remote_only": 6,
+    "relation": "diverged"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/ssh-unattended-test",
+    "remote_sha": "7e53d33bb50e160862eac91e08a45799f7c33d6d",
+    "merge_base": "9eab2dff5a319d6214e7f93c5d61b96be2c99401",
+    "local_only": 57,
+    "remote_only": 1,
+    "relation": "diverged"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/start-admission-fence-fix-20260913-003112",
+    "remote_sha": "6313540f72544c0f68820c4815903abaa0b8c1e1",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 0,
+    "remote_only": 8,
+    "relation": "ancestor"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/start-race-validation-20260912-205615",
+    "remote_sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 0,
+    "remote_only": 6,
+    "relation": "ancestor"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/startup-ingress-diagnostics-20260911",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 0,
+    "remote_only": 0,
+    "relation": "equal"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/codex/task-docs",
+    "remote_sha": "6f4acba0d20866500999e30801327defa1a7e3fb",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 51,
+    "remote_only": 16,
+    "relation": "diverged"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/docs/readme-main-architecture-20260912",
+    "remote_sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 0,
+    "remote_only": 2,
+    "relation": "ancestor"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/main",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 0,
+    "remote_only": 13,
+    "relation": "ancestor"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/master",
+    "remote_sha": "219188a914f892d67314094b43998a89ca860993",
+    "merge_base": null,
+    "local_only": 58,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "diagnostics",
+    "sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "remote": "origin/safety/pre-shm-observability-20260907-155459",
+    "remote_sha": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 51,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 4,
+    "remote_only": 11,
+    "relation": "diverged"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/backup/cf-dmas-pcf-20260816",
+    "remote_sha": "40760b42fd5494ddd476a2bbc91ce09da4587365",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/backup/main-pre-diagnostics-20260912",
+    "remote_sha": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 46,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/backup/sysdelay-per-channel-20260817",
+    "remote_sha": "e3c4bd46a47458fa033d946adb401909e946539a",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/baseline-role-ack-20260907-132500",
+    "remote_sha": "2873e8156cc4c1663a65c265ead2088c425b0a5b",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 57,
+    "remote_only": 2,
+    "relation": "diverged"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/diagnostic-log-export-20260907",
+    "remote_sha": "3c88239afaa1ac9993ad1db9eda4cfd61f242747",
+    "merge_base": "b0d654fbfca6838fb17cc8e80dc346bfffb37a9e",
+    "local_only": 62,
+    "remote_only": 1,
+    "relation": "diverged"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/diagnostics-enhancement-20260912",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 6,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/host-ingress-protection-experiment-20260908",
+    "remote_sha": "4001e3aff938d86d93783c9cfaf8c9791fd80d7a",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 46,
+    "remote_only": 4,
+    "relation": "diverged"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/network-ingress-observability-20260907",
+    "remote_sha": "38b0244e0fb07ff611849bd32cc5c669be363629",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 46,
+    "remote_only": 3,
+    "relation": "diverged"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/ring-pipeline-refactor-20260912",
+    "remote_sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 11,
+    "remote_only": 6,
+    "relation": "diverged"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/ssh-unattended-test",
+    "remote_sha": "7e53d33bb50e160862eac91e08a45799f7c33d6d",
+    "merge_base": "9eab2dff5a319d6214e7f93c5d61b96be2c99401",
+    "local_only": 63,
+    "remote_only": 1,
+    "relation": "diverged"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/start-admission-fence-fix-20260913-003112",
+    "remote_sha": "6313540f72544c0f68820c4815903abaa0b8c1e1",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 4,
+    "remote_only": 6,
+    "relation": "diverged"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/start-race-validation-20260912-205615",
+    "remote_sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "merge_base": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "local_only": 0,
+    "remote_only": 0,
+    "relation": "equal"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/startup-ingress-diagnostics-20260911",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 6,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/codex/task-docs",
+    "remote_sha": "6f4acba0d20866500999e30801327defa1a7e3fb",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 57,
+    "remote_only": 16,
+    "relation": "diverged"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/docs/readme-main-architecture-20260912",
+    "remote_sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 4,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/main",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 4,
+    "remote_only": 11,
+    "relation": "diverged"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/master",
+    "remote_sha": "219188a914f892d67314094b43998a89ca860993",
+    "merge_base": null,
+    "local_only": 64,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "start-race",
+    "sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "remote": "origin/safety/pre-shm-observability-20260907-155459",
+    "remote_sha": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 57,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 0,
+    "remote_only": 11,
+    "relation": "ancestor"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/backup/cf-dmas-pcf-20260816",
+    "remote_sha": "40760b42fd5494ddd476a2bbc91ce09da4587365",
+    "merge_base": null,
+    "local_only": 60,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/backup/main-pre-diagnostics-20260912",
+    "remote_sha": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 42,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/backup/sysdelay-per-channel-20260817",
+    "remote_sha": "e3c4bd46a47458fa033d946adb401909e946539a",
+    "merge_base": null,
+    "local_only": 60,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/baseline-role-ack-20260907-132500",
+    "remote_sha": "2873e8156cc4c1663a65c265ead2088c425b0a5b",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 53,
+    "remote_only": 2,
+    "relation": "diverged"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/diagnostic-log-export-20260907",
+    "remote_sha": "3c88239afaa1ac9993ad1db9eda4cfd61f242747",
+    "merge_base": "b0d654fbfca6838fb17cc8e80dc346bfffb37a9e",
+    "local_only": 58,
+    "remote_only": 1,
+    "relation": "diverged"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/diagnostics-enhancement-20260912",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 2,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/host-ingress-protection-experiment-20260908",
+    "remote_sha": "4001e3aff938d86d93783c9cfaf8c9791fd80d7a",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 42,
+    "remote_only": 4,
+    "relation": "diverged"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/network-ingress-observability-20260907",
+    "remote_sha": "38b0244e0fb07ff611849bd32cc5c669be363629",
+    "merge_base": "3c7904da9b9ec2e96aef384081ac04fc88d7fb29",
+    "local_only": 42,
+    "remote_only": 3,
+    "relation": "diverged"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/ring-pipeline-refactor-20260912",
+    "remote_sha": "d861b4e3671293f4eb79a1401b195ec6cdfb3cad",
+    "merge_base": "9d0fd7a84b3725a3cfa6e1aefb9be2559add0cda",
+    "local_only": 7,
+    "remote_only": 6,
+    "relation": "diverged"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/ssh-unattended-test",
+    "remote_sha": "7e53d33bb50e160862eac91e08a45799f7c33d6d",
+    "merge_base": "9eab2dff5a319d6214e7f93c5d61b96be2c99401",
+    "local_only": 59,
+    "remote_only": 1,
+    "relation": "diverged"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/start-admission-fence-fix-20260913-003112",
+    "remote_sha": "6313540f72544c0f68820c4815903abaa0b8c1e1",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 0,
+    "remote_only": 6,
+    "relation": "ancestor"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/start-race-validation-20260912-205615",
+    "remote_sha": "8431476d7ff120d774d7f6161b898f76d17b8c67",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 0,
+    "remote_only": 4,
+    "relation": "ancestor"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/startup-ingress-diagnostics-20260911",
+    "remote_sha": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "merge_base": "c24e915ba76aeee186673943b0a474c4f7c8f5e9",
+    "local_only": 2,
+    "remote_only": 0,
+    "relation": "descendant"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/codex/task-docs",
+    "remote_sha": "6f4acba0d20866500999e30801327defa1a7e3fb",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 53,
+    "remote_only": 16,
+    "relation": "diverged"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/docs/readme-main-architecture-20260912",
+    "remote_sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 0,
+    "remote_only": 0,
+    "relation": "equal"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/main",
+    "remote_sha": "432cafcd49cbc410241928db86da3a47784e142c",
+    "merge_base": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "local_only": 0,
+    "remote_only": 11,
+    "relation": "ancestor"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/master",
+    "remote_sha": "219188a914f892d67314094b43998a89ca860993",
+    "merge_base": null,
+    "local_only": 60,
+    "remote_only": 1,
+    "relation": "unrelated"
+  },
+  {
+    "local": "old-main",
+    "sha": "f326056ee99e5f9c135635d7e97fe2027ee50fbc",
+    "remote": "origin/safety/pre-shm-observability-20260907-155459",
+    "remote_sha": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "merge_base": "7dd7a4d443c0f5f73fd5873a68570c221c5e1f79",
+    "local_only": 53,
+    "remote_only": 0,
+    "relation": "descendant"
+  }
+]
