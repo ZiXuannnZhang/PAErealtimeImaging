@@ -1,0 +1,11 @@
+{
+  "date": "2026-09-13",
+  "removed_source_files": 27659,
+  "removed_source_bytes": 10777167269,
+  "removed_upload_temporary_bytes": 2171705722,
+  "release": "https://github.com/ZiXuannnZhang/PAErealtimeImaging/releases/tag/archive/local-development-20260913",
+  "remote_source_commit": "cab86a1933d659f8d3e68ecadaee6d20b472ec80",
+  "remote_report_commit_before_cleanup": "29a65c91fdffbbcbd670b555706114fb314527e3",
+  "result": "archived source directory and upload payloads removed after remote verification",
+  "retained_folder": "workspace-records/20260913-local-cloud-sync"
+}
