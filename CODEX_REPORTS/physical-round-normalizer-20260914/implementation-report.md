@@ -16,7 +16,7 @@ BASE_BRANCH       codex/start-admission-fence-fix-20260913-003112
 BASE_SHA          6313540f72544c0f68820c4815903abaa0b8c1e1
 IMPLEMENTATION_BRANCH codex/physical-round-normalizer-20260914-043019
 SOURCE_FIX_SHA    N/A (Phase 0 protocol block; no production source changed)
-RECEIPT_SHA       见本分支最终 HEAD 及推送核验
+RECEIPT_SHA       9424b1c（本报告首个 report-only commit；最终分支 HEAD 另行核验）
 ```
 
 `git rev-parse origin/codex/start-admission-fence-fix-20260913-003112` 的结果为任务要求的 `6313540f72544c0f68820c4815903abaa0b8c1e1`，因此 baseline 未触发 `BASELINE_BLOCKED`。
