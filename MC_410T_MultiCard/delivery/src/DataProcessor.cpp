@@ -89,124 +89,142 @@ void DataProcessor::run() {
             m_hasData.store(false, std::memory_order_relaxed);
         }
 
-        DataPacket pkt;
-        int count = 0;
-        while (m_inputQueue.try_dequeue(pkt) && count++ < PROC_BATCH_SIZE) {
-            m_stats.packetsReceived.fetch_add(1, std::memory_order_relaxed);
+        processInputBatch(assemblyBuf);
+    }
+}
 
-            // 测量门控：未点击“开始测量”前丢弃数据包，不进入组包/显示/环形馈送
-            if (!m_measureEnabled.load(std::memory_order_relaxed))
-                continue;
+int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
+    DataPacket pkt;
+    int count = 0;
+    // 先检查 batch quota，再尝试 dequeue。这样第 513 个包不会被
+    // try_dequeue 成功取出后又因 quota 失败而静默丢失。
+    while (count < PROC_BATCH_SIZE && m_inputQueue.try_dequeue(pkt)) {
+        ++count;
+        m_stats.processorPacketsDequeued.fetch_add(1, std::memory_order_relaxed);
+        m_stats.packetsReceived.fetch_add(1, std::memory_order_relaxed);
 
-            // ══ 步骤1：丢弃旧触发迟到包（含重复包），不重复计入丢包 ──────────────────
-            // 设计原则：迟到包在触发切换时已被精确统计（步骤2的missingInOld），
-            //           此处只丢弃，不再重复计数，避免双重统计。
-            // 首次flush前（启动阶段）用缓冲区内的triggerSeq作回退判断，
-            // 防止系统启动时网络中残留的旧触发包污染第一个触发的组装缓冲区。
-            if (m_hasFlushedOnce) {
-                // flush后：seqDiff≤0 → 属于已flush触发（或更旧），丢弃
-                if (static_cast<int16_t>(pkt.triggerSeq - m_lastFlushedTriggerSeq) <= 0) {
-                    // ── 新一帧/新一轮测量触发序号重置识别 ───────────────────────
-                    // 模拟器重发或 FPGA 重置后，首触发序号相对上一帧末触发大幅回退
-                    // （远大于乱序抖动窗口）。立即重置锚点并接受当前包，
-                    // 避免整帧首个触发被当作迟到包丢弃（触发计数少 1 且丢包为 0）。
-                    const int32_t backJump =
-                        static_cast<int32_t>(m_lastFlushedTriggerSeq) -
-                        static_cast<int32_t>(pkt.triggerSeq);
-                    if (backJump >= kTriggerResetBackJumpThreshold) {
+        // 测量门控：未点击“开始测量”前丢弃数据包，不进入组包/显示/环形馈送
+        if (!m_measureEnabled.load(std::memory_order_relaxed))
+            continue;
+
+        // ══ 步骤1：丢弃旧触发迟到包（含重复包），不重复计入丢包 ──────────────────
+        // 设计原则：迟到包在触发切换时已被精确统计（步骤2的missingInOld），
+        //           此处只丢弃，不再重复计数，避免双重统计。
+        // 首次flush前（启动阶段）用缓冲区内的triggerSeq作回退判断，
+        // 防止系统启动时网络中残留的旧触发包污染第一个触发的组装缓冲区。
+        if (m_hasFlushedOnce) {
+            // flush后：seqDiff≤0 → 属于已flush触发（或更旧），丢弃
+            if (static_cast<int16_t>(pkt.triggerSeq - m_lastFlushedTriggerSeq) <= 0) {
+                // ── 新一帧/新一轮测量触发序号重置识别 ───────────────────────
+                // 模拟器重发或 FPGA 重置后，首触发序号相对上一帧末触发大幅回退
+                // （远大于乱序抖动窗口）。立即重置锚点并接受当前包，
+                // 避免整帧首个触发被当作迟到包丢弃（触发计数少 1 且丢包为 0）。
+                const int32_t backJump =
+                    static_cast<int32_t>(m_lastFlushedTriggerSeq) -
+                    static_cast<int32_t>(pkt.triggerSeq);
+                if (backJump >= kTriggerResetBackJumpThreshold) {
+                    m_hasFlushedOnce     = false;
+                    m_consecutiveDiscards = 0;
+                    assemblyBuf.reset();
+                    // fall through：把当前包当作第一个新包处理
+                } else {
+                    // ── 连续丢弃恢复机制（小回退=乱序迟到包）─────────────────
+                    // 超过 expectedPackets+1 个连续丢弃后，强制重置锚点，
+                    // 接受任意新触发序号，恢复正常处理（复位后仅丢 1 个触发）。
+                    ++m_consecutiveDiscards;
+                    if (m_consecutiveDiscards >= m_expectedPackets + 1) {
                         m_hasFlushedOnce     = false;
                         m_consecutiveDiscards = 0;
                         assemblyBuf.reset();
                         // fall through：把当前包当作第一个新包处理
                     } else {
-                        // ── 连续丢弃恢复机制（小回退=乱序迟到包）─────────────────
-                        // 超过 expectedPackets+1 个连续丢弃后，强制重置锚点，
-                        // 接受任意新触发序号，恢复正常处理（复位后仅丢 1 个触发）。
-                        ++m_consecutiveDiscards;
-                        if (m_consecutiveDiscards >= m_expectedPackets + 1) {
-                            m_hasFlushedOnce     = false;
-                            m_consecutiveDiscards = 0;
-                            assemblyBuf.reset();
-                            // fall through：把当前包当作第一个新包处理
-                        } else {
-                            continue;
-                        }
+                        continue;
                     }
-                } else {
-                    m_consecutiveDiscards = 0;  // 收到有效包，重置计数
                 }
-            } else if (assemblyBuf.receivedCount() > 0) {
-                // flush前（启动期）：seqDiff<0 → 属于比当前更旧的触发，丢弃
-                if (static_cast<int16_t>(pkt.triggerSeq - assemblyBuf.triggerSeq()) < 0)
-                    continue;
+            } else {
+                m_consecutiveDiscards = 0;  // 收到有效包，重置计数
             }
-
-            // ══ 步骤2：触发切换 + 精确丢包统计 ─────────────────────────────────────
-            // 核心：用 bitmask receivedCount 计算缺失包数，对乱序到达完全不敏感
-            // 例：70包期望，收到68包（乱序 ok），切换时精确计2包丢失
-            bool didSwitch = false;
-            if (assemblyBuf.receivedCount() > 0 &&
-                pkt.triggerSeq != assemblyBuf.triggerSeq())
-            {
-                const uint16_t oldSeq = assemblyBuf.triggerSeq();
-
-                // ① 旧触发：期望包数 - 实收包数（bitmask去重，对乱序精确）
-                const int32_t missingInOld =
-                    m_expectedPackets - assemblyBuf.receivedCount();
-                if (missingInOld > 0) {
-                    m_stats.packetsDropped.fetch_add(
-                        static_cast<uint32_t>(missingInOld), std::memory_order_relaxed);
-                    emit partialTrigger(m_cardId, oldSeq, missingInOld);
-                }
-
-                // ② 旧触发与当前包触发之间跳过的完整触发（0包到达，int16差值处理回绕）
-                //    示例：oldSeq=5, pkt.triggerSeq=8 → skipGap=2 → T6+T7全部丢失
-                const int16_t skipGap =
-                    static_cast<int16_t>(pkt.triggerSeq - oldSeq) - 1;
-                if (skipGap > 0)
-                    m_stats.packetsDropped.fetch_add(
-                        static_cast<uint32_t>(skipGap) *
-                        static_cast<uint32_t>(m_expectedPackets),
-                        std::memory_order_relaxed);
-
-                m_stats.triggersPartial.fetch_add(1, std::memory_order_relaxed);
-                flushAssemblyBuf(assemblyBuf);
-                assemblyBuf.reset();
-                m_lastFlushedTriggerSeq = oldSeq;  // 锚点移到旧触发
-                m_hasFlushedOnce        = true;
-                didSwitch               = true;
-            }
-
-            // ══ 步骤3：全触发丢失检测（缓冲区原本为空时的序号断层）──────────────────
-            // 场景：T5完成→缓冲区清空→T7第一包到达（T6全部0包）
-            //       didSwitch=false（无旧触发可切换），此处通过锚点gap检测T6的丢失
-            // 注意：didSwitch=true时步骤2的skipGap已覆盖跳过的触发，此处不再执行
-            if (!didSwitch && assemblyBuf.receivedCount() == 0 && m_hasFlushedOnce) {
-                const int16_t gap =
-                    static_cast<int16_t>(pkt.triggerSeq - m_lastFlushedTriggerSeq) - 1;
-                if (gap > 0)
-                    m_stats.packetsDropped.fetch_add(
-                        static_cast<uint32_t>(gap) *
-                        static_cast<uint32_t>(m_expectedPackets),
-                        std::memory_order_relaxed);
-            }
-
-            // ══ 步骤4：插入包（bitmask去重 + 直接索引，乱序/重复均安全）───────────
-            assemblyBuf.insertPacket(pkt);
-
-            // ══ 步骤5：触发完成（所有期望包均已到达，含乱序）────────────────────────
-            if (assemblyBuf.isComplete(m_expectedPackets)) {
-                m_lastFlushedTriggerSeq = assemblyBuf.triggerSeq();
-                m_hasFlushedOnce        = true;
-                flushAssemblyBuf(assemblyBuf);
-                assemblyBuf.reset();
-            }
+        } else if (assemblyBuf.receivedCount() > 0) {
+            // flush前（启动期）：seqDiff<0 → 属于比当前更旧的触发，丢弃
+            if (static_cast<int16_t>(pkt.triggerSeq - assemblyBuf.triggerSeq()) < 0)
+                continue;
         }
 
-        // 更新队列深度（供统计显示）
-        m_stats.inputQueueDepth = static_cast<int>(m_inputQueue.size_approx());
+        // ══ 步骤2：触发切换 + 精确丢包统计 ─────────────────────────────────────
+        // 核心：用 bitmask receivedCount 计算缺失包数，对乱序到达完全不敏感
+        // 例：70包期望，收到68包（乱序 ok），切换时精确计2包丢失
+        bool didSwitch = false;
+        if (assemblyBuf.receivedCount() > 0 &&
+            pkt.triggerSeq != assemblyBuf.triggerSeq())
+        {
+            const uint16_t oldSeq = assemblyBuf.triggerSeq();
+
+            // ① 旧触发：期望包数 - 实收包数（bitmask去重，对乱序精确）
+            const int32_t missingInOld =
+                m_expectedPackets - assemblyBuf.receivedCount();
+            if (missingInOld > 0) {
+                m_stats.packetsDropped.fetch_add(
+                    static_cast<uint32_t>(missingInOld), std::memory_order_relaxed);
+                emit partialTrigger(m_cardId, oldSeq, missingInOld);
+            }
+
+            // ② 旧触发与当前包触发之间跳过的完整触发（0包到达，int16差值处理回绕）
+            //    示例：oldSeq=5, pkt.triggerSeq=8 → skipGap=2 → T6+T7全部丢失
+            const int16_t skipGap =
+                static_cast<int16_t>(pkt.triggerSeq - oldSeq) - 1;
+            if (skipGap > 0)
+                m_stats.packetsDropped.fetch_add(
+                    static_cast<uint32_t>(skipGap) *
+                    static_cast<uint32_t>(m_expectedPackets),
+                    std::memory_order_relaxed);
+
+            m_stats.triggersPartial.fetch_add(1, std::memory_order_relaxed);
+            flushAssemblyBuf(assemblyBuf);
+            assemblyBuf.reset();
+            m_lastFlushedTriggerSeq = oldSeq;  // 锚点移到旧触发
+            m_hasFlushedOnce        = true;
+            didSwitch               = true;
+        }
+
+        // ══ 步骤3：全触发丢失检测（缓冲区原本为空时的序号断层）──────────────────
+        // 场景：T5完成→缓冲区清空→T7第一包到达（T6全部0包）
+        //       didSwitch=false（无旧触发可切换），此处通过锚点gap检测T6的丢失
+        // 注意：didSwitch=true时步骤2的skipGap已覆盖跳过的触发，此处不再执行
+        if (!didSwitch && assemblyBuf.receivedCount() == 0 && m_hasFlushedOnce) {
+            const int16_t gap =
+                static_cast<int16_t>(pkt.triggerSeq - m_lastFlushedTriggerSeq) - 1;
+            if (gap > 0)
+                m_stats.packetsDropped.fetch_add(
+                    static_cast<uint32_t>(gap) *
+                    static_cast<uint32_t>(m_expectedPackets),
+                    std::memory_order_relaxed);
+        }
+
+        // ══ 步骤4：插入包（bitmask去重 + 直接索引，乱序/重复均安全）───────────
+        assemblyBuf.insertPacket(pkt);
+
+        // ══ 步骤5：触发完成（所有期望包均已到达，含乱序）────────────────────────
+        if (assemblyBuf.isComplete(m_expectedPackets)) {
+            m_lastFlushedTriggerSeq = assemblyBuf.triggerSeq();
+            m_hasFlushedOnce        = true;
+            flushAssemblyBuf(assemblyBuf);
+            assemblyBuf.reset();
+        }
     }
+
+    // quota 在 dequeue 前检查，因此没有“取出后因边界被丢弃”的路径；
+    // batchBoundaryDiscards 作为兼容哨兵保持为 0。
+    // 更新队列深度（供统计显示）
+    m_stats.inputQueueDepth = static_cast<int>(m_inputQueue.size_approx());
+    return count;
 }
+
+#ifdef DATA_PROCESSOR_TEST_SEAM
+int DataProcessor::drainBatchForTest() {
+    PacketAssemblyBuffer assemblyBuf(m_expectedPackets + 20);
+    return processInputBatch(assemblyBuf);
+}
+#endif
 
 // 
 // computeFrequency

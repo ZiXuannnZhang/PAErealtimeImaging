@@ -23,9 +23,25 @@ MathWorks/
 # 本地工具（便携版 git 等，不入库）
 _tools/
 
+# 本地迁移归档与从迁移包复制的部署库
+_migration_pack/*.bundle
+MC_410T_MultiCard/delivery/third_party/ring_recon_cuda_prebuilt/
+PALiveImagingSimSender/build_oldpath_*/
+.harness_probe.txt
+
 # 下载缓存与日志
 *.7z
 *.log
+
+# 大型本地采集数据与 CUDA 运行时不纳入 GitHub 源码仓库
+testdata/
+MC_410T_MultiCard/delivery/libs/imaging/cufft64_12.dll
+
 # 临时编译产物
 *.obj
 *.o
+
+# Isolated PAimage migration build and runtime evidence (indexed by reports).
+/build/
+/artifacts/
+MC_410T_MultiCard/delivery/tools/__pycache__/

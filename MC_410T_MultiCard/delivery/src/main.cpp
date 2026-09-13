@@ -1,13 +1,124 @@
 #include <QApplication>
 #include <QSettings>
 #include <QDebug>
+#include <QStringList>
+#include <QJsonArray>
+#include <QCryptographicHash>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QSysInfo>
+#include <QDateTime>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QThreadPool>
+#include <mutex>
+#include <atomic>
 #include <cstdio>
 #include <csignal>
 #include <cstring>
 #include "MainWindow.h"
 #include "Constants.h"
+#include "DiagnosticRecorder.h"
 
 QStringList g_targetIPs;
+
+namespace {
+struct EarlyDiagnostic {
+    QString message;
+    DiagnosticRecorder::Severity severity;
+    QJsonObject fields;
+};
+std::mutex earlyDiagnosticMutex;
+QVector<EarlyDiagnostic> earlyDiagnostics;
+std::atomic<bool> diagnosticReady{false};
+void recordApplicationMessage(const QString &message, DiagnosticRecorder::Severity severity,
+                              QJsonObject fields = {})
+{
+    static thread_local bool insideHandler = false;
+    if (insideHandler) return;
+    insideHandler = true;
+    fields.insert(QStringLiteral("source"), QStringLiteral("application"));
+    fields.insert(QStringLiteral("observedAt"), QDateTime::currentDateTime().toString(Qt::ISODateWithMs));
+    if (diagnosticReady.load(std::memory_order_acquire)) {
+        if (auto *recorder = DiagnosticRecorder::instance())
+            recorder->recordEvent(QStringLiteral("application"), message, severity, fields);
+    } else {
+        std::lock_guard<std::mutex> lock(earlyDiagnosticMutex);
+        if (earlyDiagnostics.size() < 256) earlyDiagnostics.append({message, severity, fields});
+    }
+    insideHandler = false;
+}
+}
+
+static bool parseIPv4Literal(const QString& input, QString* canonical)
+{
+    const QStringList octets = input.trimmed().split('.', Qt::KeepEmptyParts);
+    if (octets.size() != 4) return false;
+
+    QStringList canonicalOctets;
+    canonicalOctets.reserve(4);
+    for (const QString& octet : octets) {
+        if (octet.isEmpty() || octet.size() > 3) return false;
+        for (const QChar ch : octet) {
+            if (ch < QLatin1Char('0') || ch > QLatin1Char('9')) return false;
+        }
+
+        bool ok = false;
+        const int value = octet.toInt(&ok);
+        if (!ok || value > 255) return false;
+        canonicalOctets.append(QString::number(value));
+    }
+
+    *canonical = canonicalOctets.join('.');
+    return true;
+}
+
+static bool parseTargetIPs(int argc, char* argv[], QStringList* parsed, QString* error)
+{
+    parsed->clear();
+    for (int i = 1; i < argc; ++i) {
+        const QString argument = QString::fromLocal8Bit(argv[i]);
+        QString rawValue;
+        if (argument == QStringLiteral("--target-ips")) {
+            if (i + 1 >= argc) {
+                *error = QStringLiteral("--target-ips requires a comma-separated IPv4 list");
+                return false;
+            }
+            rawValue = QString::fromLocal8Bit(argv[++i]);
+        } else if (argument.startsWith(QStringLiteral("--target-ips="))) {
+            rawValue = argument.mid(QStringLiteral("--target-ips=").size());
+        } else {
+            continue;
+        }
+
+        const QStringList values = rawValue.split(',', Qt::KeepEmptyParts);
+        for (const QString& rawIP : values) {
+            const QString input = rawIP.trimmed();
+            if (input.isEmpty()) {
+                *error = QStringLiteral("--target-ips contains an empty address");
+                return false;
+            }
+
+            QString canonical;
+            if (!parseIPv4Literal(input, &canonical)) {
+                *error = QStringLiteral("--target-ips requires IPv4 literals: '%1'").arg(input);
+                return false;
+            }
+            if (parsed->contains(canonical)) {
+                *error = QStringLiteral("--target-ips contains duplicate address: '%1'")
+                             .arg(canonical);
+                return false;
+            }
+            parsed->append(canonical);
+            if (parsed->size() > MAX_CARDS) {
+                *error = QStringLiteral("--target-ips contains more than %1 addresses")
+                             .arg(MAX_CARDS);
+                return false;
+            }
+        }
+    }
+    return true;
+}
 
 #ifdef _WIN32
 #include <windows.h>
@@ -182,6 +293,13 @@ static LONG CALLBACK crashVectoredHandler(PEXCEPTION_POINTERS ep)
 static void qtMessageHandler(QtMsgType type, const QMessageLogContext &ctx,
                              const QString &msg)
 {
+    auto severity = DiagnosticRecorder::Severity::Info;
+    if (type == QtDebugMsg) severity = DiagnosticRecorder::Severity::Debug;
+    if (type == QtWarningMsg) severity = DiagnosticRecorder::Severity::Warning;
+    if (type == QtCriticalMsg) severity = DiagnosticRecorder::Severity::Error;
+    if (type == QtFatalMsg) severity = DiagnosticRecorder::Severity::Critical;
+    recordApplicationMessage(msg, severity, {{"qtCategory", QString::fromUtf8(ctx.category ? ctx.category : "")},
+        {"file", QString::fromUtf8(ctx.file ? ctx.file : "")}, {"line", ctx.line}});
     const char *level = "INFO";
     switch (type) {
     case QtDebugMsg:    level = "DEBUG"; break;
@@ -191,7 +309,7 @@ static void qtMessageHandler(QtMsgType type, const QMessageLogContext &ctx,
     case QtFatalMsg:    level = "FATAL"; break;
     }
 
-    const QByteArray local = msg.toLocal8Bit();
+    const QByteArray local = msg.toUtf8();
     const char *file = ctx.file ? ctx.file : "?";
     char buf[2048];
     int n = _snprintf_s(buf, sizeof(buf), _TRUNCATE,
@@ -213,6 +331,8 @@ static void LOG(const char* fmt, ...) {
     int n = vsnprintf(buf, sizeof(buf) - 2, fmt, ap);
     va_end(ap);
     if (n <= 0) return;
+    n = qMin(n, static_cast<int>(sizeof(buf) - 3));
+    recordApplicationMessage(QString::fromUtf8(buf, n).trimmed(), DiagnosticRecorder::Severity::Info);
 
     // OutputDebugStringA：VS Code 调试输出 / DebugView 可见（无需控制台）
     OutputDebugStringA(buf);
@@ -293,21 +413,11 @@ static void redirectStdioToFile() {
 #endif // _WIN32
 
 int main(int argc, char* argv[]) {
-    for (int i = 1; i < argc; ++i) {
-        // 固定目标采集卡 IP（逗号分隔，如 --target-ips 127.0.0.1,127.0.0.1）。
-        // 真机固定 IP 与同机 UDP 联调均可用；省略时自动执行网段扫描。
-        if (std::strcmp(argv[i], "--target-ips") == 0 && i + 1 < argc) {
-            const QStringList ips = QString::fromLocal8Bit(argv[i + 1])
-                                        .split(',', Qt::SkipEmptyParts);
-            g_targetIPs = ips;
-            ++i;
-        }
-    }
-    // 单个目标 IP 自动扩展为 4 张卡（同机联调/同网段多卡共用地址）
-    if (g_targetIPs.size() == 1) {
-        const QString ip = g_targetIPs.front();
-        g_targetIPs.clear();
-        for (int c = 0; c < 4; ++c) g_targetIPs << ip;
+    QString targetIPsError;
+    if (!parseTargetIPs(argc, argv, &g_targetIPs, &targetIPsError)) {
+        const QByteArray errorBytes = targetIPsError.toLocal8Bit();
+        std::fprintf(stderr, "error: %s\n", errorBytes.constData());
+        return 2;
     }
 #ifdef _WIN32
     // ── 最优先：重定向日志到 app_log.txt ─────────────────
@@ -324,10 +434,47 @@ int main(int argc, char* argv[]) {
     app.setApplicationVersion("1.0.0");
     app.setOrganizationName("MC_410T");
 
-    MainWindow window;
-    window.show();
+    QString diagnosticError;
+    auto *recorder = DiagnosticRecorder::initialize(&diagnosticError);
+    if (recorder) {
+        std::lock_guard<std::mutex> lock(earlyDiagnosticMutex);
+        diagnosticReady.store(true, std::memory_order_release);
+        for (const auto &entry : earlyDiagnostics)
+            recorder->recordEvent("application", entry.message, entry.severity, entry.fields);
+        earlyDiagnostics.clear();
+    }
+    const QString executablePath = QCoreApplication::applicationFilePath();
+    QJsonObject identity{{"kind", "program"}, {"executablePath", executablePath},
+        {"applicationVersion", app.applicationVersion()}, {"qtVersion", qVersion()},
+        {"build", QStringLiteral(__DATE__ " " __TIME__)},
+        {"os", QSysInfo::prettyProductName()}, {"architecture", QSysInfo::currentCpuArchitecture()},
+        {"processId", static_cast<double>(QCoreApplication::applicationPid())},
+        {"arguments", QJsonArray::fromStringList(QCoreApplication::arguments())},
+        {"targetIPs", QJsonArray::fromStringList(g_targetIPs)}, {"workingDirectory", QDir::currentPath()}};
+    if (recorder) recorder->recordSettingsSnapshot(identity);
+    auto identityJob = QtConcurrent::run([executablePath, identity]() mutable {
+        QFile executable(executablePath);
+        QCryptographicHash hash(QCryptographicHash::Sha256);
+        if (executable.open(QIODevice::ReadOnly) && hash.addData(&executable))
+            identity.insert("executableSha256", QString::fromLatin1(hash.result().toHex()));
+        else identity.insert("identityError", executable.errorString());
+        if (auto *r = DiagnosticRecorder::instance()) r->recordSettingsSnapshot(identity);
+    });
 
-    int ret = app.exec();
+    int ret = 0;
+    {
+        MainWindow window;
+        window.show();
+        if (!diagnosticError.isEmpty()) qWarning().noquote() << "诊断日志初始化：" << diagnosticError;
+        ret = app.exec();
+    }
+    identityJob.waitForFinished();
+    // Export/background inspection jobs must finish before destroying the recorder.
+    QThreadPool::globalInstance()->waitForDone();
+    if (recorder) recorder->recordEvent("application", "程序正常退出", DiagnosticRecorder::Severity::Info,
+                                      {{"exitCode", ret}});
+    diagnosticReady.store(false, std::memory_order_release);
+    DiagnosticRecorder::shutdown();
 
     return ret;
 }

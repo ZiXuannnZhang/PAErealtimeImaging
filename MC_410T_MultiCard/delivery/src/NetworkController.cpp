@@ -1,11 +1,18 @@
 #include "NetworkController.h"
 #include "FileSaver.h"
+#include "NetworkDiagnostics.h"
+#include <QtConcurrent/QtConcurrentRun>
+#include <QJsonArray>
+#include <QJsonValue>
 #include <QTimer>
 #include <QDebug>
 #include <QMetaObject>
+#include <QThreadPool>
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <cerrno>
+#include <cstring>
 #ifdef _WIN32
 #include <iphlpapi.h>
 #include <icmpapi.h>
@@ -25,14 +32,197 @@ static uint64_t nowMs() {
         std::chrono::system_clock::now().time_since_epoch()).count());
 }
 
+namespace {
+
+DiagnosticRecorder *diagnosticRecorder()
+{
+    return DiagnosticRecorder::instance();
+}
+
+} // namespace
+
 NetworkController::NetworkController(QObject* parent)
     : QObject(parent)
     , m_controlSocket(INVALID_SOCKET)
     , m_feedbackSocket(INVALID_SOCKET) {}
 
+void NetworkController::setDiagnosticContext(const QString& listenId,
+                                              const QString& source)
+{
+    m_diagnosticListenId = listenId;
+    m_diagnosticSource = source.isEmpty() ? QStringLiteral("unknown") : source;
+
+    QJsonObject fields;
+    fields.insert(QStringLiteral("listenId"), m_diagnosticListenId);
+    fields.insert(QStringLiteral("source"), m_diagnosticSource);
+    recordDiagnosticEvent(QStringLiteral("network.context"),
+                          QStringLiteral("diagnostic_context_set"),
+                          DiagnosticRecorder::Severity::Info,
+                          fields);
+}
+
+void NetworkController::recordDiagnosticEvent(const QString& category,
+                                              const QString& message,
+                                              DiagnosticRecorder::Severity severity,
+                                              const QJsonObject& fields) const
+{
+    DiagnosticRecorder *recorder = diagnosticRecorder();
+    if (!recorder) return;
+
+    QJsonObject enriched = fields;
+    if (!enriched.contains(QStringLiteral("listenId")))
+        enriched.insert(QStringLiteral("listenId"), m_diagnosticListenId);
+    if (!enriched.contains(QStringLiteral("source")))
+        enriched.insert(QStringLiteral("source"), m_diagnosticSource);
+    recorder->recordEvent(category, message, severity, enriched);
+}
+
+QString NetworkController::cardDiagnosticState(int cardIdx) const
+{
+    if (m_configPhase == ConfigPhase::Failed) {
+        if (cardIdx >= 0 && cardIdx < static_cast<int>(m_configAck.size()) &&
+            m_configAck[cardIdx])
+            return QStringLiteral("confirmed");
+        return QStringLiteral("failed");
+    }
+    if (m_configPhase == ConfigPhase::Confirmed)
+        return QStringLiteral("confirmed");
+    if (m_configPhase == ConfigPhase::WaitingAck) {
+        if (cardIdx >= 0 && cardIdx < static_cast<int>(m_configAck.size()) &&
+            m_configAck[cardIdx])
+            return QStringLiteral("confirmed");
+        return QStringLiteral("waiting_ack");
+    }
+    if (cardIdx >= 0 && cardIdx < static_cast<int>(m_cardsReady.size()) &&
+        m_cardsReady[cardIdx])
+        return QStringLiteral("ready");
+    return QStringLiteral("idle");
+}
+
+QJsonObject NetworkController::runtimeStatsFields(const CardStats::Snapshot& stats)
+{
+    QJsonObject fields;
+    fields.insert(QStringLiteral("packetsReceived"),
+                  static_cast<double>(stats.packetsReceived));
+    fields.insert(QStringLiteral("packetsDropped"),
+                  static_cast<double>(stats.packetsDropped));
+    fields.insert(QStringLiteral("triggersComplete"),
+                  static_cast<double>(stats.triggersComplete));
+    fields.insert(QStringLiteral("triggersPartial"),
+                  static_cast<double>(stats.triggersPartial));
+    fields.insert(QStringLiteral("triggersDiscarded"),
+                  static_cast<double>(stats.triggersDiscarded));
+    fields.insert(QStringLiteral("saveQueueDiscards"),
+                  static_cast<double>(stats.saveQueueDiscards));
+    fields.insert(QStringLiteral("inputQueueDepth"), stats.inputQueueDepth);
+    fields.insert(QStringLiteral("saveQueueDepth"), stats.saveQueueDepth);
+    fields.insert(QStringLiteral("recvMbps"), stats.recvMbps);
+    fields.insert(QStringLiteral("triggerHz"), stats.triggerHz);
+    fields.insert(QStringLiteral("packetLossRate"), stats.packetLossRate);
+    fields.insert(QStringLiteral("socketPacketsReceived"),
+                  static_cast<double>(stats.socketPacketsReceived));
+    fields.insert(QStringLiteral("processorPacketsDequeued"),
+                  static_cast<double>(stats.processorPacketsDequeued));
+    fields.insert(QStringLiteral("batchBoundaryDiscards"),
+                  static_cast<double>(stats.batchBoundaryDiscards));
+    return fields;
+}
+
+void NetworkController::recordCardSnapshots(const QString& stateOverride)
+{
+    DiagnosticRecorder *recorder = diagnosticRecorder();
+    if (!recorder) return;
+
+    QString phase = QStringLiteral("idle");
+    if (m_configPhase == ConfigPhase::WaitingAck)
+        phase = QStringLiteral("waiting_ack");
+    else if (m_configPhase == ConfigPhase::Confirmed)
+        phase = QStringLiteral("confirmed");
+    else if (m_configPhase == ConfigPhase::Failed)
+        phase = QStringLiteral("failed");
+
+    const int count = std::min<int>(m_targetIPs.size(),
+                                    static_cast<int>(m_cardDiagnostics.size()));
+    for (int i = 0; i < count; ++i) {
+        const CardDiagnosticState& card = m_cardDiagnostics[i];
+        QJsonObject fields;
+        fields.insert(QStringLiteral("listenId"), m_diagnosticListenId);
+        fields.insert(QStringLiteral("configId"), m_currentConfigId);
+        fields.insert(QStringLiteral("source"), m_diagnosticSource);
+        fields.insert(QStringLiteral("phase"), phase);
+        fields.insert(QStringLiteral("discovery"), card.discovery);
+        fields.insert(QStringLiteral("localAddress"), card.localAddress);
+        fields.insert(QStringLiteral("readyPacketCount"),
+                      static_cast<double>(card.readyPacketCount));
+        fields.insert(QStringLiteral("arpReady"),
+                      static_cast<double>(card.arpReady));
+        fields.insert(QStringLiteral("sendCount"),
+                      static_cast<double>(card.sendCount));
+        fields.insert(QStringLiteral("ackPacketCount"),
+                      static_cast<double>(card.ackPacketCount));
+        fields.insert(QStringLiteral("retryCount"),
+                      static_cast<double>(card.retryCount));
+        fields.insert(QStringLiteral("retryResetCount"),
+                      static_cast<double>(card.retryResetCount));
+        fields.insert(QStringLiteral("cardIndex"), i + 1);
+
+        if (const auto stats = getCardStats(i)) {
+            const QJsonObject runtimeFields = runtimeStatsFields(*stats);
+            for (auto it = runtimeFields.constBegin(); it != runtimeFields.constEnd(); ++it)
+                fields.insert(it.key(), it.value());
+        }
+
+        const QString state = stateOverride.isEmpty()
+            ? cardDiagnosticState(i)
+            : stateOverride;
+        recorder->setCardSnapshot(i + 1, m_targetIPs[i], state, fields);
+    }
+}
+
+void NetworkController::scheduleNetworkSnapshot(const QString& reason,
+                                                 const QString& phase,
+                                                 const QString& configId)
+{
+    DiagnosticRecorder *recorder = diagnosticRecorder();
+    if (!recorder) return;
+
+    const QStringList targets = m_targetIPs.toList();
+    const QString listenId = m_diagnosticListenId;
+    const QString source = m_diagnosticSource;
+    const QString reasonCopy = reason;
+    const QString phaseCopy = phase;
+    const QString configIdCopy = configId;
+    QJsonObject config;
+    config.insert(QStringLiteral("nCards"), m_config.nCards);
+    config.insert(QStringLiteral("localBindIP"),
+                  QString::fromStdString(m_config.localBindIP));
+    config.insert(QStringLiteral("listenId"), listenId);
+    config.insert(QStringLiteral("source"), source);
+
+    (void)QtConcurrent::run([recorder, targets, listenId, source, reasonCopy,
+                       phaseCopy, configIdCopy, config]() {
+        QJsonObject snapshot = NetworkDiagnostics::collectSnapshot(targets);
+        snapshot.insert(QStringLiteral("listenId"), listenId);
+        snapshot.insert(QStringLiteral("source"), source);
+        snapshot.insert(QStringLiteral("reason"), reasonCopy);
+        snapshot.insert(QStringLiteral("phase"), phaseCopy);
+        snapshot.insert(QStringLiteral("configId"), configIdCopy);
+        snapshot.insert(QStringLiteral("config"), config);
+        QJsonArray orderedTargets;
+        for (const QString& target : targets)
+            orderedTargets.append(target);
+        snapshot.insert(QStringLiteral("targetIPs"), orderedTargets);
+        recorder->recordNetworkSnapshot(snapshot);
+    });
+}
+
 NetworkController::~NetworkController() {
     // 析构时需要同步等待后台停止线程（不能留 this 指针悬空）
     if (m_running) {
+        // 析构路径不会经过 stop()，因此这里也要先留存一次接近关闭时刻的
+        // 逐卡运行快照，确保窗口关闭/异常退出不会丢掉最后一段统计。
+        updateAllStats();
+        recordCardSnapshots(QStringLiteral("idle"));
         // 直接同步停止所有子线程（析构路径允许短暂阻塞）
         m_running = false;
         if (m_statsTimer) { m_statsTimer->stop(); delete m_statsTimer; m_statsTimer = nullptr; }
@@ -81,6 +271,20 @@ bool NetworkController::start(const AcqConfig& config, std::function<void()> onS
             m_targetIPs.append(QString("192.168.0.%1").arg(i + 2));
     }
 
+    m_cardDiagnostics.assign(m_targetIPs.size(), CardDiagnosticState{});
+    for (CardDiagnosticState& card : m_cardDiagnostics) {
+        card.discovery = config.targetIPs.empty()
+            ? QStringLiteral("default")
+            : QStringLiteral("configured");
+        card.localAddress = config.localBindIP.empty()
+            ? QStringLiteral("unknown")
+            : QString::fromStdString(config.localBindIP);
+    }
+    m_currentConfigId.clear();
+    m_currentConfigTrigger = QStringLiteral("api");
+    m_feedbackSequence.store(0, std::memory_order_relaxed);
+    m_feedbackTimeoutCount.store(0, std::memory_order_relaxed);
+
     // 初始化卡就绪状态
     m_cardsReady.assign(config.nCards, false);
     m_cmdQueue.clear();
@@ -90,6 +294,9 @@ bool NetworkController::start(const AcqConfig& config, std::function<void()> onS
     m_configAck.clear();
     m_configRetry.clear();
     m_configSentMs.clear();
+
+    recordCardSnapshots(QStringLiteral("idle"));
+    scheduleNetworkSnapshot(QStringLiteral("start"), QStringLiteral("idle"));
 
     // 初始化控制 socket（WSAStartup 已由此调用处理）
     initControlSocket();
@@ -198,6 +405,7 @@ bool NetworkController::start(const AcqConfig& config, std::function<void()> onS
 
     //  统计定时器 
     m_lastStatsMs = nowMs();
+    m_lastRuntimeSnapshotMs = 0;
     m_statsTimer = new QTimer(this);
     connect(m_statsTimer, &QTimer::timeout, this, &NetworkController::onStatsTimer);
     m_statsTimer->start(STATS_UPDATE_MS);
@@ -212,6 +420,12 @@ bool NetworkController::start(const AcqConfig& config, std::function<void()> onS
 // ═════════════════════════════════════════════════════════════════════
 void NetworkController::rollbackStart()
 {
+    recordCardSnapshots(QStringLiteral("failed"));
+    scheduleNetworkSnapshot(QStringLiteral("start_failure"), QStringLiteral("failed"),
+                            m_currentConfigId);
+    if (DiagnosticRecorder *recorder = diagnosticRecorder())
+        recorder->requestFlush();
+
     m_running = false;
     if (m_statsTimer) { m_statsTimer->stop(); delete m_statsTimer; m_statsTimer = nullptr; }
     m_feedbackRunning = false;
@@ -283,6 +497,10 @@ void NetworkController::stop() {
     m_configAck.clear();
     m_configRetry.clear();
     m_configSentMs.clear();
+    // 停止前先刷新一次差分统计和队列深度，保证导出时至少有接近停止时刻的
+    // 最终逐卡运行快照；计数器本身仍由各线程原子维护。
+    updateAllStats();
+    recordCardSnapshots(QStringLiteral("idle"));
 
     // 发出所有停止信号（非阻塞，立即返回）
     for (auto& r : m_receivers) r->requestStop();
@@ -448,6 +666,14 @@ void NetworkController::updateAllStats() {
         // 队列深度（供 UI 监控积压情况）
         stats.inputQueueDepth = proc.inputQueueDepth();
     }
+
+    // 运行期间每约 2 秒写入一次逐卡采集快照，避免高频刷爆诊断记录器；
+    // stop() 还会额外写入一次最终快照。
+    if (m_lastRuntimeSnapshotMs == 0 ||
+        now - m_lastRuntimeSnapshotMs >= 2000) {
+        m_lastRuntimeSnapshotMs = now;
+        recordCardSnapshots(QStringLiteral("runtime"));
+    }
 }
 
 // =====================================================================
@@ -464,6 +690,15 @@ bool NetworkController::initControlSocket()
     m_controlSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (m_controlSocket == INVALID_SOCKET) {
         emit errorOccurred("创建控制 socket 失败");
+        QJsonObject fields;
+        fields.insert(QStringLiteral("socket"), QStringLiteral("control"));
+#ifdef _WIN32
+        fields.insert(QStringLiteral("errorCode"), WSAGetLastError());
+#endif
+        recordDiagnosticEvent(QStringLiteral("network.control"),
+                              QStringLiteral("socket_create_failed"),
+                              DiagnosticRecorder::Severity::Error,
+                              fields);
         return false;
     }
 
@@ -481,21 +716,52 @@ bool NetworkController::initControlSocket()
         if (::bind(m_controlSocket,
                    reinterpret_cast<sockaddr*>(&localAddr), sizeof(localAddr)) != 0) {
 #ifdef _WIN32
+            const int errorCode = WSAGetLastError();
             emit errorOccurred(
                 QString("控制 socket 绑定本地IP %1 失败（WSA=%2），将使用默认路由，控制包可能从错误接口发出")
-                .arg(QString::fromStdString(m_config.localBindIP)).arg(WSAGetLastError()));
+                .arg(QString::fromStdString(m_config.localBindIP)).arg(errorCode));
+            QJsonObject fields;
+            fields.insert(QStringLiteral("socket"), QStringLiteral("control"));
+            fields.insert(QStringLiteral("localAddress"), QString::fromStdString(m_config.localBindIP));
+            fields.insert(QStringLiteral("errorCode"), errorCode);
+            recordDiagnosticEvent(QStringLiteral("network.control"),
+                                  QStringLiteral("bind_failed"),
+                                  DiagnosticRecorder::Severity::Error,
+                                  fields);
 #else
             emit errorOccurred(
                 QString("控制 socket 绑定本地IP %1 失败，将使用默认路由")
                 .arg(QString::fromStdString(m_config.localBindIP)));
+            QJsonObject fields;
+            fields.insert(QStringLiteral("socket"), QStringLiteral("control"));
+            fields.insert(QStringLiteral("localAddress"), QString::fromStdString(m_config.localBindIP));
+            recordDiagnosticEvent(QStringLiteral("network.control"),
+                                  QStringLiteral("bind_failed"),
+                                  DiagnosticRecorder::Severity::Error,
+                                  fields);
 #endif
         } else {
             emit statusMessage(
                 QString("控制 socket 已绑定到本地接口 %1，控制包将从该接口发出")
                 .arg(QString::fromStdString(m_config.localBindIP)));
+            QJsonObject fields;
+            fields.insert(QStringLiteral("socket"), QStringLiteral("control"));
+            fields.insert(QStringLiteral("localAddress"), QString::fromStdString(m_config.localBindIP));
+            fields.insert(QStringLiteral("bindResult"), QStringLiteral("ok"));
+            recordDiagnosticEvent(QStringLiteral("network.control"),
+                                  QStringLiteral("bind_succeeded"),
+                                  DiagnosticRecorder::Severity::Info,
+                                  fields);
         }
     } else {
         emit statusMessage("控制 socket 使用默认路由（提示：双口网卡建议在注册表 NetworkParams/LocalBindIP 中指定本地IP）");
+        QJsonObject fields;
+        fields.insert(QStringLiteral("socket"), QStringLiteral("control"));
+        fields.insert(QStringLiteral("bindResult"), QStringLiteral("default_route"));
+        recordDiagnosticEvent(QStringLiteral("network.control"),
+                              QStringLiteral("bind_default_route"),
+                              DiagnosticRecorder::Severity::Info,
+                              fields);
     }
     return true;
 }
@@ -528,6 +794,15 @@ bool NetworkController::initFeedbackListener()
     m_feedbackSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (m_feedbackSocket == INVALID_SOCKET) {
         emit errorOccurred("创建反馈监听 socket 失败");
+        QJsonObject fields;
+        fields.insert(QStringLiteral("socket"), QStringLiteral("feedback"));
+#ifdef _WIN32
+        fields.insert(QStringLiteral("errorCode"), WSAGetLastError());
+#endif
+        recordDiagnosticEvent(QStringLiteral("network.feedback"),
+                              QStringLiteral("socket_create_failed"),
+                              DiagnosticRecorder::Severity::Error,
+                              fields);
         return false;
     }
 
@@ -554,11 +829,27 @@ bool NetworkController::initFeedbackListener()
     if (::bind(m_feedbackSocket,
                reinterpret_cast<sockaddr*>(&localAddr), sizeof(localAddr)) != 0) {
 #ifdef _WIN32
+        const int errorCode = WSAGetLastError();
         emit errorOccurred(QString("反馈 socket 绑定端口 %1 失败（WSA=%2），将无法检测卡片就绪状态")
-                          .arg(FEEDBACK_PORT).arg(WSAGetLastError()));
+                          .arg(FEEDBACK_PORT).arg(errorCode));
+        QJsonObject fields;
+        fields.insert(QStringLiteral("socket"), QStringLiteral("feedback"));
+        fields.insert(QStringLiteral("port"), FEEDBACK_PORT);
+        fields.insert(QStringLiteral("errorCode"), errorCode);
+        recordDiagnosticEvent(QStringLiteral("network.feedback"),
+                              QStringLiteral("bind_failed"),
+                              DiagnosticRecorder::Severity::Error,
+                              fields);
 #else
         emit errorOccurred(QString("反馈 socket 绑定端口 %1 失败，将无法检测卡片就绪状态")
                           .arg(FEEDBACK_PORT));
+        QJsonObject fields;
+        fields.insert(QStringLiteral("socket"), QStringLiteral("feedback"));
+        fields.insert(QStringLiteral("port"), FEEDBACK_PORT);
+        recordDiagnosticEvent(QStringLiteral("network.feedback"),
+                              QStringLiteral("bind_failed"),
+                              DiagnosticRecorder::Severity::Error,
+                              fields);
 #endif
         cleanupFeedbackListener();
         return false;
@@ -579,6 +870,14 @@ bool NetworkController::initFeedbackListener()
     startProbeTimer();
 
     emit statusMessage(QString("反馈监听已启动（端口 %1），等待卡片就绪信号...").arg(FEEDBACK_PORT));
+    QJsonObject fields;
+    fields.insert(QStringLiteral("socket"), QStringLiteral("feedback"));
+    fields.insert(QStringLiteral("port"), FEEDBACK_PORT);
+    fields.insert(QStringLiteral("bindResult"), QStringLiteral("ok"));
+    recordDiagnosticEvent(QStringLiteral("network.feedback"),
+                          QStringLiteral("listener_started"),
+                          DiagnosticRecorder::Severity::Info,
+                          fields);
     return true;
 }
 
@@ -603,23 +902,81 @@ void NetworkController::feedbackListenerThread()
 
     char buf[64];
     sockaddr_in senderAddr;
-    socklen_t senderLen = sizeof(senderAddr);
 
     emit statusMessage("[反馈监听] 线程已启动");
 
     while (m_feedbackRunning) {
+        socklen_t senderLen = sizeof(senderAddr);
         int n = recvfrom(m_feedbackSocket, buf, sizeof(buf), 0,
                          reinterpret_cast<sockaddr*>(&senderAddr), &senderLen);
         if (n <= 0) {
-            // 超时或错误，继续循环检查 m_feedbackRunning
+            if (!m_feedbackRunning) break;
+
+            int errorCode = 0;
+#ifdef _WIN32
+            errorCode = WSAGetLastError();
+            const bool timeout = errorCode == WSAETIMEDOUT;
+#else
+            errorCode = errno;
+            const bool timeout = errorCode == EAGAIN || errorCode == EWOULDBLOCK;
+#endif
+            if (timeout) {
+                const quint64 timeoutCount =
+                    m_feedbackTimeoutCount.fetch_add(1, std::memory_order_relaxed) + 1;
+                // SO_RCVTIMEO 是正常的线程退出轮询；只记录首个及每 60 次，
+                // 避免空闲链路把诊断队列刷满。
+                if (timeoutCount == 1 || timeoutCount % 60 == 0) {
+                    if (DiagnosticRecorder *recorder = diagnosticRecorder()) {
+                        QJsonObject fields;
+                        fields.insert(QStringLiteral("errorCode"), errorCode);
+                        fields.insert(QStringLiteral("timeout"), true);
+                        fields.insert(QStringLiteral("timeoutCount"),
+                                      static_cast<double>(timeoutCount));
+                        recorder->recordEvent(QStringLiteral("network.feedback"),
+                                              QStringLiteral("recv_timeout"),
+                                              DiagnosticRecorder::Severity::Debug,
+                                              fields);
+                    }
+                }
+            } else if (DiagnosticRecorder *recorder = diagnosticRecorder()) {
+                QJsonObject fields;
+                fields.insert(QStringLiteral("errorCode"), errorCode);
+                fields.insert(QStringLiteral("timeout"), false);
+                recorder->recordEvent(QStringLiteral("network.feedback"),
+                                      QStringLiteral("recv_error"),
+                                      DiagnosticRecorder::Severity::Warning,
+                                      fields);
+            }
             continue;
         }
 
-        // 将发送方 IP 映射到卡索引（18 字节就绪包 / 60 字节配置反馈共用）
-        char srcIP[64];
+        char srcIP[64] = {};
         inet_ntop(AF_INET, &senderAddr.sin_addr, srcIP, sizeof(srcIP));
-        QString ipStr(srcIP);
+        const QString ipStr = QString::fromLatin1(srcIP);
+        const quint16 sourcePort = ntohs(senderAddr.sin_port);
+        const quint64 receiveSequence =
+            m_feedbackSequence.fetch_add(1, std::memory_order_relaxed) + 1;
 
+        if (DiagnosticRecorder *recorder = diagnosticRecorder()) {
+            QJsonObject fields;
+            fields.insert(QStringLiteral("receiveSequence"),
+                          static_cast<double>(receiveSequence));
+            fields.insert(QStringLiteral("sourceIP"), ipStr);
+            fields.insert(QStringLiteral("sourcePort"), sourcePort);
+            fields.insert(QStringLiteral("length"), n);
+            fields.insert(QStringLiteral("hex"),
+                          NetworkDiagnostics::formatHex(QByteArray(buf, n)));
+            fields.insert(QStringLiteral("packetType"),
+                          n == 18 ? QStringLiteral("ready18")
+                                  : (n == 60 ? QStringLiteral("configAck60")
+                                             : QStringLiteral("unknown")));
+            recorder->recordEvent(QStringLiteral("network.feedback"),
+                                  QStringLiteral("packet_received"),
+                                  DiagnosticRecorder::Severity::Info,
+                                  fields);
+        }
+
+        // 将发送方 IP 映射到卡索引（18 字节就绪包 / 60 字节配置反馈共用）
         int cardIdx = -1;
         for (int i = 0; i < m_targetIPs.size(); ++i) {
             if (m_targetIPs[i] == ipStr) {
@@ -634,10 +991,22 @@ void NetworkController::feedbackListenerThread()
             // 注意：这不代表配置成功，WaitingAck 时需重发配置。
             if (cardIdx < 0) {
                 emit statusMessage(QString("[反馈监听] 收到未知来源的 18 字节包: %1（非目标卡IP）").arg(ipStr));
+                if (DiagnosticRecorder *recorder = diagnosticRecorder()) {
+                    QJsonObject fields;
+                    fields.insert(QStringLiteral("receiveSequence"),
+                                  static_cast<double>(receiveSequence));
+                    fields.insert(QStringLiteral("sourceIP"), ipStr);
+                    fields.insert(QStringLiteral("sourcePort"), sourcePort);
+                    fields.insert(QStringLiteral("reason"), QStringLiteral("unknownSource"));
+                    recorder->recordEvent(QStringLiteral("network.feedback"),
+                                          QStringLiteral("ready_packet_rejected"),
+                                          DiagnosticRecorder::Severity::Warning,
+                                          fields);
+                }
                 continue;
             }
-            QMetaObject::invokeMethod(this, [this, cardIdx]() {
-                onReadyPacket(cardIdx);
+            QMetaObject::invokeMethod(this, [this, cardIdx, receiveSequence]() {
+                onReadyPacket(cardIdx, receiveSequence);
             }, Qt::QueuedConnection);
         } else if (n == 60) {
             // ── 60 字节：配置参数反馈 ─────────────────────────────
@@ -645,15 +1014,39 @@ void NetworkController::feedbackListenerThread()
             // 反馈按单卡独立上报（以来源 IP 区分）。
             if (cardIdx < 0) {
                 emit statusMessage(QString("[反馈监听] 收到未知来源的 60 字节反馈: %1（非目标卡IP）").arg(ipStr));
+                if (DiagnosticRecorder *recorder = diagnosticRecorder()) {
+                    QJsonObject fields;
+                    fields.insert(QStringLiteral("receiveSequence"),
+                                  static_cast<double>(receiveSequence));
+                    fields.insert(QStringLiteral("sourceIP"), ipStr);
+                    fields.insert(QStringLiteral("sourcePort"), sourcePort);
+                    fields.insert(QStringLiteral("reason"), QStringLiteral("unknownSource"));
+                    recorder->recordEvent(QStringLiteral("network.feedback"),
+                                          QStringLiteral("ack_packet_rejected"),
+                                          DiagnosticRecorder::Severity::Warning,
+                                          fields);
+                }
                 continue;
             }
-            QMetaObject::invokeMethod(this, [this, cardIdx]() {
-                onConfigAck(cardIdx);
+            QMetaObject::invokeMethod(this, [this, cardIdx, receiveSequence]() {
+                onConfigAck(cardIdx, receiveSequence);
             }, Qt::QueuedConnection);
         } else {
             emit statusMessage(QString("[反馈监听] 忽略未知包: %1 字节来自 %2")
-                              .arg(n)
-                              .arg(inet_ntoa(senderAddr.sin_addr)));
+                               .arg(n)
+                               .arg(ipStr));
+            if (DiagnosticRecorder *recorder = diagnosticRecorder()) {
+                QJsonObject fields;
+                fields.insert(QStringLiteral("receiveSequence"),
+                              static_cast<double>(receiveSequence));
+                fields.insert(QStringLiteral("sourceIP"), ipStr);
+                fields.insert(QStringLiteral("sourcePort"), sourcePort);
+                fields.insert(QStringLiteral("reason"), QStringLiteral("unknownLength"));
+                recorder->recordEvent(QStringLiteral("network.feedback"),
+                                      QStringLiteral("packet_rejected"),
+                                      DiagnosticRecorder::Severity::Warning,
+                                      fields);
+            }
             continue;
         }
     }
@@ -672,6 +1065,14 @@ void NetworkController::markCardReady(int cardIdx, bool viaReadyPacket)
         return;  // 已标记，忽略重复
 
     m_cardsReady[cardIdx] = true;
+    QJsonObject fields;
+    fields.insert(QStringLiteral("cardIndex"), cardIdx + 1);
+    fields.insert(QStringLiteral("ip"), m_targetIPs.value(cardIdx));
+    fields.insert(QStringLiteral("viaReadyPacket"), viaReadyPacket);
+    recordDiagnosticEvent(QStringLiteral("network.ready"),
+                          QStringLiteral("card_marked_ready"),
+                          DiagnosticRecorder::Severity::Info,
+                          fields);
     if (viaReadyPacket)
         emit statusMessage(QString("卡%1（%2）FPGA 就绪 ✓（收到 18 字节就绪包）")
                           .arg(cardIdx + 1).arg(m_targetIPs[cardIdx]));
@@ -679,6 +1080,7 @@ void NetworkController::markCardReady(int cardIdx, bool viaReadyPacket)
         emit statusMessage(QString("卡%1（%2）标记为就绪 ✓（ARP 探测）")
                           .arg(cardIdx + 1).arg(m_targetIPs[cardIdx]));
     emit cardReady(cardIdx);
+    recordCardSnapshots();
 
     // 检查是否所有卡均已就绪
     if (isAllCardsReady()) {
@@ -708,8 +1110,38 @@ void NetworkController::markCardReady(int cardIdx, bool viaReadyPacket)
 //       这不代表配置成功，必须重发配置直到收到 60 字节反馈。
 // ═════════════════════════════════════════════════════════════════════
 
-void NetworkController::onReadyPacket(int cardIdx)
+void NetworkController::onReadyPacket(int cardIdx, quint64 receiveSequence)
 {
+    if (cardIdx < 0 || cardIdx >= static_cast<int>(m_cardsReady.size())) {
+        QJsonObject fields;
+        fields.insert(QStringLiteral("receiveSequence"),
+                      static_cast<double>(receiveSequence));
+        fields.insert(QStringLiteral("cardIndex"), cardIdx + 1);
+        fields.insert(QStringLiteral("reason"), QStringLiteral("unknownCard"));
+        recordDiagnosticEvent(QStringLiteral("network.ready"),
+                              QStringLiteral("ready_callback_rejected"),
+                              DiagnosticRecorder::Severity::Warning,
+                              fields);
+        return;
+    }
+
+    if (cardIdx < static_cast<int>(m_cardDiagnostics.size()))
+        ++m_cardDiagnostics[cardIdx].readyPacketCount;
+
+    const bool duplicate = m_cardsReady[cardIdx];
+    QJsonObject receivedFields;
+    receivedFields.insert(QStringLiteral("receiveSequence"),
+                          static_cast<double>(receiveSequence));
+    receivedFields.insert(QStringLiteral("cardIndex"), cardIdx + 1);
+    receivedFields.insert(QStringLiteral("configId"), m_currentConfigId);
+    receivedFields.insert(QStringLiteral("duplicate"), duplicate);
+    recordDiagnosticEvent(QStringLiteral("network.ready"),
+                          duplicate ? QStringLiteral("ready_packet_duplicate")
+                                    : QStringLiteral("ready_packet_associated"),
+                          duplicate ? DiagnosticRecorder::Severity::Debug
+                                    : DiagnosticRecorder::Severity::Info,
+                          receivedFields);
+
     markCardReady(cardIdx, true);   // 真正收到 18 字节版本号/就绪包
 
     // 正在等待配置确认时收到 18 字节包：非配置成功反馈，需重发该卡配置
@@ -717,20 +1149,59 @@ void NetworkController::onReadyPacket(int cardIdx)
         cardIdx >= 0 && cardIdx < static_cast<int>(m_configAck.size()) &&
         !m_configAck[cardIdx]) {
         emit statusMessage(QString("卡%1 收到 18 字节版本号包，重发配置参数...").arg(cardIdx + 1));
+        const int previousRetry = m_configRetry[cardIdx];
+        if (cardIdx < static_cast<int>(m_cardDiagnostics.size())) {
+            ++m_cardDiagnostics[cardIdx].retryResetCount;
+        }
+        QJsonObject resetFields;
+        resetFields.insert(QStringLiteral("cardIndex"), cardIdx + 1);
+        resetFields.insert(QStringLiteral("receiveSequence"),
+                           static_cast<double>(receiveSequence));
+        resetFields.insert(QStringLiteral("configId"), m_currentConfigId);
+        resetFields.insert(QStringLiteral("reason"), QStringLiteral("ready18"));
+        resetFields.insert(QStringLiteral("previousRetry"), previousRetry);
+        resetFields.insert(QStringLiteral("retryReset"), true);
+        recordDiagnosticEvent(QStringLiteral("network.config"),
+                              QStringLiteral("retry_reset"),
+                              DiagnosticRecorder::Severity::Info,
+                              resetFields);
         m_configRetry[cardIdx] = 0;   // 卡处于活跃响应，重置重试计数
-        doSendConfigTo(cardIdx);
+        doSendConfigTo(cardIdx, QStringLiteral("18_retry"));
     }
 }
 
 void NetworkController::beginConfigWait(const PendingConfig& pc)
 {
     m_pendingConfig = pc;
+    m_currentConfigId = pc.configId;
+    m_currentConfigTrigger = pc.trigger;
     m_configPhase   = ConfigPhase::WaitingAck;
 
     const int n = static_cast<int>(m_targetIPs.size());
     m_configAck.assign(n, false);
     m_configRetry.assign(n, 0);
     m_configSentMs.assign(n, 0);
+
+    if (DiagnosticRecorder *recorder = diagnosticRecorder()) {
+        QJsonObject settings;
+        settings.insert(QStringLiteral("listenId"), m_diagnosticListenId);
+        settings.insert(QStringLiteral("source"), m_diagnosticSource);
+        settings.insert(QStringLiteral("configId"), m_currentConfigId);
+        settings.insert(QStringLiteral("trigger"), m_currentConfigTrigger);
+        settings.insert(QStringLiteral("dataTime"), pc.dataTime);
+        settings.insert(QStringLiteral("aDelay"), pc.aDelay);
+        settings.insert(QStringLiteral("bDelay"), pc.bDelay);
+        recorder->recordSettingsSnapshot(settings);
+    }
+    QJsonObject waitFields;
+    waitFields.insert(QStringLiteral("configId"), m_currentConfigId);
+    waitFields.insert(QStringLiteral("trigger"), m_currentConfigTrigger);
+    waitFields.insert(QStringLiteral("cardCount"), n);
+    recordDiagnosticEvent(QStringLiteral("network.config"),
+                          QStringLiteral("config_wait_started"),
+                          DiagnosticRecorder::Severity::Info,
+                          waitFields);
+    recordCardSnapshots();
 
     if (!m_configTimer) {
         m_configTimer = new QTimer(this);
@@ -740,40 +1211,85 @@ void NetworkController::beginConfigWait(const PendingConfig& pc)
 
     // 逐卡下发配置（per-card 独立确认）
     for (int i = 0; i < n; ++i)
-        doSendConfigTo(i);
+        doSendConfigTo(i, QStringLiteral("first"));
 
     m_configTimer->start();
     emit statusMessage(QString("配置参数已下发（%1 张卡），等待 60 字节反馈确认...").arg(n));
 }
 
-bool NetworkController::doSendConfigTo(int cardIdx)
+bool NetworkController::doSendConfigTo(int cardIdx, const QString& reason)
 {
     if (m_controlSocket == INVALID_SOCKET) return false;
     if (cardIdx < 0 || cardIdx >= m_targetIPs.size()) return false;
     QByteArray cmd = buildConfigPacket(m_pendingConfig.dataTime,
                                        m_pendingConfig.aDelay,
                                        m_pendingConfig.bDelay);
-    bool ok = sendRawCommand(cmd, m_targetIPs[cardIdx]);
+    bool ok = sendRawCommand(cmd, m_targetIPs[cardIdx], reason);
     if (cardIdx >= 0 && cardIdx < static_cast<int>(m_configSentMs.size()))
         m_configSentMs[cardIdx] = nowMs();
     return ok;
 }
 
-void NetworkController::onConfigAck(int cardIdx)
+void NetworkController::onConfigAck(int cardIdx, quint64 receiveSequence)
 {
-    if (m_configPhase != ConfigPhase::WaitingAck) return;
-    if (cardIdx < 0 || cardIdx >= static_cast<int>(m_configAck.size())) return;
-    if (m_configAck[cardIdx]) return;  // 已确认，忽略重复
+    if (cardIdx >= 0 && cardIdx < static_cast<int>(m_cardDiagnostics.size()))
+        ++m_cardDiagnostics[cardIdx].ackPacketCount;
+
+    QJsonObject fields;
+    fields.insert(QStringLiteral("receiveSequence"),
+                  static_cast<double>(receiveSequence));
+    fields.insert(QStringLiteral("cardIndex"), cardIdx + 1);
+    fields.insert(QStringLiteral("configId"), m_currentConfigId);
+
+    if (cardIdx < 0 || cardIdx >= static_cast<int>(m_configAck.size())) {
+        fields.insert(QStringLiteral("reason"), QStringLiteral("unknownCard"));
+        recordDiagnosticEvent(QStringLiteral("network.config"),
+                              QStringLiteral("ack_rejected"),
+                              DiagnosticRecorder::Severity::Warning,
+                              fields);
+        return;
+    }
+    if (m_configPhase != ConfigPhase::WaitingAck) {
+        fields.insert(QStringLiteral("phase"), cardDiagnosticState(cardIdx));
+        fields.insert(QStringLiteral("reason"), QStringLiteral("nonWaiting"));
+        recordDiagnosticEvent(QStringLiteral("network.config"),
+                              QStringLiteral("ack_rejected"),
+                              DiagnosticRecorder::Severity::Warning,
+                              fields);
+        return;
+    }
+    if (m_configAck[cardIdx]) {
+        fields.insert(QStringLiteral("reason"), QStringLiteral("duplicate"));
+        recordDiagnosticEvent(QStringLiteral("network.config"),
+                              QStringLiteral("ack_duplicate"),
+                              DiagnosticRecorder::Severity::Debug,
+                              fields);
+        return;  // 已确认，忽略重复
+    }
 
     m_configAck[cardIdx] = true;
+    fields.insert(QStringLiteral("reason"), QStringLiteral("accepted"));
+    recordDiagnosticEvent(QStringLiteral("network.config"),
+                          QStringLiteral("ack_associated"),
+                          DiagnosticRecorder::Severity::Info,
+                          fields);
     emit statusMessage(QString("卡%1 配置确认 ✓（收到 60 字节反馈）").arg(cardIdx + 1));
     emit configAcked(cardIdx);
+    recordCardSnapshots();
 
     if (isAllConfigAcked()) {
         m_configPhase = ConfigPhase::Confirmed;
         if (m_configTimer) m_configTimer->stop();
         emit statusMessage("所有采集卡配置参数均已确认");
         emit configConfirmed();
+        QJsonObject confirmedFields;
+        confirmedFields.insert(QStringLiteral("configId"), m_currentConfigId);
+        confirmedFields.insert(QStringLiteral("cardCount"), static_cast<int>(m_configAck.size()));
+        recordDiagnosticEvent(QStringLiteral("network.config"),
+                              QStringLiteral("config_confirmed"),
+                              DiagnosticRecorder::Severity::Info,
+                              confirmedFields);
+        recordCardSnapshots();
         // 若有等待配置确认的测量命令 → 自动执行
         retryPendingCommand();
     }
@@ -795,11 +1311,22 @@ void NetworkController::onConfigTimerTick()
             anyFailed = true;
             emit statusMessage(QString("卡%1 配置确认失败（多次重发未收到 60 字节反馈）").arg(i + 1));
             emit configAckFailed(i);
+            QJsonObject fields;
+            fields.insert(QStringLiteral("cardIndex"), i + 1);
+            fields.insert(QStringLiteral("configId"), m_currentConfigId);
+            fields.insert(QStringLiteral("reason"), QStringLiteral("retry_exhausted"));
+            fields.insert(QStringLiteral("retryCount"), m_configRetry[i]);
+            recordDiagnosticEvent(QStringLiteral("network.config"),
+                                  QStringLiteral("ack_failed"),
+                                  DiagnosticRecorder::Severity::Error,
+                                  fields);
         } else {
             ++m_configRetry[i];
+            if (i < static_cast<int>(m_cardDiagnostics.size()))
+                ++m_cardDiagnostics[i].retryCount;
             emit statusMessage(QString("卡%1 配置反馈超时，重发配置（第 %2/%3 次）")
                               .arg(i + 1).arg(m_configRetry[i]).arg(CONFIG_ACK_MAX_RETRY));
-            doSendConfigTo(i);
+            doSendConfigTo(i, QStringLiteral("timeout_retry"));
         }
     }
 
@@ -807,6 +1334,19 @@ void NetworkController::onConfigTimerTick()
         m_configPhase = ConfigPhase::Failed;
         if (m_configTimer) m_configTimer->stop();
         emit statusMessage("配置确认失败：存在未反馈的采集卡，请检查链路后重新下发配置");
+        QJsonObject fields;
+        fields.insert(QStringLiteral("configId"), m_currentConfigId);
+        fields.insert(QStringLiteral("phase"), QStringLiteral("failed"));
+        fields.insert(QStringLiteral("reason"), QStringLiteral("card_ack_timeout"));
+        recordDiagnosticEvent(QStringLiteral("network.config"),
+                              QStringLiteral("config_failed"),
+                              DiagnosticRecorder::Severity::Error,
+                              fields);
+        recordCardSnapshots();
+        scheduleNetworkSnapshot(QStringLiteral("config_failure"),
+                                QStringLiteral("failed"), m_currentConfigId);
+        if (DiagnosticRecorder *recorder = diagnosticRecorder())
+            recorder->requestFlush();
     }
 }
 
@@ -840,7 +1380,8 @@ void NetworkController::retryPendingCommand()
         }
         if (m_retryTimer) m_retryTimer->stop();
         m_cmdQueue.pop_front();
-        beginConfigWait({front.dataTime, front.aDelay, front.bDelay});
+        beginConfigWait({front.dataTime, front.aDelay, front.bDelay,
+                         front.configId, front.trigger});
         return;
     }
 
@@ -849,6 +1390,22 @@ void NetworkController::retryPendingCommand()
         if (m_retryTimer) m_retryTimer->stop();
         bool result = (front.type == PendingCmdType::StartMeasure)
                     ? doSendStartMeasure() : doSendStopMeasure();
+        QJsonObject fields;
+        fields.insert(QStringLiteral("command"),
+                      front.type == PendingCmdType::StartMeasure
+                          ? QStringLiteral("start") : QStringLiteral("stop"));
+        fields.insert(QStringLiteral("configId"), m_currentConfigId);
+        fields.insert(QStringLiteral("outcome"),
+                      result ? QStringLiteral("executed") : QStringLiteral("rejected"));
+        fields.insert(QStringLiteral("reason"),
+                      result ? QStringLiteral("config_confirmed")
+                            : QStringLiteral("send_failed"));
+        recordDiagnosticEvent(QStringLiteral("network.measure"),
+                              result ? QStringLiteral("command_executed")
+                                     : QStringLiteral("command_rejected"),
+                              result ? DiagnosticRecorder::Severity::Info
+                                     : DiagnosticRecorder::Severity::Error,
+                              fields);
         if (result) emit statusMessage("待执行的命令已成功发送");
         else emit errorOccurred("待执行的命令发送失败");
         m_cmdQueue.pop_front();
@@ -858,6 +1415,17 @@ void NetworkController::retryPendingCommand()
     if (m_configPhase == ConfigPhase::Failed) {
         if (m_retryTimer) m_retryTimer->stop();
         emit errorOccurred("配置未确认（存在失败卡），无法执行测量命令，请重新下发配置");
+        QJsonObject fields;
+        fields.insert(QStringLiteral("command"),
+                      front.type == PendingCmdType::StartMeasure
+                          ? QStringLiteral("start") : QStringLiteral("stop"));
+        fields.insert(QStringLiteral("configId"), m_currentConfigId);
+        fields.insert(QStringLiteral("outcome"), QStringLiteral("rejected"));
+        fields.insert(QStringLiteral("reason"), QStringLiteral("config_failed"));
+        recordDiagnosticEvent(QStringLiteral("network.measure"),
+                              QStringLiteral("command_rejected"),
+                              DiagnosticRecorder::Severity::Error,
+                              fields);
         m_cmdQueue.pop_front();
         return;
     }
@@ -914,6 +1482,9 @@ void NetworkController::onProbeTimeout()
         // ── 用 SendARP 探测卡是否可达 ──────────────────────────
         QString ipStr = m_targetIPs[i];
         bool reachable = false;
+        const uint64_t arpStartMs = nowMs();
+        quint64 arpError = 0;
+        QString arpMac = QStringLiteral("unknown");
 
 #ifdef _WIN32
         ULONG macBuf[2] = {};      // 6 字节 MAC 用 2 个 ULONG 装
@@ -921,8 +1492,17 @@ void NetworkController::onProbeTimeout()
         IPAddr dest = inet_addr(ipStr.toStdString().c_str());
 
         DWORD arpRet = SendARP(dest, 0, macBuf, &macLen);
+        arpError = arpRet;
         if (arpRet == NO_ERROR && macLen >= 6) {
             reachable = true;
+            const auto *mac = static_cast<const uint8_t*>(static_cast<const void*>(macBuf));
+            arpMac = QStringLiteral("%1:%2:%3:%4:%5:%6")
+                .arg(mac[0], 2, 16, QLatin1Char('0'))
+                .arg(mac[1], 2, 16, QLatin1Char('0'))
+                .arg(mac[2], 2, 16, QLatin1Char('0'))
+                .arg(mac[3], 2, 16, QLatin1Char('0'))
+                .arg(mac[4], 2, 16, QLatin1Char('0'))
+                .arg(mac[5], 2, 16, QLatin1Char('0')).toUpper();
             emit statusMessage(QString("  ARP 探测成功: %1 → %02X:%02X:%02X:%02X:%02X:%02X")
                               .arg(ipStr)
                               .arg(static_cast<uint8_t*>(static_cast<void*>(macBuf))[0])
@@ -934,11 +1514,31 @@ void NetworkController::onProbeTimeout()
         }
 #endif
 
+        QJsonObject arpFields;
+        arpFields.insert(QStringLiteral("ip"), ipStr);
+        arpFields.insert(QStringLiteral("probe"), QStringLiteral("arp"));
+        arpFields.insert(QStringLiteral("arpFallback"), true);
+        arpFields.insert(QStringLiteral("arpResult"), reachable
+                         ? QStringLiteral("reachable")
+                         : QStringLiteral("unreachable"));
+        arpFields.insert(QStringLiteral("mac"), arpMac);
+        arpFields.insert(QStringLiteral("errorCode"), static_cast<double>(arpError));
+        arpFields.insert(QStringLiteral("elapsedMs"),
+                         static_cast<double>(nowMs() - arpStartMs));
+        arpFields.insert(QStringLiteral("cardIndex"), i + 1);
+        recordDiagnosticEvent(QStringLiteral("network.probe"),
+                              QStringLiteral("arp_probe"),
+                              reachable ? DiagnosticRecorder::Severity::Info
+                                        : DiagnosticRecorder::Severity::Debug,
+                              arpFields);
+
         if (reachable) {
             // ARP 可达 → 卡已在线（重启上位机时卡不会重发18字节包）
             // 直接标记为就绪
             emit statusMessage(QString("卡%1（%2）ARP 探测成功，标记为就绪 ✓")
                               .arg(i + 1).arg(ipStr));
+            if (i < static_cast<int>(m_cardDiagnostics.size()))
+                ++m_cardDiagnostics[i].arpReady;
             markCardReady(i, false);   // ARP 探测就绪（并未收到 18 字节包）
             anyProbed = true;
         } else {
@@ -975,21 +1575,15 @@ bool NetworkController::isAllCardsReady() const
 }
 
 // ══ 底层发送（不做就绪检查，由重试机制调用）════════════════════════════
-static bool sendRawToAll(SocketType sock, const QByteArray& cmd,
-                         const QVector<QString>& targets,
-                         int* outSuccess, int* outFail)
+bool NetworkController::sendRawToAll(const QByteArray& cmd,
+                                      const QString& reason,
+                                      int* outSuccess,
+                                      int* outFail)
 {
-    if (sock == INVALID_SOCKET) return false;
     int ok = 0, fail = 0;
-    for (const QString& ip : targets) {
-        sockaddr_in addr;
-        memset(&addr, 0, sizeof(addr));
-        addr.sin_family = AF_INET;
-        addr.sin_port   = htons(static_cast<uint16_t>(CONTROL_PORT));
-        inet_pton(AF_INET, ip.toStdString().c_str(), &addr.sin_addr);
-        int sent = sendto(sock, cmd.constData(), cmd.size(), 0,
-                          reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
-        if (sent > 0) ++ok; else ++fail;
+    for (const QString& ip : m_targetIPs) {
+        if (sendRawCommand(cmd, ip, reason)) ++ok;
+        else ++fail;
     }
     if (outSuccess) *outSuccess = ok;
     if (outFail)    *outFail    = fail;
@@ -1000,7 +1594,7 @@ bool NetworkController::doSendConfigCommand(int dataTime, int aDelay, int bDelay
 {
     QByteArray cmd = buildConfigPacket(dataTime, aDelay, bDelay);
     int successCount = 0, failCount = 0;
-    sendRawToAll(m_controlSocket, cmd, m_targetIPs, &successCount, &failCount);
+    sendRawToAll(cmd, QStringLiteral("first"), &successCount, &failCount);
     if (successCount > 0) {
         emit statusMessage(QString("配置命令已发送（%1/%2 张卡成功）: 采集=%3ns, A延时=%4ns, B延时=%5ns")
                           .arg(successCount).arg(m_targetIPs.size())
@@ -1026,7 +1620,7 @@ bool NetworkController::doSendStartMeasure()
     };
     QByteArray cmd(reinterpret_cast<const char*>(startBytes), sizeof(startBytes));
     int successCount = 0, failCount = 0;
-    sendRawToAll(m_controlSocket, cmd, m_targetIPs, &successCount, &failCount);
+    sendRawToAll(cmd, QStringLiteral("measure_start"), &successCount, &failCount);
     if (successCount > 0) {
         emit statusMessage(QString("开始测量命令已发送（%1/%2 张卡成功）")
                           .arg(successCount).arg(m_targetIPs.size()));
@@ -1052,7 +1646,7 @@ bool NetworkController::doSendStopMeasure()
     };
     QByteArray cmd(reinterpret_cast<const char*>(stopBytes), sizeof(stopBytes));
     int successCount = 0, failCount = 0;
-    sendRawToAll(m_controlSocket, cmd, m_targetIPs, &successCount, &failCount);
+    sendRawToAll(cmd, QStringLiteral("measure_stop"), &successCount, &failCount);
     if (successCount > 0) {
         emit statusMessage(QString("停止测量命令已发送（%1/%2 张卡成功）")
                           .arg(successCount).arg(m_targetIPs.size()));
@@ -1063,16 +1657,62 @@ bool NetworkController::doSendStopMeasure()
     return false;
 }
 
-bool NetworkController::sendRawCommand(const QByteArray& cmd, const QString& targetIP)
+bool NetworkController::sendRawCommand(const QByteArray& cmd,
+                                       const QString& targetIP,
+                                       const QString& reason)
 {
-    if (m_controlSocket == INVALID_SOCKET) return false;
+    QJsonObject fields;
+    fields.insert(QStringLiteral("targetIP"), targetIP);
+    fields.insert(QStringLiteral("targetPort"), CONTROL_PORT);
+    fields.insert(QStringLiteral("payloadLength"), cmd.size());
+    fields.insert(QStringLiteral("payloadHex"), NetworkDiagnostics::formatHex(cmd));
+    fields.insert(QStringLiteral("reason"), reason);
+    fields.insert(QStringLiteral("configId"), m_currentConfigId);
+    fields.insert(QStringLiteral("trigger"), m_currentConfigTrigger);
+
+    int cardIdx = m_targetIPs.indexOf(targetIP);
+    if (cardIdx >= 0 && cardIdx < static_cast<int>(m_cardDiagnostics.size())) {
+        ++m_cardDiagnostics[cardIdx].sendCount;
+        fields.insert(QStringLiteral("sendCount"),
+                      static_cast<double>(m_cardDiagnostics[cardIdx].sendCount));
+    }
+
+    if (m_controlSocket == INVALID_SOCKET) {
+        fields.insert(QStringLiteral("sendtoReturn"), -1);
+        fields.insert(QStringLiteral("errorCode"), QStringLiteral("socket_invalid"));
+        recordDiagnosticEvent(QStringLiteral("network.control"),
+                              QStringLiteral("send_skipped"),
+                              DiagnosticRecorder::Severity::Error,
+                              fields);
+        return false;
+    }
     sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port   = htons(static_cast<uint16_t>(CONTROL_PORT));
-    inet_pton(AF_INET, targetIP.toStdString().c_str(), &addr.sin_addr);
+    const int addressResult = inet_pton(AF_INET, targetIP.toStdString().c_str(), &addr.sin_addr);
     int sent = sendto(m_controlSocket, cmd.constData(), cmd.size(), 0,
                       reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    int errorCode = 0;
+    if (sent <= 0) {
+#ifdef _WIN32
+        errorCode = WSAGetLastError();
+#else
+        errorCode = errno;
+#endif
+    }
+    fields.insert(QStringLiteral("addressParse"), addressResult == 1 ? QStringLiteral("ok")
+                                                                       : QStringLiteral("failed"));
+    fields.insert(QStringLiteral("sendtoReturn"), sent);
+    fields.insert(QStringLiteral("errorCode"), errorCode);
+    fields.insert(QStringLiteral("sendOutcome"), sent > 0 ? QStringLiteral("local_interface_ok")
+                                                           : QStringLiteral("failed"));
+    recordDiagnosticEvent(QStringLiteral("network.control"),
+                          sent > 0 ? QStringLiteral("sendto_succeeded")
+                                  : QStringLiteral("sendto_failed"),
+                          sent > 0 ? DiagnosticRecorder::Severity::Info
+                                  : DiagnosticRecorder::Severity::Warning,
+                          fields);
     // 注意：不对每个 IP 单独 emit errorOccurred，避免 nCards 较大时日志刷屏。
     // 调用方（sendConfigCommand 等）统计成功/失败数后汇总上报。
     return (sent > 0);
@@ -1104,25 +1744,55 @@ QByteArray NetworkController::buildConfigPacket(int dataTime, int aDelay, int bD
     return cmd;
 }
 
-bool NetworkController::sendConfigCommand(int dataTime, int aDelay, int bDelay)
+bool NetworkController::sendConfigCommand(int dataTime,
+                                          int aDelay,
+                                          int bDelay,
+                                          QString trigger)
 {
+    const QString configId = QStringLiteral("config-%1").arg(m_nextConfigId++);
+    if (trigger.isEmpty()) trigger = QStringLiteral("api");
+
+    QJsonObject requestFields;
+    requestFields.insert(QStringLiteral("configId"), configId);
+    requestFields.insert(QStringLiteral("trigger"), trigger);
+    requestFields.insert(QStringLiteral("dataTime"), dataTime);
+    requestFields.insert(QStringLiteral("aDelay"), aDelay);
+    requestFields.insert(QStringLiteral("bDelay"), bDelay);
+
     if (m_controlSocket == INVALID_SOCKET) {
         emit errorOccurred("控制 socket 未初始化，请先点击[开始监听]");
+        requestFields.insert(QStringLiteral("reason"), QStringLiteral("socket_not_initialized"));
+        recordDiagnosticEvent(QStringLiteral("network.config"),
+                              QStringLiteral("config_rejected"),
+                              DiagnosticRecorder::Severity::Error,
+                              requestFields);
         return false;
     }
 
     if (isAllCardsReady()) {
         // ── 所有卡已就绪：逐卡下发配置并等待 60 字节反馈确认 ──
-        beginConfigWait({dataTime, aDelay, bDelay});
+        requestFields.insert(QStringLiteral("outcome"), QStringLiteral("execute"));
+        recordDiagnosticEvent(QStringLiteral("network.config"),
+                              QStringLiteral("config_accepted"),
+                              DiagnosticRecorder::Severity::Info,
+                              requestFields);
+        beginConfigWait({dataTime, aDelay, bDelay, configId, trigger});
         return true;
     }
 
     // ── 卡片未全部就绪：入队等待（队列保证配置不会被测量命令覆盖）──
-    m_cmdQueue.push_back(PendingCmd{PendingCmdType::Config, dataTime, aDelay, bDelay});
+    m_cmdQueue.push_back(PendingCmd{PendingCmdType::Config, dataTime, aDelay, bDelay,
+                                    configId, trigger});
 
     int readyCnt = readyCardCount();
     emit statusMessage(QString("配置命令已加入等待队列（%1/%2 张卡就绪，等待全部就绪后自动发送...")
                       .arg(readyCnt).arg(m_targetIPs.size()));
+    requestFields.insert(QStringLiteral("outcome"), QStringLiteral("queued"));
+    requestFields.insert(QStringLiteral("readyCount"), readyCnt);
+    recordDiagnosticEvent(QStringLiteral("network.config"),
+                          QStringLiteral("config_queued"),
+                          DiagnosticRecorder::Severity::Info,
+                          requestFields);
 
     // 启动重试定时器（如果还没启动）
     if (m_retryTimer && !m_retryTimer->isActive())
@@ -1135,21 +1805,62 @@ bool NetworkController::sendStartMeasure()
 {
     if (m_controlSocket == INVALID_SOCKET) {
         emit errorOccurred("控制 socket 未初始化，请先点击[开始监听]");
+        QJsonObject fields;
+        fields.insert(QStringLiteral("command"), QStringLiteral("start"));
+        fields.insert(QStringLiteral("outcome"), QStringLiteral("rejected"));
+        fields.insert(QStringLiteral("reason"), QStringLiteral("socket_not_initialized"));
+        recordDiagnosticEvent(QStringLiteral("network.measure"),
+                              QStringLiteral("command_rejected"),
+                              DiagnosticRecorder::Severity::Error,
+                              fields);
         return false;
     }
 
     if (isAllCardsReady()) {
         if (isConfigConfirmed()) {
             // ── 配置已确认：直接发送（测量命令无反馈，不等待）──
-            return doSendStartMeasure();
+            const bool result = doSendStartMeasure();
+            QJsonObject fields;
+            fields.insert(QStringLiteral("command"), QStringLiteral("start"));
+            fields.insert(QStringLiteral("configId"), m_currentConfigId);
+            fields.insert(QStringLiteral("outcome"),
+                          result ? QStringLiteral("executed") : QStringLiteral("rejected"));
+            fields.insert(QStringLiteral("reason"),
+                          result ? QStringLiteral("config_confirmed")
+                                : QStringLiteral("send_failed"));
+            recordDiagnosticEvent(QStringLiteral("network.measure"),
+                                  result ? QStringLiteral("command_executed")
+                                         : QStringLiteral("command_rejected"),
+                                  result ? DiagnosticRecorder::Severity::Info
+                                         : DiagnosticRecorder::Severity::Error,
+                                  fields);
+            return result;
         }
         if (m_configPhase == ConfigPhase::Failed) {
             emit errorOccurred("配置未确认（存在失败卡），无法开始测量，请重新下发配置");
+            QJsonObject fields;
+            fields.insert(QStringLiteral("command"), QStringLiteral("start"));
+            fields.insert(QStringLiteral("configId"), m_currentConfigId);
+            fields.insert(QStringLiteral("outcome"), QStringLiteral("rejected"));
+            fields.insert(QStringLiteral("reason"), QStringLiteral("config_failed"));
+            recordDiagnosticEvent(QStringLiteral("network.measure"),
+                                  QStringLiteral("command_rejected"),
+                                  DiagnosticRecorder::Severity::Error,
+                                  fields);
             return false;
         }
         // 等待配置确认完成后自动发送（configConfirmed 会触发 retryPendingCommand）
         m_cmdQueue.push_back(PendingCmd{PendingCmdType::StartMeasure, 0, 0, 0});
         emit statusMessage("等待配置参数确认完成后自动开始测量...");
+        QJsonObject fields;
+        fields.insert(QStringLiteral("command"), QStringLiteral("start"));
+        fields.insert(QStringLiteral("configId"), m_currentConfigId);
+        fields.insert(QStringLiteral("outcome"), QStringLiteral("queued"));
+        fields.insert(QStringLiteral("reason"), QStringLiteral("waiting_config_ack"));
+        recordDiagnosticEvent(QStringLiteral("network.measure"),
+                              QStringLiteral("command_queued"),
+                              DiagnosticRecorder::Severity::Info,
+                              fields);
         if (m_retryTimer && !m_retryTimer->isActive())
             m_retryTimer->start();
         return true;
@@ -1161,6 +1872,16 @@ bool NetworkController::sendStartMeasure()
     int readyCnt = readyCardCount();
     emit statusMessage(QString("开始测量命令已加入等待队列（%1/%2 张卡就绪，等待全部就绪后自动发送...")
                       .arg(readyCnt).arg(m_targetIPs.size()));
+    QJsonObject fields;
+    fields.insert(QStringLiteral("command"), QStringLiteral("start"));
+    fields.insert(QStringLiteral("configId"), m_currentConfigId);
+    fields.insert(QStringLiteral("outcome"), QStringLiteral("queued"));
+    fields.insert(QStringLiteral("reason"), QStringLiteral("waiting_ready"));
+    fields.insert(QStringLiteral("readyCount"), readyCnt);
+    recordDiagnosticEvent(QStringLiteral("network.measure"),
+                          QStringLiteral("command_queued"),
+                          DiagnosticRecorder::Severity::Info,
+                          fields);
 
     if (m_retryTimer && !m_retryTimer->isActive())
         m_retryTimer->start();
@@ -1172,21 +1893,62 @@ bool NetworkController::sendStopMeasure()
 {
     if (m_controlSocket == INVALID_SOCKET) {
         emit errorOccurred("控制 socket 未初始化，请先点击[开始监听]");
+        QJsonObject fields;
+        fields.insert(QStringLiteral("command"), QStringLiteral("stop"));
+        fields.insert(QStringLiteral("outcome"), QStringLiteral("rejected"));
+        fields.insert(QStringLiteral("reason"), QStringLiteral("socket_not_initialized"));
+        recordDiagnosticEvent(QStringLiteral("network.measure"),
+                              QStringLiteral("command_rejected"),
+                              DiagnosticRecorder::Severity::Error,
+                              fields);
         return false;
     }
 
     if (isAllCardsReady()) {
         if (isConfigConfirmed()) {
             // ── 配置已确认：直接发送（测量命令无反馈，不等待）──
-            return doSendStopMeasure();
+            const bool result = doSendStopMeasure();
+            QJsonObject fields;
+            fields.insert(QStringLiteral("command"), QStringLiteral("stop"));
+            fields.insert(QStringLiteral("configId"), m_currentConfigId);
+            fields.insert(QStringLiteral("outcome"),
+                          result ? QStringLiteral("executed") : QStringLiteral("rejected"));
+            fields.insert(QStringLiteral("reason"),
+                          result ? QStringLiteral("config_confirmed")
+                                : QStringLiteral("send_failed"));
+            recordDiagnosticEvent(QStringLiteral("network.measure"),
+                                  result ? QStringLiteral("command_executed")
+                                         : QStringLiteral("command_rejected"),
+                                  result ? DiagnosticRecorder::Severity::Info
+                                         : DiagnosticRecorder::Severity::Error,
+                                  fields);
+            return result;
         }
         if (m_configPhase == ConfigPhase::Failed) {
             emit errorOccurred("配置未确认（存在失败卡），无法停止测量");
+            QJsonObject fields;
+            fields.insert(QStringLiteral("command"), QStringLiteral("stop"));
+            fields.insert(QStringLiteral("configId"), m_currentConfigId);
+            fields.insert(QStringLiteral("outcome"), QStringLiteral("rejected"));
+            fields.insert(QStringLiteral("reason"), QStringLiteral("config_failed"));
+            recordDiagnosticEvent(QStringLiteral("network.measure"),
+                                  QStringLiteral("command_rejected"),
+                                  DiagnosticRecorder::Severity::Error,
+                                  fields);
             return false;
         }
         // 等待配置确认完成后自动发送（configConfirmed 会触发 retryPendingCommand）
         m_cmdQueue.push_back(PendingCmd{PendingCmdType::StopMeasure, 0, 0, 0});
         emit statusMessage("等待配置参数确认完成后自动停止测量...");
+        QJsonObject fields;
+        fields.insert(QStringLiteral("command"), QStringLiteral("stop"));
+        fields.insert(QStringLiteral("configId"), m_currentConfigId);
+        fields.insert(QStringLiteral("outcome"), QStringLiteral("queued"));
+        fields.insert(QStringLiteral("reason"), QStringLiteral("waiting_config_ack"));
+        recordDiagnosticEvent(QStringLiteral("network.measure"),
+                              QStringLiteral("command_queued"),
+                              DiagnosticRecorder::Severity::Info,
+                              fields);
         if (m_retryTimer && !m_retryTimer->isActive())
             m_retryTimer->start();
         return true;
@@ -1196,6 +1958,16 @@ bool NetworkController::sendStopMeasure()
     int readyCnt = readyCardCount();
     emit statusMessage(QString("停止测量命令已加入等待队列（%1/%2 张卡就绪，等待全部就绪后自动发送...")
                       .arg(readyCnt).arg(m_targetIPs.size()));
+    QJsonObject fields;
+    fields.insert(QStringLiteral("command"), QStringLiteral("stop"));
+    fields.insert(QStringLiteral("configId"), m_currentConfigId);
+    fields.insert(QStringLiteral("outcome"), QStringLiteral("queued"));
+    fields.insert(QStringLiteral("reason"), QStringLiteral("waiting_ready"));
+    fields.insert(QStringLiteral("readyCount"), readyCnt);
+    recordDiagnosticEvent(QStringLiteral("network.measure"),
+                          QStringLiteral("command_queued"),
+                          DiagnosticRecorder::Severity::Info,
+                          fields);
     if (m_retryTimer && !m_retryTimer->isActive())
         m_retryTimer->start();
     return true;
@@ -1220,7 +1992,13 @@ void NetworkController::setMeasureEnabled(bool enable)
 // ═════════════════════════════════════════════════════════════════════
 #ifdef _WIN32
 // ICMP 快扫（采集卡响应 ping）：短超时，比 SendARP 快一个数量级
-static bool icmpProbeOnce(HANDLE hIcmp, const QString& ip, DWORD timeoutMs, bool* timedOut)
+static bool icmpProbeOnce(HANDLE hIcmp,
+                          const QString& ip,
+                          DWORD timeoutMs,
+                          bool* timedOut,
+                          DWORD* replyCount,
+                          DWORD* errorCode,
+                          DWORD* replyStatus)
 {
     IPAddr dest = inet_addr(ip.toStdString().c_str());
     char sendData[32] = {0};
@@ -1228,23 +2006,42 @@ static bool icmpProbeOnce(HANDLE hIcmp, const QString& ip, DWORD timeoutMs, bool
     std::vector<char> replyBuf(replySize, 0);
     DWORD n = IcmpSendEcho(hIcmp, dest, sendData, sizeof(sendData), nullptr,
                            replyBuf.data(), replySize, timeoutMs);
-    if (n > 0) { *timedOut = false; return true; }
+    if (replyCount) *replyCount = n;
+    if (n > 0) {
+        if (replyStatus) *replyStatus = reinterpret_cast<const ICMP_ECHO_REPLY*>(replyBuf.data())->Status;
+        *timedOut = false;
+        return true; // Preserve the existing scan criterion; log the status separately.
+    }
     DWORD err = GetLastError();
+    if (errorCode) *errorCode = err;
     *timedOut = (err == IP_REQ_TIMED_OUT);   // 超时=离线，不视为探测错误
     return false;
 }
 // ARP 兜底（ICMP 未命中时，兼容不响应 ping 或 ICMP 被过滤的情况）
-static bool arpProbeOnce(const QString& ip)
+static bool arpProbeOnce(const QString& ip, QString* macText, DWORD* errorCode)
 {
     ULONG macBuf[2] = {};
     ULONG macLen = sizeof(macBuf);
     IPAddr dest = inet_addr(ip.toStdString().c_str());
     DWORD arpRet = SendARP(dest, 0, macBuf, &macLen);
+    if (errorCode) *errorCode = arpRet;
+    if (macText && arpRet == NO_ERROR && macLen >= 6) {
+        const auto *mac = static_cast<const uint8_t*>(static_cast<const void*>(macBuf));
+        *macText = QStringLiteral("%1:%2:%3:%4:%5:%6")
+            .arg(mac[0], 2, 16, QLatin1Char('0'))
+            .arg(mac[1], 2, 16, QLatin1Char('0'))
+            .arg(mac[2], 2, 16, QLatin1Char('0'))
+            .arg(mac[3], 2, 16, QLatin1Char('0'))
+            .arg(mac[4], 2, 16, QLatin1Char('0'))
+            .arg(mac[5], 2, 16, QLatin1Char('0')).toUpper();
+    }
     return arpRet == NO_ERROR && macLen >= 6;
 }
 #endif
 
-QVector<QString> NetworkController::scanReachableIPs(const QString& baseIP, int count)
+QVector<QString> NetworkController::scanReachableIPs(const QString& baseIP,
+                                                     int count,
+                                                     const QString& listenId)
 {
     QVector<QString> result;
     const QStringList parts = baseIP.split('.');
@@ -1265,6 +2062,20 @@ QVector<QString> NetworkController::scanReachableIPs(const QString& baseIP, int 
     const int total = static_cast<int>(ips.size());
     if (total <= 0) return result;
 
+    QStringList candidates;
+    for (const auto &ip : ips) candidates.append(ip);
+    if (auto *r = diagnosticRecorder()) {
+        r->recordEvent("scan.begin", "开始扫描候选地址", DiagnosticRecorder::Severity::Info,
+            {{"listenId",listenId},{"baseIP",baseIP},{"requestedCount",count},
+             {"candidates",QJsonArray::fromStringList(candidates)}});
+    }
+    (void)QtConcurrent::run([candidates,listenId] {
+        auto snapshot = NetworkDiagnostics::collectSnapshot(candidates);
+        snapshot.insert("listenId",listenId);
+        snapshot.insert("reason","scan_start");
+        if (auto *r = diagnosticRecorder()) r->recordNetworkSnapshot(snapshot);
+    });
+
     // 并行探测：最多 16 线程分片，每线程只写自己的槽位（无竞争）。
     // ICMP 快扫（150ms 超时）为主判据：在线毫秒级响应，超时=离线直接判离线，
     // 只有 ICMP 调用出错（非超时）才用 SendARP 兜底，避免离线 IP 叠加 ARP 超时。
@@ -1273,15 +2084,30 @@ QVector<QString> NetworkController::scanReachableIPs(const QString& baseIP, int 
     std::vector<std::thread> workers;
     workers.reserve(nThreads);
     for (int t = 0; t < nThreads; ++t) {
-        workers.emplace_back([&ips, &online, t, nThreads]() {
+        workers.emplace_back([&ips, &online, t, nThreads, listenId]() {
 #ifdef _WIN32
             HANDLE hIcmp = IcmpCreateFile();
+            const DWORD createError = hIcmp == INVALID_HANDLE_VALUE ? GetLastError() : 0;
             if (hIcmp == INVALID_HANDLE_VALUE) hIcmp = nullptr;
             for (int i = t; i < static_cast<int>(ips.size()); i += nThreads) {
+                const auto started = std::chrono::steady_clock::now();
                 bool timedOut = false;
-                bool reachable = (hIcmp && icmpProbeOnce(hIcmp, ips[i], SCAN_ICMP_TIMEOUT_MS, &timedOut));
-                if (!reachable && !timedOut) reachable = arpProbeOnce(ips[i]);   // 仅出错时 ARP 兜底
+                DWORD replies=0, icmpError=createError, replyStatus=0, arpError=0;
+                QString mac;
+                bool reachable = (hIcmp && icmpProbeOnce(hIcmp, ips[i], SCAN_ICMP_TIMEOUT_MS,
+                    &timedOut, &replies, &icmpError, &replyStatus));
+                const bool arpAttempted = !reachable && !timedOut;
+                if (arpAttempted) reachable = arpProbeOnce(ips[i], &mac, &arpError);
                 online[i] = reachable ? 1 : 0;
+                const double elapsed = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+                if (auto *r=diagnosticRecorder()) r->recordEvent("scan.result", "候选地址探测结果",
+                    DiagnosticRecorder::Severity::Info,
+                    {{"listenId",listenId},{"ip",ips[i]},{"candidateIndex",i+1},
+                     {"reachable",reachable},{"elapsedMs",elapsed},{"icmpAttempted",hIcmp!=nullptr},
+                     {"icmpReplyCount",double(replies)},{"icmpReplyStatus",replies ? QJsonValue(double(replyStatus)):QJsonValue()},
+                     {"icmpError",double(icmpError)},{"icmpTimedOut",timedOut},
+                     {"arpAttempted",arpAttempted},{"arpError",arpAttempted?QJsonValue(double(arpError)):QJsonValue()},
+                     {"mac",mac},{"selectionBasis",reachable?(arpAttempted?"arp_success":"icmp_reply_count"):"not_selected"}});
             }
             if (hIcmp) IcmpCloseHandle(hIcmp);
 #else
@@ -1296,86 +2122,8 @@ QVector<QString> NetworkController::scanReachableIPs(const QString& baseIP, int 
     // 按原顺序收集在线 IP
     for (int i = 0; i < total; ++i)
         if (online[i]) result.append(ips[i]);
-    return result;
-}
-
-// ═════════════════════════════════════════════════════════════════════
-// 虚拟采集卡探测（PALiveImagingSimSender）
-//
-// 向 127.0.0.1~127.0.0.4:8080 发送带探测标记的 58 字节配置命令，模拟器
-// 在线时会从各虚拟卡源 IP 把 60 字节反馈回发到本探针的来源端口（不占用
-// 8000，避免残留监听进程占用端口时探测失败）。仅用于真实网段扫描无结果
-// 时的兜底识别，不影响真实采集卡流程。
-// ═════════════════════════════════════════════════════════════════════
-QVector<QString> NetworkController::scanVirtualCards()
-{
-    QVector<QString> result;
-#ifdef _WIN32
-    WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
-
-    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (s == INVALID_SOCKET) {
-        WSACleanup();
-        return result;
-    }
-
-    // 探测反馈监听：绑定临时端口接收模拟器回发的反馈
-    sockaddr_in local = {};
-    local.sin_family = AF_INET;
-    local.sin_port   = 0;
-    local.sin_addr.s_addr = INADDR_ANY;
-    if (::bind(s, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
-        closesocket(s);
-        WSACleanup();
-        return result;
-    }
-
-    DWORD timeout = 100;
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO,
-               reinterpret_cast<const char*>(&timeout), sizeof(timeout));
-
-    // 58 字节配置命令探针：第 6 字节为探测标记 0xEE（正常配置命令该字节为 0）
-    uint8_t cmd[58] = {};
-    cmd[0] = 0xFA; cmd[1] = 0xFA; cmd[2] = 0xFA; cmd[3] = 0xFA;
-    cmd[4] = 0x02;
-    cmd[5] = 0xEE;
-    for (int i = 0; i < 4; ++i) {
-        sockaddr_in dst = {};
-        dst.sin_family = AF_INET;
-        dst.sin_port   = htons(CONTROL_PORT);
-        inet_pton(AF_INET, QString("127.0.0.%1").arg(i + 1).toStdString().c_str(),
-                  &dst.sin_addr);
-        sendto(s, reinterpret_cast<const char*>(cmd), sizeof(cmd), 0,
-               reinterpret_cast<sockaddr*>(&dst), sizeof(dst));
-    }
-
-    std::vector<int> seen(5, 0);   // 下标 1~4 = 127.0.0.1~127.0.0.4
-    const uint64_t deadline = nowMs() + 500;
-    while (nowMs() < deadline) {
-        char buf[128];
-        sockaddr_in src = {};
-        socklen_t srcLen = sizeof(src);
-        const int n = recvfrom(s, buf, sizeof(buf), 0,
-                               reinterpret_cast<sockaddr*>(&src), &srcLen);
-        if (n <= 0) continue;
-        if (n != 60) continue;
-
-        char ip[64];
-        inet_ntop(AF_INET, &src.sin_addr, ip, sizeof(ip));
-        const QStringList parts = QString(ip).split('.');
-        if (parts.size() == 4 && parts[0] == "127" &&
-            parts[1] == "0" && parts[2] == "0") {
-            bool ok = false;
-            const int last = parts[3].toInt(&ok);
-            if (ok && last >= 1 && last <= 4) seen[last] = 1;
-        }
-    }
-    for (int i = 1; i <= 4; ++i)
-        if (seen[i]) result.append(QString("127.0.0.%1").arg(i));
-
-    closesocket(s);
-    WSACleanup();
-#endif
+    if (auto *r=diagnosticRecorder()) r->recordEvent("scan.complete", "扫描完成，有序目标列表",
+        DiagnosticRecorder::Severity::Info, {{"listenId",listenId},{"targetIPs",QJsonArray::fromStringList(result)},
+                                           {"targetCount",result.size()}});
     return result;
 }

@@ -5,8 +5,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-set(CMAKE_PREFIX_PATH "D:/Qt/Qt6.8.0/6.8.0/mingw_64")
-
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 add_executable(PALiveImagingSimSender
@@ -23,7 +21,10 @@ set_target_properties(PALiveImagingSimSender PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 # 部署 Qt 运行库到输出目录
+get_target_property(_qmake_exec Qt6::qmake IMPORTED_LOCATION)
+get_filename_component(_qt_bin_dir "${_qmake_exec}" DIRECTORY)
+find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}" REQUIRED)
 add_custom_command(TARGET PALiveImagingSimSender POST_BUILD
-    COMMAND D:/Qt/Qt6.8.0/6.8.0/mingw_64/bin/windeployqt.exe
+    COMMAND "${WINDEPLOYQT_EXECUTABLE}"
             --no-translations "$<TARGET_FILE:PALiveImagingSimSender>"
     COMMENT "Deploying Qt runtime")

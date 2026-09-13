@@ -553,6 +553,16 @@
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_5">
           <item>
+           <widget class="QPushButton" name="btnExportDiagnostic">
+            <property name="text">
+             <string>导出诊断日志…</string>
+            </property>
+            <property name="toolTip">
+             <string>选择当前或历史运行并导出诊断日志 ZIP</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <widget class="QTextEdit" name="txtLog">
             <property name="readOnly">
              <bool>true</bool>

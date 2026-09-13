@@ -7,6 +7,7 @@
 #include <QSettings>
 #include <QTabBar>
 #include <QDialog>
+#include <QJsonObject>
 #include <QImage>
 #include <QPushButton>
 #include <QCheckBox>
@@ -21,6 +22,7 @@
 #include <cmath>
 #include "qcustomplot.h"
 #include "DataTypes.h"
+#include "CardStatusFormatting.h"
 #include "AcqConfig.h"
 #include "Constants.h"
 #include "ImagingParams.h"
@@ -59,6 +61,11 @@ public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
+    // 逐卡状态栏的稳定文本/tooltip 格式，UI 与无窗口单元测试共用。
+    static QString formatCardStatusText(int cardNumber,
+                                        const CardStats::Snapshot& stats);
+    static QString formatCardStatusTooltip(const CardStats::Snapshot& stats);
+
 protected:
     void closeEvent(QCloseEvent *event) override;
     void showEvent(QShowEvent *event) override;
@@ -68,7 +75,8 @@ protected:
 private slots:
     void onStartListenClicked();
     void onStartMeasureClicked();
-    void onConfigParamsClicked();
+    void onConfigParamsClicked(bool fromStartMeasure = false);
+    void onExportDiagnosticClicked();
     void onSelectDirClicked();
     void onToggleSaveClicked();
     void onAutoSaveToggled(bool checked);   // 自动保存勾选切换（环形：触发开始/圈末或超时重置停止）
@@ -89,6 +97,7 @@ private slots:
     void onImagingImageReady(const QImage &image, int seq);
     void onImagingError(const QString &error);
     void setImagingParamControlsEnabled(bool enable); // 实时成像期间锁定成像参数/采集控制，svcStopped 后恢复
+    void onDiagnosticStatusTick();
 
 private:
     void setupUI();
@@ -106,6 +115,12 @@ private:
                             const QVector<double> &magnitude,
                             bool doReplot = true);
     void logMessage(const QString &message);
+    void recordDiagnosticAction(const QString &action,
+                                const QJsonObject &fields = QJsonObject());
+    void recordAcquisitionSnapshot(const QVector<QString> &targetIPs,
+                                   const QString &phase);
+    QJsonObject diagnosticAcquisitionSnapshot(const QVector<QString> &targetIPs,
+                                              const QString &phase) const;
     void loadSettings();
     void saveSettings();
     void loadStyleSheet();
@@ -168,6 +183,7 @@ private:
 
     // 定时器
     QTimer *m_statsTimer;
+    QTimer *m_diagnosticStatusTimer;
     QTimer *m_displayTimer;   // 30fps pull 定时器
     QTimer *m_ringTimeoutTimer = nullptr;   // 超时重置到点检测（触发即保存 PNG）
     bool    m_ringTimeoutSaveDone = false;  // 本次空闲超时只保存一次
@@ -178,6 +194,17 @@ private:
     bool m_highDataRateWarningShown;
     bool m_pendingAutoSave;  // 重新监听后需要自动恢复保存（停止监听前处于保存状态）
     bool m_scanning = false; // 网段扫描进行中（防止重复触发）
+
+    // 诊断上下文：每次开始监听生成新的会话标识，随 UI 日志/网络快照传递。
+    QString m_diagnosticListenId;
+    bool m_diagnosticStatusInitialized = false;
+    bool m_diagnosticLastWriteError = false;
+    QString m_diagnosticLastWriteErrorText;
+    quint64 m_diagnosticLastQueueDropped = 0;
+    quint64 m_diagnosticLastCriticalQueueDropped = 0;
+    quint64 m_diagnosticLastNoiseDropped = 0;
+    quint64 m_diagnosticLastFallbackDropped = 0;
+    int m_diagnosticStatusNoticeCount = 0;
 
     // 存储队列溢出告警跟踪
     uint64_t m_prevSaveDiscards[MAX_CARDS];  // 上次 onUpdateStatistics 时各卡的 saveQueueDiscards 值

@@ -24,6 +24,9 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets PrintSupport OpenGL OpenGL
 # ============================================================
 set(SOURCES
     src/main.cpp
+    src/DiagnosticRecorder.cpp
+    src/DiagnosticExportDialog.cpp
+    src/NetworkDiagnostics.cpp
     src/DataProcessor.cpp
     src/FileSaver.cpp
     src/FramePublisher.cpp
@@ -41,8 +44,12 @@ set(SOURCES
 
 set(HEADERS
     include/Constants.h
+    include/DiagnosticRecorder.h
+    include/DiagnosticExportDialog.h
+    include/NetworkDiagnostics.h
     include/AcqConfig.h
     include/DataTypes.h
+    include/CardStatusFormatting.h
     include/ObjectPool.h
     include/PacketAssemblyBuffer.h
     include/DisplayBuffer.h

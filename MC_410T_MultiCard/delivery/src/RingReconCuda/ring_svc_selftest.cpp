@@ -4,6 +4,7 @@
 // 原始块并附带每根 A-line 的通道号与角度，经共享内存+ZMQ 驱动 ImagingSvc
 // 环形重建，逐块保存 wl1/wl2 帧供对照。多通道模拟要求 360° 数据集。
 #include "ImagingSharedMemory.h"
+#include "RingShmObservability.h"
 #include "RingBlockAssembler.h"
 
 #include <QCoreApplication>
@@ -340,12 +341,20 @@ int main(int argc, char** argv) {
 
     double totalMs = 0.0;
     std::vector<float> lastWl1, lastWl2;   // 逐块对比缓存
+    ring_shm_obs::Tracker producerObs;
+    producerObs.beginSession();
+    QJsonObject lastObservation;
     RingBlockAssembler assembler;
     assembler.setBlockCallback([&](std::vector<float> &&raw, std::vector<float> &&angles,
                                    std::vector<uint8_t> &&chIds, int blockSeq) {
         const auto t0 = std::chrono::steady_clock::now();
+        const uint64_t submitWallUs = ring_shm_obs::wallNowUs();
+        uint8_t previousReady = 0;
+        uint32_t previousSeq = 0;
         shm.lock();
         auto* h = static_cast<RingImagingShmHeader*>(shm.data());
+        previousReady = h->block_ready;
+        previousSeq = h->block_seq;
         std::memcpy(reinterpret_cast<float*>(h + 1), raw.data(),
                     static_cast<size_t>(blockSize) * sizeof(float));
         std::memcpy(reinterpret_cast<uint8_t*>(h + 1) + ringAnglesOffset(blockSize),
@@ -355,7 +364,14 @@ int main(int argc, char** argv) {
         h->block_seq = static_cast<uint32_t>(blockSeq);
         h->block_ready = 1;
         shm.unlock();
-        sendJson(sock, {{"cmd", "ring_block_ready"}, {"seq", blockSeq}});
+        const auto producerEvent = producerObs.observeProducerSubmit(
+            previousReady, previousSeq, static_cast<uint32_t>(blockSeq), submitWallUs);
+        QJsonObject ready;
+        ready[QStringLiteral("cmd")] = QStringLiteral("ring_block_ready");
+        ready[QStringLiteral("seq")] = blockSeq;
+        ready[QStringLiteral("submit_index")] = static_cast<qint64>(producerEvent.submitIndex);
+        ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(producerEvent.submitWallUs);
+        sendJson(sock, ready);
 
         bool got = false;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kTimeoutMs);
@@ -364,7 +380,12 @@ int main(int argc, char** argv) {
             while (sock.recv(msg, zmq::recv_flags::dontwait)) {
                 const QByteArray data(static_cast<const char*>(msg.data()), static_cast<int>(msg.size()));
                 const QJsonObject obj = QJsonDocument::fromJson(data).object();
-                if (obj["cmd"].toString() == "ring_snapshot_ready") { got = true; break; }
+                const QString cmd = obj["cmd"].toString();
+                if (cmd == QStringLiteral("ring_shm_observation")) {
+                    lastObservation = obj;
+                    continue;
+                }
+                if (cmd == QStringLiteral("ring_snapshot_ready")) { got = true; break; }
             }
             if (got) break;
             QThread::msleep(5);
@@ -455,7 +476,18 @@ int main(int argc, char** argv) {
     }
 
     sendJson(sock, {{"cmd", "stop"}});
-    QThread::msleep(100);
+    const auto observationDeadline = std::chrono::steady_clock::now()
+        + std::chrono::milliseconds(500);
+    while (std::chrono::steady_clock::now() < observationDeadline) {
+        zmq::message_t msg;
+        while (sock.recv(msg, zmq::recv_flags::dontwait)) {
+            const QByteArray data(static_cast<const char*>(msg.data()), static_cast<int>(msg.size()));
+            const QJsonObject obj = QJsonDocument::fromJson(data).object();
+            if (obj["cmd"].toString() == QStringLiteral("ring_shm_observation"))
+                lastObservation = obj;
+        }
+        QThread::msleep(5);
+    }
     if (!noLaunch) {
         svc.terminate();
         if (!svc.waitForFinished(3000)) svc.kill();
@@ -463,5 +495,34 @@ int main(int argc, char** argv) {
 
     std::printf("done: channels=%d K=%d rounds=%d blocks=%d total=%.1f ms avg=%.2f ms\n",
                 cnt, K, nRounds, nBlocksTotal, totalMs, totalMs / nBlocksTotal);
+    if (!lastObservation.isEmpty()) {
+        std::printf("[RingSHMObs] service kind=%s session=%lld epoch=%lld submitted=%lld "
+                    "notifications=%lld consumed=%lld mismatch=%lld ready_zero=%lld "
+                    "duplicate=%lld gap=%lld avg_queue_us=%.1f avg_copy_us=%.1f avg_process_us=%.1f\n",
+                    lastObservation["kind"].toString().toUtf8().constData(),
+                    static_cast<long long>(lastObservation["session"].toVariant().toLongLong()),
+                    static_cast<long long>(lastObservation["epoch"].toVariant().toLongLong()),
+                    static_cast<long long>(lastObservation["submitted"].toVariant().toLongLong()),
+                    static_cast<long long>(lastObservation["notifications"].toVariant().toLongLong()),
+                    static_cast<long long>(lastObservation["consumed"].toVariant().toLongLong()),
+                    static_cast<long long>(lastObservation["notify_shm_mismatch"].toVariant().toLongLong()),
+                    static_cast<long long>(lastObservation["ready_zero_before_copy"].toVariant().toLongLong()),
+                    static_cast<long long>(lastObservation["duplicate_shm_seq"].toVariant().toLongLong()),
+                    static_cast<long long>(lastObservation["shm_seq_gap"].toVariant().toLongLong()),
+                    lastObservation["avg_queue_delay_us"].toDouble(),
+                    lastObservation["avg_copy_lock_us"].toDouble(),
+                    lastObservation["avg_process_us"].toDouble());
+    } else {
+        std::fprintf(stderr, "[RingSHMObs] service observation missing\n");
+        return 3;
+    }
+    const auto producerSnapshot = producerObs.snapshot();
+    std::printf("[RingSHMObs] producer session=%llu submitted=%llu slot_busy=%llu "
+                "last_seq=%u last_interval_us=%llu\n",
+                static_cast<unsigned long long>(producerSnapshot.session),
+                static_cast<unsigned long long>(producerSnapshot.submitted),
+                static_cast<unsigned long long>(producerSnapshot.slotBusyBeforeSubmit),
+                producerSnapshot.lastSubmittedSeq,
+                static_cast<unsigned long long>(producerSnapshot.lastSubmitIntervalUs));
     return 0;
 }

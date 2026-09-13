@@ -5,6 +5,8 @@
 #include "RingConfigDialog.h"
 #include "ImagingDisplayWindow.h"
 #include "RingBlockAssembler.h"
+#include "DiagnosticRecorder.h"
+#include "DiagnosticExportDialog.h"
 #include "Constants.h"
 #include "AcqConfig.h"
 #include <QFileDialog>
@@ -24,6 +26,12 @@
 #include <QTimer>
 #include <QProgressDialog>
 #include <QCloseEvent>
+#include <QDesktopServices>
+#include <QFutureWatcher>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QUrl>
+#include <QUuid>
 #include <QApplication>
 #include <QScrollArea>
 #include <QSignalBlocker>
@@ -38,6 +46,7 @@
 #include <QFrame>
 #include <QPointer>
 #include <QThreadPool>
+#include <QtConcurrent/QtConcurrentRun>
 #include <thread>
 #include <cmath>
 #include <numeric>
@@ -81,6 +90,38 @@ static void setBtnText(QPushButton *btn, const QString &text)
 {
     btn->setText(text);
     btn->setAccessibleName(text);
+}
+
+static QString uniqueDiagnosticZipPath(const QString &requestedPath)
+{
+    const QFileInfo requested(requestedPath);
+    const QString absolute = requested.absoluteFilePath();
+    if (!QFileInfo::exists(absolute)) return absolute;
+
+    const QString directory = requested.absolutePath();
+    const QString baseName = requested.completeBaseName();
+    const QString suffix = requested.suffix().isEmpty()
+        ? QStringLiteral("zip") : requested.suffix();
+    for (int index = 1; index < 100000; ++index) {
+        const QString candidate = QDir(directory).filePath(
+            QStringLiteral("%1 (%2).%3").arg(baseName).arg(index).arg(suffix));
+        if (!QFileInfo::exists(candidate)) return candidate;
+    }
+    return absolute;
+}
+
+static DiagnosticRecorder::ExportRequest diagnosticRequestForHistoricalRun(
+    const DiagnosticRecorder::RunInfo &run, const QString &note)
+{
+    DiagnosticRecorder::ExportRequest request;
+    request.runId = run.runId;
+    request.sourceDirectory = run.directory;
+    request.startIsoTime = run.startIsoTime;
+    request.endIsoTime = run.endIsoTime;
+    request.boundarySequence = run.lastSequence;
+    request.sourceWasActive = run.active;
+    request.note = note;
+    return request;
 }
 
 // ══ 频域显示辅助：radix-2 FFT 幅值谱（Hann 窗）══
@@ -179,6 +220,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_nCards(4)
     , m_netController(nullptr)
     , m_statsTimer(new QTimer(this))
+    , m_diagnosticStatusTimer(new QTimer(this))
     , m_displayTimer(new QTimer(this))
     , m_ringTimeoutTimer(new QTimer(this))
     , m_isListening(false)
@@ -264,6 +306,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->edtTriggersPerFile->setAccessibleName("每文件触发数");
     ui->edtFileSuffix->setAccessibleName("文件后缀");
     ui->chkAutoSave->setAccessibleName("自动保存");
+    ui->btnExportDiagnostic->setAccessibleName("导出诊断日志");
 
     m_lblStats[0] = ui->lblStats1;
     m_lblStats[1] = ui->lblStats2;
@@ -503,6 +546,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(m_statsTimer, &QTimer::timeout, this, &MainWindow::onUpdateStatistics);
     m_statsTimer->start(2000);
+    m_diagnosticStatusTimer->setInterval(1000);
+    connect(m_diagnosticStatusTimer, &QTimer::timeout,
+            this, &MainWindow::onDiagnosticStatusTick);
+    m_diagnosticStatusTimer->start();
 
     // 超时重置到点检测：空闲超过超时值立即保存当前窗口 PNG（不等新触发）
     m_ringTimeoutTimer->setInterval(250);
@@ -1493,8 +1540,11 @@ void MainWindow::syncVisiblePlotsGeometry()
 void MainWindow::createConnections()
 {
     connect(ui->btnStartListen,  &QPushButton::clicked, this, &MainWindow::onStartListenClicked);
-    connect(ui->btnConfig,       &QPushButton::clicked, this, &MainWindow::onConfigParamsClicked);
+    connect(ui->btnConfig,       &QPushButton::clicked, this,
+            [this]() { onConfigParamsClicked(false); });
     connect(ui->btnStartMeasure, &QPushButton::clicked, this, &MainWindow::onStartMeasureClicked);
+    connect(ui->btnExportDiagnostic, &QPushButton::clicked,
+            this, &MainWindow::onExportDiagnosticClicked);
     connect(ui->btnSelectDir,    &QPushButton::clicked, this, &MainWindow::onSelectDirClicked);
     connect(ui->btnToggleSave,   &QPushButton::clicked, this, &MainWindow::onToggleSaveClicked);
     connect(ui->chkAutoSave,     &QCheckBox::toggled,   this, &MainWindow::onAutoSaveToggled);
@@ -1525,6 +1575,83 @@ void MainWindow::createConnections()
     connect(m_groupTabBar, &QTabBar::currentChanged, this, &MainWindow::onGroupTabChanged);
 }
 
+void MainWindow::onExportDiagnosticClicked()
+{
+    auto *recorder = DiagnosticRecorder::instance();
+    if (!recorder) {
+        QMessageBox::warning(this, QStringLiteral("导出诊断日志"),
+                             QStringLiteral("诊断日志服务尚未初始化。"));
+        return;
+    }
+
+    DiagnosticExportDialog dialog(recorder->runId(), recorder->runDirectory(), this);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const DiagnosticExportDialog::Selection selected = dialog.selection();
+    QString targetPath = uniqueDiagnosticZipPath(selected.targetPath);
+    if (targetPath.isEmpty()) {
+        QMessageBox::warning(this, QStringLiteral("导出诊断日志"),
+                             QStringLiteral("请选择有效的 ZIP 保存位置。"));
+        return;
+    }
+
+    recordDiagnosticAction(QStringLiteral("diagnostic_export"),
+                           {{QStringLiteral("targetPath"), targetPath},
+                            {QStringLiteral("historical"), !selected.currentRun}});
+
+    DiagnosticRecorder::ExportRequest request;
+    if (selected.currentRun) {
+        // Capture immediately after the save click.  The immutable request
+        // carries the cutoff; the exporter performs any live flush later.
+        request = recorder->captureExportRequest(recorder->captureBoundary(), selected.note);
+    } else {
+        request = diagnosticRequestForHistoricalRun(selected.historical, selected.note);
+    }
+
+    statusBar()->showMessage(QStringLiteral("正在后台导出诊断日志…"), 3000);
+    const QPointer<MainWindow> guard(this);
+    auto *watcher = new QFutureWatcher<DiagnosticRecorder::ExportResult>();
+    connect(watcher,
+            &QFutureWatcher<DiagnosticRecorder::ExportResult>::finished,
+            [watcher, guard]() {
+                const DiagnosticRecorder::ExportResult result = watcher->result();
+                watcher->deleteLater();
+                if (!guard) return;
+
+                if (!result.success) {
+                    QMessageBox::warning(guard,
+                                         QStringLiteral("导出诊断日志失败"),
+                                         result.error.isEmpty()
+                                             ? QStringLiteral("未知导出错误")
+                                             : result.error);
+                    return;
+                }
+
+                QString details = QStringLiteral("诊断日志已导出：\n%1")
+                                      .arg(result.targetPath);
+                if (!result.truncationReasons.isEmpty()) {
+                    details += QStringLiteral("\n\n提示：导出包含以下记录完整性说明：\n• ")
+                               + result.truncationReasons.join(QStringLiteral("\n• "));
+                }
+                QMessageBox box(QMessageBox::Information,
+                                QStringLiteral("导出诊断日志"), details,
+                                QMessageBox::NoButton, guard);
+                QPushButton *openButton = box.addButton(QStringLiteral("打开目录"),
+                                                        QMessageBox::AcceptRole);
+                box.addButton(QStringLiteral("关闭"), QMessageBox::RejectRole);
+                box.exec();
+                if (box.clickedButton() == openButton)
+                    QDesktopServices::openUrl(
+                        QUrl::fromLocalFile(QFileInfo(result.targetPath).absolutePath()));
+                guard->statusBar()->showMessage(
+                    QStringLiteral("诊断日志导出完成：%1").arg(result.targetPath), 8000);
+            });
+    watcher->setFuture(QtConcurrent::run(
+        [request, targetPath]() mutable {
+            return DiagnosticRecorder::exportRequest(request, targetPath);
+        }));
+}
+
 // =====================================================================
 // 开始 / 停止监听
 // =====================================================================
@@ -1533,6 +1660,12 @@ void MainWindow::onStartListenClicked()
     if (!m_isListening) {
         // 扫描进行中，忽略重复点击
         if (m_scanning) return;
+        m_diagnosticListenId = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        recordDiagnosticAction(QStringLiteral("listen_button"),
+                               {{QStringLiteral("phase"), QStringLiteral("start")},
+                                {QStringLiteral("scanBaseIP"), m_scanBaseIP},
+                                {QStringLiteral("scanIPCount"), m_scanIPCount}});
+        recordAcquisitionSnapshot({}, QStringLiteral("listen_button"));
         logMessage("开始网络监听...");
 
         // ══ 固定目标 IP（--target-ips）：跳过网段扫描直接监听 ══
@@ -1554,34 +1687,41 @@ void MainWindow::onStartListenClicked()
         const QString scanBase = m_scanBaseIP;
         const int    scanCount = m_scanIPCount;
 
-        // 后台扫描线程：只做 ARP 探测，不触碰 UI；完成后切回主线程继续启动监听
-        std::thread([this, scanBase, scanCount]() {
-            QVector<QString> onlineIPs =
-                NetworkController::scanReachableIPs(scanBase, scanCount);
-            // 真实网段无结果时兜底识别本机虚拟采集卡：
-            // PALiveImagingSimSender 虚拟卡在线时会应答配置命令探针，
-            // 按应答源 IP（127.0.0.1~127.0.0.4）确定监听目标。
-            if (onlineIPs.isEmpty()) {
-                onlineIPs = NetworkController::scanVirtualCards();
-            }
-            QMetaObject::invokeMethod(this, [this, onlineIPs]() {
-                m_scanning = false;
-                if (onlineIPs.isEmpty()) {
-                    logMessage("❌ 未扫描到任何在线采集卡，请检查网线/交换机/采集卡上电状态");
-                    setBtnText(ui->btnStartListen, "开始监听");
-                    ui->btnStartListen->setProperty("state", QVariant());
-                    ui->btnStartListen->style()->unpolish(ui->btnStartListen);
-                    ui->btnStartListen->style()->polish(ui->btnStartListen);
-                    ui->btnStartListen->setEnabled(true);
-                    return;
-                }
-                logMessage(QString("✅ 扫描到 %1 张在线采集卡：%2 ~ %3")
-                           .arg(onlineIPs.size()).arg(onlineIPs.first()).arg(onlineIPs.last()));
-                startListeningWithIPs(onlineIPs);
-            }, Qt::QueuedConnection);
-        }).detach();
+        // 后台扫描只接收值参数；完成后由 QFutureWatcher 安全回到 UI。
+        // QPointer 使窗口在扫描完成前关闭时直接丢弃回调，避免访问悬空 this。
+        const QString listenId = m_diagnosticListenId;
+        const QPointer<MainWindow> guard(this);
+        auto *watcher = new QFutureWatcher<QVector<QString>>(this);
+        connect(watcher,
+                &QFutureWatcher<QVector<QString>>::finished,
+                this,
+                [guard, watcher]() {
+                    const QVector<QString> onlineIPs = watcher->result();
+                    watcher->deleteLater();
+                    if (!guard) return;
+                    MainWindow *window = guard.data();
+                    window->m_scanning = false;
+                    if (onlineIPs.isEmpty()) {
+                        window->logMessage("❌ 未扫描到任何在线采集卡，请检查网线/交换机/采集卡上电状态");
+                        setBtnText(window->ui->btnStartListen, "开始监听");
+                        window->ui->btnStartListen->setProperty("state", QVariant());
+                        window->ui->btnStartListen->style()->unpolish(window->ui->btnStartListen);
+                        window->ui->btnStartListen->style()->polish(window->ui->btnStartListen);
+                        window->ui->btnStartListen->setEnabled(true);
+                        return;
+                    }
+                    window->logMessage(QString("✅ 扫描到 %1 张在线采集卡：%2 ~ %3")
+                                       .arg(onlineIPs.size()).arg(onlineIPs.first()).arg(onlineIPs.last()));
+                    window->startListeningWithIPs(onlineIPs);
+                });
+        watcher->setFuture(QtConcurrent::run(
+            [scanBase, scanCount, listenId]() {
+                return NetworkController::scanReachableIPs(scanBase, scanCount, listenId);
+            }));
 
     } else {
+        recordDiagnosticAction(QStringLiteral("listen_button"),
+                               {{QStringLiteral("phase"), QStringLiteral("stop")}});
         logMessage("正在停止网络监听...");
         ui->btnStartListen->setEnabled(false);
         setBtnText(ui->btnStartListen, "正在停止...");
@@ -1658,6 +1798,16 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
     // 新监听会话：重置各卡触发去重序号，避免把首触发当作旧数据跳过
     for (int i = 0; i < MAX_CARDS; ++i) m_lastFeedSeq[i] = 0xFFFF;
 
+    const QString targetSource = g_targetIPs.isEmpty()
+        ? QStringLiteral("网段扫描")
+        : QStringLiteral("显式 --target-ips");
+    logMessage(QString("监听启动目标来源：%1；物理采集卡数=%2（每卡 2 个通道）")
+               .arg(targetSource).arg(onlineIPs.size()));
+    for (int i = 0; i < onlineIPs.size(); ++i) {
+        logMessage(QString("监听目标映射：物理卡%1 -> %2（通道 A/B）")
+                   .arg(i + 1).arg(onlineIPs.at(i)));
+    }
+
     if (onlineIPs.size() != m_nCards) {
         // 自动识别卡数并重建动态 UI（监听前，符合"监听期间禁止调用"约束）
         m_nCards = static_cast<int>(onlineIPs.size());
@@ -1667,6 +1817,11 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
     saveSettings();  // 持久化自动识别的卡数
 
     m_netController = new NetworkController(this);
+    m_netController->setDiagnosticContext(
+        m_diagnosticListenId,
+        g_targetIPs.isEmpty() ? QStringLiteral("网段扫描")
+                              : QStringLiteral("显式 --target-ips"));
+    recordAcquisitionSnapshot(onlineIPs, QStringLiteral("listen_starting"));
     // 环形实时馈送回调：DataProcessor 每触发直连入队（须在 start() 之前设置）
     m_netController->setRingFeedSink(
         [this](int cardId, uint16_t triggerSeq,
@@ -1757,6 +1912,12 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
     ui->btnToggleSave->setEnabled(true);
     logMessage(QString("网络监听已启动，共 %1 张卡，端口 %2~%3")
                .arg(m_nCards).arg(BASE_PORT).arg(BASE_PORT + m_nCards - 1));
+    QJsonArray startedTargets;
+    for (const QString &ip : onlineIPs) startedTargets.append(ip);
+    recordDiagnosticAction(QStringLiteral("listen_started"),
+                           {{QStringLiteral("cardCount"), m_nCards},
+                            {QStringLiteral("targetIPs"), startedTargets}});
+    recordAcquisitionSnapshot(onlineIPs, QStringLiteral("listen_started"));
 
     // 保存状态恢复（方案B）：自动保存勾选优先——在新控制器上重建自动保存
     // （会话代/目录注册表随旧控制器销毁，需重新初始化，避免保存器停摆丢数据）；
@@ -1781,15 +1942,22 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs)
 // =====================================================================
 // 配置参数
 // =====================================================================
-void MainWindow::onConfigParamsClicked()
+void MainWindow::onConfigParamsClicked(bool fromStartMeasure)
 {
     int dataTime = ui->edtDataTime->text().toInt();
     int aDelay   = ui->edtADelay->text().toInt();
     int bDelay   = ui->edtBDelay->text().toInt();
+    const QString trigger = fromStartMeasure
+        ? QStringLiteral("start_measure") : QStringLiteral("config_button");
+    recordDiagnosticAction(trigger,
+                           {{QStringLiteral("dataTimeNs"), dataTime},
+                            {QStringLiteral("delayA"), aDelay},
+                            {QStringLiteral("delayB"), bDelay}});
+    recordAcquisitionSnapshot({}, trigger);
     saveSettings();
     logMessage(QString("发送配置: 采集=%1ns, A延时=%2ns, B延时=%3ns").arg(dataTime).arg(aDelay).arg(bDelay));
     if (m_netController) {
-        if (m_netController->sendConfigCommand(dataTime, aDelay, bDelay)) {
+        if (m_netController->sendConfigCommand(dataTime, aDelay, bDelay, trigger)) {
             // 同步更新 DataProcessor 的采集参数（包数、采样点数等）
             AcqConfig cfg = m_netController->config();
             cfg.acqTimeNs = dataTime;
@@ -1811,9 +1979,11 @@ void MainWindow::onConfigParamsClicked()
 void MainWindow::onStartMeasureClicked()
 {
     if (!m_isMeasuring) {
+        recordDiagnosticAction(QStringLiteral("measure_button"),
+                               {{QStringLiteral("phase"), QStringLiteral("start")}});
         // 功能整合：开始测量前先下发配置参数，再发送开始测量命令
         logMessage("开始测量：先下发配置参数");
-        onConfigParamsClicked();
+        onConfigParamsClicked(true);
         if (m_netController) {
             if (m_netController->sendStartMeasure()) {
                 logMessage("开始测量命令发送成功");
@@ -1830,6 +2000,8 @@ void MainWindow::onStartMeasureClicked()
         m_highDataRateWarningShown = false;
         logMessage("开始测量");
     } else {
+        recordDiagnosticAction(QStringLiteral("measure_button"),
+                               {{QStringLiteral("phase"), QStringLiteral("stop")}});
         if (m_netController) {
             if (m_netController->sendStopMeasure()) {
                 logMessage("停止测量命令发送成功");
@@ -2441,6 +2613,17 @@ void MainWindow::updateSpectrumPlot(int cardId, int channel,
 // =====================================================================
 // 统计更新（1Hz/2Hz）
 // =====================================================================
+QString MainWindow::formatCardStatusText(int cardNumber,
+                                         const CardStats::Snapshot& stats)
+{
+    return CardStatusFormatting::text(cardNumber, stats);
+}
+
+QString MainWindow::formatCardStatusTooltip(const CardStats::Snapshot& stats)
+{
+    return CardStatusFormatting::tooltip(stats);
+}
+
 void MainWindow::onUpdateStatistics()
 {
     // 告警冷却递减（每 2s timer tick 减 1）
@@ -2473,6 +2656,7 @@ void MainWindow::onUpdateStatistics()
                 m_lblStats[i]->setText(QString("卡%1: 等待连接...").arg(virtualCardNum));
             else
                 m_lblStats[i]->setText(QString("--"));
+            m_lblStats[i]->setToolTip(QString());
         }
         return;
     }
@@ -2486,6 +2670,7 @@ void MainWindow::onUpdateStatistics()
 
         if (i >= cardsInGroup) {
             m_lblStats[i]->setText(QString("--"));
+            m_lblStats[i]->setToolTip(QString());
             continue;
         }
 
@@ -2494,26 +2679,10 @@ void MainWindow::onUpdateStatistics()
             const auto &s = statsOpt.value();
             if (s.recvMbps > HIGH_RATE_THRESHOLD) anyExceeds = true;
 
-            // 状态栏：两行显示，避免长文本把布局撑宽或互相重叠；
-            // 第一行：卡号/触发/丢失/速率，第二行：处队/存队
-            QString statusText = QString("卡%1 | 触发: %2 | 丢失: %3 | 速率: %4 Mb/s\n处队: %5 | 存队: %6")
-                .arg(virtualCardNum)
-                .arg(s.triggersComplete)
-                .arg(s.triggersPartial)
-                .arg(s.recvMbps, 0, 'f', 2)
-                .arg(s.inputQueueDepth)
-                .arg(s.saveQueueDepth);
-            if (s.packetsDropped > 0)
-                statusText += QString(" | 丢弃: %1").arg(s.packetsDropped);
-            // 存储队列满丢弃（磁盘跟不上）
-            if (s.saveQueueDiscards > 0)
-                statusText += QString(" | 存丢: %1").arg(s.saveQueueDiscards);
-            // 其他原因跳帧（内存不足、序列号复位恢复期）
-            const uint64_t otherDiscards = (s.triggersDiscarded > s.saveQueueDiscards)
-                ? s.triggersDiscarded - s.saveQueueDiscards : 0;
-            if (otherDiscards > 0)
-                statusText += QString(" | 跳帧: %1").arg(otherDiscards);
-            m_lblStats[i]->setText(statusText);
+            // 常驻栏只显示“丢失”；详细采集统计集中放入 tooltip，避免
+            // 状态栏文本随计数增长而撑宽布局或掩盖关键信息。
+            m_lblStats[i]->setText(formatCardStatusText(virtualCardNum, s));
+            m_lblStats[i]->setToolTip(formatCardStatusTooltip(s));
 
             // 存储队列满 → 非阻塞告警（冷却期内不重复）
             uint64_t newDisc = s.saveQueueDiscards;
@@ -2531,6 +2700,7 @@ void MainWindow::onUpdateStatistics()
             }
         } else {
             m_lblStats[i]->setText(QString("卡%1: 等待连接...").arg(virtualCardNum));
+            m_lblStats[i]->setToolTip(QString());
         }
     }
 
@@ -2554,6 +2724,136 @@ void MainWindow::logMessage(const QString &message)
     cursor.movePosition(QTextCursor::End);
     ui->txtLog->setTextCursor(cursor);
     ui->txtLog->ensureCursorVisible();
+
+    if (auto *recorder = DiagnosticRecorder::instance()) {
+        QJsonObject fields{{QStringLiteral("source"), QStringLiteral("ui")}};
+        if (!m_diagnosticListenId.isEmpty())
+            fields.insert(QStringLiteral("listenId"), m_diagnosticListenId);
+        recorder->logText(message, DiagnosticRecorder::Severity::Info, fields);
+    }
+}
+
+void MainWindow::recordDiagnosticAction(const QString &action,
+                                        const QJsonObject &fields)
+{
+    auto *recorder = DiagnosticRecorder::instance();
+    if (!recorder) return;
+    QJsonObject actionFields = fields;
+    actionFields.insert(QStringLiteral("source"), QStringLiteral("ui"));
+    if (!m_diagnosticListenId.isEmpty())
+        actionFields.insert(QStringLiteral("listenId"), m_diagnosticListenId);
+    recorder->recordEvent(QStringLiteral("ui.action"), action,
+                          DiagnosticRecorder::Severity::Info, actionFields);
+}
+
+QJsonObject MainWindow::diagnosticAcquisitionSnapshot(
+    const QVector<QString> &targetIPs, const QString &phase) const
+{
+    QVector<QString> effectiveTargets = targetIPs;
+    if (effectiveTargets.isEmpty() && m_netController) {
+        const AcqConfig &config = m_netController->config();
+        for (const std::string &ip : config.targetIPs)
+            effectiveTargets.append(QString::fromStdString(ip));
+    }
+
+    QJsonArray targetArray;
+    for (const QString &ip : effectiveTargets) targetArray.append(ip);
+    return {
+        {QStringLiteral("kind"), QStringLiteral("acquisition")},
+        {QStringLiteral("phase"), phase},
+        {QStringLiteral("source"), QStringLiteral("ui")},
+        {QStringLiteral("listenId"), m_diagnosticListenId},
+        {QStringLiteral("nCards"), effectiveTargets.isEmpty() ? m_nCards : effectiveTargets.size()},
+        {QStringLiteral("targetIPs"), targetArray},
+        {QStringLiteral("localBindIP"), m_localBindIP},
+        {QStringLiteral("scanBaseIP"), m_scanBaseIP},
+        {QStringLiteral("scanIPCount"), m_scanIPCount},
+        {QStringLiteral("dataTimeNs"), ui->edtDataTime->text().toInt()},
+        {QStringLiteral("delayA"), ui->edtADelay->text().toInt()},
+        {QStringLiteral("delayB"), ui->edtBDelay->text().toInt()},
+        {QStringLiteral("displayPoints"), ui->spnDownsampleRatio->value()},
+        {QStringLiteral("bitsPerChannel"), m_bitsPerChannel},
+        {QStringLiteral("sampleIntervalNs"), m_sampleIntervalNs},
+        {QStringLiteral("sampleRateHz"), static_cast<double>(FPGA_ADC_FREQ_HZ)},
+        {QStringLiteral("sampleRateSource"), QStringLiteral("FPGA_ADC_FREQ_HZ (250MHz)")}
+    };
+}
+
+void MainWindow::recordAcquisitionSnapshot(const QVector<QString> &targetIPs,
+                                           const QString &phase)
+{
+    if (auto *recorder = DiagnosticRecorder::instance()) {
+        const QJsonObject snapshot = diagnosticAcquisitionSnapshot(targetIPs, phase);
+        recorder->recordSettingsSnapshot(snapshot);
+        if (phase.startsWith(QStringLiteral("listen")))
+            recorder->recordNetworkSnapshot(snapshot);
+    }
+}
+
+void MainWindow::onDiagnosticStatusTick()
+{
+    auto *recorder = DiagnosticRecorder::instance();
+    if (!recorder) return;
+
+    const DiagnosticRecorder::Status status = recorder->status();
+    const auto &drops = status.drops;
+    const bool hasIssue = status.writeError
+        || drops.queueDropped > 0
+        || drops.criticalQueueDropped > 0
+        || drops.noiseDropped > 0
+        || drops.writeFallbackDropped > 0;
+    const bool previousIssue = m_diagnosticLastWriteError
+        || m_diagnosticLastQueueDropped > 0
+        || m_diagnosticLastCriticalQueueDropped > 0
+        || m_diagnosticLastNoiseDropped > 0
+        || m_diagnosticLastFallbackDropped > 0;
+    const bool changed = !m_diagnosticStatusInitialized
+        || status.writeError != m_diagnosticLastWriteError
+        || status.writeErrorText != m_diagnosticLastWriteErrorText
+        || drops.queueDropped != m_diagnosticLastQueueDropped
+        || drops.criticalQueueDropped != m_diagnosticLastCriticalQueueDropped
+        || drops.noiseDropped != m_diagnosticLastNoiseDropped
+        || drops.writeFallbackDropped != m_diagnosticLastFallbackDropped;
+
+    m_diagnosticStatusInitialized = true;
+    m_diagnosticLastWriteError = status.writeError;
+    m_diagnosticLastWriteErrorText = status.writeErrorText;
+    m_diagnosticLastQueueDropped = drops.queueDropped;
+    m_diagnosticLastCriticalQueueDropped = drops.criticalQueueDropped;
+    m_diagnosticLastNoiseDropped = drops.noiseDropped;
+    m_diagnosticLastFallbackDropped = drops.writeFallbackDropped;
+
+    if (!hasIssue) {
+        if (previousIssue) {
+            statusBar()->showMessage(QStringLiteral("诊断日志写入状态已恢复"), 5000);
+            if (m_diagnosticStatusNoticeCount < 5)
+                logMessage(QStringLiteral("诊断日志写入状态已恢复"));
+        }
+        m_diagnosticStatusNoticeCount = 0;
+        return;
+    }
+    if (!changed || m_diagnosticStatusNoticeCount >= 5) return;
+
+    QStringList details;
+    if (status.writeError)
+        details.append(QStringLiteral("写入失败：%1")
+                       .arg(status.writeErrorText.isEmpty()
+                                ? QStringLiteral("未知错误") : status.writeErrorText));
+    if (drops.queueDropped > 0)
+        details.append(QStringLiteral("队列丢弃=%1").arg(drops.queueDropped));
+    if (drops.criticalQueueDropped > 0)
+        details.append(QStringLiteral("高优先级队列丢弃=%1").arg(drops.criticalQueueDropped));
+    if (drops.noiseDropped > 0)
+        details.append(QStringLiteral("噪声限流丢弃=%1").arg(drops.noiseDropped));
+    if (drops.writeFallbackDropped > 0)
+        details.append(QStringLiteral("写入回退丢弃=%1").arg(drops.writeFallbackDropped));
+
+    const QString message = QStringLiteral("诊断日志状态异常：%1").arg(details.join(QStringLiteral("；")));
+    ++m_diagnosticStatusNoticeCount;
+    statusBar()->showMessage(message, 8000);
+    // Update the cached status before logging so this notice cannot recursively
+    // retrigger itself through the recorder's own queue accounting.
+    logMessage(message);
 }
 
 // =====================================================================

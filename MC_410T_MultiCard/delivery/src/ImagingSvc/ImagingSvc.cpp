@@ -12,6 +12,7 @@
 #include <QDir>
 #include <cmath>
 #include <cstring>
+#include <chrono>
 
 // ZMQ IPC 端点（与主进程 ImagingController 约定一致）
 static const char *ZMQ_IPC_ENDPOINT = "tcp://127.0.0.1:5555";
@@ -121,11 +122,16 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
     if (cmd == "configure") {
         processConfigure(msg["params"].toObject());
     } else if (cmd == "ring_block_ready") {
-        processRingPulse();
+        const ring_shm_obs::ReadyMetadata ready = ring_shm_obs::parseReadyMessage(msg);
+        m_ringObs.observeNotification(ready.seq, ready.submitIndex);
+        processRingPulse(ready.seq, ready.submitIndex, ready.submitWallUs, ready.hasSeq);
     } else if (cmd == "ring_reset") {
         // 停机超时判定新一圈：清空重建累积（与圈末重置同一函数）
+        sendRingObservation("epoch_reset", m_ringObs.snapshot());
+        m_ringObs.resetEpoch();
         resetRingRecon();
     } else if (cmd == "start") {
+        m_ringObs.beginSession();
         m_running = true;
         m_pulseCount = 0;
         m_ringBlockIndex = 0;
@@ -135,6 +141,7 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
             m_ringPrevRadius[c] = 0.0f;
         }
     } else if (cmd == "stop") {
+        sendRingObservation("final", m_ringObs.snapshot());
         m_running = false;
     } else if (cmd == "pulse_ready") {
         processPulse();
@@ -538,14 +545,19 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
              << "frameSize=" << m_ringFrameSize << "nx=" << nx;
 }
 
-void ImagingSvc::processRingPulse()
+void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
+                                  uint64_t submitWallUs, bool notifySeqValid)
 {
+    const uint64_t processStartUs = ring_shm_obs::steadyNowUs();
     if (!m_running || !m_ringCuda[0] || !m_ringCuda[1] || !m_ringSharedMemory) return;
 
+    const uint64_t copyStartUs = ring_shm_obs::steadyNowUs();
     m_ringSharedMemory->lock();
     auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
     const int blockSize = m_ringBlockSize;
     const int alines    = m_ringAlineCount;
+    const uint8_t readyBeforeCopy = h->block_ready;
+    const uint32_t shmSeq = h->block_seq;
     QVector<float> raw(blockSize);
     QVector<float> ang(alines);
     QVector<quint8> ch(alines);
@@ -559,6 +571,23 @@ void ImagingSvc::processRingPulse()
                 static_cast<size_t>(alines));
     h->block_ready = 0;
     m_ringSharedMemory->unlock();
+
+    const uint64_t copyLockUs = ring_shm_obs::steadyNowUs() - copyStartUs;
+    const auto observation = m_ringObs.observeConsumed(
+        notifySeq, notifySeqValid, shmSeq, readyBeforeCopy, submitWallUs,
+        ring_shm_obs::wallNowUs(), copyLockUs);
+    if (observation.hasAnomaly()) {
+        QJsonObject extra;
+        extra[QStringLiteral("notify_seq")] = static_cast<qint64>(notifySeq);
+        extra[QStringLiteral("shm_seq")] = static_cast<qint64>(shmSeq);
+        extra[QStringLiteral("ready_before_copy")] = static_cast<int>(readyBeforeCopy);
+        extra[QStringLiteral("submit_index")] = static_cast<qint64>(submitIndex);
+        extra[QStringLiteral("notify_shm_mismatch")] = observation.notifyShmMismatch;
+        extra[QStringLiteral("ready_zero_before_copy")] = observation.readyZeroBeforeCopy;
+        extra[QStringLiteral("duplicate_shm_seq")] = observation.duplicateShmSeq;
+        extra[QStringLiteral("shm_seq_gap")] = observation.shmSeqGap;
+        sendRingObservation("anomaly", m_ringObs.snapshot(), extra);
+    }
 
     const int sampDepth = m_ringConfig.sampDepth;
     const int perCh = m_ringConfig.alinesPerChannelPerBlock;   // 每通道块内触发数
@@ -695,9 +724,34 @@ void ImagingSvc::processRingPulse()
 
     sendRingSnapshotToHost();     // 新链路：方案A 显示快照
 
+    m_ringObs.recordProcessDuration(ring_shm_obs::steadyNowUs() - processStartUs);
+    if (observation.periodicDue)
+        sendRingObservation("periodic", m_ringObs.snapshot());
+
     // 整圈完成：清零累积器，避免跨圈污染（PNG 保存由接收端窗口在圈末触发点执行）
     if (m_ringBlocksPerFrame > 0 && m_ringBlockIndex % m_ringBlocksPerFrame == 0) {
         resetRingRecon();
+    }
+}
+
+void ImagingSvc::sendRingObservation(const char *kind,
+                                     const ring_shm_obs::Snapshot &snapshot,
+                                     const QJsonObject &extra)
+{
+    QJsonObject msg = ring_shm_obs::snapshotToJson(snapshot);
+    msg[QStringLiteral("cmd")] = QStringLiteral("ring_shm_observation");
+    msg[QStringLiteral("kind")] = QString::fromLatin1(kind);
+    msg[QStringLiteral("component")] = QStringLiteral("consumer");
+    for (auto it = extra.constBegin(); it != extra.constEnd(); ++it)
+        msg[it.key()] = it.value();
+
+    const QByteArray data = QJsonDocument(msg).toJson(QJsonDocument::Compact);
+    qInfo().noquote() << "[RingSHMObs]" << QString::fromUtf8(data);
+    zmq::message_t zmsg(static_cast<size_t>(data.size()));
+    std::memcpy(zmsg.data(), data.constData(), static_cast<size_t>(data.size()));
+    try {
+        if (m_zmqSocket) m_zmqSocket->send(zmsg, zmq::send_flags::dontwait);
+    } catch (...) {
     }
 }
 

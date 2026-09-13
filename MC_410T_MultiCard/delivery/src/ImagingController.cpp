@@ -20,6 +20,16 @@
 // ZMQ IPC 端点（与 ImagingSvc 子进程约定一致）
 static const char *ZMQ_IPC_ENDPOINT = "tcp://127.0.0.1:5555";
 
+static QJsonObject makeRingObservation(const char *kind,
+                                       const ring_shm_obs::Snapshot &snapshot)
+{
+    QJsonObject json = ring_shm_obs::snapshotToJson(snapshot);
+    json[QStringLiteral("cmd")] = QStringLiteral("ring_shm_observation");
+    json[QStringLiteral("kind")] = QString::fromLatin1(kind);
+    json[QStringLiteral("component")] = QStringLiteral("producer");
+    return json;
+}
+
 // =====================================================================
 // 构造 / 析构
 // =====================================================================
@@ -88,6 +98,7 @@ bool ImagingController::startSvc()
                            .arg(blockSize).arg(frameSize), 0);
         if (!setupRingSharedMemory(blockSize, frameSize, alines, nx))
             return false;
+        m_ringObs.beginSession();
     } else {
         emit svcStatus(QString("[诊断] startSvc: pulseSize=%1 frameSize=%2 nx=%3 ny=%4 depth=%5")
                        .arg(pulseSize).arg(frameSize)
@@ -220,6 +231,12 @@ void ImagingController::finishStopSvc()
     m_running.store(false, std::memory_order_relaxed);
     stopRingWorker();
 
+    if (m_ringMode && m_zmqSocket) {
+        const QJsonDocument doc(makeRingObservation("final", m_ringObs.snapshot()));
+        emit svcStatus(QStringLiteral("[RingSHMObs] ")
+                           + QString::fromUtf8(doc.toJson(QJsonDocument::Compact)), 0);
+    }
+
     delete m_zmqSocket;  m_zmqSocket = nullptr;
     delete m_zmqCtx;     m_zmqCtx    = nullptr;
 
@@ -315,8 +332,13 @@ bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
         return false;
     }
 
+    const uint64_t submitWallUs = ring_shm_obs::wallNowUs();
+    uint8_t previousReady = 0;
+    uint32_t previousSeq = 0;
     m_ringSharedMemory->lock();
     auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
+    previousReady = h->block_ready;
+    previousSeq = h->block_seq;
     auto *blockBuf = reinterpret_cast<float *>(h + 1);
     std::memcpy(blockBuf, rawBlock.constData(),
                 static_cast<size_t>(m_ringBlockSize) * sizeof(float));
@@ -329,12 +351,32 @@ bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
     h->block_ready = 1;
     m_ringSharedMemory->unlock();
 
-    sendCommand({{"cmd", "ring_block_ready"}, {"seq", blockSeq}});
+    const auto event = m_ringObs.observeProducerSubmit(
+        previousReady, previousSeq, static_cast<uint32_t>(blockSeq), submitWallUs);
+    QJsonObject ready;
+    ready[QStringLiteral("cmd")] = QStringLiteral("ring_block_ready");
+    ready[QStringLiteral("seq")] = blockSeq;
+    ready[QStringLiteral("submit_index")] = static_cast<qint64>(event.submitIndex);
+    ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(event.submitWallUs);
+    sendCommand(ready);
+
+    if (event.slotBusy || event.periodicDue) {
+        QJsonObject diag = makeRingObservation(event.slotBusy ? "producer_overwrite" : "periodic",
+                                               m_ringObs.snapshot());
+        diag[QStringLiteral("previous_ready")] = static_cast<int>(previousReady);
+        diag[QStringLiteral("previous_seq")] = static_cast<qint64>(previousSeq);
+        diag[QStringLiteral("new_seq")] = static_cast<qint64>(event.newSeq);
+        diag[QStringLiteral("submit_interval_us")] = static_cast<qint64>(event.submitIntervalUs);
+        const QJsonDocument doc(diag);
+        emit svcStatus(QStringLiteral("[RingSHMObs] ")
+                           + QString::fromUtf8(doc.toJson(QJsonDocument::Compact)), 0);
+    }
     return true;
 }
 
 void ImagingController::sendRingReset()
 {
+    m_ringObs.resetEpoch();
     sendCommand({{"cmd", "ring_reset"}});
 }
 
@@ -691,7 +733,10 @@ void ImagingController::processMessage(const QJsonObject &msg)
 {
     QString cmd = msg["cmd"].toString();
 
-    if (cmd == "ring_snapshot_ready") {
+    if (cmd == "ring_shm_observation") {
+        emit svcStatus(QStringLiteral("[RingSHMObs] ")
+                           + QString::fromUtf8(QJsonDocument(msg).toJson(QJsonDocument::Compact)), 0);
+    } else if (cmd == "ring_snapshot_ready") {
         processRingMessage(msg);
     } else if (cmd == "frame_ready") {
         int seq      = msg["seq"].toInt();

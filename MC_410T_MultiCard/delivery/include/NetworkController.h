@@ -6,6 +6,7 @@
 #include <QVector>
 #include <QHash>
 #include <QMutex>
+#include <QJsonObject>
 #include <vector>
 #include <deque>
 #include <memory>
@@ -19,6 +20,7 @@
 #include "FileSaver.h"
 #include "FramePublisher.h"
 #include "DisplayBuffer.h"
+#include "DiagnosticRecorder.h"
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -64,12 +66,13 @@ public:
     //  专用网段假设：在线 IP 即采集卡（上位机/交换机避开扫描范围），
     //  用于自动识别采集卡数量与目标 IP。扫描范围由注册表
     //  NetworkParams/ScanBaseIP、ScanIPCount 控制（默认 .2 起 32 个）。
-    static QVector<QString> scanReachableIPs(const QString& baseIP, int count);
+    static QVector<QString> scanReachableIPs(const QString& baseIP,
+                                             int count,
+                                             const QString& listenId = QString());
 
-    //  虚拟采集卡探测：向本机 127.0.0.1~127.0.0.4 控制口发送 58 字节
-    //  配置命令探针，若模拟器（PALiveImagingSimSender 虚拟卡）在线，会从
-    //  各虚拟卡源 IP 回发 60 字节反馈；返回识别到的虚拟卡 IP 列表。
-    static QVector<QString> scanVirtualCards();
+    // 设置本次监听的诊断关联信息。该上下文只在控制器线程使用，
+    // 反馈接收线程通过不可变的 receiveSequence 与控制器线程关联。
+    void setDiagnosticContext(const QString& listenId, const QString& source);
 
     // 检查所有子线程是否已全部退出（供 closeEvent 异步轮询）
     bool allThreadsStopped() const {
@@ -98,7 +101,10 @@ public:
 
     //  UDP 控制命令（向采集卡发送，协议与 MC_410T_Qt 完全一致）
     //  增强版：自动等待卡片就绪 + 重试机制
-    bool sendConfigCommand(int dataTime, int aDelay, int bDelay);
+    bool sendConfigCommand(int dataTime,
+                           int aDelay,
+                           int bDelay,
+                           QString trigger = QStringLiteral("api"));
     bool sendStartMeasure();
     bool sendStopMeasure();
     // 测量门控：true=开始测量（处理并显示数据），false=停止测量（丢弃数据）
@@ -118,6 +124,9 @@ public:
     // per-card 统计快照（主线程安全，~1Hz 调用）
     std::optional<CardStats::Snapshot> getCardStats(int cardIdx) const;
     std::vector<CardStats::Snapshot>   getAllCardStats() const;
+
+    // 运行统计的稳定 machine-readable 字段，供诊断快照和单元测试共用。
+    static QJsonObject runtimeStatsFields(const CardStats::Snapshot& stats);
 
     // DisplayBuffer 访问（MainWindow pull 模式）
     DisplayBuffer* displayBuffer(int cardIdx) const;
@@ -141,11 +150,29 @@ private slots:
     void onStatsTimer();
 
 private:
+    friend class NetworkDiagnosticTestAccess;
+
     // UDP 控制命令底层实现
     bool initControlSocket();
     void cleanupControlSocket();
-    bool sendRawCommand(const QByteArray& cmd, const QString& targetIP);
+    bool sendRawCommand(const QByteArray& cmd,
+                        const QString& targetIP,
+                        const QString& reason = QStringLiteral("first"));
+    bool sendRawToAll(const QByteArray& cmd,
+                      const QString& reason,
+                      int* outSuccess,
+                      int* outFail);
     QByteArray buildConfigPacket(int dataTime, int aDelay, int bDelay);
+
+    void scheduleNetworkSnapshot(const QString& reason,
+                                 const QString& phase = QString(),
+                                 const QString& configId = QString());
+    void recordCardSnapshots(const QString& stateOverride = QString());
+    QString cardDiagnosticState(int cardIdx) const;
+    void recordDiagnosticEvent(const QString& category,
+                               const QString& message,
+                               DiagnosticRecorder::Severity severity,
+                               const QJsonObject& fields = QJsonObject()) const;
 
     // ══ 卡片就绪检测（被动监听 + 主动探测）═══════════════════════════
     bool initFeedbackListener();       // 在端口 8000 创建 UDP 监听 socket
@@ -172,6 +199,8 @@ private:
         int  dataTime = 0;
         int  aDelay   = 0;
         int  bDelay   = 0;
+        QString configId;
+        QString trigger = QStringLiteral("api");
     };
     std::deque<PendingCmd> m_cmdQueue; // 待执行命令队列（按序：配置 → 测量，避免测量覆盖配置）
     QTimer*      m_retryTimer = nullptr; // 重试定时器（500ms）
@@ -180,11 +209,18 @@ private:
     // 只有配置参数指令有 60 字节反馈；18 字节包不算配置成功，需重发。
     // 反馈按单卡独立上报，重发仅针对未确认的卡。
     enum class ConfigPhase { Idle, WaitingAck, Confirmed, Failed };
-    struct PendingConfig { int dataTime = 0; int aDelay = 0; int bDelay = 0; };
+    struct PendingConfig {
+        int dataTime = 0;
+        int aDelay = 0;
+        int bDelay = 0;
+        QString configId;
+        QString trigger = QStringLiteral("api");
+    };
     void beginConfigWait(const PendingConfig& pc);  // 全部就绪后：逐卡下发并启动确认
-    bool doSendConfigTo(int cardIdx);               // 仅向指定卡发送配置包并记录时间
-    void onConfigAck(int cardIdx);                  // 收到 60 字节反馈（主线程）
-    void onReadyPacket(int cardIdx);                // 收到 18 字节包：标记就绪 + 等待确认时重发配置
+    bool doSendConfigTo(int cardIdx,
+                        const QString& reason = QStringLiteral("first")); // 仅向指定卡发送配置包并记录时间
+    void onConfigAck(int cardIdx, quint64 receiveSequence); // 收到 60 字节反馈（主线程）
+    void onReadyPacket(int cardIdx, quint64 receiveSequence); // 收到 18 字节包：标记就绪 + 等待确认时重发配置
     void onConfigTimerTick();                       // 200ms 轮询：超时重发 / 判失败
     bool isAllConfigAcked() const;
     bool isConfigConfirmed() const { return m_configPhase == ConfigPhase::Confirmed; }
@@ -194,6 +230,25 @@ private:
     std::vector<uint64_t> m_configSentMs; // 每卡最近发送配置的时刻
     PendingConfig        m_pendingConfig; // 当前待确认的配置参数
     QTimer*              m_configTimer = nullptr; // 200ms 配置确认轮询
+
+    struct CardDiagnosticState {
+        QString discovery = QStringLiteral("unknown");
+        QString localAddress = QStringLiteral("unknown");
+        quint64 readyPacketCount = 0;
+        quint64 arpReady = 0;
+        quint64 sendCount = 0;
+        quint64 ackPacketCount = 0;
+        quint64 retryCount = 0;
+        quint64 retryResetCount = 0;
+    };
+    std::vector<CardDiagnosticState> m_cardDiagnostics;
+    QString m_diagnosticListenId;
+    QString m_diagnosticSource = QStringLiteral("unknown");
+    quint64 m_nextConfigId = 1;
+    QString m_currentConfigId;
+    QString m_currentConfigTrigger = QStringLiteral("api");
+    std::atomic<quint64> m_feedbackSequence{0};
+    std::atomic<quint64> m_feedbackTimeoutCount{0};
 
     AcqConfig m_config;
     bool      m_running = false;
@@ -233,4 +288,5 @@ private:
     std::vector<uint64_t> m_lastPktsDropped;
     std::vector<uint64_t> m_lastTrigsComplete;
     uint64_t              m_lastStatsMs = 0;
+    uint64_t              m_lastRuntimeSnapshotMs = 0;
 };
