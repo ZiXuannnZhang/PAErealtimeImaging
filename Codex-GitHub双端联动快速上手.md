@@ -10,6 +10,32 @@
 
 ChatGPT 负责方案设计、任务规格、代码审查与验收；Codex Desktop 负责具体代码修改、本地构建、测试、提交与推送。
 
+## Codex 开始任务前必须先读
+
+Codex Desktop 获取具体任务文档后、开始实现或构建前，必须先读取 `origin/main` 上的两份仓库级长期规范：
+
+```text
+REPOSITORY_BASELINE.md
+BUILD_STANDARD.md
+```
+
+推荐顺序：
+
+```powershell
+git fetch origin
+git show origin/main:REPOSITORY_BASELINE.md
+git show origin/main:BUILD_STANDARD.md
+git show origin/codex/task-docs:TASKS/<任务文件名>
+```
+
+其中：
+
+- `REPOSITORY_BASELINE.md` 管理分支、历史和交付治理；
+- `BUILD_STANDARD.md` 管理所有后续工作的默认工具链、CMake preset、构建脚本、CUDA/Qt/ZeroMQ 依赖、BuildIdentity、正式交付目录和二进制回执；
+- 具体任务文档决定本次任务的目标分支/commit、特殊测试与明确 override。
+
+`BUILD_STANDARD.md` 存放在 `main` 是为了让它成为稳定入口，**不表示 Codex 应默认在 `main` 上构建**；实际构建对象始终是当前任务指定的实现分支和精确 commit。
+
 ## 已验证的连接方式
 
 目标仓库：`ZiXuannnZhang/PAErealtimeImaging`
@@ -94,6 +120,8 @@ ChatGPT 在 `codex/task-docs` 的 `TASKS/` 目录新增任务文档。任务文�
 Set-Location "D:\ChatGPT\PAERealtimeImaging"
 git fetch origin
 
+git show origin/main:REPOSITORY_BASELINE.md
+git show origin/main:BUILD_STANDARD.md
 git show origin/codex/task-docs:TASKS/<任务文件名>
 ```
 
@@ -135,6 +163,8 @@ git diff --cached
 
 执行任务文档要求的构建、测试和回归验证，并记录实际命令和结果。
 
+构建和交付必须同时遵守 `BUILD_STANDARD.md`；如任务文档对工具链、preset、依赖或交付方式有明确 override，必须在执行报告中指出。
+
 ### 6. 提交与推送
 
 ```powershell
@@ -166,9 +196,11 @@ $LocalSha -eq $RemoteSha
 - 实际执行的测试命令
 - 测试结果
 - 回归结果
+- 正式 build-delivery 路径（如本任务产生可运行产物）
+- 构建 preset / 工具链 / 关键依赖来源
 - 已知限制或未验证项
 
-不能只报告“测试通过”。
+不能只报告“测试通过”或“build passed”。
 
 ### 8. ChatGPT 审查
 
@@ -242,12 +274,14 @@ git config --local user.email "codex-desktop@local.invalid"
 6. 不要在同步失败时自动 `reset --hard`、自动 rebase 或改写历史。
 7. 不要提交 SSH 私钥、凭据、PAT 或敏感配置。
 8. 不要依赖“测试通过”这一结论；必须记录具体命令、输出结论和未覆盖项。
+9. 不要绕过 `BUILD_STANDARD.md` 静默使用另一套编译器、preset、CUDA DLL 或交付目录。
 
 ## 当前正式状态
 
 - GitHub 双端链路：已验证。
 - `main`：唯一 canonical branch。
 - `codex/task-docs`：任务文档专用分支。
+- `BUILD_STANDARD.md`：所有后续工作的正式构建与交付规范。
 - 新实现任务：必须从最新 `main` 创建独立分支。
 - ChatGPT：设计与审查。
-- Codex Desktop：实现与本地验证。
+- Codex Desktop：实现、本地验证、规范化构建与交付。
