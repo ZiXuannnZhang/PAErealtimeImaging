@@ -93,4 +93,61 @@ A  MC_410T_MultiCard/delivery/tests/startup_diagnostics_analyze_test.py
 M  MC_410T_MultiCard/delivery/tools/startup_diagnostics_analyze.py
 ```
 
-报告提交后将再次核对：工作树 clean、实现分支本地 HEAD 与 GitHub 同名远端分支 HEAD 相同；原始脏工作区保持不变。
+## 最终验收收口
+
+本轮 review starting HEAD 为 `1e53769729d0d76232c86f886e3d3e87a8af8c74`。本轮唯一源码/test 提交为 `ffd9eae66502d87170bb0c83721386516c6fe236`，仅在 `paimage_start_race_test.cpp` 中加入失败 session 硬门禁；production source 与 analyzer 在本轮未修改。report-only 提交与最终远端 HEAD 按照最终交付消息单独给出，避免报告文件自引用自身 SHA。
+
+### Injected START failure hard gates
+
+`runFailureAndRecovery()` 在 recovery session 之前、且在 `failed session ingress drained` 等待完成后，直接 `require()` 以下条件；因此这些条件由 test executable 强制执行，而不是只由报告人工查看：
+
+```text
+Injected START failure conditions are enforced by test assertions: YES
+startReturnedFalse        = true
+fenceReturnedFalse        = true
+heldCount                 > 0
+failedDiscardCount        > 0
+releasedCount             = 0
+cardFrameCount            = 0
+syncFrameCount            = 0
+recoverySessionPassed     = true
+```
+
+本轮最新 race artifact `run-138524000198` 的实际失败 session 数值为：`heldCount=8`、`failedDiscardCount=11`、`releasedCount=0`、`cardFrameCount=0`、`syncFrameCount=0`、`recoverySessionPassed=true`。
+
+### 本轮验证
+
+- `paimage_start_race` + `paimage_start_race_analyzer`：2/2 通过；analyzer 读取本轮新生成 artifact。
+- `paimage_start_fence_regression`、`paimage_start_overflow`、`startup_diagnostics_analyze_test`、`paimage_network_test`：4/4 通过。
+- `paimage_core`：11/11 通过。
+- Python `py_compile` 与 synthetic analyzer fixture：通过。
+- tests full relevant build：通过；`paimage_start_race_test` 已重新编译。
+- `git diff 1e53769729d0d76232c86f886e3d3e87a8af8c74..ffd9eae66502d87170bb0c83721386516c6fe236 -- MC_410T_MultiCard/delivery/src MC_410T_MultiCard/delivery/include`：空；本轮 production source unchanged。
+
+### 本轮更新时的完整 Git receipt
+
+以下为源码/test 提交 `ffd9eae66502d87170bb0c83721386516c6fe236` 相对 `origin/main` 的完整统计；report-only commit 只会改变本报告文件：
+
+```text
+15 files changed, 1548 insertions(+), 26 deletions(-)
+```
+
+```text
+A  CODEX_REPORTS/start-admission-fence-fix-20260913/implementation-report.md
+M  MC_410T_MultiCard/delivery/include/PaimageAcquisition/ControlSocket.h
+M  MC_410T_MultiCard/delivery/include/PaimageAcquisition/SocketReceiver.h
+M  MC_410T_MultiCard/delivery/include/PaimageAcquisition/SourceCore.h
+M  MC_410T_MultiCard/delivery/src/PaimageAcquisition/Backend.cpp
+M  MC_410T_MultiCard/delivery/src/PaimageAcquisition/ControlSocket.cpp
+M  MC_410T_MultiCard/delivery/src/PaimageAcquisition/SocketReceiver.cpp
+M  MC_410T_MultiCard/delivery/src/PaimageAcquisition/SourceCore.cpp
+M  MC_410T_MultiCard/delivery/tests/CMakeLists.txt
+A  MC_410T_MultiCard/delivery/tests/paimage_start_fence_regression_test.cpp
+A  MC_410T_MultiCard/delivery/tests/paimage_start_overflow_test.cpp
+A  MC_410T_MultiCard/delivery/tests/paimage_start_race_analyzer_test.py
+A  MC_410T_MultiCard/delivery/tests/paimage_start_race_test.cpp
+A  MC_410T_MultiCard/delivery/tests/startup_diagnostics_analyze_test.py
+M  MC_410T_MultiCard/delivery/tools/startup_diagnostics_analyze.py
+```
+
+原始脏工作区未修改；本分支未修改 main、未 rebase/squash/force，最终 local/remote SHA、working tree clean 和 report-only commit SHA 由最终交付消息给出。
