@@ -18,8 +18,8 @@ ADDENDUM_TASK       TASKS/物理轮次超时重置语义整改追加_20260914.md
 IMPLEMENTATION_BRANCH codex/physical-round-normalizer-20260914-043019
 CONTINUE_FROM_SHA   c28db3d373f378b7ae17e250cd53a2778bc0fe1b
 SOURCE_FIX_SHA      0d57baffb59819b13e212aa017c85ca1a408e170
-RECEIPT_SHA         pending-report-commit
-LOCAL_HEAD_EQUALS_REMOTE_HEAD  待最终推送后核对
+RECEIPT_SHA         46cc49e1c1088ef8ac371022d2249e4af2d72f24
+LOCAL_HEAD_EQUALS_REMOTE_HEAD  verified after final push
 ```
 
 源码从任务书指定的 continuation SHA 继续，没有 reset、rebase 或 force push。此前已提交的首控制过滤语义保持不变；本追加只修正超时边界的归属和生产触发方式。
