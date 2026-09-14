@@ -3,142 +3,202 @@
 ## 结论
 
 ```text
-PROTOCOL_BLOCKED
+CODE_IMPLEMENTED
+AUTOMATED_TESTS_PASS
+WINDOWS_BUILD_PASS
+HARDWARE_VALIDATION_PENDING
 ```
 
-Phase 0 未找到能够确定性识别 `StartupControlTrigger`，或在该触发已于 ingress 前丢失时安全推断其缺失的协议证据。依据任务文档第 5 节，已停止生产代码修改；没有加入 first-observed、计数、幅度、时序或 `triggerSeq` 猜测过滤。
+已按实施授权追加采用 `first-visible-operational` heuristic：每个 measurement session 和后续 physical round 的第一个新的可见 `triggerSeq` 被视为 `OperationalStartupControl`，从生产 save/Ring logical path 过滤；随后按配置接收 logical scan。此实现不宣称 wire-level control identity，也没有修改 UDP admission 或 START fence。
 
-## 任务身份
+## 任务身份与回执
 
 ```text
-TASK_DOCUMENT     TASKS/物理轮次归一化与首控制触发安全过滤_20260914-043019.md
-BASE_BRANCH       codex/start-admission-fence-fix-20260913-003112
-BASE_SHA          6313540f72544c0f68820c4815903abaa0b8c1e1
+ADDENDUM_TASK       TASKS/物理轮次归一化实施授权追加_20260914-110200.md
 IMPLEMENTATION_BRANCH codex/physical-round-normalizer-20260914-043019
-SOURCE_FIX_SHA    N/A (Phase 0 protocol block; no production source changed)
-RECEIPT_SHA       9424b1c（本报告首个 report-only commit；最终分支 HEAD 另行核验）
+CONTINUE_FROM_SHA   0752819ba1e63e0127e9d6cbcfe9a305e22bff31
+FINAL_SOURCE_SHA    b5260c8eed92178b61bd15834cf45de5f675c16f
+FINAL_RECEIPT_SHA   pending-report-commit
+LOCAL_HEAD_EQUALS_REMOTE_HEAD  verified after final push
 ```
 
-`git rev-parse origin/codex/start-admission-fence-fix-20260913-003112` 的结果为任务要求的 `6313540f72544c0f68820c4815903abaa0b8c1e1`，因此 baseline 未触发 `BASELINE_BLOCKED`。
+源代码提交从任务书指定的 `CONTINUE_FROM_SHA` 继续，没有 reset、rebase 或 force push。原来的 `PROTOCOL_BLOCKED` 报告已由本实施报告替换。
 
-## Phase 0 协议证据调查
+## 实现要点
 
-### A. startup/control trigger 身份
+### Operational policy 与共享分类
 
-结论：`UNKNOWN`，没有正向身份规则。
+- 新增 `paimage::PhysicalRoundNormalizer`，状态为 `AwaitingControl` / `CollectingScan`。
+- 新 measurement session 清空 logical count 和 recent decision cache；首个新的 identity 过滤为 `OperationalStartupControl`。
+- 一个 identity 的 key 是 `measurementSession + uint16 triggerSeq`，并使用容量为 8192 的 bounded recent-decision cache。跨卡乱序、迟到卡和 `uint16` wrap 复用同一个 decision；同一 identity 只推进一次 logical count。
+- count boundary 在第 N 个 logical identity 上产生一次 `roundComplete`/`CountBoundary`；同一 identity 的迟到卡复用上一轮 logical index，不重复 reset，也不变成下一轮 control。
+- classification 与 `CardFrame::complete` 无关，因此 partial 的首 control 也会被过滤；其底层 SourceCore physical partial/loss 统计继续保留。
 
-已检查的采样 wire 定义和实现：
+### 配置来源
 
-- 根 `README.md:63-65` 与 `MC_410T_MultiCard/delivery/include/Constants.h:12-15` 将采样头定义为 4 字节 `packetSeq + triggerSeq`，没有 trigger type、control bit 或 reserved 字段。
-- `MC_410T_MultiCard/delivery/src/MultiPortReceiver.cpp:417-434` 只从前 4 字节解析两个 `uint16_t`，其余内容直接作为 payload；没有依据包头分类 control/startup trigger 的分支。
-- 当前生产 PAimage-derived 路径 `MC_410T_MultiCard/delivery/src/PaimageAcquisition/SourceCore.cpp:92-110` 同样只读取 `le16(p)` 和 `le16(p+2)`，并将其用于组包；`SourceCore.h:16-24,30-38` 的 `Decision`/`CardFrame` 也没有 control-trigger 身份字段。
-- `MC_410T_MultiCard/delivery/tools/paimage-trace-schema.md:3-7` 只记录 `triggerSeq`、`packetSeq` 和 `rawHeader[4]`。其中 `stage 2` 的 `StartupIdleClear`、`StartupBuffered` 等是主机启动缓存/状态决策，不是 wire-level control-trigger 类型。
-- 两个回放器没有额外身份：`PALiveImagingSimSender/src/UdpReplaySender.cpp:347-360` 和 `MC_410T_MultiCard/delivery/src/RingUdpReplay/ring_udp_replay.cpp:182-192` 都只写入这 4 个头字节和采样 payload。
-- 对 baseline 源码、模拟器、`docs/` 和根 README 执行了以下定向搜索，结果为 `NO_MATCH_FOR_CONTROL_TRIGGER_IDENTITY_TERMS`：
+- 线性/默认路径使用持久化 `AcquisitionParams/LogicalTriggersPerRound`，默认值由 `AcqConfig::kDefaultLogicalTriggersPerRound` 提供（4000）。normalizer 本身不内置 4000。
+- Ring 路径使用 canonical source `RingReconCudaConfig.alinesPerFrame / enabledChannelCount`，启动时校验它等于 `2 * alinesPerChannelPerFrame`，并校验 logical round 可整除 `enabledChannelCount * alinesPerChannelPerBlock`；不一致时记录 `imaging_assembler_invalid_config` 并拒绝配置组包器。
+- Ring 配置通过 `NetworkController::setLogicalTriggersPerRound` 更新同一个 production normalizer；没有新增互不关联的 UI counter。
 
-  ```powershell
-  git grep -n -i -E 'triggerType|triggerClass|controlTrigger|startupControl|startupTrigger|control-trigger|startup-trigger|trigger.*reserved|reserved.*trigger|packetFlag|triggerFlag' origin/codex/start-admission-fence-fix-20260913-003112 -- 'MC_410T_MultiCard/delivery/**' 'PALiveImagingSimSender/**' 'docs/**' 'README.md'
-  ```
+### Save、Ring 与边界行为
 
-### B. `triggerSeq` 的真实作用域
+- 分类位于 `HostOutput` 的 production output boundary，先于 FileSaver 和 Ring；control 不进入正常 FileSaver 数据流、不进入 Ring、不推进 wavelength parity、angle/index、block 或 logical count。
+- 同一 `FrameConverter` entry 将 classification metadata 复制到 `TriggerGroup`，save 与 sync/Ring 共用同一 decision 和 logical index。
+- Ring consumer 在最终 logical identity 到达后，按 enabled-card mask 等待全部启用卡的同一 identity 消费完成，再调用 `RingBlockAssembler::completeLogicalRound()` 一次；这样多卡首卡先到不会提前重置，迟到卡仍可进入上一 identity。
+- count boundary 重置 Ring host 侧 wavelength/angle phase；`blockSeq` 保持单调。由于 N 与 block 配置已校验，ImagingSvc 的现有 blocks-per-frame/reconstruction reset 与 logical round 对齐，auto-save 的圈末条件也继续按 logical block/frame 边界工作。
+- timeout boundary 清空 partial normalizer state、`ImagingBypass` 队列和 Ring partial block，并通过既有 callback 发出 reconstruction `ring_reset`；normalizer 在已处于 `AwaitingControl` 时不重复推进 generation 或产生空 round。
 
-结论：只有主机表示层的 16 位宽度/回绕是可见的；硬件作用域仍为 `UNKNOWN`。
+## 诊断与已接受风险
 
-| 问题 | 结论 | 证据/限制 |
-|---|---|---|
-| 宽度 | 已知为 `uint16_t` | `DataTypes.h:13-14`；主机使用 16 位序号。 |
-| 数值回绕 | 主机按 16 位回绕运算 | `DataTypes.h:14` 注释及 `SourceCore.cpp:105` 的 `uint16_t` 差值；这不能证明 FPGA 的轮次语义。 |
-| 所有采集卡是否共享一个计数器 | `UNKNOWN` | 接收端按卡/端口处理，但没有硬件协议保证。 |
-| 每个物理轮次是否 reset | `UNKNOWN` | `M3_实时数据传递链路.md:57-58` 将“是否连续/每块是否重置”列为待确认事项。 |
-| 仅 FPGA reset 时是否 reset | `UNKNOWN` | 未发现硬件状态机或协议说明。 |
-| 控制程序启动时是否 reset | `UNKNOWN` | 回放器从 `g=0` 生成测试流，不是硬件契约。 |
-| startup/control trigger 是否占用一个 `triggerSeq` | `UNKNOWN` | 没有类型/边界/序号关系定义。 |
-| 是否保证跨轮次连续且仅 modulo 65536 | `UNKNOWN` | 主机算术不能替代 FPGA wire-side 说明。 |
-
-根 `README.md:129` 还明确指出“首个可见 trigger”不等于物理首 trigger，16 位 `triggerSeq` 跨轮次不能直接关联。
-
-### C. `4001` 行为的发生范围
-
-结论：对于仓库已有的特定实测分析段，存在“用户确认的 4001 物理预期”记录；但仓库没有协议或硬件证据证明每一个 physical round 都是 `1 + 4000`，也没有证明它只发生在控制程序首次运行或某一特定边界，因此通用发生范围为 `UNKNOWN`。
-
-证据边界如下：
-
-- `CODEX_REPORTS/receiver-real-regression.json:14-32` 将 round 1 标记为 `basis: user-confirmed`，并记录 `physicalExpected: 4001`、`extraExpected: 1`、`effectiveExpected: 4000`；报告中 `extraTrigger: 4` 也是事后关联字段，不是 wire-level 身份。
-- `CODEX_REPORTS/接收侧诊断增强_执行任务书_20260910.md:33` 记录了用户对当次实验“每轮 4001、首个为多余触发”的确认，但同一行也明确要求报文号与物理轮次边界必须有显式依据，不能由首个收到的数据自动确定。
-- 同一历史任务文档 `:105-109` 将依据区分为用户确认、协议确认、推断和未知，并要求在缺少可靠轮次起点时不得把第一个收到的有效触发当作多余触发。
-- `CODEX_REPORTS/接收诊断_快速候选验证报告.md:12-13` 说明真实轨迹的完整/部分/完全未见触发统计和 `receiver-real-regression.json` 的分析边界；这属于观测/事后分类，不会补足 FPGA 的 control-trigger 定义。
-
-因此这些记录可作为后续实机验证的业务前提，不能作为实现安全过滤所需的正向协议证据。
-
-### D. control trigger 完全丢失时能否安全推断
-
-结论：不能安全推断。
-
-当前没有协议保证以下任一关系：
+每次 normalizer boundary snapshot/事件包含：
 
 ```text
-上一物理轮次最后序号 = N
-startup/control trigger = N + 1
-第一条真实 scan = N + 2
+roundGeneration
+configuredLogicalTriggersPerRound
+physicalDistinctObserved
+operationalControlFiltered
+logicalDistinctAccepted
+countBoundaryResets
+timeoutBoundaryResets
+firstVisibleFilterMode=true
 ```
 
-也没有保证 control trigger 与 scan trigger 使用可区分的 type/flag，或保证跨卡、跨轮次序号不 reset。现有分析器也保留了这一边界：`MC_410T_MultiCard/delivery/tools/paimage_trace_analyze.py:432-433` 将物理 slot zero 标为 unknown，`:462` 将 unseen trigger estimate 明确标为非 physical truth。故在 control 完全未进 ingress 时，首个观测 scan 必须 fail-open 保留，不能据序号猜测并删除。
+每次控制过滤记录 `paimage.round / round_control_filtered`，包含 `measurementSession`、`roundGeneration`、`physicalTriggerSeq`、`basis=first-visible-operational`，以及 `filterClassification=software-operational`、`filterIsNotNetworkLoss=true`、`packetLossAccounting=unchanged`。SourceCore 的 raw trace 仍记录真实 trigger、packet、卡号、complete/partial decision 和原始原因；control filter 不计入 `packetsDropped`、`stale` 或 START fence discard。
 
-## 停止原因与未实施范围
+若真实 control 在 ingress 前完全丢失，按授权契约软件仍会过滤第一条可见 scan；这是明确记录的 `acceptedControlInvisibleRisk`，不是网络丢包结论，也不是声称 physical trigger 不存在。笔记本 startup ingress loss 未在本分支解决；其独立诊断基线未修改。
 
-任务文档的 Phase 0 Stop Condition 要求：无法确定性识别或安全推断时，不实现以下内容，并提交 `PROTOCOL_BLOCKED`：
+## 证据与测试
 
-- `PhysicalRoundNormalizer` 生产组件；
-- first observed / first complete / first-after-timeout 过滤；
-- count-based `4001` 猜测；
-- amplitude、timing 或裸 `triggerSeq` heuristic；
-- 保存路径和 Ring 路径的任意一侧过滤。
+### Normalizer / 集成证据
 
-因此本分支只新增本报告，未修改 `DataTypes`、`DataProcessor`、`SourceCore`、`SocketReceiver`、`FileSaver`、`RingBlockAssembler`、协议解析、CUDA 或保存格式。现有 raw physical counters 未被改写。
-
-## 测试与构建
+`physical_round_normalizer_test` 覆盖 T1–T12，包括小 N、生产 N=4000、连续三轮、跨卡共享 identity、迟到卡、partial control、部分/全部 control 不可见的预期行为、timeout、count+timeout 幂等和 `65534/65535/0/1` wrap。N=4000 断言：
 
 ```text
-CMake configure: NOT_RUN — Phase 0 否决后没有源码或构建目标变化
-Windows build:   NOT_RUN — 同上
-T1–T9:           NOT_RUN — 正向协议证据缺失，不能构造合法的 control-trigger fixture
-T10 regressions: NOT_RUN — 本次没有生产代码改动；执行它不会解除协议阻塞
+physicalDistinctObserved = 4001
+operationalControlFiltered = 1
+logicalDistinctAccepted = 4000
+countBoundaryResets = 1
 ```
 
-没有任何测试被标记为 `PASS`，也没有生成交付构建包；不得将本结果写成 `CODE_IMPLEMENTED`、`AUTOMATED_TESTS_PASS` 或 `HARDWARE_VALIDATED`。
+`paimage_host_output_test` 断言 control 不进入 save/Ring，N=3 的 save 与 Ring identity 均为 101/102/103，logical index 均为 0/1/2，边界标记只在 final logical identity 上出现一次，并校验 float16 文件不含 control 数据。
 
-## 任务验收项状态
+`paimage_network_test` 运行四卡、三轮 source-backed UDP 回放；非 missing 场景每张卡的 Ring identity 都是 trigger 1..21、logical index 0..20，累计 `hostRingReturns=252`，保存文件大小按 21 个 logical trigger 计算。现有 START/session、batch、Ring、socket、trace、worker、protocol、conversion 和 looplog 回归均通过。
+
+### Exact commands
+
+源码最终 SHA：`b5260c8eed92178b61bd15834cf45de5f675c16f`。
+
+```powershell
+Set-Location D:\ChatGPT\PAERealtimeImaging\_worktrees\physical-round-normalizer-20260914-043019\MC_410T_MultiCard\delivery
+cmd /c build_mingw_debug.cmd configure
+cmd /c build_mingw_debug.cmd build
+```
+
+结果：CMake Debug configure 通过；Windows MinGW Debug 主程序链接通过，产物为 `build/mingw_debug/bin/PAimageReceiverDiagnostics.exe`。configure/post-build 仅报告环境中缺少 Vulkan headers、Qt translations catalog、DX compiler 的 warning，没有构建失败。
+
+```powershell
+$env:QT_QPA_PLATFORM = 'offscreen'
+$env:Path = 'D:\Qt\Qt6.8.0\6.8.0\mingw_64\bin;D:\Qt\Qt6.8.0\Tools\mingw1310_64\bin;D:\Qt\Qt6.8.0\Tools\Ninja;' + $env:Path
+& 'D:\Qt\Qt6.8.0\Tools\Ninja\ninja.exe' -C D:\ChatGPT\PAERealtimeImaging\_worktrees\physical-round-normalizer-20260914-043019\MC_410T_MultiCard\delivery\build\paimage_tests8
+```
+
+结果：测试目标增量重建通过。
+
+测试在上述 Qt/offscreen 与 MinGW PATH 下逐项隔离执行以下命令形式：
+
+```powershell
+& 'D:\Qt\Qt6.8.0\Tools\CMake_64\bin\ctest.exe' -R '^<test-name>$' --output-on-failure
+```
+
+34 项全部通过：
 
 ```text
-[x] BASE_SHA 精确匹配
-[x] Phase 0 结论已记录
-[x] 没有 first-observed blind drop
-[x] 没有修改生产过滤/保存/Ring 代码
-[x] raw physical counters 未被篡改
-[ ] shared classifier / 4001→4000 / timeout / wrap 实现
-[ ] 自动化测试与 Windows build
-[ ] logical round counters
+ring_block_assembler_test
+imaging_bypass_test
+data_processor_imaging_isolation_test
+diagnostic_recorder_test
+ring_shm_observability_test
+diagnostic_dialog_test
+diagnostic_time_window_test
+process_scheduling_test
+network_ingress_observability_test
+network_snapshot_test
+network_diagnostics_test
+measurement_session_transaction_test
+session_boundary_test
+session_boundary_receiver_test
+data_processor_batch_test
+card_status_formatting_test
+paimage_network_test
+paimage_start_race
+paimage_start_fence_regression
+paimage_start_overflow
+paimage_host_output_test
+paimage_trace_bundle_test
+paimage_discovery_checks
+paimage_discovery_socket_checks
+paimage_core_checks
+paimage_output_checks
+physical_round_normalizer_test
+paimage_control_checks
+paimage_socket_short
+paimage_trace_checks
+paimage_worker_checks
+paimage_protocol_checks
+paimage_conversion_checks
+paimage_looplog_checks
 ```
 
-后三类不能在协议阻塞时安全实现，不是测试失败。
+结果：`PASS isolated CTest 34 tests at final source SHA`。
 
-## 解除阻塞所需的最小外部信息
+## 修改文件
 
-需要来自 FPGA/控制程序协议或可重复硬件抓取的正向证据，至少包括：
-
-1. startup/control trigger 的明确 wire identity（header flag/type/reserved field 或等价可验证标记）；
-2. `triggerSeq` 的跨卡共享关系、跨物理轮次行为、FPGA reset/控制程序启动 reset 规则及 modulo/wrap 规则；
-3. `4001` 额外 trigger 是每个 physical round 的保证，还是仅特定控制程序/边界行为；
-4. control trigger 已丢失时，是否有协议保证可由相邻序号唯一推断；若有，给出精确序号关系和跨卡一致性保证。
-
-在这些信息进入仓库并可由测试复核前，保留 `PROTOCOL_BLOCKED` 是唯一满足安全不变量的结果。
-
-## 远端回执
-
-本报告提交后需在推送前核对：
+生产实现：
 
 ```text
-local HEAD == remote codex/physical-round-normalizer-20260914-043019 HEAD
+MC_410T_MultiCard/delivery/CMakeLists.txt
+MC_410T_MultiCard/delivery/include/AcqConfig.h
+MC_410T_MultiCard/delivery/include/DataTypes.h
+MC_410T_MultiCard/delivery/include/MainWindow.h
+MC_410T_MultiCard/delivery/include/NetworkController.h
+MC_410T_MultiCard/delivery/include/PaimageAcquisition/Backend.h
+MC_410T_MultiCard/delivery/include/PaimageAcquisition/FrameConverter.h
+MC_410T_MultiCard/delivery/include/PaimageAcquisition/HostOutput.h
+MC_410T_MultiCard/delivery/include/PaimageAcquisition/PhysicalRoundNormalizer.h
+MC_410T_MultiCard/delivery/include/RingBlockAssembler.h
+MC_410T_MultiCard/delivery/src/MainWindow.cpp
+MC_410T_MultiCard/delivery/src/NetworkController.cpp
+MC_410T_MultiCard/delivery/src/PaimageAcquisition/Backend.cpp
+MC_410T_MultiCard/delivery/src/PaimageAcquisition/FrameConverter.cpp
+MC_410T_MultiCard/delivery/src/PaimageAcquisition/HostOutput.cpp
+MC_410T_MultiCard/delivery/src/PaimageAcquisition/NetworkControllerPaimage.cpp
+MC_410T_MultiCard/delivery/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
+MC_410T_MultiCard/delivery/src/RingBlockAssembler.cpp
 ```
 
-本任务没有硬件测试，不能报告 `HARDWARE_VALIDATED`。
+测试与构建：
+
+```text
+MC_410T_MultiCard/delivery/tests/CMakeLists.txt
+MC_410T_MultiCard/delivery/tests/paimage_core/CMakeLists.txt
+MC_410T_MultiCard/delivery/tests/paimage_core/physical_round_normalizer_test.cpp
+MC_410T_MultiCard/delivery/tests/paimage_host_output_test.cpp
+MC_410T_MultiCard/delivery/tests/paimage_network_test.cpp
+MC_410T_MultiCard/delivery/tests/paimage_trace_bundle_test.cpp
+MC_410T_MultiCard/delivery/tests/ring_block_assembler_test.cpp
+```
+
+`paimage_trace_bundle_test.cpp` 的变更只同步其已有 LoopLog/启动分析器/抓取 launcher fixture 与当前仓库契约，未改变生产 trace 语义。
+
+## 限制与硬件状态
+
+- 当前没有本次任务的台式机实机采集时段；`physical 4001 -> logical/save/Ring 4000` 已由配置驱动的 N=4000 contract test 和 source-backed 多卡集成测试覆盖，但仍需台式机硬件验证连续多轮 frame/save/reconstruction boundary。
+- 主程序 configure/build 通过；Vulkan headers、Qt translations catalog 和 DX compiler 仍是当前工作站部署环境的非致命缺项。
+- 构建期间临时补入的 ignored `libs/imaging/cufft64_12.dll` 已在验证后删除；没有留下新的追踪临时文件。
+- 不得将本报告解释为已修复笔记本 startup ingress 丢包；本分支只落实授权的 operational first-visible filter。
+
+最终推送后应核对并保持：
+
+```text
+git rev-parse HEAD == git rev-parse origin/codex/physical-round-normalizer-20260914-043019
+```
