@@ -519,12 +519,60 @@ MainWindow::MainWindow(QWidget *parent)
         if (!m_ringAssemblerConfigured) return false;
         const int chA = frame->cardId * 2;
         const int chB = chA + 1;
+        bool fed = false;
         if (enabled[chA])
             m_ringAssembler->pushChannelLine(chA, frame->triggerSeq, frame->freqA.data(),
-                                             static_cast<int>(frame->freqA.size()));
+                                              static_cast<int>(frame->freqA.size()));
+        fed = fed || enabled[chA];
         if (enabled[chB])
             m_ringAssembler->pushChannelLine(chB, frame->triggerSeq, frame->freqB.data(),
                                              static_cast<int>(frame->freqB.size()));
+        fed = fed || enabled[chB];
+        const bool pendingForFrame =
+            m_ringBoundaryPending &&
+            frame->measurementSession == m_ringBoundarySession &&
+            frame->triggerSeq == m_ringBoundaryTrigger &&
+            (m_ringBoundaryGeneration == 0 ||
+             frame->roundGeneration + 1 == m_ringBoundaryGeneration);
+        if (fed && frame->roundComplete && frame->normalizationApplied &&
+            frame->physicalDecision == paimage::PhysicalTriggerDecision::LogicalScan &&
+            !pendingForFrame &&
+            (!m_ringBoundaryApplied ||
+             frame->measurementSession != m_lastRingBoundarySession ||
+             frame->roundGeneration + 1 != m_lastRingBoundaryGeneration ||
+             frame->triggerSeq != m_lastRingBoundaryTrigger)) {
+            // Fallback for an adapter that supplies the group marker without
+            // the boundary observer. Production normally arrives here with
+            // the observer-created pending boundary already installed.
+            m_ringBoundaryPending = true;
+            m_ringBoundarySession = frame->measurementSession;
+            m_ringBoundaryGeneration = frame->roundGeneration + 1;
+            m_ringBoundaryTrigger = frame->triggerSeq;
+            m_ringBoundaryCards = 0;
+        }
+        if (fed && (pendingForFrame ||
+                    (m_ringBoundaryPending &&
+                     frame->measurementSession == m_ringBoundarySession &&
+                     frame->triggerSeq == m_ringBoundaryTrigger &&
+                     (m_ringBoundaryGeneration == 0 ||
+                      frame->roundGeneration + 1 == m_ringBoundaryGeneration)))) {
+            const uint32_t expectedCards =
+                (enabled[0] || enabled[1] ? 1u : 0u) |
+                (enabled[2] || enabled[3] ? 2u : 0u) |
+                (enabled[4] || enabled[5] ? 4u : 0u) |
+                (enabled[6] || enabled[7] ? 8u : 0u);
+            m_ringBoundaryCards |= 1u << frame->cardId;
+            if (expectedCards != 0 &&
+                (m_ringBoundaryCards & expectedCards) == expectedCards &&
+                m_ringAssembler->completeLogicalRound()) {
+                m_ringBoundaryPending = false;
+                m_ringBoundaryCards = 0;
+                m_ringBoundaryApplied = true;
+                m_lastRingBoundarySession = frame->measurementSession;
+                m_lastRingBoundaryGeneration = m_ringBoundaryGeneration;
+                m_lastRingBoundaryTrigger = frame->triggerSeq;
+            }
+        }
         return true;
     });
     connect(m_imagingController, &ImagingController::svcStopped, this, [this]() {
@@ -2135,6 +2183,36 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
         [this](const TriggerGroupConstPtr& frame) {
             return ringFeedSink(frame);
         });
+    m_netController->setPhysicalRoundBoundarySink(
+        [this](const paimage::PhysicalRoundEvent& event) {
+            if (event.kind == paimage::PhysicalRoundEvent::Kind::CountBoundary) {
+                if (!m_ringAssembler || !m_ringAssemblerConfigured) return;
+                std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+                if (!m_ringAssemblerConfigured) return;
+                m_ringBoundaryPending = true;
+                m_ringBoundarySession = event.measurementSession;
+                m_ringBoundaryGeneration = event.roundGeneration;
+                m_ringBoundaryTrigger = event.triggerSeq;
+                m_ringBoundaryCards = 0;
+                return;
+            }
+            if (event.kind != paimage::PhysicalRoundEvent::Kind::TimeoutBoundary)
+                return;
+            // SourceCore reports a physical timeout before the next logical
+            // scan can reach Ring. Remove queued pre-boundary groups first,
+            // then reset the assembler under its existing mutex so no partial
+            // block survives that boundary.
+            if (m_imagingBypass)
+                m_imagingBypass->clear(ImagingSubmitResult::StaleSession);
+            if (!m_ringAssembler || !m_ringAssemblerConfigured)
+                return;
+            std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+            if (!m_ringAssemblerConfigured) return;
+            m_ringBoundaryPending = false;
+            m_ringBoundaryCards = 0;
+            m_ringBoundaryApplied = false;
+            m_ringAssembler->resetAfterPhysicalTimeout();
+        });
     connect(m_netController, &NetworkController::statusMessage, this, &MainWindow::logMessage);
     connect(m_netController, &NetworkController::errorOccurred, this, &MainWindow::logMessage);
     // ══ 卡片就绪信号：更新网络信息标签 ════════════════════════════
@@ -2215,6 +2293,7 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     // 数据格式参数：与线性实例相同来源（注册表，默认 250 MSa/s 满速率 32bit Q16.16）
     cfg.bitsPerChannel = m_bitsPerChannel;
     cfg.sampleIntervalNs = m_sampleIntervalNs;
+    cfg.logicalTriggersPerRound = m_logicalTriggersPerRound;
     {
         QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
         cfg.diagnosticLevel = qBound(0, settings.value("Diagnostics/Level", 1).toInt(), 2);
@@ -3291,6 +3370,11 @@ void MainWindow::loadSettings()
     // 修改：reg add "HKCU\Software\MC410T\MC410T_Receiver\AcquisitionParams" /v BitsPerChannel /t REG_DWORD /d 32 /f
     m_bitsPerChannel = settings.value("AcquisitionParams/BitsPerChannel", 32).toInt();
     if (m_bitsPerChannel != 16 && m_bitsPerChannel != 32) m_bitsPerChannel = 32;
+    m_logicalTriggersPerRound = settings.value(
+        "AcquisitionParams/LogicalTriggersPerRound",
+        AcqConfig::kDefaultLogicalTriggersPerRound).toInt();
+    if (m_logicalTriggersPerRound <= 0)
+        m_logicalTriggersPerRound = AcqConfig::kDefaultLogicalTriggersPerRound;
     const double registrySampleIntervalNs =
         settings.value("AcquisitionParams/SampleIntervalNs", FPGA_ADC_INTERVAL_NS).toDouble();
     m_sampleIntervalNs = FPGA_ADC_INTERVAL_NS;   // 全链路唯一采样率来源
@@ -3436,6 +3520,8 @@ void MainWindow::saveSettings()
     settings.setValue("DisplayParams/AutoRescaleAxes",    m_autoRescaleAxes);
     // 数据格式参数
     settings.setValue("AcquisitionParams/BitsPerChannel",   m_bitsPerChannel);
+    settings.setValue("AcquisitionParams/LogicalTriggersPerRound",
+                      m_logicalTriggersPerRound);
     // 采样间隔固定写回 "4.0"（REG_SZ，与线性实例一致；不删除键，仅统一数值）
     settings.setValue("AcquisitionParams/SampleIntervalNs",
                       QString::number(m_sampleIntervalNs, 'f', 1));
@@ -4908,9 +4994,28 @@ void MainWindow::configureRingAssembler()
     if (!m_imagingController || !m_ringAssembler) return;
     const auto configureBeginNs = paimage::SocketReceiver::now();
     const RingReconCudaConfig &cfg = m_imagingController->ringConfig();
-    if (cfg.enabledChannelCount <= 0 || cfg.alinesPerChannelPerBlock <= 0 ||
-        cfg.sampDepth <= 0 || cfg.alinesPerChannelPerFrame <= 0)
+    const bool roundConfigValid =
+        cfg.enabledChannelCount > 0 && cfg.alinesPerChannelPerBlock > 0 &&
+        cfg.sampDepth > 0 && cfg.alinesPerChannelPerFrame > 0 &&
+        cfg.alinesPerFrame > 0 && cfg.alinesPerFrame % cfg.enabledChannelCount == 0 &&
+        cfg.alinesPerFrame / cfg.enabledChannelCount == 2 * cfg.alinesPerChannelPerFrame &&
+        cfg.alinesPerFrame % (cfg.enabledChannelCount * cfg.alinesPerChannelPerBlock) == 0;
+    if (!roundConfigValid) {
+        recordDiagnosticAction(QStringLiteral("imaging_assembler_invalid_config"),
+            {{"enabledChannelCount", cfg.enabledChannelCount},
+             {"alinesPerFrame", cfg.alinesPerFrame},
+             {"alinesPerChannelPerFrame", cfg.alinesPerChannelPerFrame},
+             {"alinesPerChannelPerBlock", cfg.alinesPerChannelPerBlock},
+             {"sampDepth", cfg.sampDepth},
+             {"logicalRoundConfigSource", QStringLiteral(
+                 "RingReconCudaConfig.alinesPerFrame/enabledChannelCount")}});
+        logMessage(QStringLiteral("[环形采集] 轮次配置不一致，拒绝初始化组包器"));
         return;
+    }
+    const int logicalTriggersPerRound = cfg.alinesPerFrame / cfg.enabledChannelCount;
+    if (m_netController)
+        m_netController->setLogicalTriggersPerRound(
+            static_cast<std::uint64_t>(logicalTriggersPerRound));
 
     int enabled[8];
     for (int i = 0; i < 8; ++i) enabled[i] = cfg.enabledChannels[i] ? 1 : 0;
@@ -4923,6 +5028,9 @@ void MainWindow::configureRingAssembler()
     const double step = sectorWidth / cfg.alinesPerChannelPerFrame;
 
     { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+      m_ringBoundaryPending = false;
+      m_ringBoundaryCards = 0;
+      m_ringBoundaryApplied = false;
       m_ringAssembler->configure(enabled, cfg.alinesPerChannelPerBlock,
                                  cfg.sampDepth, cfg.sectorStartDeg, sectorWidth,
                                  step, cfg.alinesPerChannelPerFrame,
@@ -4935,7 +5043,10 @@ void MainWindow::configureRingAssembler()
          {"endMonotonicNs", QString::number(configureEndNs)},
          {"durationNs", QString::number(configureEndNs - configureBeginNs)},
          {"enabledChannels", cfg.enabledChannelCount},
-         {"alinesPerChannelPerBlock", cfg.alinesPerChannelPerBlock}});
+         {"alinesPerChannelPerBlock", cfg.alinesPerChannelPerBlock},
+         {"configuredLogicalTriggersPerRound", logicalTriggersPerRound},
+         {"logicalRoundConfigSource", QStringLiteral(
+             "RingReconCudaConfig.alinesPerFrame/enabledChannelCount")}});
     logMessage(QString("[环形采集] 组包器已配置: 通道=%1 每块=%2 step=%3°")
                .arg(cfg.enabledChannelCount)
                .arg(cfg.alinesPerChannelPerBlock)

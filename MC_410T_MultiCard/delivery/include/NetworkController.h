@@ -52,6 +52,14 @@ public:
     //  环形实时馈送回调（必须在 start() 之前设置，转发给每张卡 DataProcessor）
     void setRingFeedSink(const DataProcessor::RingFeedSink& sink) { m_ringFeedSink = sink; }
 
+    // Physical-round boundary notifications are rare control/timeout events.
+    // The callback is installed before start and may be invoked by the source
+    // output thread; consumers must keep it bounded and thread-safe.
+    void setPhysicalRoundBoundarySink(
+        const paimage::PhysicalRoundNormalizer::Observer& sink) {
+        m_physicalRoundBoundarySink = sink;
+    }
+
     //  主接口（MainWindow 调用）
     // onStarted：初始化完成后的回调（同步调用，可直接操作 UI）
     // onFailed：初始化失败时调用，可为 nullptr
@@ -99,6 +107,8 @@ public:
     void     requestCloseSavers();
     // 实时更新显示降采样点数（不重建线程，直接修改各 DataProcessor 的配置）
     void setDisplayPoints(int displayPoints);
+    // 更新生产输出边界使用的逻辑轮次计数（环形模式由 Ring 配置覆盖）。
+    void setLogicalTriggersPerRound(std::uint64_t count);
     // 重新配置（采集时间改变时传入，无需重建线程）
     void reconfigure(const AcqConfig& config);
 
@@ -193,6 +203,7 @@ private:
     quint64 m_paimageLastBurstEpoch=0;
     qint64 m_paimageLastStallWarnMs=0;
     QString m_paimageRunId;
+    paimage::PhysicalRoundNormalizer::Observer m_physicalRoundBoundarySink;
     void recordPaimageSnapshot();
     void writeSystemCaptureNotification(quint64 epoch, qint64 burstNs);
 

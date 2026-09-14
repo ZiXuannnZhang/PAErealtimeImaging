@@ -9,12 +9,14 @@
 #include <stdexcept>
 #include <cstring>
 #include <chrono>
+#include <mutex>
 void require(bool b,const char* message){if(!b)throw std::runtime_error(message);}
 template<class F> bool until(F f){QElapsedTimer timer;timer.start();while(!f()&&timer.elapsed()<5000){QCoreApplication::processEvents();QThread::msleep(1);}return f();}
 int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     const bool stress=argc>=3;const int hz=argc>=5?std::stoi(argv[4]):40;
     const int triggers=stress?std::stoi(argv[1])*hz:22;
     const bool missing=argc>=4&&std::string(argv[3])=="missing";
+    const int logicalTriggersPerPhase = triggers - 1; // first visible operational control is filtered
     FILETIME creation{},exit{},kernelBefore{},userBefore{},kernelAfter{},userAfter{};
     GetProcessTimes(GetCurrentProcess(),&creation,&exit,&kernelBefore,&userBefore);
     const auto wallBefore=std::chrono::steady_clock::now();
@@ -33,11 +35,18 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     auto send=[&](int c,int port,const std::vector<unsigned char>& bytes){sockaddr_in dst{};dst.sin_family=AF_INET;dst.sin_port=htons(port);inet_pton(AF_INET,"127.0.0.1",&dst.sin_addr);
         require(sendto(hardware[c],reinterpret_cast<const char*>(bytes.data()),int(bytes.size()),0,reinterpret_cast<sockaddr*>(&dst),sizeof(dst))==int(bytes.size()),"hardware data send");};
     NetworkController controller;std::atomic<int> rings{0};std::atomic<bool> values{true};int started=0;bool stopped=false;
+    std::mutex ringIdentityMutex;
+    std::vector<std::vector<std::uint16_t>> ringTriggers(4);
+    std::vector<std::vector<std::int64_t>> ringIndices(4);
     QObject::connect(&controller,&NetworkController::errorOccurred,[](const QString& error){std::cerr<<error.toStdString()<<'\n';});
     controller.setRingFeedSink([&](const TriggerGroupConstPtr& frame){
         if(!frame)return ImagingSubmitResult::InvalidFrame;const int c=frame->cardId;const auto& a=frame->freqA;const auto& b=frame->freqB;
         if(stress){if(a.empty()||b.empty()||a.front()!=c+1||a.back()!=c+1||b.front()!=-c-1||b.back()!=-c-1)values=false;}
-        else for(std::size_t i=0;i<a.size();++i)if(a[i]!=c+1||b[i]!=-c-1)values=false;++rings;return ImagingSubmitResult::Accepted;});
+        else for(std::size_t i=0;i<a.size();++i)if(a[i]!=c+1||b[i]!=-c-1)values=false;
+        if(c>=0&&c<4){std::lock_guard<std::mutex> lock(ringIdentityMutex);
+            ringTriggers[c].push_back(frame->triggerSeq);
+            ringIndices[c].push_back(frame->logicalTriggerIndex);}
+        ++rings;return ImagingSubmitResult::Accepted;});
     QObject::connect(&controller,&NetworkController::measurementStarted,[&]{++started;});
     QObject::connect(&controller,&NetworkController::stopped,[&]{stopped=true;});
     require(controller.start(config),"production listen");
@@ -61,7 +70,19 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
             }
             QCoreApplication::processEvents();
         }
-        require(until([&]{return rings.load()==(phase+1)*triggers*4-(missing?4:0);}),"source confirmation releases host outputs");
+        require(until([&]{return rings.load()==(phase+1)*logicalTriggersPerPhase*4-(missing?4:0);}),"source confirmation releases host outputs");
+        if(!missing){
+            std::lock_guard<std::mutex> lock(ringIdentityMutex);
+            for(int c=0;c<4;++c){
+                const std::size_t base=static_cast<std::size_t>(phase)*logicalTriggersPerPhase;
+                require(ringTriggers[c].size()>=base+logicalTriggersPerPhase,"Ring logical identity count");
+                require(ringIndices[c].size()>=base+logicalTriggersPerPhase,"Ring logical index count");
+                for(int i=0;i<logicalTriggersPerPhase;++i){
+                    require(ringTriggers[c][base+i]==static_cast<std::uint16_t>(i+1),"Ring physical/logical trigger identity");
+                    require(ringIndices[c][base+i]==i,"Ring logical index reset");
+                }
+            }
+        }
         require(controller.sendStopMeasure(),"production Stop");readCommands(paimage::stopCommand());
         ++phase;
     }
@@ -71,13 +92,13 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
             require(until([&]{auto stats=controller.getAllCardStats();for(const auto& s:stats)if(s.sessionBoundaryPacketsDiscarded<tailCount)return false;return true;}),"disabled tails observed before parsing admission");};
         for(int cycle=0;cycle<100;++cycle){tail();require(controller.sendStartMeasure(),"100-cycle production START");readCommands(paimage::startCommand());
             require(controller.sendStopMeasure(),"100-cycle production STOP");readCommands(paimage::stopCommand());tail();}
-        require(rings==264,"disabled tails never reach Ring");
+        require(rings==3*logicalTriggersPerPhase*4,"disabled tails never reach Ring");
     }
     controller.stop();require(until([&]{return stopped;}),"asynchronous listener shutdown");require(values,"Ring raw values");
     if(!stress)for(int c=0;c<4;++c)for(int phase=0;phase<3;++phase)for(const auto& channel:{QString("A"),QString("B")}){
         QFile file(dir.filePath(QString("Card%1_Ch%2_switch_%3.dat").arg(c+1).arg(channel).arg(phase,3,10,QChar('0'))));
         require(file.open(QIODevice::ReadOnly),"save sequence retained across sample changes");
-        require(file.size()==qint64(22)*(phase==1?12500:5000)*2,"sample-specific saved file size");
+        require(file.size()==qint64(logicalTriggersPerPhase)*(phase==1?12500:5000)*2,"sample-specific saved file size");
     }
     for(auto s:hardware)closesocket(s);WSACleanup();
     GetProcessTimes(GetCurrentProcess(),&creation,&exit,&kernelAfter,&userAfter);

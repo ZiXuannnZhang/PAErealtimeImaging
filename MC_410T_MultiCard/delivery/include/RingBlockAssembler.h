@@ -52,6 +52,15 @@ public:
     void pushChannelLine(int channelId, uint16_t triggerSeq,
                          const float *line, int length);
 
+    // Called after the final configured logical trigger has delivered all
+    // enabled channels. Reset the wavelength/angle phase for the next round,
+    // while keeping blockSeq monotonic for producer/consumer observability.
+    bool completeLogicalRound();
+
+    // SourceCore timeout boundary. This clears a partial block and invokes
+    // the existing reset callback exactly at the physical timeout boundary.
+    void resetAfterPhysicalTimeout();
+
     void setBlockCallback(BlockCallback cb) { m_callback = std::move(cb); }
     void setProgressCallback(ProgressCallback cb) { m_progressCallback = std::move(cb); }
     void setTimeoutCallback(TimeoutCallback cb) { m_timeoutCallback = std::move(cb); }

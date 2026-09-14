@@ -251,6 +251,7 @@ private:
     // 数据格式参数（注册表配置，无 UI 接口；真实采集固定 250MHz=FPGA_ADC_FREQ_HZ）
     int    m_bitsPerChannel    = 32;    // 每通道位宽（16 或 32）
     double m_sampleIntervalNs  = FPGA_ADC_INTERVAL_NS;   // 采样间隔 ns（4.0=250MHz 满速率）
+    int    m_logicalTriggersPerRound = AcqConfig::kDefaultLogicalTriggersPerRound;
 
     // pull 模式计数器（配合 spnRefreshRate 跳帧）
     int m_refreshCounter;
@@ -279,6 +280,18 @@ private:
     RingBlockAssembler *m_ringAssembler = nullptr;   // 阶段B：真实采集组包器
     mutable std::mutex m_ringAssemblerMutex;          // 仅保护成像组包器，不与采集/保存共享
     std::atomic<bool> m_ringAssemblerConfigured{false};
+    // Count-boundary events are emitted when the first card observes the
+    // final logical identity. The Ring consumer applies the boundary only
+    // after every enabled card for that identity has been consumed.
+    bool m_ringBoundaryPending = false;
+    uint64_t m_ringBoundarySession = 0;
+    uint64_t m_ringBoundaryGeneration = 0;
+    uint16_t m_ringBoundaryTrigger = 0;
+    uint32_t m_ringBoundaryCards = 0;
+    bool m_ringBoundaryApplied = false;
+    uint64_t m_lastRingBoundarySession = 0;
+    uint64_t m_lastRingBoundaryGeneration = 0;
+    uint16_t m_lastRingBoundaryTrigger = 0;
     bool m_restartRingOnSvcStop = false;   // 运行中修改环形参数后，待停止完成时自动重启
 
     // 独立有界成像旁路。队列持有共享只读触发帧，不复制整卡 A/B 数据。

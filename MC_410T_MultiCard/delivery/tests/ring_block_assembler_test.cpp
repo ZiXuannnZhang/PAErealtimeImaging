@@ -255,6 +255,29 @@ bool testTimeoutReset(Runner &r)
     return true;
 }
 
+bool testLogicalRoundBoundary(Runner &r)
+{
+    Fixture f;
+    f.configure({1}, 2, 1, 0.0, 10.0, 1.0, 4, 1, 0.0);
+    f.line(0, 20, {20.0f});
+    f.line(0, 21, {21.0f});
+
+    r.check(f.blocks.size() == 1, "pre-boundary block must complete");
+    if (f.blocks.size() != 1) return false;
+    r.check(f.assembler.completeLogicalRound(),
+            "logical round boundary must reset angle phase");
+
+    f.line(0, 30, {30.0f});
+    f.line(0, 31, {31.0f});
+    r.check(f.blocks.size() == 2, "post-boundary block must complete");
+    if (f.blocks.size() != 2) return false;
+    r.check(f.blocks[1].blockSeq == 1,
+            "logical round boundary must preserve block sequence monotonicity");
+    r.equal(f.blocks[1].angles, {0.0f, 1.0f},
+            "logical round boundary must restart wavelength angle phase");
+    return true;
+}
+
 bool testNormalGoldenRegression(Runner &r)
 {
     Fixture f;
@@ -318,6 +341,7 @@ int main()
         {"T8 sequence wrap overflow", testSequenceWrapOverflow},
         {"T9 timeout reset", testTimeoutReset},
         {"T10 normal golden regression", testNormalGoldenRegression},
+        {"T11 logical round boundary", testLogicalRoundBoundary},
     };
 
     for (const auto &test : tests) {
@@ -327,6 +351,6 @@ int main()
             std::cout << "PASS " << test.first << '\n';
     }
     if (!runner.ok) return 1;
-    std::cout << "PASS all RingBlockAssembler tests (T1-T10)\n";
+    std::cout << "PASS all RingBlockAssembler tests (T1-T11)\n";
     return 0;
 }

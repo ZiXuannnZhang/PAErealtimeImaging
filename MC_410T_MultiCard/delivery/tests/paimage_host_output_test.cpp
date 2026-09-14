@@ -4,10 +4,14 @@
 #include <QDir>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
+#include <vector>
 using namespace paimage;
 using namespace std::chrono_literals;
-void require(bool b){if(!b)throw std::runtime_error("host delivery contract");}
+void require(bool b,const char* message="host delivery contract"){
+    if(!b)throw std::runtime_error(message);
+}
 template<class F> bool until(F f){auto end=std::chrono::steady_clock::now()+3s;while(!f()&&std::chrono::steady_clock::now()<end)std::this_thread::sleep_for(1ms);return f();}
 int main(int argc,char** argv){QCoreApplication app(argc,argv);
     for(int samples:{5000,12500}){
@@ -73,5 +77,74 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             require(file.open(QIODevice::ReadOnly));require(file.size()==(g==1?20000:10000));
         }
     }
-    std::cout<<"PASS production source/output/host boundary: four cards, 28/70, exact float16 files, display and Ring; queued saving generation retains original directory; no legacy QThreads\n";
+    // T11: the production save and sync/Ring paths consume the same
+    // normalization decision. The first visible identity is filtered from
+    // both paths, and the N logical identities are identical in saved bytes
+    // and Ring metadata.
+    {
+        QTemporaryDir root(QDir::currentPath()+"/normalized-output-XXXXXX");require(root.isValid());
+        DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=64;config.displayPoints=16;
+        std::mutex ringMutex;std::vector<std::uint16_t> ringTriggers;std::vector<std::int64_t> ringIndices;
+        std::vector<bool> ringBoundaries;
+        std::vector<PhysicalRoundEvent> roundEvents;
+        DataProcessor processor(0,nullptr,&display,nullptr,config,
+            [&](const TriggerGroupConstPtr& frame){
+                std::lock_guard<std::mutex> lock(ringMutex);
+                ringTriggers.push_back(frame->triggerSeq);
+                ringIndices.push_back(frame->logicalTriggerIndex);
+                ringBoundaries.push_back(frame->roundComplete);
+                return ImagingSubmitResult::Accepted;
+            });
+        HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,3,
+            [&](const PhysicalRoundEvent& event){roundEvents.push_back(event);});
+        output.beginSession(77);output.start();
+        const auto save=output.startSaving(root.path(),100,"normalized");
+        require(until([&]{return output.savingApplied(save);}));
+        auto make=[&](std::uint16_t trigger){
+            auto frame=std::make_shared<CardFrame>();frame->card=0;frame->trigger=trigger;
+            frame->measurementSession=77;frame->first=1;frame->complete=true;frame->reason=Decision::Complete;
+            frame->bytes.resize(16*8);
+            for(int i=0;i<16;++i){const std::int32_t b=-static_cast<std::int32_t>(trigger);
+                const std::int32_t a=static_cast<std::int32_t>(trigger);
+                std::memcpy(frame->bytes.data()+i*8,&b,4);
+                std::memcpy(frame->bytes.data()+i*8+4,&a,4);}
+            return frame;
+        };
+        auto control=make(100);output.card(control);output.sync(100,{control},false);
+        for(std::uint16_t trigger=101;trigger<=103;++trigger){
+            auto frame=make(trigger);output.card(frame);output.sync(trigger,{frame},false);
+        }
+        require(until([&]{std::lock_guard<std::mutex> lock(ringMutex);
+            return saver.savedCount()==3&&ringTriggers.size()==3;}));
+        const auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));
+        output.stop();
+        {
+            std::lock_guard<std::mutex> lock(ringMutex);
+            require((ringTriggers==std::vector<std::uint16_t>{101,102,103})&&
+                        (ringIndices==std::vector<std::int64_t>{0,1,2})&&
+                        (ringBoundaries==std::vector<bool>{false,false,true}),
+                    "T11 Ring identities");
+        }
+        require(roundEvents.size()==2&&
+                    roundEvents[0].kind==PhysicalRoundEvent::Kind::ControlFiltered&&
+                    roundEvents[1].kind==PhysicalRoundEvent::Kind::CountBoundary,
+                "T11 round events");
+        QFile savedA(root.filePath("Card1_ChA_normalized_000.dat"));
+        require(savedA.open(QIODevice::ReadOnly)&&savedA.size()==3*16*2,
+                "T11 saved logical count");
+        // FileSaver's float16 output is constant per trigger in this fixture;
+        // the three chunks therefore prove that the filtered control value
+        // 100 never reached the save path.
+        const QByteArray bytes=savedA.readAll();
+        for (int logical = 0; logical < 3; ++logical) {
+            const std::uint16_t expected = static_cast<std::uint16_t>(0x5650 + logical * 0x10);
+            for (int sample = 0; sample < 16; ++sample) {
+                std::uint16_t actual = 0;
+                std::memcpy(&actual, bytes.constData() +
+                                      (logical * 16 + sample) * 2, sizeof(actual));
+                require(actual == expected, "T11 saved identity");
+            }
+        }
+    }
+    std::cout<<"PASS production source/output/host boundary: four cards, 28/70, exact float16 files, display and Ring; normalized 1+N save/Ring identity; queued saving generation retains original directory; no legacy QThreads\n";
 }

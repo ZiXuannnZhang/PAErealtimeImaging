@@ -41,6 +41,7 @@ void RingBlockAssembler::reset()
     m_blockTriggers.store(0, std::memory_order_relaxed);
     m_globalTrigger = 0;
     m_nextPendingOrder = 0;
+    m_lastTriggerUs.store(0, std::memory_order_relaxed);
     if (m_configured) {
         const size_t alines = static_cast<size_t>(m_channelCount) * m_perChannelBlock;
         m_raw.assign(alines * static_cast<size_t>(m_sampDepth), 0.0f);
@@ -51,6 +52,27 @@ void RingBlockAssembler::reset()
         m_angles.clear();
         m_channels.clear();
     }
+}
+
+bool RingBlockAssembler::completeLogicalRound()
+{
+    if (!m_configured || !m_pending.empty() ||
+        m_blockTriggers.load(std::memory_order_relaxed) != 0)
+        return false;
+
+    // The ring dialog validates that N logical triggers is an integral number
+    // of blocks. Keep the block sequence monotonic, but reset the wavelength
+    // and angular phase that must restart at the next physical round.
+    m_globalTrigger = 0;
+    m_nextPendingOrder = 0;
+    return true;
+}
+
+void RingBlockAssembler::resetAfterPhysicalTimeout()
+{
+    resetRoundState();
+    if (m_timeoutCallback)
+        m_timeoutCallback();
 }
 
 void RingBlockAssembler::pushChannelLine(int channelId, uint16_t triggerSeq,
@@ -67,8 +89,7 @@ void RingBlockAssembler::pushChannelLine(int channelId, uint16_t triggerSeq,
     if (m_timeoutResetSec > 0.0 && lastUs > 0) {
         const double dt = static_cast<double>(nowUs - lastUs) / 1e6;
         if (dt > m_timeoutResetSec) {
-            resetRoundState();
-            if (m_timeoutCallback) m_timeoutCallback();
+            resetAfterPhysicalTimeout();
         }
     }
     m_lastTriggerUs.store(nowUs, std::memory_order_relaxed);
@@ -120,6 +141,7 @@ void RingBlockAssembler::resetRoundState()
     m_blockTriggers.store(0, std::memory_order_relaxed);
     m_globalTrigger = 0;
     m_nextPendingOrder = 0;
+    m_lastTriggerUs.store(0, std::memory_order_relaxed);
     // 超时判定新一圈：块序号随新一圈重新计数，使“seq % 每圈块数 == 0”的
     // 圈末判定点与重建侧清零（ring_reset 后服务端从 0 计数）重新对齐
     m_blockSeq = 0;

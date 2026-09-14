@@ -8,13 +8,16 @@
 #include <stdexcept>
 namespace paimage {
 HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors,
-    std::vector<FileSaver*> savers,TraceWriter* trace,TimingWriter* timing)
+    std::vector<FileSaver*> savers,TraceWriter* trace,TimingWriter* timing,
+    std::uint64_t logicalTriggersPerRound,PhysicalRoundNormalizer::Observer normalizerObserver)
     :processors_(std::move(processors)),savers_(std::move(savers)),trace_(trace),timing_(timing),
      converter_(bits,QDateTime::currentMSecsSinceEpoch(),SocketReceiver::now()),
      workers_(int(processors_.size()),block,[this](Frame f){consumeCard(f);},
         [this](const SyncFrame& f){consumeSync(f);},
         [this](auto r,Frame f){observe(f,5,std::uint8_t(r));}) {
     if(processors_.size()!=savers_.size())throw std::invalid_argument("host card mapping");
+    if(logicalTriggersPerRound)
+        normalizer_=std::make_unique<PhysicalRoundNormalizer>(logicalTriggersPerRound,std::move(normalizerObserver));
     for(std::size_t i=0;i<processors_.size();++i){
         auto saver=savers_[i];processors_[i]->setDirectSaveSink([saver](const TriggerGroupPtr& f){return saver->consumeTriggerGroup(f);});
     }
@@ -23,12 +26,44 @@ HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors
 }
 HostOutput::~HostOutput(){stop();}
 void HostOutput::card(Frame f){
+    if(!f)return;
+    PhysicalRoundClassification classification;
+    if(normalizer_){
+        classification=normalizer_->classify(f->measurementSession,f->trigger);
+        converter_.tagNormalization(f,classification);
+        if(classification.decision==PhysicalTriggerDecision::OperationalStartupControl){
+            // A timeout is itself a physical boundary. Even when the timed
+            // out identity is the visible operational control, clear the
+            // normalizer so the following identity cannot be accepted as a
+            // continuation of the stale partial round.
+            if(f->reason==Decision::Timeout)
+                normalizer_->timeoutBoundary(f->measurementSession);
+            return;
+        }
+    }
     converter_.tagSaveSession(f,processors_.at(f->card)->captureSaveSessionGen());const auto begin=SocketReceiver::now();const auto session=f->measurementSession,link=f->firstIngressId;const int card=f->card;
-    workers_.pushCard(std::move(f));if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.correlation=link;r.threadId=GetCurrentThreadId();r.card=card;r.kind=std::uint16_t(TimingKind::CardEnqueue);timing_->observe(r,end-begin>=500000);}
+    workers_.pushCard(f);
+    if(normalizer_&&f->reason==Decision::Timeout&&classification.decision==PhysicalTriggerDecision::LogicalScan)
+        normalizer_->timeoutBoundary(f->measurementSession);
+    if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.correlation=link;r.threadId=GetCurrentThreadId();r.card=card;r.kind=std::uint16_t(TimingKind::CardEnqueue);timing_->observe(r,end-begin>=500000);}
 }
 void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
+    bool filter=false;
+    if(normalizer_){
+        for(const auto& f:frames){
+            if(!f)continue;
+            const auto classification=normalizer_->classify(f->measurementSession,f->trigger);
+            converter_.tagNormalization(f,classification);
+            if(classification.decision==PhysicalTriggerDecision::OperationalStartupControl)filter=true;
+        }
+        if(filter)return;
+    }
     const auto begin=SocketReceiver::now();const auto session=frames.empty()?0:frames.front()->measurementSession;workers_.pushSync(trigger,frames,startup);
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.threadId=GetCurrentThreadId();r.card=-1;r.kind=std::uint16_t(TimingKind::SyncEnqueue);r.value0=std::uint32_t(frames.size());r.flags=startup?1:0;timing_->observe(r,end-begin>=500000);}
+}
+PhysicalRoundNormalizer::Snapshot HostOutput::normalizerSnapshot() const{
+    if(normalizer_)return normalizer_->snapshot();
+    PhysicalRoundNormalizer::Snapshot result;result.firstVisibleFilterMode=false;return result;
 }
 void HostOutput::observe(Frame f,std::uint8_t stage,std::uint8_t reason,std::uint32_t value){
     if(!trace_)return;TraceRecord r;r.monotonicNs=SocketReceiver::now();

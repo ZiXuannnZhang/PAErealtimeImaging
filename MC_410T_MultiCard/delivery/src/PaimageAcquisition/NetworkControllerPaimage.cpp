@@ -49,6 +49,33 @@ bool NetworkController::createPaimageBackend(QString& error){
         qBound(0,m_config.socketTimestampMode,3));
     settings.acquisition={m_config.nCards,m_config.samplesPerTrig(),m_config.bitsPerChannel,
                           m_config.startupIdleMs,timestampMode};
+    settings.logicalTriggersPerRound=static_cast<std::uint64_t>(m_config.logicalTriggersPerRound);
+    settings.normalizerObserver=[this](const paimage::PhysicalRoundEvent& event){
+        const QString message=QString::fromLatin1(paimage::physicalRoundEventName(event.kind));
+        const QJsonObject fields{
+            {"measurementSession",QString::number(event.measurementSession)},
+            {"roundGeneration",QString::number(event.roundGeneration)},
+            {"triggerSeq",static_cast<int>(event.triggerSeq)},
+            {"physicalTriggerSeq",static_cast<int>(event.triggerSeq)},
+            {"basis",QString::fromStdString(event.basis)},
+            {"state",QString::fromLatin1(paimage::physicalRoundStateName(event.state))},
+            {"configuredLogicalTriggersPerRound",QString::number(event.configuredLogicalTriggersPerRound)},
+            {"physicalDistinctObserved",QString::number(event.physicalDistinctObserved)},
+            {"operationalControlFiltered",QString::number(event.operationalControlFiltered)},
+            {"logicalDistinctAccepted",QString::number(event.logicalDistinctAccepted)},
+            {"countBoundaryResets",QString::number(event.countBoundaryResets)},
+            {"timeoutBoundaryResets",QString::number(event.timeoutBoundaryResets)},
+            {"currentLogicalDistinctCount",QString::number(event.currentLogicalDistinctCount)},
+            {"firstVisibleFilterMode",true},
+            {"filterLayer","paimage-host-output"},
+            {"packetLossAccounting","unchanged"},
+            {"filterClassification","software-operational"},
+            {"filterIsNotNetworkLoss",true},
+            {"acceptedControlInvisibleRisk","first-visible-scan-may-be-filtered"}};
+        recordDiagnosticEvent(QStringLiteral("paimage.round"),message,
+                              DiagnosticRecorder::Severity::Info,fields);
+        if(m_physicalRoundBoundarySink)m_physicalRoundBoundarySink(event);
+    };
     settings.localIp=m_config.localBindIP;
     for(const auto& ip:m_targetIPs)settings.targets.push_back(ip.toStdString());
     std::vector<DataProcessor*> processors;std::vector<FileSaver*> savers;
@@ -73,6 +100,9 @@ bool NetworkController::createPaimageBackend(QString& error){
             {"diagnosticModes",QJsonObject{{"0","raw-ingress only"},{"1","raw-ingress plus lightweight timing"},{"2","lightweight timing plus externally managed system capture index"}}},
             {"listenId",m_diagnosticListenId},{"configId",m_currentConfigId},{"samples",m_config.samplesPerTrig()},
             {"bits",m_config.bitsPerChannel},{"cards",m_config.nCards},{"dataPort",8001},{"feedbackPort",8000},
+            {"configuredLogicalTriggersPerRound",m_config.logicalTriggersPerRound},
+            {"logicalRoundConfigSource","AcquisitionParams/LogicalTriggersPerRound; ring mode overrides from RingReconCudaConfig"},
+            {"physicalRoundFilterPolicy","first-visible-operational"},
             {"targets",targets},{"startupPolicy",m_config.startupIdleMs>0?"legacy":"bypass"},
             {"socketTimestampMode",paimage::socketTimestampModeName(timestampMode)},
             {"socketTimestampDefaultOff",timestampMode==paimage::SocketTimestampMode::Off},
@@ -140,7 +170,7 @@ bool NetworkController::createPaimageBackend(QString& error){
 
 bool NetworkController::startPaimage(const AcqConfig& config,std::function<void()> onStarted,std::function<void()> onFailed){
     if(config.nCards<1||config.nCards>32||config.samplesPerTrig()<128||
-       (config.bitsPerChannel!=16&&config.bitsPerChannel!=32)){
+       (config.bitsPerChannel!=16&&config.bitsPerChannel!=32)||config.logicalTriggersPerRound<=0){
         emit errorOccurred(QStringLiteral("PAimage采集配置无效：检查卡数、位宽及采样点数"));if(onFailed)onFailed();return false;}
     if(m_running||m_stopThread.joinable()){emit errorOccurred(QStringLiteral("请等待当前监听停止后再启动"));if(onFailed)onFailed();return false;}
     m_config=config;m_targetIPs.clear();
@@ -199,6 +229,7 @@ void NetworkController::recordPaimageSnapshot(){
     if(!m_paimage)return;
     const auto counters=m_paimage->receiver().counters();QJsonArray buffers,bytes;
     const auto outputStats=m_paimage->output().stats();
+    const auto roundStats=m_paimage->output().normalizerSnapshot();
     for(auto n:m_paimage->receiver().receiveBuffers())buffers.append(n<0?QJsonValue("unknown"):QJsonValue(n));
     for(const auto& p:m_processors)bytes.append(QString::number(p->stats().socketBytesReceived.load()));
     QJsonObject fields{{"backendId","paimage-derived"},{"configId",m_currentConfigId},
@@ -208,9 +239,21 @@ void NetworkController::recordPaimageSnapshot(){
         {"sourceStartupFilteredCards",QString::number(counters.startupFilteredCards)},
         {"sourceStartupFilteredSync",QString::number(counters.startupFilteredSync)},
         {"sourceStartupIncompleteCounter",QString::number(counters.startupIncomplete)},
-        {"sourceRuntimeIncompleteCounter",QString::number(counters.runtimeIncomplete)},
-        {"incompleteCounterUnit","source mixed card/sync events; inspect per-object trace"},
-        {"dataReceiveBuffers",buffers},{"feedbackReceiveBuffer",m_paimage->receiver().feedbackReceiveBuffer()},
+         {"sourceRuntimeIncompleteCounter",QString::number(counters.runtimeIncomplete)},
+         {"incompleteCounterUnit","source mixed card/sync events; inspect per-object trace"},
+         {"roundGeneration",QString::number(roundStats.roundGeneration)},
+         {"configuredLogicalTriggersPerRound",QString::number(roundStats.configuredLogicalTriggersPerRound)},
+         {"physicalDistinctObserved",QString::number(roundStats.physicalDistinctObserved)},
+         {"operationalControlFiltered",QString::number(roundStats.operationalControlFiltered)},
+         {"logicalDistinctAccepted",QString::number(roundStats.logicalDistinctAccepted)},
+         {"countBoundaryResets",QString::number(roundStats.countBoundaryResets)},
+         {"timeoutBoundaryResets",QString::number(roundStats.timeoutBoundaryResets)},
+         {"currentLogicalDistinctCount",QString::number(roundStats.currentLogicalDistinctCount)},
+         {"roundState",QString::fromLatin1(paimage::physicalRoundStateName(roundStats.state))},
+         {"firstVisibleFilterMode",roundStats.firstVisibleFilterMode},
+         {"recentDecisionCacheSize",static_cast<qint64>(roundStats.recentDecisionCacheSize)},
+         {"recentDecisionCacheCapacity",static_cast<qint64>(roundStats.recentDecisionCacheCapacity)},
+         {"dataReceiveBuffers",buffers},{"feedbackReceiveBuffer",m_paimage->receiver().feedbackReceiveBuffer()},
         {"receivePriorityRequested",2},{"receivePriorityError",m_paimage->receiver().priorityResult()},
         {"receivePriorityActual",m_paimage->receiver().actualPriority()},
         {"receiveHardErrors",QString::number(m_paimage->receiver().hardErrors())},

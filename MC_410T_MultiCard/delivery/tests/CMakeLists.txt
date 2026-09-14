@@ -167,6 +167,7 @@ if(WIN32)
     add_subdirectory(paimage_core)
     target_sources(network_diagnostics_test PRIVATE
         ../src/PaimageAcquisition/HostOutput.cpp
+        ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
         ../src/PaimageAcquisition/Backend.cpp
         ../src/PaimageAcquisition/NetworkControllerPaimage.cpp)
     target_link_libraries(network_diagnostics_test PRIVATE paimage_socket)
@@ -199,6 +200,7 @@ if(WIN32)
     set_tests_properties(paimage_start_overflow PROPERTIES RUN_SERIAL TRUE)
     add_executable(paimage_host_output_test paimage_host_output_test.cpp
         ../src/PaimageAcquisition/HostOutput.cpp
+        ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
         ../src/PaimageAcquisition/Backend.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
         ../src/FileSaver.cpp ../include/FileSaver.h

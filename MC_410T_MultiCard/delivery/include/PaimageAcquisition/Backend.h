@@ -10,7 +10,9 @@ namespace paimage {
 class Backend {
 public:
     struct Settings {Config acquisition;int blockSize=50;std::string localIp;
-        std::vector<std::string> targets;std::uint16_t dataPort=8001,feedbackPort=8000,controlPort=8080;};
+        std::vector<std::string> targets;std::uint16_t dataPort=8001,feedbackPort=8000,controlPort=8080;
+        std::uint64_t logicalTriggersPerRound=0;
+        PhysicalRoundNormalizer::Observer normalizerObserver;};
     Backend(Settings,std::vector<DataProcessor*>,std::vector<FileSaver*>,TraceWriter*,TimingWriter* = nullptr,LoopLog* = nullptr);
     ~Backend();
     bool listen(std::string&);

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <limits>
 #ifdef _WIN32
 #include <iphlpapi.h>
 #include <icmpapi.h>
@@ -537,8 +538,22 @@ void NetworkController::setDisplayPoints(int displayPoints) {
     for (auto& p : m_processors) p->setDisplayPoints(displayPoints);
 }
 
+void NetworkController::setLogicalTriggersPerRound(std::uint64_t count) {
+    if (count == 0 || count > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
+        return;
+    m_config.logicalTriggersPerRound = static_cast<int>(count);
+    if (m_paimage)
+        m_paimage->output().setConfiguredLogicalTriggersPerRound(count);
+}
+
 void NetworkController::reconfigure(const AcqConfig& config) {
-    if(m_paimage){m_config.displayPoints=config.displayPoints;setDisplayPoints(config.displayPoints);return;}
+    if(m_paimage){
+        m_config.displayPoints=config.displayPoints;
+        setDisplayPoints(config.displayPoints);
+        if (config.logicalTriggersPerRound > 0)
+            setLogicalTriggersPerRound(static_cast<std::uint64_t>(config.logicalTriggersPerRound));
+        return;
+    }
     m_config = config;
     for (auto& p : m_processors) p->updateConfig(config);
 }

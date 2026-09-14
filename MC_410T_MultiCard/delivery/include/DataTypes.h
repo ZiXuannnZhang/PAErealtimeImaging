@@ -5,6 +5,7 @@
 #include <atomic>
 #include <string>
 #include "Constants.h"
+#include "PaimageAcquisition/PhysicalRoundNormalizer.h"
 
 // ============================================================
 // DataPacket  Layer 2  Layer 3 的数据包（接收线程  处理线程）
@@ -33,6 +34,17 @@ struct TriggerGroup {
     uint64_t sessionGen   = 0;        // 自动保存会话代（0=手动/无会话代；DataProcessor 入队前打标）
     uint64_t measurementSession = 0;  // 采集会话令牌；成像旁路用来拒绝旧会话帧
 
+    // PAimage physical-round normalization metadata.  The source frame is
+    // immutable, so FrameConverter copies this decision onto the host group
+    // before either the save or sync worker can consume it.
+    bool normalizationApplied = false;
+    paimage::PhysicalTriggerDecision physicalDecision =
+        paimage::PhysicalTriggerDecision::LogicalScan;
+    uint64_t roundGeneration = 0;
+    int64_t logicalTriggerIndex = -1;
+    bool roundComplete = false;
+    bool sourceTimedOut = false;
+
     //  完整采样数据（float32，sampleCount 个点）
     std::vector<float> freqA;         // A 通道瞬时频率（kHz）
     std::vector<float> freqB;         // B 通道瞬时频率（kHz）
@@ -54,6 +66,12 @@ struct TriggerGroup {
         timestamp_ms = 0; isComplete = true; sourceIPv4 = 0;
         sessionGen = 0;
         measurementSession = 0;
+        normalizationApplied = false;
+        physicalDecision = paimage::PhysicalTriggerDecision::LogicalScan;
+        roundGeneration = 0;
+        logicalTriggerIndex = -1;
+        roundComplete = false;
+        sourceTimedOut = false;
         freqA.clear(); freqB.clear();
         phaseA_display.clear(); phaseB_display.clear();
         freqA_display.clear();  freqB_display.clear();

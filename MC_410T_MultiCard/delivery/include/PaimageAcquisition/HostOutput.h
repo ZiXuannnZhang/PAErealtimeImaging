@@ -5,19 +5,32 @@
 #include "TimingWriter.h"
 #include "DataProcessor.h"
 #include "FileSaver.h"
+#include <memory>
 namespace paimage {
 // Lifetimes: processors/savers and trace outlive this adapter. Their QThreads
 // remain unstarted; only the recovered two output workers invoke delivery.
 class HostOutput {
 public:
-    HostOutput(int bits,int blockSize,std::vector<DataProcessor*>,std::vector<FileSaver*>,TraceWriter*,TimingWriter* = nullptr);
+    // logicalTriggersPerRound is required by the production Backend.  Zero
+    // keeps the historical adapter-only tests in pass-through mode.
+    HostOutput(int bits,int blockSize,std::vector<DataProcessor*>,std::vector<FileSaver*>,TraceWriter*,
+               TimingWriter* = nullptr,
+               std::uint64_t logicalTriggersPerRound = 0,
+               PhysicalRoundNormalizer::Observer = {});
     ~HostOutput();
     void start(){workers_.start();}
     void stop(){workers_.stop();}
     void requestStop(){workers_.requestStop();}
-    void beginSession(std::uint64_t s){workers_.beginSession(s);}
+    void beginSession(std::uint64_t s){
+        if(normalizer_)normalizer_->beginSession(s);
+        workers_.beginSession(s);
+    }
     void card(Frame f);
     void sync(std::uint16_t,const std::vector<Frame>&,bool startup);
+    void setConfiguredLogicalTriggersPerRound(std::uint64_t count){
+        if(normalizer_)normalizer_->setConfiguredLogicalTriggersPerRound(count);
+    }
+    PhysicalRoundNormalizer::Snapshot normalizerSnapshot() const;
     std::uint64_t startSaving(const QString&,int,const QString&);
     std::uint64_t stopSaving();
     void prepareConfigurationRestart(){configurationRestart_=true;}
@@ -31,6 +44,7 @@ private:
     void observe(Frame,std::uint8_t stage,std::uint8_t reason,std::uint32_t value=0);
     std::vector<DataProcessor*> processors_;std::vector<FileSaver*> savers_;
     TraceWriter* trace_;TimingWriter* timing_;FrameConverter converter_;OutputWorkers workers_;
+    std::unique_ptr<PhysicalRoundNormalizer> normalizer_;
     std::atomic<bool> configurationRestart_{false};
 };
 }
