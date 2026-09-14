@@ -648,7 +648,7 @@ MainWindow::MainWindow(QWidget *parent)
             !m_reconSaveEnabled || m_reconSaveDir.isEmpty())
             return;
         const auto round = m_netController->physicalRoundSnapshot();
-        if (!round.physicalRoundTimeoutEnabled || round.timeoutResetNs <= 0 ||
+        if (round.timeoutResetNs <= 0 ||
             round.state != paimage::PhysicalRoundState::CollectingScan ||
             !round.hasLastDistinctTrigger || round.lastDistinctTriggerTimeNs <= 0)
             return;
