@@ -255,6 +255,26 @@ bool testTimeoutReset(Runner &r)
     return true;
 }
 
+bool testExternalTimeoutOwnership(Runner &r)
+{
+    Fixture f;
+    f.configure({1, 1}, 2, 1, 0.0, 10.0, 1.0, 32, 1, 0.02);
+    f.assembler.setTimeoutManagedExternally(true);
+    f.line(0, 5, {5.0f});
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    f.line(0, 6, {6.0f});
+    f.line(1, 6, {60.0f});
+
+    r.check(f.timeouts == 0,
+            "externally managed timeout must not fire the assembler boundary");
+    r.check(f.blocks.empty(),
+            "externally managed timeout must retain the partial block until the owner resets it");
+    f.assembler.resetAfterPhysicalTimeout();
+    r.check(f.timeouts == 1 && f.blocks.empty(),
+            "explicit owner reset must remain available");
+    return true;
+}
+
 bool testLogicalRoundBoundary(Runner &r)
 {
     Fixture f;
@@ -340,8 +360,9 @@ int main()
         {"T7 numerically smallest current", testNumericallySmallCurrentTrigger},
         {"T8 sequence wrap overflow", testSequenceWrapOverflow},
         {"T9 timeout reset", testTimeoutReset},
-        {"T10 normal golden regression", testNormalGoldenRegression},
-        {"T11 logical round boundary", testLogicalRoundBoundary},
+        {"T10 external timeout ownership", testExternalTimeoutOwnership},
+        {"T11 normal golden regression", testNormalGoldenRegression},
+        {"T12 logical round boundary", testLogicalRoundBoundary},
     };
 
     for (const auto &test : tests) {
@@ -351,6 +372,6 @@ int main()
             std::cout << "PASS " << test.first << '\n';
     }
     if (!runner.ok) return 1;
-    std::cout << "PASS all RingBlockAssembler tests (T1-T11)\n";
+    std::cout << "PASS all RingBlockAssembler tests (T1-T12)\n";
     return 0;
 }

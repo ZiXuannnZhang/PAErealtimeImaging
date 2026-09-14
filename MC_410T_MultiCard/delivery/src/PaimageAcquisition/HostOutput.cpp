@@ -7,17 +7,29 @@
 #include <QDateTime>
 #include <stdexcept>
 namespace paimage {
+namespace {
+Time normalizationTime(const Frame& frame) {
+    if (!frame) return 0;
+    // SourceCore records first/closed using SocketReceiver::now(), i.e. the
+    // same steady-clock domain used by the physical-round timeout. Do not
+    // substitute wall-clock time when a source timestamp is absent.
+    return frame->first > 0 ? frame->first : frame->closed;
+}
+}
 HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors,
     std::vector<FileSaver*> savers,TraceWriter* trace,TimingWriter* timing,
-    std::uint64_t logicalTriggersPerRound,PhysicalRoundNormalizer::Observer normalizerObserver)
+    std::uint64_t logicalTriggersPerRound,PhysicalRoundNormalizer::Observer normalizerObserver,
+    double physicalRoundTimeoutSec)
     :processors_(std::move(processors)),savers_(std::move(savers)),trace_(trace),timing_(timing),
      converter_(bits,QDateTime::currentMSecsSinceEpoch(),SocketReceiver::now()),
      workers_(int(processors_.size()),block,[this](Frame f){consumeCard(f);},
         [this](const SyncFrame& f){consumeSync(f);},
         [this](auto r,Frame f){observe(f,5,std::uint8_t(r));}) {
     if(processors_.size()!=savers_.size())throw std::invalid_argument("host card mapping");
-    if(logicalTriggersPerRound)
+    if(logicalTriggersPerRound){
         normalizer_=std::make_unique<PhysicalRoundNormalizer>(logicalTriggersPerRound,std::move(normalizerObserver));
+        normalizer_->setTimeoutResetSec(physicalRoundTimeoutSec);
+    }
     for(std::size_t i=0;i<processors_.size();++i){
         auto saver=savers_[i];processors_[i]->setDirectSaveSink([saver](const TriggerGroupPtr& f){return saver->consumeTriggerGroup(f);});
     }
@@ -29,22 +41,19 @@ void HostOutput::card(Frame f){
     if(!f)return;
     PhysicalRoundClassification classification;
     if(normalizer_){
-        classification=normalizer_->classify(f->measurementSession,f->trigger);
+        classification=normalizer_->classify(f->measurementSession,f->trigger,
+                                              normalizationTime(f));
         converter_.tagNormalization(f,classification);
         if(classification.decision==PhysicalTriggerDecision::OperationalStartupControl){
-            // A timeout is itself a physical boundary. Even when the timed
-            // out identity is the visible operational control, clear the
-            // normalizer so the following identity cannot be accepted as a
-            // continuation of the stale partial round.
-            if(f->reason==Decision::Timeout)
-                normalizer_->timeoutBoundary(f->measurementSession);
+            // SourceCore::Decision::Timeout is a single-card packet assembly
+            // timeout. It must never be promoted to a physical-round idle
+            // boundary; only the normalizer's monotonic idle check owns that
+            // boundary.
             return;
         }
     }
     converter_.tagSaveSession(f,processors_.at(f->card)->captureSaveSessionGen());const auto begin=SocketReceiver::now();const auto session=f->measurementSession,link=f->firstIngressId;const int card=f->card;
     workers_.pushCard(f);
-    if(normalizer_&&f->reason==Decision::Timeout&&classification.decision==PhysicalTriggerDecision::LogicalScan)
-        normalizer_->timeoutBoundary(f->measurementSession);
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.correlation=link;r.threadId=GetCurrentThreadId();r.card=card;r.kind=std::uint16_t(TimingKind::CardEnqueue);timing_->observe(r,end-begin>=500000);}
 }
 void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
@@ -52,7 +61,8 @@ void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,boo
     if(normalizer_){
         for(const auto& f:frames){
             if(!f)continue;
-            const auto classification=normalizer_->classify(f->measurementSession,f->trigger);
+            const auto classification=normalizer_->classify(f->measurementSession,f->trigger,
+                                                              normalizationTime(f));
             converter_.tagNormalization(f,classification);
             if(classification.decision==PhysicalTriggerDecision::OperationalStartupControl)filter=true;
         }

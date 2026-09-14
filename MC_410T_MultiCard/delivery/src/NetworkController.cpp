@@ -11,6 +11,7 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 #include <cerrno>
 #include <cstring>
 #include <limits>
@@ -544,6 +545,22 @@ void NetworkController::setLogicalTriggersPerRound(std::uint64_t count) {
     m_config.logicalTriggersPerRound = static_cast<int>(count);
     if (m_paimage)
         m_paimage->output().setConfiguredLogicalTriggersPerRound(count);
+}
+
+void NetworkController::setPhysicalRoundTimeout(double seconds) {
+    if (!std::isfinite(seconds) || seconds < 0.0)
+        return;
+    m_physicalRoundTimeoutSec = seconds;
+    if (m_paimage)
+        m_paimage->output().setPhysicalRoundTimeout(seconds);
+}
+
+paimage::PhysicalRoundNormalizer::Snapshot NetworkController::physicalRoundSnapshot() const {
+    if (m_paimage)
+        return m_paimage->output().normalizerSnapshot();
+    paimage::PhysicalRoundNormalizer::Snapshot result;
+    result.firstVisibleFilterMode = false;
+    return result;
 }
 
 void NetworkController::reconfigure(const AcqConfig& config) {

@@ -16,7 +16,8 @@ public:
     HostOutput(int bits,int blockSize,std::vector<DataProcessor*>,std::vector<FileSaver*>,TraceWriter*,
                TimingWriter* = nullptr,
                std::uint64_t logicalTriggersPerRound = 0,
-               PhysicalRoundNormalizer::Observer = {});
+               PhysicalRoundNormalizer::Observer = {},
+               double physicalRoundTimeoutSec = 0.0);
     ~HostOutput();
     void start(){workers_.start();}
     void stop(){workers_.stop();}
@@ -29,6 +30,9 @@ public:
     void sync(std::uint16_t,const std::vector<Frame>&,bool startup);
     void setConfiguredLogicalTriggersPerRound(std::uint64_t count){
         if(normalizer_)normalizer_->setConfiguredLogicalTriggersPerRound(count);
+    }
+    void setPhysicalRoundTimeout(double seconds){
+        if(normalizer_)normalizer_->setTimeoutResetSec(seconds);
     }
     PhysicalRoundNormalizer::Snapshot normalizerSnapshot() const;
     std::uint64_t startSaving(const QString&,int,const QString&);

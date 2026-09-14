@@ -146,5 +146,130 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             }
         }
     }
-    std::cout<<"PASS production source/output/host boundary: four cards, 28/70, exact float16 files, display and Ring; normalized 1+N save/Ring identity; queued saving generation retains original directory; no legacy QThreads\n";
+    // T12 / timeout T1+T7: exercise the production HostOutput card+sync,
+    // save and Ring paths with a real monotonic idle boundary. The timeout is
+    // detected while the next identity is classified, before that identity
+    // can be admitted to either output path.
+    {
+        QTemporaryDir root(QDir::currentPath()+"/normalized-timeout-XXXXXX");require(root.isValid());
+        DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=64;config.displayPoints=16;
+        std::mutex ringMutex;std::vector<std::uint16_t> ringTriggers;std::vector<std::int64_t> ringIndices;
+        std::atomic<int> ringCount{0};
+        std::vector<bool> ringBoundaries;std::vector<PhysicalRoundEvent> roundEvents;
+        DataProcessor processor(0,nullptr,&display,nullptr,config,
+            [&](const TriggerGroupConstPtr& frame){
+                std::lock_guard<std::mutex> lock(ringMutex);
+                ringTriggers.push_back(frame->triggerSeq);
+                ringIndices.push_back(frame->logicalTriggerIndex);
+                ringBoundaries.push_back(frame->roundComplete);
+                ++ringCount;
+                return ImagingSubmitResult::Accepted;
+            });
+        HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,3,
+            [&](const PhysicalRoundEvent& event){roundEvents.push_back(event);},1.0e-6);
+        output.beginSession(79);output.start();
+        const auto save=output.startSaving(root.path(),100,"timeout");
+        require(until([&]{return output.savingApplied(save);}),
+                "timeout T1 save configuration");
+        auto make=[&](std::uint16_t trigger,std::int64_t time){
+            auto frame=std::make_shared<CardFrame>();frame->card=0;frame->trigger=trigger;
+            frame->measurementSession=79;frame->first=time;frame->closed=time;
+            frame->complete=true;frame->reason=Decision::Complete;frame->bytes.resize(16*8);
+            for(int i=0;i<16;++i){const std::int32_t b=-static_cast<std::int32_t>(trigger);
+                const std::int32_t a=static_cast<std::int32_t>(trigger);
+                std::memcpy(frame->bytes.data()+i*8,&b,4);
+                std::memcpy(frame->bytes.data()+i*8+4,&a,4);}
+            return frame;
+        };
+        auto deliver=[&](std::uint16_t trigger,std::int64_t time){
+            auto frame=make(trigger,time);output.card(frame);
+            output.sync(trigger,{frame},false);
+        };
+        deliver(100,1000);deliver(101,1500);deliver(102,1800);
+        deliver(200,20000);deliver(201,20500);deliver(202,20800);deliver(203,20900);
+        require(until([&]{return saver.savedCount()==5&&ringCount.load()==5;}),
+                "timeout T1/T7 save and Ring delivery");
+        const auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));
+        output.stop();
+        {
+            std::lock_guard<std::mutex> lock(ringMutex);
+            require((ringTriggers==std::vector<std::uint16_t>{101,102,201,202,203})&&
+                        (ringIndices==std::vector<std::int64_t>{0,1,0,1,2})&&
+                        (ringBoundaries==std::vector<bool>{false,false,false,false,true}),
+                    "timeout T1/T7 shared logical output");
+        }
+        require(roundEvents.size()==4&&
+                    roundEvents[0].kind==PhysicalRoundEvent::Kind::ControlFiltered&&
+                    roundEvents[1].kind==PhysicalRoundEvent::Kind::TimeoutBoundary&&
+                    roundEvents[1].basis=="physical-idle-timeout"&&
+                    roundEvents[1].idleDurationNs==18200&&
+                    roundEvents[1].lastDistinctTriggerSeq==102&&
+                    roundEvents[1].nextVisibleTriggerSeq==200&&
+                    roundEvents[2].kind==PhysicalRoundEvent::Kind::ControlFiltered&&
+                    roundEvents[3].kind==PhysicalRoundEvent::Kind::CountBoundary,
+                "timeout T1 event ordering and diagnostics");
+        QFile savedA(root.filePath("Card1_ChA_timeout_000.dat"));
+        require(savedA.open(QIODevice::ReadOnly)&&savedA.size()==5*16*2,
+                "timeout T7 saved logical count");
+    }
+
+    // T13 / timeout T3: SourceCore's 100ms assembly timeout closes only a
+    // partial card. It remains a logical output and must not create a
+    // physical-round boundary in HostOutput.
+    {
+        DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=400*4;
+        std::atomic<int> ringCount{0};std::atomic<int> timedOutRings{0};
+        std::vector<PhysicalRoundEvent> roundEvents;
+        DataProcessor processor(0,nullptr,&display,nullptr,config,
+            [&](const TriggerGroupConstPtr& frame){
+                if (frame->sourceTimedOut) ++timedOutRings;
+                ++ringCount;
+                return ImagingSubmitResult::Accepted;
+            });
+        HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,4,
+            [&](const PhysicalRoundEvent& event){roundEvents.push_back(event);},5.0);
+        output.beginSession(80);output.start();
+        std::atomic<bool> sawAssemblyTimeout{false};
+        SourceCore source({1,400,32,0},[&](Frame frame){output.card(frame);},
+            [&](auto trigger,const auto& frames,bool startup){output.sync(trigger,frames,startup);},
+            [&](const Observation& observation){
+                if (observation.decision==Decision::Timeout) sawAssemblyTimeout=true;
+            });
+        std::uint64_t ingress=1;
+        auto sendPacket=[&](std::uint16_t trigger,std::uint16_t packet,
+                            std::int64_t time){
+            const int totalBytes=400*8;const int offset=int(packet)*1440;
+            const int payload=std::min(1440,totalBytes-offset);
+            std::vector<std::uint8_t> bytes(payload+4);
+            bytes[0]=std::uint8_t(packet);bytes[1]=std::uint8_t(packet>>8);
+            bytes[2]=std::uint8_t(trigger);bytes[3]=std::uint8_t(trigger>>8);
+            for(int i=0;i<payload;i+=8){const std::int32_t b=-1,a=1;
+                std::memcpy(bytes.data()+4+i,&b,4);std::memcpy(bytes.data()+8+i,&a,4);}
+            source.ingest(0,bytes.data(),bytes.size(),time,ingress++,0x0100007f);
+        };
+        auto sendComplete=[&](std::uint16_t trigger,std::int64_t time){
+            sendPacket(trigger,0,time);sendPacket(trigger,1,time+1);sendPacket(trigger,2,time+2);
+        };
+        source.prepareStart(80,0);source.completeStart(true,0);
+        sendComplete(10,1000000000LL);sendComplete(11,1100000000LL);
+        sendPacket(12,0,1200000000LL);
+        source.poll(1400000000LL);
+        sendComplete(13,1300000000LL);
+        // The partial SourceCore frame is deliberately not sent to sync/Ring;
+        // the first complete frame is the startup control, leaving two
+        // complete logical frames for Ring.
+        require(until([&]{return ringCount.load()==2;}),
+                "timeout T3 output delivery");
+        const auto sourceCounters=source.counters();
+        const auto snapshot=output.normalizerSnapshot();
+        require(sawAssemblyTimeout.load() && sourceCounters.runtimeIncomplete>=1 &&
+                    snapshot.timeoutBoundaryResets==0 &&
+                    snapshot.logicalDistinctAccepted==3 &&
+                    snapshot.currentLogicalDistinctCount==3 &&
+                    timedOutRings.load()==0 && roundEvents.size()==1 &&
+                    roundEvents.front().kind==PhysicalRoundEvent::Kind::ControlFiltered,
+                "timeout T3 assembly timeout isolation");
+        output.stop();
+    }
+    std::cout<<"PASS production source/output/host boundary: four cards, 28/70, exact float16 files, display and Ring; normalized 1+N save/Ring identity; queued saving generation retains original directory; physical idle timeout shared by save/Ring; SourceCore assembly timeout isolated\n";
 }

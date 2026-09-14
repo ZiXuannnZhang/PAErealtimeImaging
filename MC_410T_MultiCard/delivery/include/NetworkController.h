@@ -109,6 +109,11 @@ public:
     void setDisplayPoints(int displayPoints);
     // 更新生产输出边界使用的逻辑轮次计数（环形模式由 Ring 配置覆盖）。
     void setLogicalTriggersPerRound(std::uint64_t count);
+    // Canonical physical-round idle timeout. Ring mode supplies
+    // RingReconCudaConfig.timeoutResetSec; this setter is also valid before
+    // the PAimage backend is created.
+    void setPhysicalRoundTimeout(double seconds);
+    paimage::PhysicalRoundNormalizer::Snapshot physicalRoundSnapshot() const;
     // 重新配置（采集时间改变时传入，无需重建线程）
     void reconfigure(const AcqConfig& config);
 
@@ -204,6 +209,7 @@ private:
     qint64 m_paimageLastStallWarnMs=0;
     QString m_paimageRunId;
     paimage::PhysicalRoundNormalizer::Observer m_physicalRoundBoundarySink;
+    double m_physicalRoundTimeoutSec = 0.0;
     void recordPaimageSnapshot();
     void writeSystemCaptureNotification(quint64 epoch, qint64 burstNs);
 

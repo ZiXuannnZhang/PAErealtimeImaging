@@ -86,7 +86,7 @@ void RingBlockAssembler::pushChannelLine(int channelId, uint16_t triggerSeq,
     const int64_t nowUs = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     const int64_t lastUs = m_lastTriggerUs.load(std::memory_order_relaxed);
-    if (m_timeoutResetSec > 0.0 && lastUs > 0) {
+    if (!m_timeoutManagedExternally && m_timeoutResetSec > 0.0 && lastUs > 0) {
         const double dt = static_cast<double>(nowUs - lastUs) / 1e6;
         if (dt > m_timeoutResetSec) {
             resetAfterPhysicalTimeout();

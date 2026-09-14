@@ -196,8 +196,9 @@ private:
     QTimer *m_diagnosticStatusTimer;
     QTimer *m_systemCaptureStatusTimer;
     QTimer *m_displayTimer;   // 30fps pull 定时器
-    QTimer *m_ringTimeoutTimer = nullptr;   // 超时重置到点检测（触发即保存 PNG）
-    std::atomic<bool> m_ringTimeoutSaveDone{false};  // 成像 worker 写，UI 定时器读
+    QTimer *m_ringTimeoutTimer = nullptr;   // 物理空闲超时到点保存 PNG
+    std::atomic<bool> m_ringTimeoutSaveDone{false};  // shared timeout boundary/UI timer de-dup
+    std::atomic<bool> m_ringTimeoutAutoSessionDone{false};
 
     // 状态标志
     bool m_isListening;
@@ -292,6 +293,8 @@ private:
     uint64_t m_lastRingBoundarySession = 0;
     uint64_t m_lastRingBoundaryGeneration = 0;
     uint16_t m_lastRingBoundaryTrigger = 0;
+    uint64_t m_lastRingTimeoutBoundarySession = 0;
+    uint64_t m_lastRingTimeoutBoundaryGeneration = 0;
     bool m_restartRingOnSvcStop = false;   // 运行中修改环形参数后，待停止完成时自动重启
 
     // 独立有界成像旁路。队列持有共享只读触发帧，不复制整卡 A/B 数据。

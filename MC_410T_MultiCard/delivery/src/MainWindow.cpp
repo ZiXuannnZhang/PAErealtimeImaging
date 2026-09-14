@@ -53,6 +53,7 @@
 #include <QComboBox>
 #include <QFrame>
 #include <QPointer>
+#include <QThread>
 #include <QThreadPool>
 #include <QtConcurrent/QtConcurrentRun>
 #include <thread>
@@ -485,6 +486,10 @@ MainWindow::MainWindow(QWidget *parent)
     m_imagingBypass = std::make_unique<ImagingBypass>(256);
     m_imagingBypass->start();
     m_ringAssembler = new RingBlockAssembler();
+    // PhysicalRoundNormalizer owns the production physical-idle boundary.
+    // Keep the assembler's direct timeout path available for its standalone
+    // tests, but prevent a second production reset for the same idle gap.
+    m_ringAssembler->setTimeoutManagedExternally(true);
     m_ringAssembler->setBlockCallback(
         [this](std::vector<float> &&raw, std::vector<float> &&angles,
                std::vector<uint8_t> &&channels, int blockSeq) {
@@ -504,10 +509,13 @@ MainWindow::MainWindow(QWidget *parent)
             }
             Q_UNUSED(alines);
         });
-    m_ringAssembler->setProgressCallback([this]() { m_ringTimeoutSaveDone = false; });
-    // 停机超时判定新一圈：组包器触发级检测，通知子进程清空重建累积，
-    // 输出帧计数从新一圈重新计算
-    // （自动保存的会话代推进在超时到点定时器中提前完成，不在此处处理）
+    m_ringAssembler->setProgressCallback([this]() {
+        m_ringTimeoutSaveDone.store(false, std::memory_order_release);
+        m_ringTimeoutAutoSessionDone.store(false, std::memory_order_release);
+    });
+    // PhysicalRoundNormalizer is the production source of physical idle
+    // boundaries. This callback clears queued pre-boundary frames and resets
+    // Ring/reconstruction exactly once for each session/generation.
     m_ringAssembler->setTimeoutCallback([this]() {
         if (m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire))
             m_imagingController->sendRingReset();
@@ -632,29 +640,33 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_systemCaptureStatusTimer,&QTimer::timeout,this,&MainWindow::onSystemCaptureStatusTick);
     m_systemCaptureStatusTimer->start();
 
-    // 超时重置到点检测：空闲超过超时值立即保存当前窗口 PNG（不等新触发）
+    // 超时到点检测只负责在没有下一触发时落盘；边界分类和 Ring reset
+    // 仍由 PhysicalRoundNormalizer 的生产链路负责。
     m_ringTimeoutTimer->setInterval(250);
     connect(m_ringTimeoutTimer, &QTimer::timeout, this, [this]() {
-        if (!m_imagingEnabled || !m_ringAssembler || !m_ringAssemblerConfigured
-            || !m_reconSaveEnabled || m_reconSaveDir.isEmpty())
+        if (!m_imagingEnabled || !m_netController ||
+            !m_reconSaveEnabled || m_reconSaveDir.isEmpty())
             return;
-        double timeoutResetSec = 0.0;
-        double idleSeconds = 0.0;
-        { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
-          timeoutResetSec = m_ringAssembler->timeoutResetSec();
-          idleSeconds = m_ringAssembler->idleSeconds(); }
-        if (timeoutResetSec <= 0.0) return;
-        if (idleSeconds > timeoutResetSec && !m_ringTimeoutSaveDone) {
-            m_ringTimeoutSaveDone = true;
+        const auto round = m_netController->physicalRoundSnapshot();
+        if (!round.physicalRoundTimeoutEnabled || round.timeoutResetNs <= 0 ||
+            round.state != paimage::PhysicalRoundState::CollectingScan ||
+            !round.hasLastDistinctTrigger || round.lastDistinctTriggerTimeNs <= 0)
+            return;
+        const auto nowNs = paimage::SocketReceiver::now();
+        if (nowNs < round.lastDistinctTriggerTimeNs ||
+            nowNs - round.lastDistinctTriggerTimeNs < round.timeoutResetNs)
+            return;
+        if (!m_ringTimeoutSaveDone.exchange(true, std::memory_order_acq_rel)) {
             if (m_imagingDisplayWindow)
                 m_imagingDisplayWindow->saveWindowPngs(
                     m_reconSaveDir, m_reconSaveSuffix,
                     m_imagingDisplayWindow->lastSeq());
-            // 自动保存方案2：超时到点即推进会话代（下一会话目录预注册），
-            // 数十秒空闲后到达的首触发读到的已是新会话代，边界严格分界
-            if (m_autoSaveEnabled)
-                advanceAutoSession();
         }
+        // 自动保存方案2：与观察器共享同一幂等门；超时期间没有下一
+        // 触发时也要提前注册下一会话目录，保证首触发不丢不串。
+        if (m_autoSaveEnabled &&
+            !m_ringTimeoutAutoSessionDone.exchange(true, std::memory_order_acq_rel))
+            advanceAutoSession();
     });
     m_ringTimeoutTimer->start();
 
@@ -2177,6 +2189,12 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     m_netController->setDiagnosticContext(
         m_diagnosticListenId,
         targetSourceKind);
+    // Preserve the ring dialog's canonical timeout even if the ImagingSvc
+    // is currently stopped. The PAimage normalizer is created with this
+    // value when the listener starts.
+    if (m_imagingController && m_imagingController->isRingMode())
+        m_netController->setPhysicalRoundTimeout(
+            m_imagingController->ringConfig().timeoutResetSec);
     recordAcquisitionSnapshot(onlineIPs, QStringLiteral("listen_starting"));
     // 环形实时馈送回调：DataProcessor 每触发直连入队（须在 start() 之前设置）
     m_netController->setRingFeedSink(
@@ -2189,6 +2207,8 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                 if (!m_ringAssembler || !m_ringAssemblerConfigured) return;
                 std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
                 if (!m_ringAssemblerConfigured) return;
+                m_ringTimeoutSaveDone.store(false, std::memory_order_release);
+                m_ringTimeoutAutoSessionDone.store(false, std::memory_order_release);
                 m_ringBoundaryPending = true;
                 m_ringBoundarySession = event.measurementSession;
                 m_ringBoundaryGeneration = event.roundGeneration;
@@ -2198,16 +2218,42 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
             }
             if (event.kind != paimage::PhysicalRoundEvent::Kind::TimeoutBoundary)
                 return;
-            // SourceCore reports a physical timeout before the next logical
-            // scan can reach Ring. Remove queued pre-boundary groups first,
-            // then reset the assembler under its existing mutex so no partial
-            // block survives that boundary.
+            // The normalizer has already classified the next visible identity
+            // using the canonical monotonic idle gap. Save/auto-save and the
+            // Ring reset share this event; the atomics make the UI timer and
+            // the observer idempotent when they notice the same boundary.
+            const auto applyTimeoutUi = [this]() {
+                if (!m_ringTimeoutSaveDone.exchange(true, std::memory_order_acq_rel) &&
+                    m_reconSaveEnabled && !m_reconSaveDir.isEmpty() &&
+                    m_imagingDisplayWindow) {
+                    m_imagingDisplayWindow->saveWindowPngs(
+                        m_reconSaveDir, m_reconSaveSuffix,
+                        m_imagingDisplayWindow->lastSeq());
+                }
+                if (m_autoSaveEnabled &&
+                    !m_ringTimeoutAutoSessionDone.exchange(true, std::memory_order_acq_rel))
+                    advanceAutoSession();
+            };
+            if (QThread::currentThread() == thread())
+                applyTimeoutUi();
+            else
+                QMetaObject::invokeMethod(this, applyTimeoutUi,
+                                          Qt::BlockingQueuedConnection);
+
+            // Remove queued pre-boundary groups first, then reset the
+            // assembler under its existing mutex so no partial block survives
+            // that boundary. Deduplicate the reset by session/generation.
             if (m_imagingBypass)
                 m_imagingBypass->clear(ImagingSubmitResult::StaleSession);
             if (!m_ringAssembler || !m_ringAssemblerConfigured)
                 return;
             std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
             if (!m_ringAssemblerConfigured) return;
+            if (m_lastRingTimeoutBoundarySession == event.measurementSession &&
+                m_lastRingTimeoutBoundaryGeneration == event.roundGeneration)
+                return;
+            m_lastRingTimeoutBoundarySession = event.measurementSession;
+            m_lastRingTimeoutBoundaryGeneration = event.roundGeneration;
             m_ringBoundaryPending = false;
             m_ringBoundaryCards = 0;
             m_ringBoundaryApplied = false;
@@ -4035,6 +4081,12 @@ void MainWindow::onImagingConfigClicked()
         m_ringConfigDialog->setAcquisitionParams(
             m_sampleIntervalNs, ui->edtDataTime->text().toInt());
         m_ringConfigDialog->exec();
+        // Keep the production normalizer configured even while ImagingSvc is
+        // stopped; configureRingAssembler() repeats this at svcReady.
+        if (m_netController && m_imagingController &&
+            m_imagingController->isRingMode())
+            m_netController->setPhysicalRoundTimeout(
+                m_imagingController->ringConfig().timeoutResetSec);
         return;
     }
 
@@ -5013,9 +5065,11 @@ void MainWindow::configureRingAssembler()
         return;
     }
     const int logicalTriggersPerRound = cfg.alinesPerFrame / cfg.enabledChannelCount;
-    if (m_netController)
+    if (m_netController) {
         m_netController->setLogicalTriggersPerRound(
             static_cast<std::uint64_t>(logicalTriggersPerRound));
+        m_netController->setPhysicalRoundTimeout(cfg.timeoutResetSec);
+    }
 
     int enabled[8];
     for (int i = 0; i < 8; ++i) enabled[i] = cfg.enabledChannels[i] ? 1 : 0;
@@ -5031,12 +5085,15 @@ void MainWindow::configureRingAssembler()
       m_ringBoundaryPending = false;
       m_ringBoundaryCards = 0;
       m_ringBoundaryApplied = false;
+      m_lastRingTimeoutBoundarySession = 0;
+      m_lastRingTimeoutBoundaryGeneration = 0;
       m_ringAssembler->configure(enabled, cfg.alinesPerChannelPerBlock,
                                  cfg.sampDepth, cfg.sectorStartDeg, sectorWidth,
                                  step, cfg.alinesPerChannelPerFrame,
                                  cfg.triggerWlOdd, cfg.timeoutResetSec); }
     m_ringAssemblerConfigured = true;
     m_ringTimeoutSaveDone = false;   // 新会话：允许超时到点保存
+    m_ringTimeoutAutoSessionDone = false;
     const auto configureEndNs = paimage::SocketReceiver::now();
     recordDiagnosticAction(QStringLiteral("imaging_assembler_initialized"),
         {{"startMonotonicNs", QString::number(configureBeginNs)},

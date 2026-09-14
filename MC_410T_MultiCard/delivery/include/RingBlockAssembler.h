@@ -57,13 +57,18 @@ public:
     // while keeping blockSeq monotonic for producer/consumer observability.
     bool completeLogicalRound();
 
-    // SourceCore timeout boundary. This clears a partial block and invokes
-    // the existing reset callback exactly at the physical timeout boundary.
+    // PhysicalRoundNormalizer timeout boundary. This clears a partial block
+    // and invokes the existing reset callback after the canonical production
+    // normalizer has classified the next visible identity.
     void resetAfterPhysicalTimeout();
 
     void setBlockCallback(BlockCallback cb) { m_callback = std::move(cb); }
     void setProgressCallback(ProgressCallback cb) { m_progressCallback = std::move(cb); }
     void setTimeoutCallback(TimeoutCallback cb) { m_timeoutCallback = std::move(cb); }
+    // Production sets this before feeding data: the PAimage physical-round
+    // normalizer owns idle-boundary detection. The default remains false so
+    // standalone assembler tests retain their direct timeout behavior.
+    void setTimeoutManagedExternally(bool managed) { m_timeoutManagedExternally = managed; }
 
     // 当前块进度（线程安全）：{ 当前块已收到的触发脉冲数, 每通道每块 Aline 数 }
     std::pair<int, int> blockProgress() const {
@@ -105,6 +110,7 @@ private:
     int  m_perChannelFrame = 0;   // 每通道每波长每圈 A-line 数（角度按圈回绕）
     int  m_triggerWlOdd = 1;
     double m_timeoutResetSec = 0.0;   // 0=关闭
+    bool m_timeoutManagedExternally = false;
     std::atomic<int64_t> m_lastTriggerUs{0};   // 上一触发时刻（steady 时钟微秒，0=从未）
     TimeoutCallback m_timeoutCallback;
 

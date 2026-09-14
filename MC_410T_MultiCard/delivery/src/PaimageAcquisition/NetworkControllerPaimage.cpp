@@ -50,6 +50,7 @@ bool NetworkController::createPaimageBackend(QString& error){
     settings.acquisition={m_config.nCards,m_config.samplesPerTrig(),m_config.bitsPerChannel,
                           m_config.startupIdleMs,timestampMode};
     settings.logicalTriggersPerRound=static_cast<std::uint64_t>(m_config.logicalTriggersPerRound);
+    settings.physicalRoundTimeoutSec=m_physicalRoundTimeoutSec;
     settings.normalizerObserver=[this](const paimage::PhysicalRoundEvent& event){
         const QString message=QString::fromLatin1(paimage::physicalRoundEventName(event.kind));
         const QJsonObject fields{
@@ -66,6 +67,16 @@ bool NetworkController::createPaimageBackend(QString& error){
             {"countBoundaryResets",QString::number(event.countBoundaryResets)},
             {"timeoutBoundaryResets",QString::number(event.timeoutBoundaryResets)},
             {"currentLogicalDistinctCount",QString::number(event.currentLogicalDistinctCount)},
+            {"physicalRoundTimeoutResetSec",event.timeoutResetSec},
+            {"physicalRoundTimeoutEnabled",event.physicalRoundTimeoutEnabled},
+            {"physicalRoundTimeoutSource","RingReconCudaConfig.timeoutResetSec"},
+            {"assemblyTimeoutIsNotRoundBoundary",true},
+            {"idleDurationNs",QString::number(event.idleDurationNs)},
+            {"configuredTimeoutNs",QString::number(event.configuredTimeoutNs)},
+            {"lastDistinctTriggerSeq",event.hasLastDistinctTriggerSeq
+                 ? QJsonValue(static_cast<int>(event.lastDistinctTriggerSeq)) : QJsonValue()},
+            {"nextVisibleTriggerSeq",event.hasNextVisibleTriggerSeq
+                 ? QJsonValue(static_cast<int>(event.nextVisibleTriggerSeq)) : QJsonValue()},
             {"firstVisibleFilterMode",true},
             {"filterLayer","paimage-host-output"},
             {"packetLossAccounting","unchanged"},
@@ -103,6 +114,10 @@ bool NetworkController::createPaimageBackend(QString& error){
             {"configuredLogicalTriggersPerRound",m_config.logicalTriggersPerRound},
             {"logicalRoundConfigSource","AcquisitionParams/LogicalTriggersPerRound; ring mode overrides from RingReconCudaConfig"},
             {"physicalRoundFilterPolicy","first-visible-operational"},
+            {"physicalRoundTimeoutResetSec",m_physicalRoundTimeoutSec},
+            {"physicalRoundTimeoutEnabled",m_physicalRoundTimeoutSec>0.0},
+            {"physicalRoundTimeoutSource","RingReconCudaConfig.timeoutResetSec"},
+            {"assemblyTimeoutIsNotRoundBoundary",true},
             {"targets",targets},{"startupPolicy",m_config.startupIdleMs>0?"legacy":"bypass"},
             {"socketTimestampMode",paimage::socketTimestampModeName(timestampMode)},
             {"socketTimestampDefaultOff",timestampMode==paimage::SocketTimestampMode::Off},
@@ -249,6 +264,13 @@ void NetworkController::recordPaimageSnapshot(){
          {"countBoundaryResets",QString::number(roundStats.countBoundaryResets)},
          {"timeoutBoundaryResets",QString::number(roundStats.timeoutBoundaryResets)},
          {"currentLogicalDistinctCount",QString::number(roundStats.currentLogicalDistinctCount)},
+         {"physicalRoundTimeoutResetSec",roundStats.timeoutResetSec},
+         {"physicalRoundTimeoutEnabled",roundStats.timeoutResetNs>0},
+         {"physicalRoundTimeoutSource","RingReconCudaConfig.timeoutResetSec"},
+         {"assemblyTimeoutIsNotRoundBoundary",true},
+         {"lastDistinctTriggerTimeNs",QString::number(roundStats.lastDistinctTriggerTimeNs)},
+         {"lastDistinctTriggerSeq",roundStats.hasLastDistinctTrigger
+              ? QJsonValue(static_cast<int>(roundStats.lastDistinctTriggerSeq)) : QJsonValue()},
          {"roundState",QString::fromLatin1(paimage::physicalRoundStateName(roundStats.state))},
          {"firstVisibleFilterMode",roundStats.firstVisibleFilterMode},
          {"recentDecisionCacheSize",static_cast<qint64>(roundStats.recentDecisionCacheSize)},
