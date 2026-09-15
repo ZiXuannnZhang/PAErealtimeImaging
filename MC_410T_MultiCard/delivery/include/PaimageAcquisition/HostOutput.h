@@ -5,12 +5,19 @@
 #include "TimingWriter.h"
 #include "DataProcessor.h"
 #include "FileSaver.h"
+#include <functional>
 #include <memory>
+#include <utility>
 namespace paimage {
 // Lifetimes: processors/savers and trace outlive this adapter. Their QThreads
 // remain unstarted; only the recovered two output workers invoke delivery.
 class HostOutput {
 public:
+    using SaveSessionResolver =
+        std::function<std::uint64_t(std::uint64_t measurementSession,
+                                    std::uint64_t roundGeneration)>;
+    using MeasurementSessionBinder = std::function<std::uint64_t(std::uint64_t)>;
+
     // logicalTriggersPerRound is required by the production Backend.  Zero
     // keeps the historical adapter-only tests in pass-through mode.
     HostOutput(int bits,int blockSize,std::vector<DataProcessor*>,std::vector<FileSaver*>,TraceWriter*,
@@ -23,8 +30,19 @@ public:
     void stop(){workers_.stop();}
     void requestStop(){workers_.requestStop();}
     void beginSession(std::uint64_t s){
+        if(measurementSessionBinder_)
+            measurementSessionBinder_(s);
         if(normalizer_)normalizer_->beginSession(s);
         workers_.beginSession(s);
+    }
+    // Installed before the Backend starts.  The resolver is authoritative for
+    // normalized LogicalScan save stamps; the old DataProcessor reader stays
+    // only as a compatibility fallback for adapter-only tests.
+    void setSaveSessionResolver(SaveSessionResolver resolver){
+        saveSessionResolver_=std::move(resolver);
+    }
+    void setMeasurementSessionBinder(MeasurementSessionBinder binder){
+        measurementSessionBinder_=std::move(binder);
     }
     void card(Frame f);
     void sync(std::uint16_t,const std::vector<Frame>&,bool startup);
@@ -49,6 +67,8 @@ private:
     std::vector<DataProcessor*> processors_;std::vector<FileSaver*> savers_;
     TraceWriter* trace_;TimingWriter* timing_;FrameConverter converter_;OutputWorkers workers_;
     std::unique_ptr<PhysicalRoundNormalizer> normalizer_;
+    SaveSessionResolver saveSessionResolver_;
+    MeasurementSessionBinder measurementSessionBinder_;
     std::atomic<bool> configurationRestart_{false};
 };
 }

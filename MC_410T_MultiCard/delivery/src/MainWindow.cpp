@@ -416,36 +416,40 @@ MainWindow::MainWindow(QWidget *parent)
         const bool frameEnd = m_roundUi.noteSnapshot(bpf);
         if (frameEnd)
             m_roundUi.resetFrameCount();   // 圈末：判定为下一圈图像，帧计数重新计算
-        // Capture the old presentation/save target before publishing a
-        // CountBoundary generation.  The final old frame remains in its old
-        // directory even when the UI callback is delayed.
-        const bool saveNow = frameEnd && m_reconSaveEnabled && !m_reconSaveDir.isEmpty();
-        if (saveNow)
-            m_ringTimeoutSaveDone = true;
-        const QString saveDir = m_reconSaveDir;
-        const QString saveSuffix = m_reconSaveSuffix;
-        bool hasCountBoundary = false;
-        std::uint64_t countBoundarySession = 0;
-        std::uint64_t countBoundaryGeneration = 0;
-        if (frameEnd && m_autoSaveEnabled && m_netController) {
+        // CountBoundary has already prepared and published the next data
+        // binding on the source thread.  Capture the old presentation target
+        // before applying that committed target to the UI.  The final old
+        // frame therefore keeps its old directory even when its render/save
+        // callback is delayed.
+        AutoSaveCommit countPresentation;
+        bool hasCountPresentation = false;
+        if (frameEnd) {
             std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
-            hasCountBoundary = m_ringAutoSaveCountPending;
-            if (hasCountBoundary) {
-                countBoundarySession = m_ringAutoSaveCountSession;
-                countBoundaryGeneration = m_ringAutoSaveCountGeneration;
-                m_ringAutoSaveCountPending = false;
+            for (auto it = m_pendingCountPresentation.begin();
+                 it != m_pendingCountPresentation.end(); ++it) {
+                if (it->measurementSession == m_ringBoundarySession &&
+                    it->roundGeneration == m_ringBoundaryGeneration) {
+                    countPresentation = *it;
+                    m_pendingCountPresentation.erase(it);
+                    hasCountPresentation = true;
+                    break;
+                }
             }
         }
-        if (hasCountBoundary) {
-            const auto commit = m_netController->commitAutoSaveBoundary(
-                countBoundarySession,
-                countBoundaryGeneration,
-                paimage::AutoSaveBoundaryKind::Count,
-                QStringLiteral("ui_final_frame"));
-            if (commit.failed)
-                queueAutoSaveFailure(commit);
+        QString saveDir = m_reconSaveDir;
+        if (hasCountPresentation && !countPresentation.oldDirectory.isEmpty())
+            saveDir = QDir(countPresentation.oldDirectory).filePath("recon_png");
+        const bool saveNow = frameEnd && m_reconSaveEnabled && !saveDir.isEmpty();
+        if (saveNow)
+            m_ringTimeoutSaveDone = true;
+        const QString saveSuffix = m_reconSaveSuffix;
+        if (hasCountPresentation) {
+            if (countPresentation.failed)
+                queueAutoSaveFailure(countPresentation);
             else
-                applyAutoSaveCommitToUi(commit);
+                // This call only applies the already committed presentation
+                // target; it never allocates or increments a generation.
+                applyAutoSaveCommitToUi(countPresentation);
         }
         if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
             if (!m_imagingDisplayWindow) {
@@ -2186,6 +2190,11 @@ void MainWindow::onStartListenClicked()
                 ui->btnToggleSave->style()->unpolish(ui->btnToggleSave);
                 ui->btnToggleSave->style()->polish(ui->btnToggleSave);
                 m_reconSaveEnabled = false;   // 重建图像保存随监听停止而关闭
+                m_autoSavePresentation.reset();
+                {
+                    std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+                    m_pendingCountPresentation.clear();
+                }
 
                 if (m_netController) {
                     m_netController->setParent(nullptr);
@@ -2255,6 +2264,48 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     m_netController->setPhysicalRoundBoundarySink(
         [this](const paimage::PhysicalRoundEvent& event) {
             if (event.kind == paimage::PhysicalRoundEvent::Kind::CountBoundary) {
+                // Allocate and publish the next data binding synchronously on
+                // the source boundary.  UI work below only applies the
+                // presentation target after the old final frame completes.
+                AutoSaveCommit autoCommit;
+                bool hasAutoCommit = false;
+                if (m_netController && m_netController->autoSaveEnabled()) {
+                    autoCommit = m_netController->commitAutoSaveBoundary(
+                        event.measurementSession,
+                        event.roundGeneration,
+                        paimage::AutoSaveBoundaryKind::Count,
+                        QStringLiteral("normalizer_count_boundary"));
+                    hasAutoCommit = true;
+                }
+                if (hasAutoCommit && autoCommit.failed)
+                    queueAutoSaveFailure(autoCommit);
+                if (hasAutoCommit &&
+                    (autoCommit.committed || autoCommit.alreadyApplied)) {
+                    QMetaObject::invokeMethod(this, [this, autoCommit]() {
+                        recordDiagnosticAction(
+                            QStringLiteral("auto_save_count_presentation_transition_pending"),
+                            {{QStringLiteral("measurementSession"),
+                              qint64(autoCommit.measurementSession)},
+                             {QStringLiteral("roundGeneration"),
+                              qint64(autoCommit.roundGeneration)},
+                             {QStringLiteral("oldSessionGen"),
+                              qint64(autoCommit.oldSessionGen)},
+                             {QStringLiteral("newSessionGen"),
+                              qint64(autoCommit.newSessionGen)},
+                             {QStringLiteral("oldDirectory"), autoCommit.oldDirectory},
+                             {QStringLiteral("newDirectory"), autoCommit.directory},
+                             {QStringLiteral("boundaryKind"),
+                              QString::fromLatin1(paimage::autoSaveBoundaryKindName(
+                                  autoCommit.boundaryKind))},
+                             {QStringLiteral("phase"), autoCommit.phase}});
+                    }, Qt::QueuedConnection);
+                }
+                {
+                    std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+                    if (hasAutoCommit &&
+                        (autoCommit.committed || autoCommit.alreadyApplied))
+                        m_pendingCountPresentation.push_back(autoCommit);
+                }
                 // 低频业务事件：count 边界不在此清零帧计数（保留帧末驱动清零）。
                 // 边界 sink 运行在网络线程；诊断记录 marshal 到 UI 线程，
                 // 避免跨线程读 UI 成员。
@@ -2268,8 +2319,6 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                          {QStringLiteral("uiFrameCountAfter"), qint64(ui.frameCount)},
                          {QStringLiteral("ringBlockCounterBefore"), qint64(ui.blockCount)},
                          {QStringLiteral("ringBlockCounterAfter"), qint64(ui.blockCount)},
-                         {QStringLiteral("autoSessionGen"),
-                          m_netController ? qint64(m_netController->autoSessionGen()) : 0},
                          {QStringLiteral("frameReset"), QStringLiteral("deferred_to_final_frame")}});
                 }, Qt::QueuedConnection);
                 if (!m_ringAssembler || !m_ringAssemblerConfigured) return;
@@ -2281,11 +2330,6 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                 m_ringBoundaryGeneration = event.roundGeneration;
                 m_ringBoundaryTrigger = event.triggerSeq;
                 m_ringBoundaryCards = 0;
-                if (m_netController && m_netController->autoSaveEnabled()) {
-                    m_ringAutoSaveCountPending = true;
-                    m_ringAutoSaveCountSession = event.measurementSession;
-                    m_ringAutoSaveCountGeneration = event.roundGeneration;
-                }
                 return;
             }
             if (event.kind != paimage::PhysicalRoundEvent::Kind::TimeoutBoundary)
@@ -2303,6 +2347,14 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                     QStringLiteral("normalizer_timeout_boundary"));
                 hasAutoCommit = true;
             }
+            // Capture the old presentation directory from the committed
+            // transition, not from the mutable UI target.  A delayed timeout
+            // callback must not save an old reconstruction into a directory
+            // that a later boundary has already applied.
+            const QString oldReconDirectory =
+                hasAutoCommit && !autoCommit.oldDirectory.isEmpty()
+                    ? QDir(autoCommit.oldDirectory).filePath("recon_png")
+                    : QString();
             // Claim the physical boundary before touching UI state.  The
             // coordinator makes directory publication idempotent; this gate
             // makes the corresponding Ring/UI reset idempotent as well.
@@ -2319,13 +2371,17 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
             // event loop is delayed by rendering or PNG work.
             m_roundUi.onTimeoutBoundary();
             QMetaObject::invokeMethod(this, [this, event, uiBefore,
-                                             autoCommit, hasAutoCommit]() {
+                                             autoCommit, hasAutoCommit,
+                                             oldReconDirectory]() {
                 updateRingImagingStatus();
                 if (!m_ringTimeoutSaveDone.exchange(true, std::memory_order_acq_rel) &&
-                    m_reconSaveEnabled && !m_reconSaveDir.isEmpty() &&
+                    m_reconSaveEnabled &&
+                    !(oldReconDirectory.isEmpty() && m_reconSaveDir.isEmpty()) &&
                     m_imagingDisplayWindow) {
+                    const QString target = oldReconDirectory.isEmpty()
+                        ? m_reconSaveDir : oldReconDirectory;
                     m_imagingDisplayWindow->saveWindowPngs(
-                        m_reconSaveDir, m_reconSaveSuffix,
+                        target, m_reconSaveSuffix,
                         m_imagingDisplayWindow->lastSeq());
                 }
                 if (hasAutoCommit) {
@@ -2362,9 +2418,6 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
             m_ringBoundaryPending = false;
             m_ringBoundaryCards = 0;
             m_ringBoundaryApplied = false;
-            m_ringAutoSaveCountPending = false;
-            m_ringAutoSaveCountSession = 0;
-            m_ringAutoSaveCountGeneration = 0;
             m_ringResetCommandSent.store(false, std::memory_order_release);
             m_ringAssembler->resetAfterPhysicalTimeout();
             // ring_reset and ring_block_ready share ImagingController's ZMQ
@@ -2695,8 +2748,9 @@ void MainWindow::onToggleSaveClicked()
 //   基线目录 = 保存目录输入路径忽略最后一层（如 D:\zzx\data\run\01 → D:\zzx\data\run）
 //   勾选时扫描基线目录下三位数命名文件夹的最大编号，从最大编号+1 起分配。
 //   目录准备与 generation 发布由 AutoSaveRoundCoordinator 完成；TimeoutBoundary
-//   在源线程提交，CountBoundary 在最终旧帧完成后由 UI 消费提交。DataProcessor
-//   在数据入队前读取已发布代号，FileSaver 按代路由目录。
+//   与 CountBoundary 都在源线程同步提交，最终旧帧只负责应用已准备的展示目标。
+//   DataProcessor 在数据入队前按 measurementSession+roundGeneration 解析，
+//   FileSaver 按已解析 generation 路由目录。
 // =====================================================================
 static int scanMaxAutoFolder(const QString &base)
 {
@@ -2714,6 +2768,8 @@ static int scanMaxAutoFolder(const QString &base)
 
 void MainWindow::applyAutoSaveCommitToUi(const AutoSaveCommit& commit)
 {
+    if (!m_autoSaveEnabled || !m_isListening)
+        return;
     if (commit.failed) {
         queueAutoSaveFailure(commit);
         return;
@@ -2721,6 +2777,21 @@ void MainWindow::applyAutoSaveCommitToUi(const AutoSaveCommit& commit)
     if ((!commit.committed && !commit.alreadyApplied) ||
         commit.newSessionGen == 0 || commit.directory.isEmpty())
         return;
+
+    const auto presentationResult = m_autoSavePresentation.apply(commit);
+    if (presentationResult == paimage::AutoSavePresentationState::ApplyResult::Stale) {
+        recordDiagnosticAction(QStringLiteral("auto_save_presentation_transition_stale_ignored"),
+            {{QStringLiteral("measurementSession"), qint64(commit.measurementSession)},
+             {QStringLiteral("roundGeneration"), qint64(commit.roundGeneration)},
+             {QStringLiteral("oldSessionGen"), qint64(commit.oldSessionGen)},
+             {QStringLiteral("newSessionGen"), qint64(commit.newSessionGen)},
+             {QStringLiteral("oldDirectory"), commit.oldDirectory},
+             {QStringLiteral("newDirectory"), commit.directory},
+             {QStringLiteral("boundaryKind"),
+              QString::fromLatin1(paimage::autoSaveBoundaryKindName(commit.boundaryKind))},
+             {QStringLiteral("phase"), commit.phase}});
+        return;
+    }
 
     m_reconSaveEnabled = true;
     m_reconSaveDir = QDir(commit.directory).filePath("recon_png");
@@ -2739,9 +2810,17 @@ void MainWindow::applyAutoSaveCommitToUi(const AutoSaveCommit& commit)
           QString::fromLatin1(paimage::autoSaveBoundaryKindName(commit.boundaryKind))},
          {QStringLiteral("oldSessionGen"), qint64(commit.oldSessionGen)},
          {QStringLiteral("newSessionGen"), qint64(commit.newSessionGen)},
+         {QStringLiteral("oldDirectory"), commit.oldDirectory},
          {QStringLiteral("directory"), commit.directory},
          {QStringLiteral("phase"), commit.phase},
-         {QStringLiteral("idempotent"), commit.alreadyApplied}});
+         {QStringLiteral("idempotent"), commit.alreadyApplied},
+         {QStringLiteral("presentationTransition"),
+           commit.boundaryKind == paimage::AutoSaveBoundaryKind::Count
+               ? QStringLiteral("count_presentation_applied")
+               : QStringLiteral("round_generation_applied")},
+         {QStringLiteral("presentationApply"),
+           presentationResult == paimage::AutoSavePresentationState::ApplyResult::AlreadyCurrent
+               ? QStringLiteral("already_current") : QStringLiteral("applied")}});
 }
 
 void MainWindow::queueAutoSaveFailure(const AutoSaveCommit& commit)
@@ -2789,6 +2868,11 @@ void MainWindow::queueAutoSaveFailure(const AutoSaveCommit& commit)
 void MainWindow::initAutoSaveSavers()
 {
     if (!m_netController || !m_autoSaveEnabled) return;
+    m_autoSavePresentation.reset();
+    {
+        std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+        m_pendingCountPresentation.clear();
+    }
     const QFileInfo fi(ui->edtSaveDir->text().trimmed());
     const QString base = fi.absolutePath();
     if (base.isEmpty()) return;
@@ -2838,6 +2922,11 @@ void MainWindow::onAutoSaveToggled(bool checked)
         if (m_netController) {
             m_netController->stopSaving();
             m_netController->disableAutoSave();
+        }
+        m_autoSavePresentation.reset();
+        {
+            std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+            m_pendingCountPresentation.clear();
         }
         m_reconSaveEnabled = false;   // PNG 保存随自动保存关闭
         ui->btnToggleSave->setEnabled(m_isListening);
@@ -5273,9 +5362,7 @@ void MainWindow::configureRingAssembler()
       m_ringBoundaryPending = false;
       m_ringBoundaryCards = 0;
       m_ringBoundaryApplied = false;
-      m_ringAutoSaveCountPending = false;
-      m_ringAutoSaveCountSession = 0;
-      m_ringAutoSaveCountGeneration = 0;
+      m_pendingCountPresentation.clear();
       m_lastRingTimeoutBoundarySession = 0;
       m_lastRingTimeoutBoundaryGeneration = 0;
       m_ringAssembler->configure(enabled, cfg.alinesPerChannelPerBlock,

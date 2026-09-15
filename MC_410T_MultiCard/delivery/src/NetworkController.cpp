@@ -51,22 +51,39 @@ NetworkController::NetworkController(QObject* parent)
     m_autoSaveCoordinator.setEventSink([this](
         const paimage::AutoSaveRoundCoordinator::Event& event) {
         QString message;
+        QString bindingState;
         DiagnosticRecorder::Severity severity = DiagnosticRecorder::Severity::Info;
         switch (event.kind) {
         case paimage::AutoSaveRoundCoordinator::Event::Kind::Reserved:
             message = QStringLiteral("auto_save_round_generation_reserved");
+            bindingState = QStringLiteral("prepared");
             break;
         case paimage::AutoSaveRoundCoordinator::Event::Kind::Committed:
             message = QStringLiteral("auto_save_round_generation_committed");
+            bindingState = QStringLiteral("committed");
             break;
         case paimage::AutoSaveRoundCoordinator::Event::Kind::AlreadyApplied:
             message = QStringLiteral("auto_save_round_generation_already_applied");
+            bindingState = QStringLiteral("already_applied");
             break;
         case paimage::AutoSaveRoundCoordinator::Event::Kind::Failed:
             message = QStringLiteral("auto_save_round_generation_failed");
+            bindingState = QStringLiteral("failed");
+            severity = DiagnosticRecorder::Severity::Error;
+            break;
+        case paimage::AutoSaveRoundCoordinator::Event::Kind::LookupFailed:
+            message = QStringLiteral("auto_save_round_binding_lookup_failed");
+            bindingState = QStringLiteral("lookup_failed");
             severity = DiagnosticRecorder::Severity::Error;
             break;
         }
+        const bool bindingFailed =
+            event.kind == paimage::AutoSaveRoundCoordinator::Event::Kind::Failed ||
+            event.kind == paimage::AutoSaveRoundCoordinator::Event::Kind::LookupFailed;
+        const auto resolvedSessionGen = bindingFailed
+            ? paimage::AutoSaveRoundCoordinator::kFailedGeneration
+            : (event.newSessionGen != 0 ? event.newSessionGen
+                                        : event.publishedSessionGen);
         recordDiagnosticEvent(
             QStringLiteral("paimage.auto_save"), message, severity,
             {{QStringLiteral("measurementSession"),
@@ -79,9 +96,14 @@ NetworkController::NetworkController(QObject* parent)
              {QStringLiteral("oldSessionGen"),
               QString::number(event.oldSessionGen)},
              {QStringLiteral("newSessionGen"),
-              QString::number(event.newSessionGen)},
-             {QStringLiteral("publishedSessionGen"),
-              QString::number(event.publishedSessionGen)},
+               QString::number(event.newSessionGen)},
+              {QStringLiteral("publishedSessionGen"),
+               QString::number(event.publishedSessionGen)},
+              {QStringLiteral("resolvedSessionGen"),
+               QString::number(resolvedSessionGen)},
+             {QStringLiteral("roundBinding"), true},
+             {QStringLiteral("roundBindingState"), bindingState},
+             {QStringLiteral("oldDirectory"), event.oldDirectory},
              {QStringLiteral("directory"), event.directory},
              {QStringLiteral("phase"), event.phase},
              {QStringLiteral("error"), event.error}});
@@ -570,7 +592,30 @@ NetworkController::AutoSaveCommit NetworkController::beginAutoSaveSession(
     auto result = m_autoSaveCoordinator.beginSession(measurementSession, phase);
     if (result.committed)
         requestCloseSavers();
+    if (!result.failed && m_measurementRunning && m_measurementSessionToken != 0) {
+        const auto round = physicalRoundSnapshot().roundGeneration;
+        const auto binding = bindAutoSaveMeasurementRound(
+            m_measurementSessionToken,
+            round, QStringLiteral("ui_auto_save_enable_active_round"));
+        if (binding.failed)
+            return binding;
+    }
     return result;
+}
+
+NetworkController::AutoSaveCommit NetworkController::bindAutoSaveMeasurementSession(
+    std::uint64_t measurementSession, const QString& phase)
+{
+    return m_autoSaveCoordinator.bindMeasurementSession(measurementSession, phase);
+}
+
+NetworkController::AutoSaveCommit NetworkController::bindAutoSaveMeasurementRound(
+    std::uint64_t measurementSession,
+    std::uint64_t roundGeneration,
+    const QString& phase)
+{
+    return m_autoSaveCoordinator.bindMeasurementRound(
+        measurementSession, roundGeneration, phase);
 }
 
 NetworkController::AutoSaveCommit NetworkController::commitAutoSaveBoundary(
@@ -609,6 +654,13 @@ uint64_t NetworkController::autoSessionGen() const
 QString NetworkController::sessionDir(uint64_t gen) const
 {
     return m_autoSaveCoordinator.directoryFor(gen);
+}
+
+uint64_t NetworkController::resolveAutoSaveRound(uint64_t measurementSession,
+                                                  uint64_t roundGeneration) const
+{
+    return m_autoSaveCoordinator.resolveRound(
+        measurementSession, roundGeneration).sessionGen;
 }
 
 void NetworkController::requestCloseSavers() {

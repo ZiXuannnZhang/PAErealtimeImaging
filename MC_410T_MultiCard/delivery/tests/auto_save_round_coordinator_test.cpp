@@ -167,6 +167,10 @@ int main(int argc, char** argv)
               "A5 directory registration failure is explicit");
         check(coordinator.currentGeneration() == AutoSaveRoundCoordinator::kFailedGeneration,
               "A5 failure publishes fail-closed sentinel");
+        const auto unresolved = coordinator.resolveRound(1, 2);
+        check(unresolved.failed &&
+                  unresolved.sessionGen == AutoSaveRoundCoordinator::kFailedGeneration,
+              "A5 failed coordinator keeps round lookup fail-closed");
         saver.saveTriggerGroup(makeGroup(coordinator.currentGeneration(), 1, 302));
         drain(saver);
         saver.stopSaving();

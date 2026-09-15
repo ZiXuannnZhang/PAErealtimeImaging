@@ -52,7 +52,14 @@ void HostOutput::card(Frame f){
             return;
         }
     }
-    converter_.tagSaveSession(f,processors_.at(f->card)->captureSaveSessionGen());const auto begin=SocketReceiver::now();const auto session=f->measurementSession,link=f->firstIngressId;const int card=f->card;
+    const auto saveGeneration = saveSessionResolver_
+        ? saveSessionResolver_(classification.measurementSession,
+                               classification.roundGeneration)
+        : processors_.at(f->card)->captureSaveSessionGen();
+    // The resolver returns the coordinator's fail-closed sentinel for an
+    // enabled lookup miss.  FrameConverter stores it on this source frame so
+    // FileSaver cannot silently reuse its previous directory.
+    converter_.tagSaveSession(f,saveGeneration);const auto begin=SocketReceiver::now();const auto session=f->measurementSession,link=f->firstIngressId;const int card=f->card;
     workers_.pushCard(f);
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.correlation=link;r.threadId=GetCurrentThreadId();r.card=card;r.kind=std::uint16_t(TimingKind::CardEnqueue);timing_->observe(r,end-begin>=500000);}
 }

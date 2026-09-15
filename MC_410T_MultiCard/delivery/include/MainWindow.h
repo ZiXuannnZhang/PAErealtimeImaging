@@ -296,9 +296,10 @@ private:
     uint16_t m_ringBoundaryTrigger = 0;
     uint32_t m_ringBoundaryCards = 0;
     bool m_ringBoundaryApplied = false;
-    bool m_ringAutoSaveCountPending = false;
-    uint64_t m_ringAutoSaveCountSession = 0;
-    uint64_t m_ringAutoSaveCountGeneration = 0;
+    // CountBoundary allocates/binds the next data directory on the source
+    // thread.  These committed results wait here until the old final frame
+    // has been presented; the queue is guarded by m_ringAssemblerMutex.
+    std::deque<AutoSaveCommit> m_pendingCountPresentation;
     uint64_t m_lastRingBoundarySession = 0;
     uint64_t m_lastRingBoundaryGeneration = 0;
     uint16_t m_lastRingBoundaryTrigger = 0;
@@ -328,6 +329,7 @@ private:
     // TimeoutBoundary 立即清零、CountBoundary 保留帧末驱动清零。
     // 取代原 m_ringBlockCounter / m_imagingFrameCount（单一事实来源，可测试）。
     paimage::RingRoundUiState m_roundUi;
+    paimage::AutoSavePresentationState m_autoSavePresentation;
     QCPRange     m_freqColorRange;     // 频率颜色图保存的色条范围
     QCPRange     m_pixelColorRange;    // 像素图保存的色条范围
     bool         m_settingColorRange = false; // 程序设置色条范围时的互斥标记

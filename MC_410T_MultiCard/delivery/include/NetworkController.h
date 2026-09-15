@@ -96,13 +96,23 @@ public:
                      const QString& suffix);
     void stopSaving();
     // 自动保存会话代协调器：目录准备/注册完成后才发布 generation。
-    // 物理边界源调用 commit，DataProcessor 热路径只做 acquire 读取。
+    // 物理边界源调用 commit，HostOutput 按 round identity 解析后再打标。
     using AutoSaveCommit = paimage::AutoSaveRoundCoordinator::CommitResult;
     void configureAutoSave(const QString& baseDirectory,
                            std::uint64_t lastDirectoryNumber);
     AutoSaveCommit beginAutoSaveSession(
         std::uint64_t measurementSession,
         const QString& phase = QStringLiteral("ui_session_start"));
+    // Bind round zero before the first normalized LogicalScan reaches the
+    // HostOutput save stamp.  The source path calls the same method at
+    // measurement-session start; it does not allocate a new directory.
+    AutoSaveCommit bindAutoSaveMeasurementSession(
+        std::uint64_t measurementSession,
+        const QString& phase = QStringLiteral("source_measurement_session_start"));
+    AutoSaveCommit bindAutoSaveMeasurementRound(
+        std::uint64_t measurementSession,
+        std::uint64_t roundGeneration,
+        const QString& phase = QStringLiteral("active_measurement_round_start"));
     AutoSaveCommit commitAutoSaveBoundary(
         std::uint64_t measurementSession,
         std::uint64_t roundGeneration,
@@ -113,6 +123,11 @@ public:
     bool autoSaveFaulted() const;
     uint64_t autoSessionGen() const;
     QString sessionDir(uint64_t gen) const;
+    // Round-aware resolver used by HostOutput before a TriggerGroup enters
+    // the save worker.  It returns 0 for manual/disabled save and the
+    // coordinator's fail-closed sentinel for an enabled lookup failure.
+    uint64_t resolveAutoSaveRound(uint64_t measurementSession,
+                                  uint64_t roundGeneration) const;
     // 方案A：请求全部保存器在队列排空后刷盘关闭当前会话文件（会话边界主动落盘）
     void     requestCloseSavers();
     // 实时更新显示降采样点数（不重建线程，直接修改各 DataProcessor 的配置）

@@ -237,6 +237,20 @@ if(WIN32)
         WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(auto_save_round_coordinator_test PRIVATE Qt6::Core)
     add_test(NAME auto_save_round_coordinator_test COMMAND auto_save_round_coordinator_test)
+    add_executable(count_boundary_save_binding_test
+        count_boundary_save_binding_test.cpp
+        ../src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp
+        ../include/PaimageAcquisition/AutoSaveRoundCoordinator.h
+        ../src/PaimageAcquisition/HostOutput.cpp
+        ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
+        ../src/DataProcessor.cpp ../include/DataProcessor.h
+        ../src/FileSaver.cpp ../include/FileSaver.h
+        ../src/FramePublisher.cpp ../include/FramePublisher.h)
+    target_include_directories(count_boundary_save_binding_test PRIVATE ../include)
+    target_compile_definitions(count_boundary_save_binding_test PRIVATE
+        WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(count_boundary_save_binding_test PRIVATE paimage_socket Qt6::Core Qt6::Gui)
+    add_test(NAME count_boundary_save_binding_test COMMAND count_boundary_save_binding_test)
     add_executable(paimage_trace_bundle_test paimage_trace_bundle_test.cpp
         ../src/PaimageAcquisition/TraceBundle.cpp ../src/DiagnosticRecorder.cpp)
     target_include_directories(paimage_trace_bundle_test PRIVATE ../include)

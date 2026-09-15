@@ -131,6 +131,23 @@ bool NetworkController::createPaimageBackend(QString& error){
         if(!metadata.open(QIODevice::WriteOnly)||metadata.write(QJsonDocument(identity).toJson())<0)throw std::runtime_error("trace identity write failed");
         metadata.close();
         m_paimage=std::make_unique<paimage::Backend>(settings,processors,savers,m_paimageTrace.get(),m_paimageTiming.get(),m_paimageLoopLog.get());
+        // Normalized LogicalScan save stamps are resolved by physical round
+        // identity.  This is installed before listen/start so round zero is
+        // bound synchronously by HostOutput::beginSession, before the first
+        // LogicalScan can enter a save worker.
+        m_paimage->output().setMeasurementSessionBinder(
+            [this](std::uint64_t measurementSession) {
+                const auto binding = bindAutoSaveMeasurementSession(
+                    measurementSession,
+                    QStringLiteral("source_measurement_session_start"));
+                return binding.failed ?
+                    paimage::AutoSaveRoundCoordinator::kFailedGeneration :
+                    binding.newSessionGen;
+            });
+        m_paimage->output().setSaveSessionResolver(
+            [this](std::uint64_t measurementSession, std::uint64_t roundGeneration) {
+                return resolveAutoSaveRound(measurementSession, roundGeneration);
+            });
         m_paimageRunId=id;
         const int expected=m_config.packetsPerTrig();
         m_paimage->receiver().ingressSink=[this](int card,const paimage::TraceRecord& r){
