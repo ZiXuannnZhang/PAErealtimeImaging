@@ -51,6 +51,7 @@ set(SOURCES
     src/RingImageWidget.cpp
     src/RingColorBarWidget.cpp
     src/RingBlockAssembler.cpp
+    src/RingRoundUiState.cpp
     qcustomplot/qcustomplot.cpp
 )
 

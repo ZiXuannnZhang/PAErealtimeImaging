@@ -208,9 +208,23 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
                     roundEvents[2].kind==PhysicalRoundEvent::Kind::ControlFiltered&&
                     roundEvents[3].kind==PhysicalRoundEvent::Kind::CountBoundary,
                 "timeout T1 event ordering and diagnostics");
+        // Physical-round business boundary (remediation 20260915): the timeout
+        // partial round must be sealed into its own file and the next round's
+        // logical scans must go to a new file sequence — one file never spans
+        // two roundGenerations. Old expectation (5 triggers in _000.dat)
+        // encoded the pre-remediation behavior that the field test disproved.
+        require(saver.physicalRoundRolloverCount()==1,
+                "timeout T7 one physical-round rollover");
+        const auto& rollInfo = saver.lastFileRollover();
+        require(rollInfo.oldRoundGeneration==0 && rollInfo.newRoundGeneration==1 &&
+                    rollInfo.oldFileTriggerCount==2 && rollInfo.manualMode,
+                "timeout T7 rollover metadata (old=gen0/2 triggers sealed)");
         QFile savedA(root.filePath("Card1_ChA_timeout_000.dat"));
-        require(savedA.open(QIODevice::ReadOnly)&&savedA.size()==5*16*2,
-                "timeout T7 saved logical count");
+        require(savedA.open(QIODevice::ReadOnly)&&savedA.size()==2*16*2,
+                "timeout T7 partial round sealed at 2");
+        QFile savedB(root.filePath("Card1_ChA_timeout_001.dat"));
+        require(savedB.open(QIODevice::ReadOnly)&&savedB.size()==3*16*2,
+                "timeout T7 next round written to a new file");
     }
 
     // T13 / timeout T3: SourceCore's 100ms assembly timeout closes only a

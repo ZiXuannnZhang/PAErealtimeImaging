@@ -27,6 +27,7 @@
 #include "AcqConfig.h"
 #include "Constants.h"
 #include "ImagingParams.h"
+#include "RingRoundUiState.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -315,8 +316,10 @@ private:
     QLabel      *m_lblImagingStatus;   // 成像进度/状态指示
     QTimer      *m_imagingTimer;       // 独立成像馈送定时器（5ms）
     int          m_imagingPulseCount;  // 当前帧已采集脉冲数
-    std::atomic<int> m_ringBlockCounter{0};  // 环形重建已提交组包数（工作线程写/UI读）
-    int          m_imagingFrameCount;  // 已输出帧数
+    // 物理轮次业务边界的 UI 侧状态：每轮帧/块计数、快照准入 epoch、
+    // TimeoutBoundary 立即清零、CountBoundary 保留帧末驱动清零。
+    // 取代原 m_ringBlockCounter / m_imagingFrameCount（单一事实来源，可测试）。
+    paimage::RingRoundUiState m_roundUi;
     QCPRange     m_freqColorRange;     // 频率颜色图保存的色条范围
     QCPRange     m_pixelColorRange;    // 像素图保存的色条范围
     bool         m_settingColorRange = false; // 程序设置色条范围时的互斥标记

@@ -216,6 +216,7 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
         processor->setSessionGenReader([this]{return autoSessionGen();});
         connect(saver.get(),&FileSaver::errorOccurred,this,&NetworkController::errorOccurred);
         connect(saver.get(),&FileSaver::statusMessage,this,&NetworkController::statusMessage);
+        connect(saver.get(),&FileSaver::fileRolled,this,&NetworkController::fileSaverRollover);
         m_displayBuffers.push_back(std::move(display));m_savers.push_back(std::move(saver));m_processors.push_back(std::move(processor));
     }
     QString error;if(!createPaimageBackend(error)){

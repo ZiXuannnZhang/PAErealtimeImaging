@@ -243,7 +243,6 @@ MainWindow::MainWindow(QWidget *parent)
     , m_imagingConfigDialog(nullptr)
     , m_imagingEnabled(false)
     , m_imagingPulseCount(0)
-    , m_imagingFrameCount(0)
     , m_freqColorRange(0, 500)
     , m_pixelColorRange(0, 500)
     , m_freqColorInited(false)
@@ -382,15 +381,27 @@ MainWindow::MainWindow(QWidget *parent)
                 m_imagingController->releaseSnapshotBuffer(bufferIndex);
             return;
         }
-        ++m_imagingFrameCount;   // 环形重建输出帧计数（反馈显示用）
-        const int frameIdx = m_imagingFrameCount;   // 本帧序号（圈末重置前捕获）
-        updateRingImagingStatus();   // 帧计数变化后即时刷新状态栏
-        // 圈末重置（本帧为整圈最后一帧）：判定为下一圈图像，帧计数重新计算
-        {
-            const int bpf = m_imagingController->ringBlocksPerFrame();
-            if (bpf > 0 && seq > 0 && seq % bpf == 0)
-                m_imagingFrameCount = 0;
+        // 物理轮次准入：TimeoutBoundary 复位前已重建完成的旧轮快照视为
+        // stale——不得推进新轮帧计数、不得重新污染已清空图像，直接释放。
+        if (!m_roundUi.admitSnapshot(seq)) {
+            m_roundUi.noteStaleSnapshot();
+            recordDiagnosticAction(QStringLiteral("physical_round_stale_frame_dropped"),
+                {{QStringLiteral("seq"), seq},
+                 {QStringLiteral("uiEpoch"), qint64(m_roundUi.snapshot().epoch)}});
+            if (m_imagingController)
+                m_imagingController->releaseSnapshotBuffer(bufferIndex);
+            return;
         }
+        m_roundUi.onFrame();   // 环形重建输出帧计数（反馈显示用）
+        const int frameIdx = int(m_roundUi.frameCount());   // 本帧序号（圈末重置前捕获）
+        updateRingImagingStatus();   // 帧计数变化后即时刷新状态栏
+        // 帧末检测：本轮已准入快照数达到 blocksPerFrame 整数倍即一帧完成。
+        // 采用本轮计数而非 svc 全局 seq 取模——TimeoutBoundary 后 RingBlockAssembler
+        // 块序号清零而 svc 的 shm frame_seq 不归零，全局取模会在超时后永久失准。
+        const int bpf = m_imagingController->ringBlocksPerFrame();
+        const bool frameEnd = m_roundUi.noteSnapshot(bpf);
+        if (frameEnd)
+            m_roundUi.resetFrameCount();   // 圈末：判定为下一圈图像，帧计数重新计算
         if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
             if (!m_imagingDisplayWindow) {
                 m_imagingDisplayWindow = new ImagingDisplayWindow();
@@ -413,9 +424,8 @@ MainWindow::MainWindow(QWidget *parent)
                 QPointer<ImagingDisplayWindow> win(m_imagingDisplayWindow);
                 QPointer<ImagingController> ctrl(m_imagingController);
                 const int idx = bufferIndex;
-                const int blocksPerFrame = m_imagingController->ringBlocksPerFrame();
-                const bool saveNow = m_reconSaveEnabled && !m_reconSaveDir.isEmpty()
-                    && blocksPerFrame > 0 && seq > 0 && seq % blocksPerFrame == 0;
+                // 帧末（本轮 blocksPerFrame 整数倍）：圈末 PNG 保存与自动会话推进
+                const bool saveNow = frameEnd && m_reconSaveEnabled && !m_reconSaveDir.isEmpty();
                 // 圈末已保存：本次成像的“空闲超时到点保存”不再重复保存同一张图
                 // （两种保存条件互斥；新触发到来时由进度回调复位该标志）
                 if (saveNow)
@@ -424,7 +434,7 @@ MainWindow::MainWindow(QWidget *parent)
                 const QString saveSuffix = m_reconSaveSuffix;
                 // 自动保存方案2：圈末即推进会话代（下一会话目录预注册），
                 // 圈末 PNG 已按当前会话目录捕获，下一会话首触发读到的已是新代
-                if (m_autoSaveEnabled && blocksPerFrame > 0 && seq > 0 && seq % blocksPerFrame == 0)
+                if (frameEnd && m_autoSaveEnabled)
                     advanceAutoSession();
                 QThreadPool::globalInstance()->start([ctrl, idx, frame, n, nx, seq, frameIdx, r1, r2, win,
                                    saveNow, saveDir, saveSuffix]() {
@@ -473,7 +483,7 @@ MainWindow::MainWindow(QWidget *parent)
                     m_lblImagingStatus->setText(
                         QString("采集脉冲 %1/%2 · 输出 %3 帧 · %4 fps")
                         .arg(progress).arg(total)
-                        .arg(m_imagingFrameCount)
+                        .arg(m_roundUi.frameCount())
                         .arg(fps, 0, 'f', 1));
                 }
             }
@@ -493,8 +503,9 @@ MainWindow::MainWindow(QWidget *parent)
     m_ringAssembler->setBlockCallback(
         [this](std::vector<float> &&raw, std::vector<float> &&angles,
                std::vector<uint8_t> &&channels, int blockSeq) {
-            // 回调运行在独立成像 worker；只提交成像服务并更新原子统计。
-            m_ringBlockCounter.fetch_add(1, std::memory_order_relaxed);
+            // 回调运行在独立成像 worker；只提交成像服务并更新 per-round 统计。
+            m_roundUi.recordSubmit();   // 记录本轮块序号空间，供快照准入/帧末判定
+            m_roundUi.onBlock();
             const int alines = static_cast<int>(channels.size());
             QVector<float> rawQ(raw.begin(), raw.end());
             QVector<float> angQ(angles.begin(), angles.end());
@@ -2204,6 +2215,22 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     m_netController->setPhysicalRoundBoundarySink(
         [this](const paimage::PhysicalRoundEvent& event) {
             if (event.kind == paimage::PhysicalRoundEvent::Kind::CountBoundary) {
+                // 低频业务事件：count 边界不在此清零帧计数（保留帧末驱动清零）。
+                // 边界 sink 运行在网络线程；诊断记录 marshal 到 UI 线程，
+                // 避免跨线程读 UI 成员（listenId/autoSaveNext）。
+                QMetaObject::invokeMethod(this, [this, event]() {
+                    const auto ui = m_roundUi.snapshot();
+                    recordDiagnosticAction(QStringLiteral("physical_round_boundary"),
+                        {{QStringLiteral("measurementSession"), qint64(event.measurementSession)},
+                         {QStringLiteral("roundGeneration"), qint64(event.roundGeneration)},
+                         {QStringLiteral("boundaryKind"), QStringLiteral("count")},
+                         {QStringLiteral("uiFrameCountBefore"), qint64(ui.frameCount)},
+                         {QStringLiteral("uiFrameCountAfter"), qint64(ui.frameCount)},
+                         {QStringLiteral("ringBlockCounterBefore"), qint64(ui.blockCount)},
+                         {QStringLiteral("ringBlockCounterAfter"), qint64(ui.blockCount)},
+                         {QStringLiteral("autoSessionGen"), m_autoSaveNext},
+                         {QStringLiteral("frameReset"), QStringLiteral("deferred_to_final_frame")}});
+                }, Qt::QueuedConnection);
                 if (!m_ringAssembler || !m_ringAssemblerConfigured) return;
                 std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
                 if (!m_ringAssemblerConfigured) return;
@@ -2222,7 +2249,14 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
             // using the canonical monotonic idle gap. Save/auto-save and the
             // Ring reset share this event; the atomics make the UI timer and
             // the observer idempotent when they notice the same boundary.
-            const auto applyTimeoutUi = [this]() {
+            const auto applyTimeoutUi = [this, event]() {
+                const auto uiBefore = m_roundUi.snapshot();
+                // 统一物理轮次业务边界：TimeoutBoundary 立即切换到新轮次。
+                // 上一轮已长期 idle 且 stale 队列/重建状态已被清除，可以安全
+                // 立即清零 per-round UI 计数（累计网络/诊断统计不受影响）。
+                m_roundUi.onTimeoutBoundary();
+                updateRingImagingStatus();
+                const int autoGenBefore = m_autoSaveNext;
                 if (!m_ringTimeoutSaveDone.exchange(true, std::memory_order_acq_rel) &&
                     m_reconSaveEnabled && !m_reconSaveDir.isEmpty() &&
                     m_imagingDisplayWindow) {
@@ -2233,6 +2267,18 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                 if (m_autoSaveEnabled &&
                     !m_ringTimeoutAutoSessionDone.exchange(true, std::memory_order_acq_rel))
                     advanceAutoSession();
+                const auto uiAfter = m_roundUi.snapshot();
+                recordDiagnosticAction(QStringLiteral("physical_round_boundary"),
+                    {{QStringLiteral("measurementSession"), qint64(event.measurementSession)},
+                     {QStringLiteral("roundGeneration"), qint64(event.roundGeneration)},
+                     {QStringLiteral("boundaryKind"), QStringLiteral("timeout")},
+                     {QStringLiteral("uiFrameCountBefore"), qint64(uiBefore.frameCount)},
+                     {QStringLiteral("uiFrameCountAfter"), qint64(uiAfter.frameCount)},
+                     {QStringLiteral("ringBlockCounterBefore"), qint64(uiBefore.blockCount)},
+                     {QStringLiteral("ringBlockCounterAfter"), qint64(uiAfter.blockCount)},
+                     {QStringLiteral("autoSessionGenBefore"), autoGenBefore},
+                     {QStringLiteral("autoSessionGenAfter"), m_autoSaveNext},
+                     {QStringLiteral("saveRoundRollover"), QStringLiteral("data_plane_roundGeneration")}});
             };
             if (QThread::currentThread() == thread())
                 applyTimeoutUi();
@@ -2258,9 +2304,29 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
             m_ringBoundaryCards = 0;
             m_ringBoundaryApplied = false;
             m_ringAssembler->resetAfterPhysicalTimeout();
+            // ring_reset 已交给 ImagingSvc（超时回调内发送）：此刻之前的提交
+            // 全部属于复位前块，svc 按 FIFO 先处理它们再处理 ring_reset。
+            // 在此武装 stale 截止，确保并发提交也被精确分类。
+            m_roundUi.armStaleCutoff();
         });
     connect(m_netController, &NetworkController::statusMessage, this, &MainWindow::logMessage);
     connect(m_netController, &NetworkController::errorOccurred, this, &MainWindow::logMessage);
+    connect(m_netController, &NetworkController::fileSaverRollover, this,
+            [this](int cardId, const QString& reason,
+                   quint64 oldRoundGeneration, quint64 newRoundGeneration,
+                   int oldFileSequence, int newFileSequence,
+                   int oldFileTriggerCount, bool manualMode) {
+        // 低频：仅在文件翻滚时记录；可区分容量翻滚与物理轮次强制翻滚。
+        recordDiagnosticAction(QStringLiteral("save.file_rollover"),
+            {{QStringLiteral("card"), cardId},
+             {QStringLiteral("boundary"), reason},
+             {QStringLiteral("oldRoundGeneration"), static_cast<qint64>(oldRoundGeneration)},
+             {QStringLiteral("newRoundGeneration"), static_cast<qint64>(newRoundGeneration)},
+             {QStringLiteral("oldFileSequence"), oldFileSequence},
+             {QStringLiteral("newFileSequence"), newFileSequence},
+             {QStringLiteral("oldFileTriggerCount"), oldFileTriggerCount},
+             {QStringLiteral("saveMode"), manualMode ? QStringLiteral("manual") : QStringLiteral("auto")}});
+    });
     // ══ 卡片就绪信号：更新网络信息标签 ════════════════════════════
     connect(m_netController, &NetworkController::cardReady, this, [this](int cardIdx) {
         int ready = m_netController ? m_netController->readyCardCount() : 0;
@@ -4637,8 +4703,7 @@ void MainWindow::onImagingConfigClicked()
 void MainWindow::onImagingStarted()
 {
     m_imagingPulseCount = 0;
-    m_imagingFrameCount = 0;
-    m_ringBlockCounter.store(0);
+    m_roundUi.reset();   // 新成像会话：每轮帧/块计数与快照准入空间清零
     // 保存当前频率颜色图色条范围（切到像素图前）并持久化
     if (m_colorMap) {
         m_freqColorRange = m_colorMap->dataRange();
@@ -4714,7 +4779,7 @@ void MainWindow::onImagingStopped()
 void MainWindow::onImagingImageReady(const QImage &image, int seq)
 {
     if (image.isNull()) return;
-    m_imagingFrameCount++;
+    m_roundUi.onFrame();   // 线性模式输出帧沿用同一 per-round 计数
     saveReconImage(image, "linear");
 
     // 从 ImagingController 获取原始 float 帧数据
@@ -4937,7 +5002,7 @@ void MainWindow::feedImagingPulse()
         if (progress == 0) progress = moveAline;
         m_lblImagingStatus->setText(
             QString("测试脉冲 %1/%2 · 输出 %3 帧")
-            .arg(progress).arg(moveAline).arg(m_imagingFrameCount));
+            .arg(progress).arg(moveAline).arg(m_roundUi.frameCount()));
         return;
     }
 
@@ -4997,7 +5062,7 @@ void MainWindow::feedImagingPulse()
     if (progress == 0) progress = moveAline;
     m_lblImagingStatus->setText(QString("采集脉冲 %1/%2 · 输出 %3 帧")
                                 .arg(progress).arg(moveAline)
-                                .arg(m_imagingFrameCount));
+                                .arg(m_roundUi.frameCount()));
 }
 
 // =====================================================================
@@ -5092,6 +5157,7 @@ void MainWindow::configureRingAssembler()
                                  step, cfg.alinesPerChannelPerFrame,
                                  cfg.triggerWlOdd, cfg.timeoutResetSec); }
     m_ringAssemblerConfigured = true;
+    m_roundUi.reset();   // 新组包会话：每轮计数与快照准入空间清零
     m_ringTimeoutSaveDone = false;   // 新会话：允许超时到点保存
     m_ringTimeoutAutoSessionDone = false;
     const auto configureEndNs = paimage::SocketReceiver::now();
@@ -5113,7 +5179,7 @@ void MainWindow::configureRingAssembler()
 // =====================================================================
 // updateRingImagingStatus — 环形模式“成像中”状态反馈
 // x = 当前块已收到的触发脉冲数，y = 每通道每块 Aline 数（组包器块进度）；
-// 首个触发脉冲到达即由等待状态切换为计数显示；帧计数沿用 m_imagingFrameCount。
+// 首个触发脉冲到达即由等待状态切换为计数显示；帧计数沿用 m_roundUi。
 // 仅主线程调用（工作线程通过 QMetaObject::invokeMethod 切回）。
 // =====================================================================
 void MainWindow::updateRingImagingStatus()
@@ -5135,7 +5201,8 @@ void MainWindow::updateRingImagingStatus()
         return;
     }
 
-    const int blocksDone = m_ringBlockCounter.load(std::memory_order_relaxed);
+    const paimage::RingRoundUiState::Snapshot roundUi = m_roundUi.snapshot();
+    const auto blocksDone = roundUi.blockCount;
     if (pulses <= 0 && blocksDone <= 0) {
         m_lblImagingStatus->setText("成像中，等待重建数据…");
         m_lblImagingStatus->setStyleSheet(amberStyle);
@@ -5147,6 +5214,6 @@ void MainWindow::updateRingImagingStatus()
     m_lblImagingStatus->setText(
         QString("采集脉冲 %1/%2 · 输出 %3 帧")
         .arg(displayPulses).arg(perBlock)
-        .arg(m_imagingFrameCount));
+        .arg(roundUi.frameCount));
     m_lblImagingStatus->setStyleSheet(amberStyle);
 }

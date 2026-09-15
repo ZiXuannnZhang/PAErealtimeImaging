@@ -209,6 +209,22 @@ if(WIN32)
     target_compile_definitions(paimage_host_output_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(paimage_host_output_test PRIVATE paimage_socket Qt6::Core)
     add_test(NAME paimage_host_output_test COMMAND paimage_host_output_test)
+    add_executable(filesaver_round_boundary_test filesaver_round_boundary_test.cpp
+        ../src/PaimageAcquisition/HostOutput.cpp
+        ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
+        ../src/PaimageAcquisition/Backend.cpp
+        ../src/DataProcessor.cpp ../include/DataProcessor.h
+        ../src/FileSaver.cpp ../include/FileSaver.h
+        ../src/FramePublisher.cpp ../include/FramePublisher.h)
+    target_include_directories(filesaver_round_boundary_test PRIVATE ../include)
+    target_compile_definitions(filesaver_round_boundary_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(filesaver_round_boundary_test PRIVATE paimage_socket Qt6::Core)
+    add_test(NAME filesaver_round_boundary_test COMMAND filesaver_round_boundary_test)
+    add_executable(ring_round_ui_state_test ring_round_ui_state_test.cpp
+        ../src/RingRoundUiState.cpp ../include/RingRoundUiState.h)
+    target_include_directories(ring_round_ui_state_test PRIVATE ../include)
+    target_compile_features(ring_round_ui_state_test PRIVATE cxx_std_17)
+    add_test(NAME ring_round_ui_state_test COMMAND ring_round_ui_state_test)
     add_executable(paimage_trace_bundle_test paimage_trace_bundle_test.cpp
         ../src/PaimageAcquisition/TraceBundle.cpp ../src/DiagnosticRecorder.cpp)
     target_include_directories(paimage_trace_bundle_test PRIVATE ../include)

@@ -175,6 +175,11 @@ signals:
                                const QString& reason);
     void stopped();   // 所有子线程已退出，stop() 后台工作完成
     // started() 已移除，改用 start(config, onStarted回调) 方式通知 UI
+    // 保存文件翻滚低频事件（容量 / 物理轮次），由 UI 桥接进诊断记录
+    void fileSaverRollover(int cardId, const QString& reason,
+                           quint64 oldRoundGeneration, quint64 newRoundGeneration,
+                           int oldFileSequence, int newFileSequence,
+                           int oldFileTriggerCount, bool manualMode);
 
 private slots:
     void onStatsTimer();

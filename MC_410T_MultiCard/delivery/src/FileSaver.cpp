@@ -121,6 +121,7 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
     m_fileSequence      = 0;
     m_currentFileTriggers = 0;
     m_currentSourceIPv4 = 0;
+    resetPhysicalRoundState();
     m_saving.store(true, std::memory_order_release);
     emit statusMessage(QString("Card%1: 开始保存到 %2").arg(m_cardId + 1).arg(directory));
 }
@@ -134,6 +135,7 @@ void FileSaver::stopSaving() {
     m_writeAccumB.clear();
     m_accumTriggers = 0;
     m_currentFileTriggers = 0;
+    resetPhysicalRoundState();
     emit statusMessage(QString("Card%1: 停止保存，共保存 %2 触发")
                        .arg(m_cardId + 1).arg(m_savedCount.load()));
 }
@@ -146,6 +148,22 @@ void FileSaver::saveTriggerGroup(const TriggerGroupPtr& group) {
 
 int FileSaver::queueDepth() const {
     return static_cast<int>(m_saveQueue.size_approx());
+}
+
+void FileSaver::resetPhysicalRoundState() {
+    m_haveCurrentPhysicalRound = false;
+    m_currentPhysicalRoundGeneration = 0;
+}
+
+void FileSaver::recordRollover(const FileRolloverInfo& info) {
+    m_lastRollover = info;
+    ++m_rolloverCount;
+    if (info.reason == QStringLiteral("physical_round"))
+        ++m_roundRolloverCount;
+    emit fileRolled(m_cardId, info.reason,
+                    info.oldRoundGeneration, info.newRoundGeneration,
+                    info.oldFileSequence, info.newFileSequence,
+                    info.oldFileTriggerCount, info.manualMode);
 }
 
 // 
@@ -267,6 +285,9 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         m_fileSequence = 0;
         m_currentFileTriggers = 0;
         m_dropGen = 0;
+        // A new auto-save session is a new measurement: physical round file
+        // state must not inherit from the previous session.
+        resetPhysicalRoundState();
         if (m_dirResolver && gen != 0) {
             const QString d = m_dirResolver(gen);
             if (!d.isEmpty()) {
@@ -284,6 +305,35 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     if (m_dropGen != 0 && gen == m_dropGen)
         return false;
 
+    // 物理轮次边界（数据面权威）：TriggerGroup::roundGeneration 决定保存
+    // 文件边界。判定必须发生在写当前 TriggerGroup 之前；即使上一轮数据
+    // 仍在 saver 队列中排队，FIFO 消费顺序也能保证旧 generation 完整写入
+    // 旧文件后，首个新 generation 组才触发轮转。仅 normalizer 分类过的
+    // LogicalScan 参与轮次判定，保持旧路径/旧数据行为不变。
+    if (group->normalizationApplied &&
+        group->physicalDecision == paimage::PhysicalTriggerDecision::LogicalScan) {
+        if (!m_haveCurrentPhysicalRound) {
+            m_haveCurrentPhysicalRound = true;
+            m_currentPhysicalRoundGeneration = group->roundGeneration;
+        } else if (group->roundGeneration != m_currentPhysicalRoundGeneration) {
+            flushWriteBuffers();
+            closeFiles();
+            FileRolloverInfo info;
+            info.happened = true;
+            info.reason = QStringLiteral("physical_round");
+            info.oldRoundGeneration = m_currentPhysicalRoundGeneration;
+            info.newRoundGeneration = group->roundGeneration;
+            info.oldFileSequence = m_fileSequence;
+            info.oldFileTriggerCount = m_currentFileTriggers;
+            ++m_fileSequence;   // 安全推进：绝不覆盖上一物理轮次的文件
+            m_currentFileTriggers = 0;
+            info.newFileSequence = m_fileSequence;
+            info.manualMode = (m_currentGen == 0);
+            m_currentPhysicalRoundGeneration = group->roundGeneration;
+            recordRollover(info);
+        }
+    }
+
     // 打开文件（首次 或 IP 来源变化时）
     if (!m_fileChannelA || !m_fileChannelB ||
         group->sourceIPv4 != m_currentSourceIPv4) {
@@ -292,12 +342,22 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         openNewFiles(group->sourceIPv4);
     }
 
-    // 文件序号翻滚
+    // 文件序号翻滚（容量上限 triggersPerFile）
     if (m_currentFileTriggers >= m_triggersPerFile) {
         flushWriteBuffers();   // 翻滚前先刷盘
+        FileRolloverInfo info;
+        info.happened = true;
+        info.reason = QStringLiteral("capacity");
+        info.oldRoundGeneration = m_currentPhysicalRoundGeneration;
+        info.newRoundGeneration = m_currentPhysicalRoundGeneration;
+        info.oldFileSequence = m_fileSequence;
+        info.oldFileTriggerCount = m_currentFileTriggers;
         ++m_fileSequence;
+        info.newFileSequence = m_fileSequence;
+        info.manualMode = (m_currentGen == 0);
         closeFiles();
         openNewFiles(m_currentSourceIPv4);
+        recordRollover(info);
     }
 
     if (!m_fileChannelA || !m_fileChannelB) {
@@ -357,4 +417,11 @@ void FileSaver::suspendForSourceRestart() {
     // Continue the host file sequence rather than reopening/truncating the
     // file containing the preceding sample layout. Format and names unchanged.
     if(hadData)++m_fileSequence;
+}
+
+void FileSaver::resumeAfterSourceRestart() {
+    // stopSaving() (via suspendForSourceRestart) already reset the physical
+    // round file state; keep the invariant explicit for the resume half.
+    resetPhysicalRoundState();
+    m_saving.store(true,std::memory_order_release);
 }
