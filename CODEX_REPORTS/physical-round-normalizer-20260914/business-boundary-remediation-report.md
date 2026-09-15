@@ -23,7 +23,7 @@ ADDENDUM_TASK         TASKS/物理轮次业务边界统一整改追加_20260915-
 IMPLEMENTATION_BRANCH codex/physical-round-normalizer-20260914-043019
 CONTINUE_FROM_SHA     576e0c9f0e7bc30321a57be0f562a372fcb28ea2
 SOURCE_FIX_SHA        ec08d729f792811763671d6cee6a60263cd5f9a7
-RECEIPT_SHA           (本文件提交 SHA，由后续 commit 回填)
+RECEIPT_SHA           00c347c6f413a32fb79e23cbc57a4502216cbe6a
 LOCAL_HEAD_EQUALS_REMOTE_HEAD  verified after final push
 ```
 
