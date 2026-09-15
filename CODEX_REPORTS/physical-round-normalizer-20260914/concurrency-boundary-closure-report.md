@@ -24,7 +24,7 @@ IMPLEMENTATION_BRANCH codex/physical-round-normalizer-20260914-043019
 CONTINUE_FROM_SHA     dfdbecde74ad86a2b64e70ac9bc95a6a2a3eb264
 PREVIOUS_SOURCE_FIX   ec08d729f792811763671d6cee6a60263cd5f9a7
 SOURCE_FIX_SHA        a8fe13b1dba06e2556c55bdf236ff6eda96e40a8
-RECEIPT_SHA           0b69ab1e85a5f4a5a1a98ca353bd766cf10ce3a1
+RECEIPT_SHA           0b69ab11ba06de9dfaa95dedf2618aaecce16a30
 ```
 
 源码从任务书指定的 continuation SHA 继续；没有 reset、rebase 或 force push。`main` 工作区已有的用户改动未触碰。
@@ -220,7 +220,7 @@ MC_410T_MultiCard/delivery/tests/ring_round_ui_state_test.cpp
 
 ```text
 SOURCE_FIX_SHA a8fe13b1dba06e2556c55bdf236ff6eda96e40a8
-RECEIPT_SHA    0b69ab1e85a5f4a5a1a98ca353bd766cf10ce3a1
+RECEIPT_SHA    0b69ab11ba06de9dfaa95dedf2618aaecce16a30
 ```
 
 源代码提交与本报告提交分离；回填 SHA 的后续提交也只修改本报告字段。
