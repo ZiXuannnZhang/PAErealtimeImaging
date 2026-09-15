@@ -20,7 +20,7 @@ TASK_DOC              TASKS/CountBoundary自动保存轮次绑定整改追加_20
 IMPLEMENTATION_BRANCH codex/physical-round-normalizer-20260914-043019
 CONTINUE_FROM_SHA     a678b9cdc44c48cccbb8bd02d7e5ef1b68275baa
 SOURCE_FIX_SHA        32a3071d7be1e4dbe6558832215e0bb559f9f3b3
-RECEIPT_SHA           TO_BE_FILLED
+RECEIPT_SHA           364aa4b8f7de6ac3880928d14a9e57b01cfbf7d7
 ```
 
 实现分支 continuation baseline 与任务要求一致；没有 reset、rebase 或 force push。主工作区原有用户改动未触碰。
@@ -212,7 +212,8 @@ HARDWARE_VALIDATION_PENDING
 
 ```text
 LOCAL_HEAD_AT_SOURCE_COMMIT 32a3071d7be1e4dbe6558832215e0bb559f9f3b3
-REMOTE_HEAD                  TO_BE_VERIFIED_AFTER_PUSH
+LOCAL_HEAD_AT_REPORT_RECEIPT 364aa4b8f7de6ac3880928d14a9e57b01cfbf7d7
+REMOTE_HEAD_AT_REPORT_RECEIPT 364aa4b8f7de6ac3880928d14a9e57b01cfbf7d7
 ```
 
-回执提交后将回填 `RECEIPT_SHA`、最终 branch HEAD 和远端 HEAD；源码提交与 report-only 提交保持分离。
+`RECEIPT_SHA` 指向首个 report-only 提交；该提交已推送并验证本地/远端一致。随后仅为回填此 SHA 产生的修正提交仍只修改本报告，最终分支 HEAD 以最后一次 push 后的 `git rev-parse HEAD` 为准；源码提交与 report-only 提交保持分离。
