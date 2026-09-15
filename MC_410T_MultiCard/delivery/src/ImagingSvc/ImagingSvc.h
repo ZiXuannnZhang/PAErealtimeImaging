@@ -48,7 +48,7 @@ private:
                              const ring_shm_obs::Snapshot &snapshot,
                              const QJsonObject &extra = QJsonObject());
     void sendFrameToHost();
-    void sendRingSnapshotToHost();
+    void sendRingSnapshotToHost(uint64_t submitIndex);
     void sendStatus(float fps);
     void sendError(const QString &errMsg, int code);
 

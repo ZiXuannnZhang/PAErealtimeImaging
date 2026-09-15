@@ -94,6 +94,8 @@ if(WIN32)
     add_executable(network_diagnostics_test
         network_diagnostics_test.cpp
         ../src/NetworkController.cpp ../include/NetworkController.h
+        ../src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp
+        ../include/PaimageAcquisition/AutoSaveRoundCoordinator.h
         ../src/MeasurementSession.cpp ../include/MeasurementSession.h
         ../src/NetworkDiagnostics.cpp ../src/DiagnosticRecorder.cpp
         ../src/StartupPolicy.cpp
@@ -225,6 +227,16 @@ if(WIN32)
     target_include_directories(ring_round_ui_state_test PRIVATE ../include)
     target_compile_features(ring_round_ui_state_test PRIVATE cxx_std_17)
     add_test(NAME ring_round_ui_state_test COMMAND ring_round_ui_state_test)
+    add_executable(auto_save_round_coordinator_test
+        auto_save_round_coordinator_test.cpp
+        ../src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp
+        ../include/PaimageAcquisition/AutoSaveRoundCoordinator.h
+        ../src/FileSaver.cpp ../include/FileSaver.h)
+    target_include_directories(auto_save_round_coordinator_test PRIVATE ../include)
+    target_compile_definitions(auto_save_round_coordinator_test PRIVATE
+        WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(auto_save_round_coordinator_test PRIVATE Qt6::Core)
+    add_test(NAME auto_save_round_coordinator_test COMMAND auto_save_round_coordinator_test)
     add_executable(paimage_trace_bundle_test paimage_trace_bundle_test.cpp
         ../src/PaimageAcquisition/TraceBundle.cpp ../src/DiagnosticRecorder.cpp)
     target_include_directories(paimage_trace_bundle_test PRIVATE ../include)

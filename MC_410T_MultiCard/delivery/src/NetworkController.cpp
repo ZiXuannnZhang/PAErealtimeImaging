@@ -46,7 +46,47 @@ DiagnosticRecorder *diagnosticRecorder()
 NetworkController::NetworkController(QObject* parent)
     : QObject(parent)
     , m_controlSocket(INVALID_SOCKET)
-    , m_feedbackSocket(INVALID_SOCKET) {}
+    , m_feedbackSocket(INVALID_SOCKET)
+{
+    m_autoSaveCoordinator.setEventSink([this](
+        const paimage::AutoSaveRoundCoordinator::Event& event) {
+        QString message;
+        DiagnosticRecorder::Severity severity = DiagnosticRecorder::Severity::Info;
+        switch (event.kind) {
+        case paimage::AutoSaveRoundCoordinator::Event::Kind::Reserved:
+            message = QStringLiteral("auto_save_round_generation_reserved");
+            break;
+        case paimage::AutoSaveRoundCoordinator::Event::Kind::Committed:
+            message = QStringLiteral("auto_save_round_generation_committed");
+            break;
+        case paimage::AutoSaveRoundCoordinator::Event::Kind::AlreadyApplied:
+            message = QStringLiteral("auto_save_round_generation_already_applied");
+            break;
+        case paimage::AutoSaveRoundCoordinator::Event::Kind::Failed:
+            message = QStringLiteral("auto_save_round_generation_failed");
+            severity = DiagnosticRecorder::Severity::Error;
+            break;
+        }
+        recordDiagnosticEvent(
+            QStringLiteral("paimage.auto_save"), message, severity,
+            {{QStringLiteral("measurementSession"),
+              QString::number(event.measurementSession)},
+             {QStringLiteral("roundGeneration"),
+              QString::number(event.roundGeneration)},
+             {QStringLiteral("boundaryKind"),
+              QString::fromLatin1(paimage::autoSaveBoundaryKindName(event.boundaryKind))},
+             {QStringLiteral("boundaryKey"), event.boundaryKey},
+             {QStringLiteral("oldSessionGen"),
+              QString::number(event.oldSessionGen)},
+             {QStringLiteral("newSessionGen"),
+              QString::number(event.newSessionGen)},
+             {QStringLiteral("publishedSessionGen"),
+              QString::number(event.publishedSessionGen)},
+             {QStringLiteral("directory"), event.directory},
+             {QStringLiteral("phase"), event.phase},
+             {QStringLiteral("error"), event.error}});
+    });
+}
 
 void NetworkController::setDiagnosticContext(const QString& listenId,
                                               const QString& source)
@@ -516,20 +556,66 @@ void NetworkController::stopSaving() {
 }
 
 // ─
-// 自动保存会话代目录注册表（方案2 精确分界）
+// 自动保存会话代协调器（物理边界权威）
 // ─
-void NetworkController::registerSessionDir(uint64_t gen, const QString& dir) {
-    QMutexLocker locker(&m_sessionDirMutex);
-    m_sessionDirs.insert(gen, dir);
+void NetworkController::configureAutoSave(const QString& baseDirectory,
+                                           std::uint64_t lastDirectoryNumber)
+{
+    m_autoSaveCoordinator.configure(baseDirectory, lastDirectoryNumber);
 }
 
-QString NetworkController::sessionDir(uint64_t gen) const {
-    if (gen == 0) return QString();   // 手动模式：保持当前目录
-    QMutexLocker locker(&m_sessionDirMutex);
-    return m_sessionDirs.value(gen);
+NetworkController::AutoSaveCommit NetworkController::beginAutoSaveSession(
+    std::uint64_t measurementSession, const QString& phase)
+{
+    auto result = m_autoSaveCoordinator.beginSession(measurementSession, phase);
+    if (result.committed)
+        requestCloseSavers();
+    return result;
+}
+
+NetworkController::AutoSaveCommit NetworkController::commitAutoSaveBoundary(
+    std::uint64_t measurementSession,
+    std::uint64_t roundGeneration,
+    paimage::AutoSaveBoundaryKind boundaryKind,
+    const QString& phase)
+{
+    auto result = m_autoSaveCoordinator.commitBoundary(
+        measurementSession, roundGeneration, boundaryKind, phase);
+    if (result.committed)
+        requestCloseSavers();
+    return result;
+}
+
+void NetworkController::disableAutoSave()
+{
+    m_autoSaveCoordinator.disable();
+}
+
+bool NetworkController::autoSaveEnabled() const
+{
+    return m_autoSaveCoordinator.enabled();
+}
+
+bool NetworkController::autoSaveFaulted() const
+{
+    return m_autoSaveCoordinator.faulted();
+}
+
+uint64_t NetworkController::autoSessionGen() const
+{
+    return m_autoSaveCoordinator.currentGeneration();
+}
+
+QString NetworkController::sessionDir(uint64_t gen) const
+{
+    return m_autoSaveCoordinator.directoryFor(gen);
 }
 
 void NetworkController::requestCloseSavers() {
+    if (m_paimage) {
+        m_paimage->output().requestClose();
+        return;
+    }
     for (auto& s : m_savers) s->requestClose();
 }
 

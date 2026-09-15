@@ -722,7 +722,7 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
     h->frame_seq++;
     m_ringSharedMemory->unlock();
 
-    sendRingSnapshotToHost();     // 新链路：方案A 显示快照
+    sendRingSnapshotToHost(submitIndex);     // 新链路：方案A 显示快照
 
     m_ringObs.recordProcessDuration(ring_shm_obs::steadyNowUs() - processStartUs);
     if (observation.periodicDue)
@@ -769,7 +769,7 @@ void ImagingSvc::resetRingRecon()
     }
 }
 
-void ImagingSvc::sendRingSnapshotToHost()
+void ImagingSvc::sendRingSnapshotToHost(uint64_t submitIndex)
 {
     if (!m_ringSharedMemory) return;
     m_ringSharedMemory->lock();
@@ -780,6 +780,7 @@ void ImagingSvc::sendRingSnapshotToHost()
     QJsonObject msg;
     msg["cmd"] = "ring_snapshot_ready";
     msg["seq"] = seq;
+    msg["submit_index"] = static_cast<qint64>(submitIndex);
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
     zmq::message_t zmsg(static_cast<size_t>(data.size()));

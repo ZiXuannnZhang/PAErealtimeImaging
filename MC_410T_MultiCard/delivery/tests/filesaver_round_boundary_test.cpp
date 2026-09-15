@@ -471,7 +471,7 @@ int main(int argc, char** argv)
                    out.card(make(100, 0));
                    for (int i = 1; i <= 3; ++i) out.card(make(100 + i, i * kMs));
                    const std::int64_t base = 3 * kMs + 500 * kMs;
-                   gen = 2;   // advanceAutoSession() equivalent at the boundary
+                   gen = 2;   // coordinator generation advance at the boundary
                    out.card(make(200, base + 1 * kMs));
                    for (int i = 1; i <= 5; ++i)
                        out.card(make(200 + i, base + (1 + i) * kMs));

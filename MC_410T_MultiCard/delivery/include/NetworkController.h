@@ -4,8 +4,6 @@
 #include <QByteArray>
 #include <QStringList>
 #include <QVector>
-#include <QHash>
-#include <QMutex>
 #include <QJsonObject>
 #include <vector>
 #include <deque>
@@ -23,6 +21,7 @@
 #include "DisplayBuffer.h"
 #include "DiagnosticRecorder.h"
 #include "NetworkDiagnostics.h"
+#include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -96,13 +95,24 @@ public:
                      int triggersPerFile,
                      const QString& suffix);
     void stopSaving();
-    //  自动保存会话代（方案2 精确分界）：
-    //  gen=0 表示自动保存未激活；>0 为当前会话代。DataProcessor 入队前
-    //  读取该值打在触发组上，FileSaver 按代路由目录。
-    void     setAutoSessionGen(uint64_t gen) { m_autoSessionGen.store(gen, std::memory_order_release); }
-    uint64_t autoSessionGen() const          { return m_autoSessionGen.load(std::memory_order_acquire); }
-    void     registerSessionDir(uint64_t gen, const QString& dir);   // UI 线程预注册目录
-    QString  sessionDir(uint64_t gen) const;                          // 线程安全查询
+    // 自动保存会话代协调器：目录准备/注册完成后才发布 generation。
+    // 物理边界源调用 commit，DataProcessor 热路径只做 acquire 读取。
+    using AutoSaveCommit = paimage::AutoSaveRoundCoordinator::CommitResult;
+    void configureAutoSave(const QString& baseDirectory,
+                           std::uint64_t lastDirectoryNumber);
+    AutoSaveCommit beginAutoSaveSession(
+        std::uint64_t measurementSession,
+        const QString& phase = QStringLiteral("ui_session_start"));
+    AutoSaveCommit commitAutoSaveBoundary(
+        std::uint64_t measurementSession,
+        std::uint64_t roundGeneration,
+        paimage::AutoSaveBoundaryKind boundaryKind,
+        const QString& phase);
+    void disableAutoSave();
+    bool autoSaveEnabled() const;
+    bool autoSaveFaulted() const;
+    uint64_t autoSessionGen() const;
+    QString sessionDir(uint64_t gen) const;
     // 方案A：请求全部保存器在队列排空后刷盘关闭当前会话文件（会话边界主动落盘）
     void     requestCloseSavers();
     // 实时更新显示降采样点数（不重建线程，直接修改各 DataProcessor 的配置）
@@ -346,10 +356,8 @@ private:
     std::vector<std::unique_ptr<DisplayBuffer>>    m_displayBuffers;
     std::vector<std::unique_ptr<FileSaver>>        m_savers;
 
-    // ══ 自动保存会话代（方案2）══════════════════════════════════
-    std::atomic<uint64_t>          m_autoSessionGen{0};
-    mutable QMutex                 m_sessionDirMutex;
-    QHash<uint64_t, QString>       m_sessionDirs;   // 会话代 → 保存目录
+    // ══ 自动保存会话代（物理边界协调器）══════════════════════════
+    paimage::AutoSaveRoundCoordinator m_autoSaveCoordinator;
 
     std::vector<std::unique_ptr<MultiPortReceiver>> m_receivers;
 

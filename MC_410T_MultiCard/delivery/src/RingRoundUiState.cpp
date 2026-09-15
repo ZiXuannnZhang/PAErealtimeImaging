@@ -12,16 +12,20 @@ void RingRoundUiState::reset()
     snapshotsThisRound_ = 0;
     submissionsTotal_ = 0;
     epoch_ = 0;
-    staleCutoffSeq_ = 0;
+    lastSubmitIndex_ = 0;
+    staleCutoffSubmitIndex_ = 0;
     hasStaleCutoff_ = false;
     staleDropped_ = 0;
     frameEnds_ = 0;
 }
 
-void RingRoundUiState::recordSubmit()
+void RingRoundUiState::recordSubmitIndex(std::uint64_t submitIndex)
 {
+    if (submitIndex == 0) return;
     std::lock_guard<std::mutex> lock(mutex_);
     ++submissionsTotal_;
+    if (submitIndex > lastSubmitIndex_)
+        lastSubmitIndex_ = submitIndex;
 }
 
 void RingRoundUiState::onBlock()
@@ -30,12 +34,12 @@ void RingRoundUiState::onBlock()
     ++blockCount_;
 }
 
-bool RingRoundUiState::admitSnapshot(std::int64_t svcGlobalSeq)
+bool RingRoundUiState::admitSnapshot(std::uint64_t submitIndex)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (svcGlobalSeq < 0)
+    if (submitIndex == 0)
         return false;
-    if (hasStaleCutoff_ && static_cast<std::uint64_t>(svcGlobalSeq) <= staleCutoffSeq_)
+    if (hasStaleCutoff_ && submitIndex <= staleCutoffSubmitIndex_)
         return false;
     return true;
 }
@@ -87,15 +91,21 @@ void RingRoundUiState::onTimeoutBoundary()
     snapshotsThisRound_ = 0;
 }
 
-void RingRoundUiState::armStaleCutoff()
+void RingRoundUiState::armStaleCutoff(std::uint64_t cutoffSubmitIndex)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    // Ring block seq restarts at 0 after the assembler/service reset, while the
-    // svc shm frame_seq keeps counting. The submission total tracks the same
-    // FIFO block stream as frame_seq, so it is the exact stale cut: any
-    // snapshot produced from pre-reset blocks has svc seq <= the cut.
-    staleCutoffSeq_ = submissionsTotal_;
+    // Ring block seq and svc frame_seq are not the identity domain.  The
+    // caller supplies the producer submit_index that was reserved by the
+    // actual ring_block_ready command path.
+    staleCutoffSubmitIndex_ = cutoffSubmitIndex;
     hasStaleCutoff_ = true;
+}
+
+void RingRoundUiState::disarmStaleCutoff()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    staleCutoffSubmitIndex_ = 0;
+    hasStaleCutoff_ = false;
 }
 
 RingRoundUiState::Snapshot RingRoundUiState::snapshot() const
@@ -106,6 +116,9 @@ RingRoundUiState::Snapshot RingRoundUiState::snapshot() const
     s.blockCount = blockCount_;
     s.snapshotsThisRound = snapshotsThisRound_;
     s.submissionsTotal = submissionsTotal_;
+    s.lastSubmitIndex = lastSubmitIndex_;
+    s.staleCutoffSubmitIndex = staleCutoffSubmitIndex_;
+    s.hasStaleCutoff = hasStaleCutoff_;
     s.epoch = epoch_;
     s.staleSnapshotsDropped = staleDropped_;
     s.frameEndEvents = frameEnds_;

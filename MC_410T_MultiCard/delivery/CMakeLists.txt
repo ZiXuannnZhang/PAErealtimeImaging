@@ -52,6 +52,7 @@ set(SOURCES
     src/RingColorBarWidget.cpp
     src/RingBlockAssembler.cpp
     src/RingRoundUiState.cpp
+    src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp
     qcustomplot/qcustomplot.cpp
 )
 
@@ -83,6 +84,7 @@ set(HEADERS
     include/RingImageWidget.h
     include/RingColorBarWidget.h
     include/RingBlockAssembler.h
+    include/PaimageAcquisition/AutoSaveRoundCoordinator.h
     include/PaimageAcquisition/PhysicalRoundNormalizer.h
     include/third_party/concurrentqueue.h
     qcustomplot/qcustomplot.h

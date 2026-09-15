@@ -28,6 +28,7 @@
 #include "Constants.h"
 #include "ImagingParams.h"
 #include "RingRoundUiState.h"
+#include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -85,7 +86,6 @@ private slots:
     void onSelectDirClicked();
     void onToggleSaveClicked();
     void onAutoSaveToggled(bool checked);   // 自动保存勾选切换（环形：触发开始/圈末或超时重置停止）
-    QString advanceAutoSession();           // 方案2：分配下一会话目录（编号+1）并注册会话代，返回新目录
     void initAutoSaveSavers();              // 方案B：在当前控制器上（重）建自动保存（监听重启后恢复用）
     void onEnableDisplayToggled(bool checked);
     void onRealtimeImagingToggled(bool checked);
@@ -106,6 +106,8 @@ private slots:
     void onSystemCaptureStatusTick();
 
 private:
+    using AutoSaveCommit = paimage::AutoSaveRoundCoordinator::CommitResult;
+
     void setupUI();
     void rebuildDynamicUI();          // 根据当前 m_nCards 重建 Tab/图表/统计栏
     void setupPlots();
@@ -140,6 +142,8 @@ private:
     void updateNetworkInfoLabels(); // 根据 m_nCards 刷新网络控制面板标签
     void updateNetworkInfoIndicator(); // 把只读网络信息汇总到感叹号悬停提示
     void saveReconImage(const QImage &image, const QString &tag); // 实时重建图像 PNG 保存
+    void applyAutoSaveCommitToUi(const AutoSaveCommit& commit);
+    void queueAutoSaveFailure(const AutoSaveCommit& commit);
     void updateRingImagingStatus(); // 环形模式成像运行状态反馈（当前块脉冲数，主线程调用）
     // targetSourceKind: "explicit_target_ips" 或 "config_ack_discovery"
     void startListeningWithIPs(const QVector<QString>& onlineIPs,
@@ -199,7 +203,6 @@ private:
     QTimer *m_displayTimer;   // 30fps pull 定时器
     QTimer *m_ringTimeoutTimer = nullptr;   // 物理空闲超时到点保存 PNG
     std::atomic<bool> m_ringTimeoutSaveDone{false};  // shared timeout boundary/UI timer de-dup
-    std::atomic<bool> m_ringTimeoutAutoSessionDone{false};
 
     // 状态标志
     bool m_isListening;
@@ -282,6 +285,8 @@ private:
     RingBlockAssembler *m_ringAssembler = nullptr;   // 阶段B：真实采集组包器
     mutable std::mutex m_ringAssemblerMutex;          // 仅保护成像组包器，不与采集/保存共享
     std::atomic<bool> m_ringAssemblerConfigured{false};
+    std::atomic<bool> m_ringSnapshotAdmissionBlocked{false};
+    std::atomic<bool> m_ringResetCommandSent{false};
     // Count-boundary events are emitted when the first card observes the
     // final logical identity. The Ring consumer applies the boundary only
     // after every enabled card for that identity has been consumed.
@@ -291,6 +296,9 @@ private:
     uint16_t m_ringBoundaryTrigger = 0;
     uint32_t m_ringBoundaryCards = 0;
     bool m_ringBoundaryApplied = false;
+    bool m_ringAutoSaveCountPending = false;
+    uint64_t m_ringAutoSaveCountSession = 0;
+    uint64_t m_ringAutoSaveCountGeneration = 0;
     uint64_t m_lastRingBoundarySession = 0;
     uint64_t m_lastRingBoundaryGeneration = 0;
     uint16_t m_lastRingBoundaryTrigger = 0;
@@ -341,7 +349,6 @@ private:
     // 自动保存（环形）：勾选后随采集触发开始、随圈末/超时重置停止；
     // 会话数据存于 输入路径上一级 下的三位数编号文件夹（001、002…）
     bool m_autoSaveEnabled = false;
-    int  m_autoSaveNext = 0;   // 下一编号（勾选时扫描基线目录最大三位数编号，会话开始前自增）
 };
 
 #endif // MAINWINDOW_H

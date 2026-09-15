@@ -55,9 +55,13 @@ public:
     const RingReconCudaConfig &ringConfig() const { return m_ringConfig; }
 
     // 环形扫描：提交一个原始 A-line 块（float32，sampDepth x alinesPerBlock，列主序）
-    bool submitRingBlock(const QVector<float> &rawBlock, const QVector<float> &anglesDeg, const QVector<quint8> &channels, int blockSeq);
+    bool submitRingBlock(const QVector<float> &rawBlock,
+                         const QVector<float> &anglesDeg,
+                         const QVector<quint8> &channels,
+                         int blockSeq,
+                         std::uint64_t *outSubmitIndex = nullptr);
     // 超时判定新一圈：通知子进程清空重建累积（RingBlockAssembler 超时回调调用）
-    void sendRingReset();
+    bool sendRingReset();
 
     // 数据输入（从 MainWindow 调用，线程安全）
     // freqA/freqB 分别对应一张卡的两个物理通道的频率数据
@@ -76,6 +80,7 @@ public:
 
     int ringBlocksPerFrame() const;   // 一整圈（一帧）包含的块数，用于“最后一帧更新完”判定
     int ringDisplayNx() const { return m_ringDisplayNx; }  // 方案A：= nx（显示=全分辨率）
+    std::uint64_t ringLastSubmitIndex() const;
 
     // 固定双缓冲访问（仅 UI 线程调用）：
     // snapshotBuffer 返回已发布缓冲的只读指针，使用完必须 releaseSnapshotBuffer，
@@ -85,7 +90,10 @@ public:
 
 signals:
     void imageReady(const QImage &image, int seq);
-    void ringSnapshotReady(int seq, int bufferIndex);  // 每块显示快照（UI 线程槽）
+    void ringSnapshotReady(int seq,
+                           quint64 submitIndex,
+                           bool hasSubmitIndex,
+                           int bufferIndex);  // 每块显示快照（UI 线程槽）
     void svcStatus(const QString &status, float fps);
     void svcError(const QString &error);
     void svcReady();                   // 子进程就绪（配置已下发）
@@ -99,7 +107,7 @@ private slots:
     void pollControlMessages();
 
 private:
-    void sendCommand(const QJsonObject &cmd);
+    bool sendCommand(const QJsonObject &cmd);
     void sendConfigureAndStart();
     QImage frameDataToImage(const QVector<float> &data, int nx, int ny) const;
     void setupSharedMemory(int pulseSize, int frameSize);
@@ -108,11 +116,15 @@ private:
                         size_t expectedTotal) const;  // v2 强校验
     void processMessage(const QJsonObject &msg);
     void processRingMessage(const QJsonObject &msg);
-    void startRingFrameWorker(int seq);   // 请求环形帧转换（最新一帧覆盖）
+    void startRingFrameWorker(int seq,
+                              std::uint64_t submitIndex,
+                              bool hasSubmitIndex);   // 请求环形帧转换（最新一帧覆盖）
     void ensureRingWorkerStarted();
     void stopRingWorker();
     void ringWorkerLoop();
-    void processRingFrame(int seq);       // 常驻工作线程内的单帧读取/转换/投递
+    void processRingFrame(int seq,
+                          std::uint64_t submitIndex,
+                          bool hasSubmitIndex);       // 常驻工作线程内的单帧读取/转换/投递
     void finishStopSvc();              // 异步停止的收尾清理
 
     QProcess      *m_svcProcess;
@@ -163,6 +175,8 @@ private:
     std::mutex           m_ringReqMutex;      // 帧请求（最新一帧覆盖）
     std::condition_variable m_ringReqCv;
     int                  m_ringReqSeq = -1;
+    std::uint64_t        m_ringReqSubmitIndex = 0;
+    bool                 m_ringReqHasSubmitIndex = false;
     bool                 m_ringReqPending = false;
     bool                 m_ringWorkerStop = false;
 
