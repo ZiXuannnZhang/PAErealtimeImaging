@@ -324,10 +324,15 @@ void ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
 bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
                                   const QVector<float> &anglesDeg,
                                   const QVector<quint8> &channels,
+                                  const paimage::RoundIdentity &round,
                                   int blockSeq,
                                   std::uint64_t *outSubmitIndex)
 {
     if (outSubmitIndex) *outSubmitIndex = 0;
+    if (!round.valid()) {
+        emit svcError(QStringLiteral("环形块缺少有效物理轮次身份，拒绝提交"));
+        return false;
+    }
     if (!m_running.load(std::memory_order_relaxed) || !m_ringSharedMemory) {
         emit svcError(QStringLiteral("环形服务未就绪，拒绝提交块"));
         return false;
@@ -366,6 +371,7 @@ bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
     ready[QStringLiteral("seq")] = blockSeq;
     ready[QStringLiteral("submit_index")] = static_cast<qint64>(event.submitIndex);
     ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(event.submitWallUs);
+    ring_round_identity::add(ready, round);
     if (outSubmitIndex) *outSubmitIndex = event.submitIndex;
     const bool sent = sendCommand(ready);
 
@@ -477,18 +483,27 @@ void ImagingController::processRingMessage(const QJsonObject &msg)
     const QString cmd = msg["cmd"].toString();
     if (cmd != "ring_snapshot_ready" || !m_ringSharedMemory) return;
 
+    const auto identity = ring_round_identity::parse(msg);
+    if (!identity.valid) {
+        emit svcStatus(QStringLiteral("[RingRoundIdentity] snapshot rejected: ")
+                           + identity.error, 0);
+        return;
+    }
+
     const QJsonValue submitValue = msg.value(QStringLiteral("submit_index"));
     const bool hasSubmitIndex = !submitValue.isUndefined() &&
                                  !submitValue.isNull() &&
                                  submitValue.toVariant().toULongLong() != 0;
     const std::uint64_t submitIndex = hasSubmitIndex
         ? submitValue.toVariant().toULongLong() : 0;
-    startRingFrameWorker(msg["seq"].toInt(), submitIndex, hasSubmitIndex);
+    startRingFrameWorker(msg["seq"].toInt(), submitIndex, hasSubmitIndex,
+                         identity.identity);
 }
 
 void ImagingController::startRingFrameWorker(int seq,
                                              std::uint64_t submitIndex,
-                                             bool hasSubmitIndex)
+                                             bool hasSubmitIndex,
+                                             const paimage::RoundIdentity &round)
 {
     if (!m_running.load(std::memory_order_relaxed) || !m_ringSharedMemory) return;
 
@@ -498,6 +513,7 @@ void ImagingController::startRingFrameWorker(int seq,
         m_ringReqSeq = seq;
         m_ringReqSubmitIndex = submitIndex;
         m_ringReqHasSubmitIndex = hasSubmitIndex;
+        m_ringReqRound = round;
         m_ringReqPending = true;   // 处理期间再来新帧：覆盖为最新一帧
     }
     m_ringReqCv.notify_one();
@@ -523,6 +539,7 @@ void ImagingController::stopRingWorker()
         m_ringReqPending = false;
         m_ringReqSubmitIndex = 0;
         m_ringReqHasSubmitIndex = false;
+        m_ringReqRound = paimage::RoundIdentity{};
     }
     m_ringReqCv.notify_all();
     std::lock_guard<std::mutex> lk(m_ringWorkerMutex);
@@ -539,6 +556,7 @@ void ImagingController::ringWorkerLoop()
         int seq = -1;
         std::uint64_t submitIndex = 0;
         bool hasSubmitIndex = false;
+        paimage::RoundIdentity round;
         {
             std::unique_lock<std::mutex> lk(m_ringReqMutex);
             m_ringReqCv.wait_for(lk, std::chrono::milliseconds(200), [this]() {
@@ -549,16 +567,18 @@ void ImagingController::ringWorkerLoop()
             seq = m_ringReqSeq;
             submitIndex = m_ringReqSubmitIndex;
             hasSubmitIndex = m_ringReqHasSubmitIndex;
+            round = m_ringReqRound;
             m_ringReqPending = false;
         }
         if (seq >= 0)
-            processRingFrame(seq, submitIndex, hasSubmitIndex);
+            processRingFrame(seq, submitIndex, hasSubmitIndex, round);
     }
 }
 
 void ImagingController::processRingFrame(int seq,
                                          std::uint64_t submitIndex,
-                                         bool hasSubmitIndex)
+                                         bool hasSubmitIndex,
+                                         const paimage::RoundIdentity &round)
 {
     QSharedMemory *shm = m_ringSharedMemory;
     if (!m_running.load(std::memory_order_relaxed) || !shm) return;
@@ -590,11 +610,14 @@ void ImagingController::processRingFrame(int seq,
 
     // 停止后的迟到帧不再发 UI（避免停止后窗口重新弹出）
     if (!m_running.load(std::memory_order_relaxed)) return;
-    QMetaObject::invokeMethod(this, [this, seq, submitIndex, hasSubmitIndex, target]() {
+    QMetaObject::invokeMethod(this, [this, seq, submitIndex, hasSubmitIndex,
+                                     round, target]() {
         if (!m_running.load(std::memory_order_relaxed)) return;
         emit ringSnapshotReady(seq,
                                static_cast<quint64>(submitIndex),
                                hasSubmitIndex,
+                               static_cast<quint64>(round.measurementSession),
+                               static_cast<quint64>(round.roundGeneration),
                                target);
     }, Qt::QueuedConnection);
 }

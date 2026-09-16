@@ -5,6 +5,7 @@
 #include <atomic>
 #include <string>
 #include "Constants.h"
+#include "RoundIdentity.h"
 #include "PaimageAcquisition/PhysicalRoundNormalizer.h"
 
 // ============================================================
@@ -44,6 +45,19 @@ struct TriggerGroup {
     int64_t logicalTriggerIndex = -1;
     bool roundComplete = false;
     bool sourceTimedOut = false;
+
+    // The normalized Ring path consumes this pair as one immutable identity.
+    // Keeping the legacy scalar fields preserves the existing save contract
+    // and makes the shared identity explicit at the Ring boundary.
+    paimage::RoundIdentity physicalRoundIdentity() const noexcept {
+        return {measurementSession, roundGeneration};
+    }
+
+    bool hasPhysicalRoundIdentity() const noexcept {
+        return normalizationApplied &&
+               physicalDecision == paimage::PhysicalTriggerDecision::LogicalScan &&
+               physicalRoundIdentity().valid();
+    }
 
     //  完整采样数据（float32，sampleCount 个点）
     std::vector<float> freqA;         // A 通道瞬时频率（kHz）

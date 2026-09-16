@@ -1,5 +1,6 @@
 #include "ImagingSvc.h"
 #include "ImagingSharedMemory.h"
+#include "RingRoundIdentity.h"
 #include "pa_recon_qt.hpp"
 #include "ring_recon.h"
 #include <zmq.hpp>
@@ -123,8 +124,16 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
         processConfigure(msg["params"].toObject());
     } else if (cmd == "ring_block_ready") {
         const ring_shm_obs::ReadyMetadata ready = ring_shm_obs::parseReadyMessage(msg);
+        if (!ready.hasRoundIdentity) {
+            QJsonObject extra;
+            extra[QStringLiteral("error")] = ready.identityError;
+            extra[QStringLiteral("has_identity_fields")] = ready.identityFieldsPresent;
+            sendRingObservation("round_identity_rejected", m_ringObs.snapshot(), extra);
+            return;
+        }
         m_ringObs.observeNotification(ready.seq, ready.submitIndex);
-        processRingPulse(ready.seq, ready.submitIndex, ready.submitWallUs, ready.hasSeq);
+        processRingPulse(ready.seq, ready.submitIndex, ready.submitWallUs,
+                         ready.hasSeq, ready.roundIdentity);
     } else if (cmd == "ring_reset") {
         // 停机超时判定新一圈：清空重建累积（与圈末重置同一函数）
         sendRingObservation("epoch_reset", m_ringObs.snapshot());
@@ -546,9 +555,16 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
 }
 
 void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
-                                  uint64_t submitWallUs, bool notifySeqValid)
+                                  uint64_t submitWallUs, bool notifySeqValid,
+                                  const paimage::RoundIdentity &round)
 {
     const uint64_t processStartUs = ring_shm_obs::steadyNowUs();
+    if (!round.valid()) {
+        QJsonObject extra;
+        extra[QStringLiteral("error")] = QStringLiteral("invalid physical round identity");
+        sendRingObservation("round_identity_rejected", m_ringObs.snapshot(), extra);
+        return;
+    }
     if (!m_running || !m_ringCuda[0] || !m_ringCuda[1] || !m_ringSharedMemory) return;
 
     const uint64_t copyStartUs = ring_shm_obs::steadyNowUs();
@@ -722,7 +738,7 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
     h->frame_seq++;
     m_ringSharedMemory->unlock();
 
-    sendRingSnapshotToHost(submitIndex);     // 新链路：方案A 显示快照
+    sendRingSnapshotToHost(submitIndex, round);     // 新链路：方案A 显示快照
 
     m_ringObs.recordProcessDuration(ring_shm_obs::steadyNowUs() - processStartUs);
     if (observation.periodicDue)
@@ -769,7 +785,8 @@ void ImagingSvc::resetRingRecon()
     }
 }
 
-void ImagingSvc::sendRingSnapshotToHost(uint64_t submitIndex)
+void ImagingSvc::sendRingSnapshotToHost(uint64_t submitIndex,
+                                        const paimage::RoundIdentity &round)
 {
     if (!m_ringSharedMemory) return;
     m_ringSharedMemory->lock();
@@ -777,10 +794,8 @@ void ImagingSvc::sendRingSnapshotToHost(uint64_t submitIndex)
     const int seq = static_cast<int>(h->frame_seq);
     m_ringSharedMemory->unlock();
 
-    QJsonObject msg;
-    msg["cmd"] = "ring_snapshot_ready";
-    msg["seq"] = seq;
-    msg["submit_index"] = static_cast<qint64>(submitIndex);
+    QJsonObject msg = ring_round_identity::makeSnapshotReady(
+        static_cast<std::uint32_t>(seq), submitIndex, round);
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
     zmq::message_t zmsg(static_cast<size_t>(data.size()));

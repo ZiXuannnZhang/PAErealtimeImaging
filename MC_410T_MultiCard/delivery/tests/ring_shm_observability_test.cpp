@@ -121,15 +121,29 @@ void testLegacyReadyMessage()
         .object();
     const auto oldReady = ring_shm_obs::parseReadyMessage(oldMessage);
     check(oldReady.hasSeq && oldReady.seq == 1 && oldReady.submitIndex == 0
-              && oldReady.submitWallUs == 0,
+              && oldReady.submitWallUs == 0 && !oldReady.hasRoundIdentity,
           "T10 old ready message remains valid");
 
     QJsonObject extended = oldMessage;
     extended[QStringLiteral("submit_index")] = 3;
     extended[QStringLiteral("submit_wall_us")] = 100;
+    const paimage::RoundIdentity identity{UINT64_C(12345678901234567890), 42};
+    ring_round_identity::add(extended, identity);
     const auto parsed = ring_shm_obs::parseReadyMessage(extended);
-    check(parsed.submitIndex == 3 && parsed.submitWallUs == 100,
-          "T10 optional ready metadata");
+    check(parsed.submitIndex == 3 && parsed.submitWallUs == 100 &&
+              parsed.hasRoundIdentity && parsed.roundIdentity == identity,
+          "T10 ready metadata and RoundIdentity echo");
+
+    const auto snapshot = ring_round_identity::makeSnapshotReady(9, 3, identity);
+    const auto parsedSnapshot = ring_shm_obs::parseReadyMessage(snapshot);
+    check(parsedSnapshot.hasRoundIdentity && parsedSnapshot.roundIdentity == identity,
+          "R5 snapshot carries the exact producer RoundIdentity");
+
+    QJsonObject invalid = extended;
+    invalid[QString::fromLatin1(ring_round_identity::kRoundGeneration)] =
+        QStringLiteral("not-a-uint64");
+    check(!ring_shm_obs::parseReadyMessage(invalid).hasRoundIdentity,
+          "R5 invalid RoundIdentity is rejected");
 }
 
 void testHeaderAbi()

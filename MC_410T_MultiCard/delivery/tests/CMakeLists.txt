@@ -227,6 +227,12 @@ if(WIN32)
     target_include_directories(ring_round_ui_state_test PRIVATE ../include)
     target_compile_features(ring_round_ui_state_test PRIVATE cxx_std_17)
     add_test(NAME ring_round_ui_state_test COMMAND ring_round_ui_state_test)
+    add_executable(ring_round_identity_test ring_round_identity_test.cpp
+        ../src/RingRoundPresentation.cpp ../src/RingRoundUiState.cpp)
+    target_include_directories(ring_round_identity_test PRIVATE ../include)
+    target_compile_features(ring_round_identity_test PRIVATE cxx_std_17)
+    target_link_libraries(ring_round_identity_test PRIVATE Qt6::Core)
+    add_test(NAME ring_round_identity_test COMMAND ring_round_identity_test)
     add_executable(auto_save_round_coordinator_test
         auto_save_round_coordinator_test.cpp
         ../src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp

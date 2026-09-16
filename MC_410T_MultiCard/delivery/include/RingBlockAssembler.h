@@ -7,8 +7,10 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <utility>
 #include <vector>
+#include "RoundIdentity.h"
 
 // =====================================================================
 // RingBlockAssembler — 环形扫描真实采集组包器（阶段 B）
@@ -29,10 +31,48 @@
 class RingBlockAssembler
 {
 public:
+    struct RoundTransition {
+        enum class Kind : std::uint8_t {
+            FirstRound,
+            Clean,
+            ResidualDiscard,
+            StaleDrop,
+            GenerationGap,
+            InvalidIdentity
+        };
+
+        Kind kind = Kind::InvalidIdentity;
+        paimage::RoundIdentity oldRound;
+        paimage::RoundIdentity incomingRound;
+        std::size_t pendingCount = 0;
+        int blockTriggers = 0;
+        std::uint64_t discardedPendingTriggers = 0;
+        std::uint64_t discardedBlockTriggers = 0;
+    };
+
+    struct Snapshot {
+        bool hasActiveRound = false;
+        paimage::RoundIdentity activeRound;
+        bool hasMinimumRound = false;
+        paimage::RoundIdentity minimumRound;
+        std::size_t pendingCount = 0;
+        int blockTriggers = 0;
+        std::uint64_t cleanTransitions = 0;
+        std::uint64_t residualTransitions = 0;
+        std::uint64_t residualPendingTriggers = 0;
+        std::uint64_t residualBlockTriggers = 0;
+        std::uint64_t staleRoundDrops = 0;
+        std::uint64_t generationGapTransitions = 0;
+        std::uint64_t invalidIdentityDrops = 0;
+        std::uint64_t blockIdentityViolations = 0;
+        std::uint64_t pendingEvictions = 0;
+    };
+
     using BlockCallback = std::function<void(std::vector<float> &&raw,
                                              std::vector<float> &&anglesDeg,
                                              std::vector<uint8_t> &&channels,
-                                             int blockSeq)>;
+                                             int blockSeq,
+                                             const paimage::RoundIdentity &round)>;
     // 每完成一个触发脉冲回调一次（工作线程调用），用于块进度实时反馈
     using ProgressCallback = std::function<void()>;
     // 超时重置回调（触发级检测到停机超时后调用，工作线程）
@@ -48,7 +88,14 @@ public:
     void reset();
 
     // 一个物理通道在某触发的一根 A-line（取前 sampDepth 点）。
-    // 所有启用通道同一 triggerSeq 到达后立即按触发顺序组块。
+    // 所有启用通道同一 triggerSeq 到达后立即按触发顺序组块；物理轮次
+    // 身份必须在这条线进入 assembler 前已经确定。
+    void pushChannelLine(int channelId, uint16_t triggerSeq,
+                         const paimage::RoundIdentity &round,
+                         const float *line, int length);
+
+    // Original standalone fixture seam. Production Ring feeding must use the
+    // identity-bearing overload above.
     void pushChannelLine(int channelId, uint16_t triggerSeq,
                          const float *line, int length);
 
@@ -62,6 +109,10 @@ public:
     // normalizer has classified the next visible identity.
     void resetAfterPhysicalTimeout();
 
+    // Reset at a measurement-session boundary and reject queued data from an
+    // older session until the new normalized identity is observed.
+    void beginMeasurementSession(std::uint64_t measurementSession);
+
     void setBlockCallback(BlockCallback cb) { m_callback = std::move(cb); }
     void setProgressCallback(ProgressCallback cb) { m_progressCallback = std::move(cb); }
     void setTimeoutCallback(TimeoutCallback cb) { m_timeoutCallback = std::move(cb); }
@@ -69,12 +120,17 @@ public:
     // normalizer owns idle-boundary detection. The default remains false so
     // standalone assembler tests retain their direct timeout behavior.
     void setTimeoutManagedExternally(bool managed) { m_timeoutManagedExternally = managed; }
+    using RoundTransitionCallback = std::function<void(const RoundTransition &)>;
+    void setRoundTransitionCallback(RoundTransitionCallback cb) {
+        m_roundTransitionCallback = std::move(cb);
+    }
 
     // 当前块进度（线程安全）：{ 当前块已收到的触发脉冲数, 每通道每块 Aline 数 }
     std::pair<int, int> blockProgress() const {
         return { m_blockTriggers.load(std::memory_order_relaxed), m_perChannelBlock };
     }
     double timeoutResetSec() const { return m_timeoutResetSec; }
+    Snapshot snapshot() const;
     // 距上一触发经过的秒数（从未触发返回 0）
     double idleSeconds() const {
         const int64_t us = m_lastTriggerUs.load(std::memory_order_relaxed);
@@ -88,13 +144,17 @@ private:
     struct PendingTrigger {
         std::array<std::vector<float>, 8> lines;
         uint32_t mask = 0;
+        paimage::RoundIdentity round;
         // Monotonic order of first insertion into m_pending.  triggerSeq is
         // a 16-bit wire value and its numeric order is not temporal order.
         uint64_t firstSeenOrder = 0;
     };
 
     void appendCompletedTrigger(const PendingTrigger &pt);
-    void resetRoundState();   // 超时判定新一圈：清空半块/计数/角度回绕状态
+    void resetRoundState(bool requireNewIdentity); // physical timeout reset
+    void resetPhaseAndResidual(bool countResidual);
+    bool acceptRound(const paimage::RoundIdentity &round);
+    void notifyRoundTransition(const RoundTransition &event) const;
 
     BlockCallback m_callback;
     ProgressCallback m_progressCallback;
@@ -113,6 +173,7 @@ private:
     bool m_timeoutManagedExternally = false;
     std::atomic<int64_t> m_lastTriggerUs{0};   // 上一触发时刻（steady 时钟微秒，0=从未）
     TimeoutCallback m_timeoutCallback;
+    RoundTransitionCallback m_roundTransitionCallback;
 
     int m_blockSeq = 0;
     std::atomic<int> m_blockTriggers{0};
@@ -120,6 +181,21 @@ private:
     uint64_t m_nextPendingOrder = 0;
     uint32_t m_allMask = 0;
     std::map<uint16_t, PendingTrigger> m_pending;
+
+    std::optional<paimage::RoundIdentity> m_activeRound;
+    std::optional<paimage::RoundIdentity> m_minimumRound;
+    bool m_requireNewIdentityAfterTimeout = false;
+    std::optional<paimage::RoundIdentity> m_blockRound;
+    std::optional<paimage::RoundIdentity> m_lastReportedStaleRound;
+    std::uint64_t m_cleanTransitions = 0;
+    std::uint64_t m_residualTransitions = 0;
+    std::uint64_t m_residualPendingTriggers = 0;
+    std::uint64_t m_residualBlockTriggers = 0;
+    std::uint64_t m_staleRoundDrops = 0;
+    std::uint64_t m_generationGapTransitions = 0;
+    std::uint64_t m_invalidIdentityDrops = 0;
+    std::uint64_t m_blockIdentityViolations = 0;
+    std::uint64_t m_pendingEvictions = 0;
 
     std::vector<float> m_raw;
     std::vector<float> m_angles;

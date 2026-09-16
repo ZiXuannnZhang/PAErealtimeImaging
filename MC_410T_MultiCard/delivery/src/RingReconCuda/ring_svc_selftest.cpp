@@ -346,7 +346,8 @@ int main(int argc, char** argv) {
     QJsonObject lastObservation;
     RingBlockAssembler assembler;
     assembler.setBlockCallback([&](std::vector<float> &&raw, std::vector<float> &&angles,
-                                   std::vector<uint8_t> &&chIds, int blockSeq) {
+                                   std::vector<uint8_t> &&chIds, int blockSeq,
+                                   const paimage::RoundIdentity &round) {
         const auto t0 = std::chrono::steady_clock::now();
         const uint64_t submitWallUs = ring_shm_obs::wallNowUs();
         uint8_t previousReady = 0;
@@ -371,9 +372,11 @@ int main(int argc, char** argv) {
         ready[QStringLiteral("seq")] = blockSeq;
         ready[QStringLiteral("submit_index")] = static_cast<qint64>(producerEvent.submitIndex);
         ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(producerEvent.submitWallUs);
+        ring_round_identity::add(ready, round);
         sendJson(sock, ready);
 
         bool got = false;
+        bool identityMatch = false;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kTimeoutMs);
         while (std::chrono::steady_clock::now() < deadline) {
             zmq::message_t msg;
@@ -385,12 +388,18 @@ int main(int argc, char** argv) {
                     lastObservation = obj;
                     continue;
                 }
-                if (cmd == QStringLiteral("ring_snapshot_ready")) { got = true; break; }
+                if (cmd == QStringLiteral("ring_snapshot_ready")) {
+                    const auto snapshotIdentity = ring_round_identity::parse(obj);
+                    identityMatch = snapshotIdentity.valid &&
+                        snapshotIdentity.identity == round;
+                    got = true;
+                    break;
+                }
             }
             if (got) break;
             QThread::msleep(5);
         }
-        if (!got) {
+        if (!got || !identityMatch) {
             std::fprintf(stderr, "timeout at block %d\n", blockSeq);
             std::exit(2);
         }
@@ -444,14 +453,19 @@ int main(int argc, char** argv) {
     const int nRounds = 2;   // 复现“第 2 圈起 wl2 最后一帧不刷新”的跨圈行为
     const int nBlocksTotal = nBlocks * nRounds;
     int resetBase = 0;       // 超时复位后新一圈的数据列基准（模拟重新开始采集）
+    std::uint64_t roundGeneration = 0;
     for (int b = 0; b < nBlocksTotal; ++b) {
         // 圈中停机模拟：在第 1 圈一半处暂停，验证超时后新触发判定为新一圈
         if (timeoutResetSec > 0.0 && b == nBlocks / 2) {
             resetBase = b;   // 新一圈从该块起，数据列回到 0 基准
+            ++roundGeneration;
             std::fprintf(stderr, "[selftest] pausing %.0f ms (simulate mid-round stop)\n",
                          timeoutResetSec * 1000.0 + 500.0);
             QThread::msleep(static_cast<unsigned long>(timeoutResetSec * 1000.0) + 500);
         }
+        if (b > resetBase && (b - resetBase) % nBlocks == 0)
+            ++roundGeneration;
+        const paimage::RoundIdentity round{1, roundGeneration};
         for (int t = 0; t < perChBlock; ++t) {
             const int kInBlock = t / 2;
             const int kGlobal = (b - resetBase) * (perChBlock / 2) + kInBlock;
@@ -470,7 +484,7 @@ int main(int argc, char** argv) {
                 for (int r = 0; r < sampDepth; ++r)
                     line[r] = static_cast<float>(col[r]);
                 assembler.pushChannelLine(c, static_cast<uint16_t>(b * perChBlock + t),
-                                          line.data(), sampDepth);
+                                          round, line.data(), sampDepth);
             }
         }
     }

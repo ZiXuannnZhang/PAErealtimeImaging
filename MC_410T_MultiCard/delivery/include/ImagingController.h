@@ -15,6 +15,7 @@
 #include <vector>
 #include "ImagingParams.h"
 #include "RingShmObservability.h"
+#include "RoundIdentity.h"
 #include "ring_recon_cuda.h"
 
 namespace zmq { class context_t; class socket_t; }
@@ -58,6 +59,7 @@ public:
     bool submitRingBlock(const QVector<float> &rawBlock,
                          const QVector<float> &anglesDeg,
                          const QVector<quint8> &channels,
+                         const paimage::RoundIdentity &round,
                          int blockSeq,
                          std::uint64_t *outSubmitIndex = nullptr);
     // 超时判定新一圈：通知子进程清空重建累积（RingBlockAssembler 超时回调调用）
@@ -93,6 +95,8 @@ signals:
     void ringSnapshotReady(int seq,
                            quint64 submitIndex,
                            bool hasSubmitIndex,
+                           quint64 measurementSession,
+                           quint64 roundGeneration,
                            int bufferIndex);  // 每块显示快照（UI 线程槽）
     void svcStatus(const QString &status, float fps);
     void svcError(const QString &error);
@@ -118,13 +122,15 @@ private:
     void processRingMessage(const QJsonObject &msg);
     void startRingFrameWorker(int seq,
                               std::uint64_t submitIndex,
-                              bool hasSubmitIndex);   // 请求环形帧转换（最新一帧覆盖）
+                              bool hasSubmitIndex,
+                              const paimage::RoundIdentity &round);   // 请求环形帧转换（最新一帧覆盖）
     void ensureRingWorkerStarted();
     void stopRingWorker();
     void ringWorkerLoop();
     void processRingFrame(int seq,
                           std::uint64_t submitIndex,
-                          bool hasSubmitIndex);       // 常驻工作线程内的单帧读取/转换/投递
+                          bool hasSubmitIndex,
+                          const paimage::RoundIdentity &round);       // 常驻工作线程内的单帧读取/转换/投递
     void finishStopSvc();              // 异步停止的收尾清理
 
     QProcess      *m_svcProcess;
@@ -177,6 +183,7 @@ private:
     int                  m_ringReqSeq = -1;
     std::uint64_t        m_ringReqSubmitIndex = 0;
     bool                 m_ringReqHasSubmitIndex = false;
+    paimage::RoundIdentity m_ringReqRound;
     bool                 m_ringReqPending = false;
     bool                 m_ringWorkerStop = false;
 

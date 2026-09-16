@@ -28,6 +28,7 @@
 #include "Constants.h"
 #include "ImagingParams.h"
 #include "RingRoundUiState.h"
+#include "RingRoundPresentation.h"
 #include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 
 #ifndef M_PI
@@ -287,22 +288,7 @@ private:
     std::atomic<bool> m_ringAssemblerConfigured{false};
     std::atomic<bool> m_ringSnapshotAdmissionBlocked{false};
     std::atomic<bool> m_ringResetCommandSent{false};
-    // Count-boundary events are emitted when the first card observes the
-    // final logical identity. The Ring consumer applies the boundary only
-    // after every enabled card for that identity has been consumed.
-    bool m_ringBoundaryPending = false;
-    uint64_t m_ringBoundarySession = 0;
-    uint64_t m_ringBoundaryGeneration = 0;
-    uint16_t m_ringBoundaryTrigger = 0;
-    uint32_t m_ringBoundaryCards = 0;
-    bool m_ringBoundaryApplied = false;
-    // CountBoundary allocates/binds the next data directory on the source
-    // thread.  These committed results wait here until the old final frame
-    // has been presented; the queue is guarded by m_ringAssemblerMutex.
-    std::deque<AutoSaveCommit> m_pendingCountPresentation;
-    uint64_t m_lastRingBoundarySession = 0;
-    uint64_t m_lastRingBoundaryGeneration = 0;
-    uint16_t m_lastRingBoundaryTrigger = 0;
+    std::atomic<bool> m_ringInvalidIdentityReported{false};
     uint64_t m_lastRingTimeoutBoundarySession = 0;
     uint64_t m_lastRingTimeoutBoundaryGeneration = 0;
     bool m_restartRingOnSvcStop = false;   // 运行中修改环形参数后，待停止完成时自动重启
@@ -329,6 +315,9 @@ private:
     // TimeoutBoundary 立即清零、CountBoundary 保留帧末驱动清零。
     // 取代原 m_ringBlockCounter / m_imagingFrameCount（单一事实来源，可测试）。
     paimage::RingRoundUiState m_roundUi;
+    // Count/timeout presentation transitions are retained by old physical
+    // round identity until the matching final snapshot arrives.
+    paimage::RingRoundPresentationState m_ringPresentation;
     paimage::AutoSavePresentationState m_autoSavePresentation;
     QCPRange     m_freqColorRange;     // 频率颜色图保存的色条范围
     QCPRange     m_pixelColorRange;    // 像素图保存的色条范围

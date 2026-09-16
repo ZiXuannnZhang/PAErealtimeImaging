@@ -16,7 +16,10 @@ void RingRoundUiState::reset()
     staleCutoffSubmitIndex_ = 0;
     hasStaleCutoff_ = false;
     staleDropped_ = 0;
+    duplicateSnapshots_ = 0;
     frameEnds_ = 0;
+    admittedSubmitOrder_.clear();
+    admittedSubmitIndices_.clear();
 }
 
 void RingRoundUiState::recordSubmitIndex(std::uint64_t submitIndex)
@@ -34,20 +37,41 @@ void RingRoundUiState::onBlock()
     ++blockCount_;
 }
 
-bool RingRoundUiState::admitSnapshot(std::uint64_t submitIndex)
+RingRoundUiState::SnapshotAdmission
+RingRoundUiState::admitSnapshotDetailed(std::uint64_t submitIndex)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     if (submitIndex == 0)
-        return false;
+        return SnapshotAdmission::Missing;
     if (hasStaleCutoff_ && submitIndex <= staleCutoffSubmitIndex_)
-        return false;
-    return true;
+        return SnapshotAdmission::Stale;
+    if (admittedSubmitIndices_.find(submitIndex) != admittedSubmitIndices_.end())
+        return SnapshotAdmission::Duplicate;
+
+    admittedSubmitIndices_.insert(submitIndex);
+    admittedSubmitOrder_.push_back(submitIndex);
+    while (admittedSubmitOrder_.size() > kMaxAdmittedSubmitIndices) {
+        admittedSubmitIndices_.erase(admittedSubmitOrder_.front());
+        admittedSubmitOrder_.pop_front();
+    }
+    return SnapshotAdmission::Accepted;
+}
+
+bool RingRoundUiState::admitSnapshot(std::uint64_t submitIndex)
+{
+    return admitSnapshotDetailed(submitIndex) == SnapshotAdmission::Accepted;
 }
 
 void RingRoundUiState::noteStaleSnapshot()
 {
     std::lock_guard<std::mutex> lock(mutex_);
     ++staleDropped_;
+}
+
+void RingRoundUiState::noteDuplicateSnapshot()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    ++duplicateSnapshots_;
 }
 
 bool RingRoundUiState::noteSnapshot(int blocksPerFrame)
@@ -121,6 +145,7 @@ RingRoundUiState::Snapshot RingRoundUiState::snapshot() const
     s.hasStaleCutoff = hasStaleCutoff_;
     s.epoch = epoch_;
     s.staleSnapshotsDropped = staleDropped_;
+    s.duplicateSnapshots = duplicateSnapshots_;
     s.frameEndEvents = frameEnds_;
     return s;
 }
@@ -141,6 +166,12 @@ std::uint64_t RingRoundUiState::staleSnapshotsDropped() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return staleDropped_;
+}
+
+std::uint64_t RingRoundUiState::duplicateSnapshots() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return duplicateSnapshots_;
 }
 
 } // namespace paimage

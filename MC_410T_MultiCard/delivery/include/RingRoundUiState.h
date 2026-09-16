@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <mutex>
+#include <unordered_set>
 
 namespace paimage {
 
@@ -22,6 +24,13 @@ namespace paimage {
 // producer-index domain; svc frame_seq remains display/diagnostic metadata.
 class RingRoundUiState {
 public:
+    enum class SnapshotAdmission : std::uint8_t {
+        Accepted,
+        Duplicate,
+        Stale,
+        Missing
+    };
+
     struct Snapshot {
         std::uint64_t frameCount = 0;          // per-round output frame counter
         std::uint64_t blockCount = 0;          // per-round submitted block counter
@@ -32,6 +41,7 @@ public:
         bool hasStaleCutoff = false;
         std::uint64_t epoch = 0;               // TimeoutBoundary count applied
         std::uint64_t staleSnapshotsDropped = 0;
+        std::uint64_t duplicateSnapshots = 0;
         std::uint64_t frameEndEvents = 0;      // snapshotsThisRound hit a bpf multiple
     };
 
@@ -47,8 +57,10 @@ public:
     // Admit a Ring display snapshot carrying the producer `submit_index`.
     // Returns false for a stale pre-boundary snapshot or an absent identity;
     // the caller must drop it (release the buffer) without counting/drawing.
+    SnapshotAdmission admitSnapshotDetailed(std::uint64_t submitIndex);
     bool admitSnapshot(std::uint64_t submitIndex);
     void noteStaleSnapshot();
+    void noteDuplicateSnapshot();
 
     // Count one admitted snapshot. Returns true when it completes a frame,
     // i.e. admitted snapshots this round reached a multiple of blocksPerFrame.
@@ -72,6 +84,7 @@ public:
     std::uint64_t frameCount() const;
     std::uint64_t blockCount() const;
     std::uint64_t staleSnapshotsDropped() const;
+    std::uint64_t duplicateSnapshots() const;
 
 private:
     mutable std::mutex mutex_;
@@ -84,7 +97,11 @@ private:
     std::uint64_t staleCutoffSubmitIndex_ = 0;
     bool hasStaleCutoff_ = false;
     std::uint64_t staleDropped_ = 0;
+    std::uint64_t duplicateSnapshots_ = 0;
     std::uint64_t frameEnds_ = 0;
+    static constexpr std::size_t kMaxAdmittedSubmitIndices = 4096;
+    std::deque<std::uint64_t> admittedSubmitOrder_;
+    std::unordered_set<std::uint64_t> admittedSubmitIndices_;
 };
 
 } // namespace paimage
