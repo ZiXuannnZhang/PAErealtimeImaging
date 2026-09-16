@@ -56,13 +56,15 @@ public:
     const RingReconCudaConfig &ringConfig() const { return m_ringConfig; }
 
     // 环形扫描：提交一个原始 A-line 块（float32，sampDepth x alinesPerBlock，列主序）
+    // sourceRoundComplete 表示该块所属物理轮的最后逻辑触发已被上游观察到
+    // （source round end），不等价于服务端重建完整。
     bool submitRingBlock(const QVector<float> &rawBlock,
                          const QVector<float> &anglesDeg,
                          const QVector<quint8> &channels,
                          const paimage::RoundIdentity &round,
                          int blockSeq,
                          std::uint64_t *outSubmitIndex = nullptr,
-                         bool roundComplete = false);
+                         bool sourceRoundComplete = false);
     // 超时判定新一圈：通知子进程清空重建累积（RingBlockAssembler 超时回调调用）
     bool sendRingReset();
 

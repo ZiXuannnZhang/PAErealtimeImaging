@@ -32,7 +32,15 @@ struct PhysicalRoundClassification {
     // -1 is used for the operational control trigger.
     std::int64_t logicalTriggerIndex = -1;
     bool newDistinct = false;
+    // One-shot classification/control pulse: true only on the first
+    // classification of the round's final logical trigger. Cached late cards
+    // deliberately return false so control side effects stay one-shot.
     bool roundComplete = false;
+    // Stable data-plane property: true for every classification — first or
+    // cached — of the round's final logical trigger identity. The Ring data
+    // plane consumes this so an enabled card still carries the terminal marker
+    // when a disabled card was classified first.
+    bool isFinalLogicalTrigger = false;
 };
 
 struct PhysicalRoundEvent {

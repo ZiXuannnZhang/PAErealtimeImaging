@@ -1,5 +1,6 @@
 #include "ImagingSvc.h"
 #include "ImagingSharedMemory.h"
+#include "RingReconCompletion.h"
 #include "RingRoundIdentity.h"
 #include "pa_recon_qt.hpp"
 #include "ring_recon.h"
@@ -132,9 +133,12 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
             return;
         }
         m_ringObs.observeNotification(ready.seq, ready.submitIndex);
+        // The input flag is the data-plane source round end (stable terminal
+        // trigger property), NOT the reconstruction completion published back
+        // to the UI. Missing field fails closed.
         processRingPulse(ready.seq, ready.submitIndex, ready.submitWallUs,
                          ready.hasSeq, ready.roundIdentity,
-                         msg.value(QStringLiteral("round_complete")).toBool(false));
+                         msg.value(QStringLiteral("source_round_complete")).toBool(false));
     } else if (cmd == "ring_reset") {
         // 停机超时判定新一圈：清空重建累积（与圈末重置同一函数）
         sendRingObservation("epoch_reset", m_ringObs.snapshot());
@@ -560,7 +564,7 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
 
 void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
                                   uint64_t submitWallUs, bool notifySeqValid,
-                                  const paimage::RoundIdentity &round, bool roundComplete)
+                                  const paimage::RoundIdentity &round, bool sourceRoundComplete)
 {
     const uint64_t processStartUs = ring_shm_obs::steadyNowUs();
     if (!round.valid()) {
@@ -760,6 +764,13 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
     }
     ++m_ringBlockIndex;
 
+    // 完成语义拆分：sourceRoundComplete 只证明上游观察到本轮最后一个逻辑
+    // 触发（决定生命周期关闭）；reconstructionComplete 还要求服务端实际消费
+    // 块数精确等于配置块数（决定 final PNG / presentation 等业务动作）。
+    // 中间块丢失但 source-final 仍到达时，快照 round_complete 必须为 false。
+    const auto completion = paimage::evaluateRingReconCompletion(
+        sourceRoundComplete, m_ringBlockIndex, m_ringBlocksPerFrame);
+
     m_ringSharedMemory->lock();
     h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
     float *fb = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) +
@@ -771,17 +782,20 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
     const uint32_t snapshotSeq = ++h->frame_seq;
     m_ringSharedMemory->unlock();
 
-    sendRingSnapshotToHost(snapshotSeq, submitIndex, round, roundComplete);     // 新链路：方案A 显示快照
+    sendRingSnapshotToHost(snapshotSeq, submitIndex, round, completion.reconstructionComplete);     // 新链路：方案A 显示快照
 
     m_ringObs.recordProcessDuration(ring_shm_obs::steadyNowUs() - processStartUs);
     if (observation.periodicDue)
         sendRingObservation("periodic", m_ringObs.snapshot());
 
-    // 整圈完成：清零累积器，避免跨圈污染（PNG 保存由接收端窗口在圈末触发点执行）
-    if (roundComplete) {
-        if (m_ringBlockIndex != m_ringBlocksPerFrame) {
-            roundDiagnostic[QStringLiteral("blocks")] = m_ringBlockIndex;
-            roundDiagnostic[QStringLiteral("expected_blocks")] = m_ringBlocksPerFrame;
+    // 源轮结束即关闭并复位：不完整轮绝不等下一轮数据“补齐”，下一轮从干净
+    // 重建状态开始。最终图业务动作只由 reconstructionComplete 触发。
+    if (completion.sourceRoundComplete) {
+        if (completion.blockCountMismatch) {
+            roundDiagnostic[QStringLiteral("blocks_consumed")] = completion.blocksConsumed;
+            roundDiagnostic[QStringLiteral("expected_blocks")] = completion.expectedBlocks;
+            roundDiagnostic[QStringLiteral("source_round_complete")] = true;
+            roundDiagnostic[QStringLiteral("reconstruction_complete")] = false;
             sendRingObservation("round_block_count_mismatch", m_ringObs.snapshot(), roundDiagnostic);
         }
         m_ringRound.close();
@@ -825,10 +839,12 @@ void ImagingSvc::resetRingRecon()
 }
 
 void ImagingSvc::sendRingSnapshotToHost(uint32_t seq, uint64_t submitIndex,
-                                        const paimage::RoundIdentity &round, bool roundComplete)
+                                        const paimage::RoundIdentity &round, bool reconstructionComplete)
 {
+    // The outbound round_complete is exclusively the reconstruction completion
+    // fact: source round end AND exactly the configured block count consumed.
     QJsonObject msg = ring_round_identity::makeSnapshotReady(
-        seq, submitIndex, round, roundComplete);
+        seq, submitIndex, round, reconstructionComplete);
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
     zmq::message_t zmsg(static_cast<size_t>(data.size()));

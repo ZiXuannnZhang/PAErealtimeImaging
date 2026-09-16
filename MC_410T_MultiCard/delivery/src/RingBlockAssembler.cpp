@@ -265,7 +265,7 @@ bool RingBlockAssembler::acceptRound(const paimage::RoundIdentity &round)
 
 void RingBlockAssembler::pushChannelLine(int channelId, uint16_t triggerSeq,
                                          const paimage::RoundIdentity &round,
-                                         const float *line, int length, bool roundComplete)
+                                         const float *line, int length, bool sourceRoundComplete)
 {
     if (!m_configured || channelId < 0 || channelId >= 8 ||
         !m_enabled[channelId] || !line || length <= 0)
@@ -297,7 +297,7 @@ void RingBlockAssembler::pushChannelLine(int channelId, uint16_t triggerSeq,
     }
 
     PendingTrigger &pt = it->second;
-    pt.roundComplete = pt.roundComplete || roundComplete;
+    pt.sourceRoundComplete = pt.sourceRoundComplete || sourceRoundComplete;
     if (pt.round != round) {
         ++m_blockIdentityViolations;
         resetPhaseAndResidual(false);
@@ -382,7 +382,7 @@ void RingBlockAssembler::appendCompletedTrigger(const PendingTrigger &pt)
         const paimage::RoundIdentity blockRound = *m_blockRound;
         if (m_callback)
             m_callback(std::move(m_raw), std::move(m_angles),
-                       std::move(m_channels), m_blockSeq, blockRound, pt.roundComplete);
+                       std::move(m_channels), m_blockSeq, blockRound, pt.sourceRoundComplete);
         ++m_blockSeq;
         m_blockTriggers.store(0, std::memory_order_relaxed);
         m_blockRound.reset();
@@ -391,7 +391,7 @@ void RingBlockAssembler::appendCompletedTrigger(const PendingTrigger &pt)
         m_angles.assign(alines, 0.0f);
         m_channels.assign(alines, 0);
     }
-    if (pt.roundComplete) {
+    if (pt.sourceRoundComplete) {
         // A final trigger in a partial block cannot produce a complete image.
         // Close this identity so late channels cannot complete the residual.
         resetPhaseAndResidual(true);

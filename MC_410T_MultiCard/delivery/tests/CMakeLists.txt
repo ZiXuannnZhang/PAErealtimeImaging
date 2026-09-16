@@ -32,7 +32,8 @@ add_test(NAME data_processor_imaging_isolation_test COMMAND data_processor_imagi
 find_package(Qt6 REQUIRED COMPONENTS Core Concurrent Widgets)
 
 add_executable(ring_production_blockers_test ring_production_blockers_test.cpp
-    ../src/RingBlockAssembler.cpp ../src/RingRoundUiState.cpp ../src/RingRoundPresentation.cpp)
+    ../src/RingBlockAssembler.cpp ../src/RingRoundUiState.cpp ../src/RingRoundPresentation.cpp
+    ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp)
 target_include_directories(ring_production_blockers_test PRIVATE ../include)
 target_link_libraries(ring_production_blockers_test PRIVATE Qt6::Core)
 add_test(NAME ring_production_blockers_test COMMAND ring_production_blockers_test)

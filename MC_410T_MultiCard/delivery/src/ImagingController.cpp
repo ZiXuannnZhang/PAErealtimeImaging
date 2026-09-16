@@ -327,7 +327,7 @@ bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
                                   const QVector<quint8> &channels,
                                   const paimage::RoundIdentity &round,
                                   int blockSeq,
-                                  std::uint64_t *outSubmitIndex, bool roundComplete)
+                                  std::uint64_t *outSubmitIndex, bool sourceRoundComplete)
 {
     if (outSubmitIndex) *outSubmitIndex = 0;
     if (!round.valid()) {
@@ -373,7 +373,10 @@ bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
     ready[QStringLiteral("submit_index")] = static_cast<qint64>(event.submitIndex);
     ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(event.submitWallUs);
     ring_round_identity::add(ready, round);
-    ready[QStringLiteral("round_complete")] = roundComplete;
+    // Host->svc input carries the source round-end fact only. The service
+    // derives ring_snapshot_ready.round_complete (reconstructionComplete)
+    // from its own exact consumed block count.
+    ready[QStringLiteral("source_round_complete")] = sourceRoundComplete;
     if (outSubmitIndex) *outSubmitIndex = event.submitIndex;
     const bool sent = sendCommand(ready);
 

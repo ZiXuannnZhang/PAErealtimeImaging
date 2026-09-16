@@ -43,7 +43,13 @@ struct TriggerGroup {
         paimage::PhysicalTriggerDecision::LogicalScan;
     uint64_t roundGeneration = 0;
     int64_t logicalTriggerIndex = -1;
+    // One-shot boundary pulse from the first classification of the final
+    // logical trigger. Kept for control/event compatibility paths.
     bool roundComplete = false;
+    // Stable per-trigger terminal property (true on first and cached
+    // classifications alike). The Ring data plane must source its final
+    // marker from this field, never from the one-shot pulse.
+    bool isFinalLogicalTrigger = false;
     bool sourceTimedOut = false;
 
     // The normalized Ring path consumes this pair as one immutable identity.
@@ -85,6 +91,7 @@ struct TriggerGroup {
         roundGeneration = 0;
         logicalTriggerIndex = -1;
         roundComplete = false;
+        isFinalLogicalTrigger = false;
         sourceTimedOut = false;
         freqA.clear(); freqB.clear();
         phaseA_display.clear(); phaseB_display.clear();

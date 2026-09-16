@@ -125,6 +125,9 @@ PhysicalRoundClassification PhysicalRoundNormalizer::classify(
                 // roundComplete is a one-shot boundary signal. Late cards
                 // must reuse the logical decision/index without repeating the
                 // Ring/reconstruction reset for the same physical identity.
+                // isFinalLogicalTrigger is a stable per-trigger data property:
+                // it stays true on cached hits so the Ring final marker
+                // survives a disabled card being classified first.
                 cached.roundComplete = false;
                 return cached;
             }
@@ -178,6 +181,7 @@ PhysicalRoundClassification PhysicalRoundNormalizer::classify(
             ++logicalDistinctAccepted_;
             if (currentLogicalDistinctCount_ == configuredLogicalTriggersPerRound_) {
                 result.roundComplete = true;
+                result.isFinalLogicalTrigger = true;
                 ++countBoundaryResets_;
                 currentLogicalDistinctCount_ = 0;
                 state_ = PhysicalRoundState::AwaitingControl;

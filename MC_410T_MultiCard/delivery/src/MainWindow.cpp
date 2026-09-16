@@ -585,7 +585,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_ringAssembler->setBlockCallback(
         [this](std::vector<float> &&raw, std::vector<float> &&angles,
                std::vector<uint8_t> &&channels, int blockSeq,
-               const paimage::RoundIdentity &round, bool roundComplete) {
+               const paimage::RoundIdentity &round, bool sourceRoundComplete) {
             // 回调运行在独立成像 worker；只提交成像服务并更新 per-round 统计。
             m_roundUi.onBlock();
             QVector<float> rawQ(raw.begin(), raw.end());
@@ -596,7 +596,7 @@ MainWindow::MainWindow(QWidget *parent)
             try {
                 submitted = m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire)
                     && m_imagingController->submitRingBlock(
-                        rawQ, angQ, chQ, round, blockSeq, &submitIndex, roundComplete);
+                        rawQ, angQ, chQ, round, blockSeq, &submitIndex, sourceRoundComplete);
                 // submit_index is the producer identity domain. Record it
                 // even when dontwait send returned false: the missing
                 // notification is a gap, never an attempt-count alias.
@@ -680,15 +680,19 @@ MainWindow::MainWindow(QWidget *parent)
         if (chA < 0 || chB >= 8) return false;
         const paimage::RoundIdentity round = frame->physicalRoundIdentity();
         bool fed = false;
+        // Ring final marker sources the stable terminal data property, so the
+        // round end survives even when the first classified card of the final
+        // trigger is Ring-disabled. The one-shot roundComplete pulse is not
+        // used here.
         if (enabled[chA])
             m_ringAssembler->pushChannelLine(chA, frame->triggerSeq, round,
                                               frame->freqA.data(),
-                                              static_cast<int>(frame->freqA.size()), frame->roundComplete);
+                                              static_cast<int>(frame->freqA.size()), frame->isFinalLogicalTrigger);
         fed = fed || enabled[chA];
         if (enabled[chB])
             m_ringAssembler->pushChannelLine(chB, frame->triggerSeq, round,
                                              frame->freqB.data(),
-                                             static_cast<int>(frame->freqB.size()), frame->roundComplete);
+                                             static_cast<int>(frame->freqB.size()), frame->isFinalLogicalTrigger);
         fed = fed || enabled[chB];
         return true;
     });

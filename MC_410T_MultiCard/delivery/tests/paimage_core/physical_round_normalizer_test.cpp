@@ -1,5 +1,6 @@
 #include "PaimageAcquisition/PhysicalRoundNormalizer.h"
 
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -349,5 +350,51 @@ int main() {
                 "timeout T6 wrap");
     }
 
-    std::cout << "PASS physical round normalizer contract (T1-T17)\n";
+    // T18: the final logical trigger carries a stable terminal data property.
+    // The one-shot roundComplete pulse fires once, but isFinalLogicalTrigger
+    // stays true on cached classifications of the same trigger identity, and
+    // the CountBoundary observer still fires exactly once.
+    {
+        std::vector<PhysicalRoundEvent> events;
+        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { events.push_back(event); });
+        normalizer.beginSession(24);
+        require(classify(normalizer, 24, 900).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "T18 control");
+        require(!classify(normalizer, 24, 900).isFinalLogicalTrigger,
+                "T18 control is never terminal");
+        const auto mid = classify(normalizer, 24, 901);
+        require(!mid.roundComplete && !mid.isFinalLogicalTrigger, "T18 mid not final");
+        require(!classify(normalizer, 24, 901).isFinalLogicalTrigger,
+                "T18 cached mid stays non-final");
+        classify(normalizer, 24, 902);
+        const auto finalFirst = classify(normalizer, 24, 903);
+        require(finalFirst.roundComplete && finalFirst.isFinalLogicalTrigger &&
+                    finalFirst.logicalTriggerIndex == 2,
+                "T18 first final classification");
+        const auto finalCached = classify(normalizer, 24, 903);
+        require(!finalCached.roundComplete && finalCached.isFinalLogicalTrigger &&
+                    !finalCached.newDistinct &&
+                    finalCached.logicalTriggerIndex == finalFirst.logicalTriggerIndex &&
+                    finalCached.roundGeneration == finalFirst.roundGeneration,
+                "T18 cached final keeps the stable terminal property");
+        // A late duplicate classified after the count boundary still reports
+        // the stable property for the closed round identity.
+        const auto late = classify(normalizer, 24, 903);
+        require(!late.roundComplete && late.isFinalLogicalTrigger &&
+                    late.roundGeneration == finalFirst.roundGeneration,
+                "T18 late card after boundary keeps terminal property");
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.countBoundaryResets == 1 &&
+                    std::count_if(events.begin(), events.end(), [](const auto& e) {
+                        return e.kind == PhysicalRoundEvent::Kind::CountBoundary;
+                    }) == 1,
+                "T18 CountBoundary observer stays one-shot");
+        const auto control = classify(normalizer, 24, 904);
+        require(control.decision == PhysicalTriggerDecision::OperationalStartupControl &&
+                    !control.isFinalLogicalTrigger && !control.roundComplete,
+                "T18 next control is not terminal");
+    }
+
+    std::cout << "PASS physical round normalizer contract (T1-T18)\n";
 }

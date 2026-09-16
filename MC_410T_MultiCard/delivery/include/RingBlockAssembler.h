@@ -68,11 +68,15 @@ public:
         std::uint64_t pendingEvictions = 0;
     };
 
+    // sourceRoundComplete: the block contains the final logical trigger of its
+    // physical round (stable terminal property OR-ed across the fan-in
+    // channels). It reports source round end only; the service decides the
+    // reconstruction completion fact from its own consumed block count.
     using BlockCallback = std::function<void(std::vector<float> &&raw,
                                              std::vector<float> &&anglesDeg,
                                              std::vector<uint8_t> &&channels,
                                              int blockSeq,
-                                             const paimage::RoundIdentity &round, bool roundComplete)>;
+                                             const paimage::RoundIdentity &round, bool sourceRoundComplete)>;
     // 每完成一个触发脉冲回调一次（工作线程调用），用于块进度实时反馈
     using ProgressCallback = std::function<void()>;
     // 超时重置回调（触发级检测到停机超时后调用，工作线程）
@@ -89,10 +93,12 @@ public:
 
     // 一个物理通道在某触发的一根 A-line（取前 sampDepth 点）。
     // 所有启用通道同一 triggerSeq 到达后立即按触发顺序组块；物理轮次
-    // 身份必须在这条线进入 assembler 前已经确定。
+    // 身份必须在这条线进入 assembler 前已经确定。sourceRoundComplete 必须
+    // 来自 Normalizer 的稳定 terminal 属性（isFinalLogicalTrigger），使得
+    // 最后逻辑触发无论哪张启用卡先到达都携带相同的轮末标记。
     void pushChannelLine(int channelId, uint16_t triggerSeq,
                          const paimage::RoundIdentity &round,
-                         const float *line, int length, bool roundComplete = false);
+                         const float *line, int length, bool sourceRoundComplete = false);
 
     // Original standalone fixture seam. Production Ring feeding must use the
     // identity-bearing overload above.
@@ -144,7 +150,7 @@ private:
     struct PendingTrigger {
         std::array<std::vector<float>, 8> lines;
         uint32_t mask = 0;
-        bool roundComplete = false;
+        bool sourceRoundComplete = false;
         paimage::RoundIdentity round;
         // Monotonic order of first insertion into m_pending.  triggerSeq is
         // a 16-bit wire value and its numeric order is not temporal order.

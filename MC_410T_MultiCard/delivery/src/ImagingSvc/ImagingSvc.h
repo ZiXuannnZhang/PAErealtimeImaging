@@ -45,14 +45,14 @@ private:
     void processPulse();
     void processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
                           uint64_t submitWallUs, bool notifySeqValid,
-                          const paimage::RoundIdentity &round, bool roundComplete);
+                          const paimage::RoundIdentity &round, bool sourceRoundComplete);
     void resetRingRecon();        // 圈末/超时共用：清空 CUDA 累积与跨圈边界状态
     void sendRingObservation(const char *kind,
                              const ring_shm_obs::Snapshot &snapshot,
                              const QJsonObject &extra = QJsonObject());
     void sendFrameToHost();
     void sendRingSnapshotToHost(uint32_t seq, uint64_t submitIndex,
-                                const paimage::RoundIdentity &round, bool roundComplete);
+                                const paimage::RoundIdentity &round, bool reconstructionComplete);
     void sendStatus(float fps);
     void sendError(const QString &errMsg, int code);
 

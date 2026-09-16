@@ -23,7 +23,8 @@ void FrameConverter::tagNormalization(Frame frame,const PhysicalRoundClassificat
     // The sync path classifies the same source frame after the card/save path
     // has already seen it. A cached late-card decision deliberately carries
     // roundComplete=false, but it must not erase the one-shot boundary marker
-    // already attached to that frame.
+    // already attached to that frame. isFinalLogicalTrigger is stable across
+    // first/cached classifications of the same identity, so it needs no merge.
     if (entry->normalization && entry->normalization->roundComplete &&
         !classification.roundComplete) {
         auto merged = classification;
@@ -58,6 +59,7 @@ TriggerGroupPtr FrameConverter::convert(Frame frame){
             group->roundGeneration=n.roundGeneration;
             group->logicalTriggerIndex=n.logicalTriggerIndex;
             group->roundComplete=n.roundComplete;
+            group->isFinalLogicalTrigger=n.isFinalLogicalTrigger;
         }
         auto ms=std::int64_t(wallMs_)+(frame->first-monotonic_)/1000000;
         group->timestamp_ms=ms>0?std::uint64_t(ms):0;
