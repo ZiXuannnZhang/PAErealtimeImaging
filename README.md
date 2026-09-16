@@ -12,35 +12,73 @@ PAErealtimeImaging 是 Windows 平台实时光声成像项目工作区，包含�
 4. `Codex-GitHub双端联动快速上手.md` — ChatGPT / Codex Desktop 双端协作流程。
 5. 当前 `codex/task-docs:TASKS/<task>.md` — 本次任务的精确目标、commit、测试和显式 override。
 
-根目录 `HANDOFF.md` 已降级为历史兼容入口，不再承载当前项目状态。
+根目录 `HANDOFF.md` 仅作为旧工作流兼容入口；完整当前状态始终以 `PROJECT_STATUS.md` 为准。
 
 ## Canonical branch
 
-`main` 是本仓库唯一 canonical branch，也是所有正式源码与仓库级正式文档的唯一基线。
+`main` 是本仓库唯一 canonical branch，也是正式源码与仓库级正式文档的基线。
 
-- 新实现任务默认从最新 `origin/main` 创建独立实现分支。
-- `codex/task-docs` 仅用于任务文档通信，不是实现基线。
+- 新实现任务默认从任务明确指定的 baseline 开始；没有 override 时才从最新 `origin/main` 创建。
+- `codex/task-docs` 只用于任务规格与任务通道治理，不是实现基线。
+- 已软件 APPROVE 的实现分支在硬件/system acceptance 未完成时可以继续保持未合并。
 - `backup/*`、旧诊断/实验分支、`master` 等只用于历史追溯。
-- 不允许把历史分支隐式当成下一任务的开发基线。
 
-## 当前 START admission 状态
+## 当前项目重点：物理轮次归一实机验收
 
-当前 `main` **尚未包含** START admission fence 软件修复。
+当前最重要的待验收分支是：
 
-软件验收通过、等待真实 FPGA/NIC 实机测试的候选分支是：
+```text
+codex/physical-round-normalizer-integrated-20260916
+52cf7713d7e0e935cb14663ec3470f3a25bfeb90
+```
+
+该分支的软件整改已经完成：RoundIdentity 数据面 barrier、ImagingSvc reconstruction identity barrier、SHM exact-seq 绑定、`sourceRoundComplete` / `reconstructionComplete` 分离、稳定 Final Marker 等均已通过自动化、Windows build 和真实 ImagingSvc/CUDA selftest。
+
+但**物理轮次归一仍未完成硬件验收**。
+
+新控制环境中观察到完整物理轮可能从旧环境约 `4001` 个 physical trigger 变为约 `4007` 个 physical trigger。因此当前不能继续把旧的：
+
+```text
+4001 physical -> 1 operational/control + 4000 logical
+```
+
+作为已证实现场协议，也不能机械改成：
+
+```text
+4007 physical -> 1 control + 4006 logical
+```
+
+当前第一优先级是本地解析最新大体量诊断日志，验证：
+
+1. 排除有证据的手动暂停短轮后，完整轮是否严格稳定为 4007；
+2. CountBoundary 是否真实发生在物理圈末、roundGeneration 是否正确推进；
+3. TimeoutBoundary 是否形成 `timeout -> ring/reset -> ImagingSvc reset -> stale drop -> next clean round` 的完整证据链。
+
+日志没有证据的部分必须明确标记“无法判断 / UNVERIFIED”，不能以软件自测结果代替实机证据。
+
+当前状态：
+
+```text
+ROUND_IDENTITY_CODE_FIXES = IMPLEMENTED
+ROUND_IDENTITY_AUTOMATED_TESTS = PASS
+ROUND_IDENTITY_WINDOWS_BUILD = PASS
+ROUND_IDENTITY_CUDA_SERVICE_SELFTEST = PASS
+PHYSICAL_ROUND_NORMALIZATION_HARDWARE_ACCEPTANCE = PENDING
+FULL_ROUND_TRIGGER_COUNT_4007 = TO_BE_VERIFIED_FROM_LOCAL_LOGS
+COUNT_BOUNDARY_HARDWARE_BEHAVIOR = UNVERIFIED
+TIMEOUT_BOUNDARY_HARDWARE_BEHAVIOR = UNVERIFIED
+```
+
+## START admission：独立待验收工作流
+
+START admission 不是上述 4007 / PhysicalRoundNormalizer 问题的替代解释，应保持独立：
 
 ```text
 codex/start-admission-fence-fix-20260913-003112
 6313540f72544c0f68820c4815903abaa0b8c1e1
 ```
 
-该分支已经完成独立源码审查和确定性软件验收，结论为 **APPROVE**。但真实 FPGA/NIC 实机测试尚未完成，所以当前策略是：
-
-```text
-保持独立分支，不合并 main；先构建 6313540f... 并完成实机验证。
-```
-
-因此不能把“软件 admission race 已修复”表述成“现场丢包问题已经解决”。现场问题仍需通过真实 FPGA/NIC、应用 stage 1/stage 2/control trace，以及必要的 Pktmon/WPR 证据闭环。
+该分支的软件修复和确定性验证已经 **APPROVE**，但真实 FPGA/NIC 启动 ingress 行为仍未完成现场验收。因此仍不能把“软件 admission race 已修复”表述成“现场启动丢包已经解决”。
 
 ## 当前生产采集链路（main）
 
@@ -49,8 +87,8 @@ codex/start-admission-fence-fix-20260913-003112
 ```text
 FPGA cards
   -> Windows UDP sockets
-  -> PaimageAcquisition::SocketReceiver      单接收线程，多数据端口
-  -> PaimageAcquisition::SourceCore          会话门控、按卡触发组装、多卡同步
+  -> PaimageAcquisition::SocketReceiver
+  -> PaimageAcquisition::SourceCore
   -> PaimageAcquisition::HostOutput / FrameConverter
        -> CardFrame -> 保存路径
        -> SyncFrame -> DataProcessor::deliverAssembled
@@ -69,11 +107,9 @@ UI / NetworkController
   -> CONFIG / START / STOP UDP control command
 ```
 
-CONFIG 以当前事务收到的 **60 字节 CONFIG ACK** 作为配置确认；18 字节 ready 只表示卡就绪，不等价于 CONFIG 成功。自动卡发现同样以受控 CONFIG-ACK 探测作为身份判据。
+CONFIG 以当前事务收到的 **60 字节 CONFIG ACK** 作为配置确认；18 字节 ready 只表示卡就绪，不等价于 CONFIG 成功。
 
 ## 接收调度与负载模型
-
-`SocketReceiver` 使用一个高优先级 Windows 接收线程同时服务 feedback socket 和所有数据 socket。主循环使用约 1 ms 的 `select()`；ready socket 会持续 drain 到 `WSAEWOULDBLOCK`。每个采样 socket 请求 64 MiB `SO_RCVBUF`。
 
 生产采样模型：
 
@@ -99,11 +135,11 @@ samples/trigger       = acqTimeNs / 4
 
 ## 诊断原则
 
-当前 `main` 已具备 raw ingress、SourceCore decision、control trace、receiver timing/LoopLog 和系统抓取工具。定位启动缺失时应按证据层级判断：
+定位问题时按证据层级判断，不跨层补结论：
 
 ```text
 Pktmon 有目标包，stage 1 无包
-  -> Windows 网络栈 / socket / receiver 之前或之间继续定位
+  -> Windows 网络栈 / socket / receiver 路径继续定位
 
 stage 1 有包，stage 2 显示 admission/gate 丢弃
   -> 应用会话边界问题
@@ -111,17 +147,15 @@ stage 1 有包，stage 2 显示 admission/gate 丢弃
 stage 1 完整、SourceCore complete，但下游缺失
   -> OutputWorkers / Display / Ring / 保存等下游路径
 
-Pktmon 也没有目标包
-  -> 继续向 NIC / driver / 链路 / FPGA wire-side 取证
+PhysicalRoundNormalizer 有 boundary 事件，但缺下游 reset 证据
+  -> 只能证明 boundary 被记录，不能证明完整 reset 链成功
 ```
 
-“首个可见 trigger”不等于“物理首 trigger”；16 位 triggerSeq 跨 measurement round 不能无约束关联。
+“首个可见 trigger”不等于“物理首 trigger”；`OperationalStartupControl` 是 host 侧 operational classification，不是已确认的 FPGA 协议 trigger type。
 
 ## 构建与实机交付
 
-正式构建规范见 `BUILD_STANDARD.md`。
-
-当前默认 Windows 构建组合：Qt 6.8.0 + MinGW 13.1 + Ninja + CMake，主工程默认使用：
+正式构建规范见 `BUILD_STANDARD.md`。默认 Windows 组合仍为 Qt 6.8.0 + MinGW 13.1 + Ninja + CMake：
 
 ```text
 configure preset : mingw-debug
@@ -129,24 +163,25 @@ build preset     : mingw-debug-build
 script           : MC_410T_MultiCard/delivery/build_mingw_debug.cmd
 ```
 
-注意：构建规范位于 `main`，但**实际构建对象必须是任务指定的实现分支/commit**。例如 START admission 实机候选必须构建 `6313540f...`，而不是因为规范在 `main` 就改为构建 `main`。
+构建规范位于 `main`，但实际构建对象必须是任务指定的实现分支和精确 commit。不要为了读取最新规范而把 `main` 源码混入待验收候选。
 
 ## 主要目录
 
-- `MC_410T_MultiCard/delivery/`：当前 Windows 采集、处理、成像、诊断和测试主工程。
+- `MC_410T_MultiCard/delivery/`：Windows 采集、处理、成像、诊断和测试主工程。
 - `PALiveImagingSimSender/`：UDP 模拟发送器。
 - `RadiusCalibration/`：半径标定工具。
-- `CODEX_REPORTS/`：已执行任务的报告和证据索引。
+- `CODEX_REPORTS/`：已执行任务的报告和证据；未合并候选的报告可能只存在于对应实现分支。
 - `_migration_pack/`：迁移期与预构建 CUDA fallback 资料；不是当前工作流入口。
-- `docs/history/`：已降级的历史项目说明。
+- `docs/history/`：降级的历史项目说明。
 
 ## 当前下一步
 
-当前优先工作不是继续修改 START admission 软件逻辑，而是：
-
-1. 按 `BUILD_STANDARD.md` 为 `6313540f...` 生成可追溯实机测试包；
-2. 完成真实 FPGA/NIC 多轮 START/STOP 和目标负载测试；
-3. 必要时同步采集 Pktmon/WPR 与应用 trace；
-4. 实机验收通过后，再决定是否把 START admission 分支集成到 `main`。
+1. 本地解析最新实机诊断包，确认完整物理轮 trigger count 分布；
+2. 以时间序列验证 CountBoundary 与真实圈末的对应关系；
+3. 验证 TimeoutBoundary 的完整 reset/stale-drop/next-round 链；
+4. 在事实明确前不修改 logical trigger count、first-visible filter、CountBoundary 语义或 FPGA/UDP；
+5. 若日志证明当前归一模型不适配新控制环境，再创建独立源码整改任务；
+6. START admission 继续作为独立硬件验证工作流推进；
+7. 两条工作流分别达到硬件/system acceptance 后，再由用户决定是否以及如何集成回 `main`。
 
 完整状态始终以 `PROJECT_STATUS.md` 为准。
