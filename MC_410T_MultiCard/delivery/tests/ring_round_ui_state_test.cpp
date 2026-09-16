@@ -77,7 +77,7 @@ int main()
         for (int s = 1; s <= 5; ++s) {
             check(ui.admitSnapshot(s), "T7 admit in-round snapshot");
             ui.onFrame();
-            frameEnd = ui.noteSnapshot(bpf);
+            frameEnd = ui.noteSnapshot(s % bpf == 0);
             if (s < 5)
                 check(!frameEnd, "T7 mid-round snapshot is not a frame end");
         }
@@ -86,14 +86,13 @@ int main()
         ui.resetFrameCount();
         check(ui.frameCount() == 0, "T7 frame counter reset at round end");
 
-        // Next round continues the global admitted-snapshot space: the next
-        // frame end lands on the 10th admitted snapshot (svc m_ringBlockIndex
-        // is not reset at count boundaries either).
+        // The fixture marks the last source block of each five-block round.
+        // Production never derives this marker from admitted snapshot counts.
         for (int s = 6; s <= 10; ++s) {
             ui.recordSubmitIndex(static_cast<std::uint64_t>(s));
             ui.onBlock();
             ui.onFrame();
-            frameEnd = ui.noteSnapshot(bpf);
+            frameEnd = ui.noteSnapshot(s % bpf == 0);
         }
         check(frameEnd, "T7 next frame end at the 10th admitted snapshot");
         check(ui.snapshot().blockCount == 10, "T7 block counter accumulates across count boundary");
@@ -133,7 +132,7 @@ int main()
         bool end = false;
         for (int i = 0; i < 5; ++i) {
             ui.onFrame();
-            end = ui.noteSnapshot(5);
+            end = ui.noteSnapshot(i == 4);
         }
         check(end, "T8 new round frame completes at 5 admitted snapshots");
         ui.resetFrameCount();
@@ -205,7 +204,7 @@ int main()
             ui.recordSubmitIndex(index);
             ui.onBlock();
             ui.onFrame();
-            ui.noteSnapshot(2);
+            ui.noteSnapshot(false);
         }
         const auto before = ui.snapshot();
         ui.onCountBoundary();

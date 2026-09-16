@@ -80,7 +80,7 @@ struct Fixture {
                                           std::vector<float> &&angles,
                                           std::vector<uint8_t> &&channelIds,
                                           int blockSeq,
-                                          const paimage::RoundIdentity &round) {
+                                          const paimage::RoundIdentity &round, bool roundComplete) {
             blocks.push_back({std::move(raw), std::move(angles),
                               std::move(channelIds), blockSeq, round});
         });

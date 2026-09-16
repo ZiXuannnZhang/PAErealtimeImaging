@@ -94,6 +94,7 @@ int main(int argc, char** argv) {
     const std::string sosRadiiMm = argStr(args, "--sos-radii-mm");   // 空=单一声速
     const std::string sosSpeeds = argStr(args, "--sos", "1490,1540");
     const double timeoutResetSec = argDouble(args, "--timeout-reset", 0.0);
+    const int identityJumpAt = argInt(args, "--identity-jump-at", -1);
     const bool noLaunch = argInt(args, "--no-launch", 0) != 0;      // svc 由外部启动（沙箱环境用）
     const std::string radiusPerChMm = argStr(args, "--radius-per-ch");  // 空=统一半径；8 个毫米值逗号分隔
     const bool splice = argInt(args, "--splice", 0) != 0;          // 1=拼接模式（需配准模式）
@@ -341,13 +342,14 @@ int main(int argc, char** argv) {
 
     double totalMs = 0.0;
     std::vector<float> lastWl1, lastWl2;   // 逐块对比缓存
+    std::vector<float> firstWl1, firstWl2;
     ring_shm_obs::Tracker producerObs;
     producerObs.beginSession();
     QJsonObject lastObservation;
     RingBlockAssembler assembler;
     assembler.setBlockCallback([&](std::vector<float> &&raw, std::vector<float> &&angles,
                                    std::vector<uint8_t> &&chIds, int blockSeq,
-                                   const paimage::RoundIdentity &round) {
+                                   const paimage::RoundIdentity &round, bool roundComplete) {
         const auto t0 = std::chrono::steady_clock::now();
         const uint64_t submitWallUs = ring_shm_obs::wallNowUs();
         uint8_t previousReady = 0;
@@ -373,6 +375,7 @@ int main(int argc, char** argv) {
         ready[QStringLiteral("submit_index")] = static_cast<qint64>(producerEvent.submitIndex);
         ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(producerEvent.submitWallUs);
         ring_round_identity::add(ready, round);
+        ready[QStringLiteral("round_complete")] = roundComplete;
         sendJson(sock, ready);
 
         bool got = false;
@@ -391,7 +394,9 @@ int main(int argc, char** argv) {
                 if (cmd == QStringLiteral("ring_snapshot_ready")) {
                     const auto snapshotIdentity = ring_round_identity::parse(obj);
                     identityMatch = snapshotIdentity.valid &&
-                        snapshotIdentity.identity == round;
+                        snapshotIdentity.identity == round &&
+                        obj.value(QStringLiteral("round_complete")).isBool() &&
+                        obj.value(QStringLiteral("round_complete")).toBool() == roundComplete;
                     got = true;
                     break;
                 }
@@ -424,6 +429,19 @@ int main(int argc, char** argv) {
         }
         lastWl1 = wl1;
         lastWl2 = wl2;
+        if (blockSeq == 0) { firstWl1 = wl1; firstWl2 = wl2; }
+        if (identityJumpAt > 0 && blockSeq == identityJumpAt) {
+            double maxDiff = 0.0;
+            for (size_t i = 0; i < wl1.size(); ++i) {
+                maxDiff = std::max(maxDiff, double(std::fabs(wl1[i] - firstWl1[i])));
+                maxDiff = std::max(maxDiff, double(std::fabs(wl2[i] - firstWl2[i])));
+            }
+            std::printf("[barrier-test] fresh-round max_pixel_difference=%.9g\n", maxDiff);
+            if (!std::isfinite(maxDiff) || maxDiff > 1e-6) {
+                std::fprintf(stderr, "cross-round reconstruction contamination\n");
+                std::exit(4);
+            }
+        }
 
         char nm[64];
         std::snprintf(nm, sizeof(nm), "svc_wl1_%03d.raw", blockSeq + 1);
@@ -455,6 +473,12 @@ int main(int argc, char** argv) {
     int resetBase = 0;       // 超时复位后新一圈的数据列基准（模拟重新开始采集）
     std::uint64_t roundGeneration = 0;
     for (int b = 0; b < nBlocksTotal; ++b) {
+        if (identityJumpAt > 0 && b == identityJumpAt) {
+            // No ring_reset and no prior final marker: only RoundIdentity can
+            // discard the partial reconstruction and WL2 cross-block tail.
+            resetBase = b;
+            ++roundGeneration;
+        }
         // 圈中停机模拟：在第 1 圈一半处暂停，验证超时后新触发判定为新一圈
         if (timeoutResetSec > 0.0 && b == nBlocks / 2) {
             resetBase = b;   // 新一圈从该块起，数据列回到 0 基准
@@ -484,7 +508,8 @@ int main(int argc, char** argv) {
                 for (int r = 0; r < sampDepth; ++r)
                     line[r] = static_cast<float>(col[r]);
                 assembler.pushChannelLine(c, static_cast<uint16_t>(b * perChBlock + t),
-                                          round, line.data(), sampDepth);
+                                          round, line.data(), sampDepth,
+                                          (b - resetBase + 1) % nBlocks == 0 && t == perChBlock - 1);
             }
         }
     }

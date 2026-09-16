@@ -72,7 +72,7 @@ public:
                                              std::vector<float> &&anglesDeg,
                                              std::vector<uint8_t> &&channels,
                                              int blockSeq,
-                                             const paimage::RoundIdentity &round)>;
+                                             const paimage::RoundIdentity &round, bool roundComplete)>;
     // 每完成一个触发脉冲回调一次（工作线程调用），用于块进度实时反馈
     using ProgressCallback = std::function<void()>;
     // 超时重置回调（触发级检测到停机超时后调用，工作线程）
@@ -92,7 +92,7 @@ public:
     // 身份必须在这条线进入 assembler 前已经确定。
     void pushChannelLine(int channelId, uint16_t triggerSeq,
                          const paimage::RoundIdentity &round,
-                         const float *line, int length);
+                         const float *line, int length, bool roundComplete = false);
 
     // Original standalone fixture seam. Production Ring feeding must use the
     // identity-bearing overload above.
@@ -144,6 +144,7 @@ private:
     struct PendingTrigger {
         std::array<std::vector<float>, 8> lines;
         uint32_t mask = 0;
+        bool roundComplete = false;
         paimage::RoundIdentity round;
         // Monotonic order of first insertion into m_pending.  triggerSeq is
         // a 16-bit wire value and its numeric order is not temporal order.

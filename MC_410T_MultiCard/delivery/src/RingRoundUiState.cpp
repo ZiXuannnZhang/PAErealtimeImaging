@@ -74,12 +74,11 @@ void RingRoundUiState::noteDuplicateSnapshot()
     ++duplicateSnapshots_;
 }
 
-bool RingRoundUiState::noteSnapshot(int blocksPerFrame)
+bool RingRoundUiState::noteSnapshot(bool roundComplete)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     ++snapshotsThisRound_;
-    if (blocksPerFrame > 0 &&
-        snapshotsThisRound_ % static_cast<std::uint64_t>(blocksPerFrame) == 0) {
+    if (roundComplete) {
         ++frameEnds_;
         return true;
     }
@@ -102,7 +101,7 @@ void RingRoundUiState::onCountBoundary()
 {
     // CountBoundary keeps the seq space monotonic (RingBlockAssembler keeps
     // blockSeq running) and the frame counter resets on the final frame of the
-    // round, driven by noteSnapshot(blocksPerFrame). Nothing to do here; the
+    // round, driven by noteSnapshot(roundComplete). Nothing to do here; the
     // coordinator records the event for diagnostics at the call site.
 }
 
