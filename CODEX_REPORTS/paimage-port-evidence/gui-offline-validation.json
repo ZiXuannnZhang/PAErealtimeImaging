@@ -1,0 +1,43 @@
+{
+  "date": "2026-09-10",
+  "zipSha256": "bb62ee8e52c8aef3b79e77a7bdefa77fd87bd375f3825ca896a9351ad7b19e00",
+  "zipCrc": "passed",
+  "traceManifestFileHashes": "passed",
+  "exportMode": "idle; no acquisition trace runs",
+  "marker": {
+    "category": "ui.action",
+    "fields": {
+      "dataTimeNs": 50000,
+      "markerText": "gui-validation / 1",
+      "measuring": false,
+      "operatorTimestampNotTriggerEdge": true,
+      "roundId": "1",
+      "saving": false,
+      "source": "ui",
+      "trialId": "gui-validation"
+    },
+    "message": "experiment_marker",
+    "monotonicMs": 205156,
+    "runId": "e854cd70-57ad-4a33-8172-bfe07761239a",
+    "sequence": 17,
+    "severity": "info",
+    "sourceRunDirectory": "D:/chatgpt/paerealtimeimaging/_paimage_acquisition_port_20260909/artifacts/paimageacquisitionport/paimage-diagnostics/run-20260910T104503528-e854cd70-57ad-4a33-8172-bfe07761239a",
+    "sourceRunId": "e854cd70-57ad-4a33-8172-bfe07761239a",
+    "timestamp": "2026-09-10T10:48:28.688",
+    "windowRole": "formal"
+  },
+  "sourceRunIds": [
+    "e854cd70-57ad-4a33-8172-bfe07761239a"
+  ],
+  "guiObserved": [
+    "delivery EXE startup and backend/SHA title",
+    "experiment marker entry",
+    "asynchronous diagnostic export success"
+  ],
+  "remainingGuiAcceptance": "user-owned by explicit instruction; no further Computer Use",
+  "unverified": [
+    "GUI parameter persistence after restart",
+    "old-registry before/after equality",
+    "physical NIC and GPU end-to-end experiment"
+  ]
+}

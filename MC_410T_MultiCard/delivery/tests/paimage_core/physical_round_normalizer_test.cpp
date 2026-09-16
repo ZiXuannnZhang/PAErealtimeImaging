@@ -1,0 +1,353 @@
+#include "PaimageAcquisition/PhysicalRoundNormalizer.h"
+
+#include <iostream>
+#include <stdexcept>
+#include <vector>
+
+using namespace paimage;
+
+namespace {
+void require(bool condition, const char* message) {
+    if (!condition)
+        throw std::runtime_error(message);
+}
+
+PhysicalRoundClassification classify(PhysicalRoundNormalizer& normalizer,
+                                     std::uint64_t session,
+                                     std::uint16_t trigger,
+                                     std::int64_t observedMonotonicNs = 0) {
+    return normalizer.classify(session, trigger, observedMonotonicNs);
+}
+}
+
+int main() {
+    // T1: one operational control identity plus N logical identities.
+    {
+        std::vector<PhysicalRoundEvent> events;
+        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { events.push_back(event); });
+        normalizer.beginSession(7);
+        require(classify(normalizer, 7, 10).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "T1 control");
+        require(classify(normalizer, 7, 11).logicalTriggerIndex == 0, "T1 index zero");
+        require(classify(normalizer, 7, 12).logicalTriggerIndex == 1, "T1 index one");
+        const auto last = classify(normalizer, 7, 13);
+        require(last.decision == PhysicalTriggerDecision::LogicalScan &&
+                    last.logicalTriggerIndex == 2 && last.roundComplete,
+                "T1 final logical");
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.physicalDistinctObserved == 4 &&
+                    snapshot.operationalControlFiltered == 1 &&
+                    snapshot.logicalDistinctAccepted == 3 &&
+                    snapshot.countBoundaryResets == 1 &&
+                    snapshot.roundGeneration == 1 &&
+                    snapshot.state == PhysicalRoundState::AwaitingControl,
+                "T1 counters");
+        require(events.size() == 2 &&
+                    events.front().kind == PhysicalRoundEvent::Kind::ControlFiltered &&
+                    events.front().basis == "first-visible-operational" &&
+                    events.back().kind == PhysicalRoundEvent::Kind::CountBoundary,
+                "T1 events");
+    }
+
+    // T1 also covers the production-sized configured value. The normalizer
+    // receives the count from configuration; 4000 is not embedded in its
+    // implementation.
+    {
+        PhysicalRoundNormalizer normalizer(4000);
+        normalizer.beginSession(7000);
+        require(classify(normalizer, 7000, 0).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "T1 4000 control");
+        for (std::uint16_t trigger = 1; trigger <= 4000; ++trigger) {
+            const auto classification = classify(normalizer, 7000, trigger);
+            require(classification.decision == PhysicalTriggerDecision::LogicalScan &&
+                        classification.logicalTriggerIndex == trigger - 1 &&
+                        classification.roundComplete == (trigger == 4000),
+                    "T1 4000 logical sequence");
+        }
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.physicalDistinctObserved == 4001 &&
+                    snapshot.operationalControlFiltered == 1 &&
+                    snapshot.logicalDistinctAccepted == 4000 &&
+                    snapshot.countBoundaryResets == 1,
+                "T1 4000 counters");
+    }
+
+    // T2: three independent rounds use exactly 1+N identities each.
+    {
+        PhysicalRoundNormalizer normalizer(3);
+        normalizer.beginSession(8);
+        for (std::uint16_t base : {100, 110, 120}) {
+            require(classify(normalizer, 8, base).decision ==
+                        PhysicalTriggerDecision::OperationalStartupControl,
+                    "T2 control");
+            classify(normalizer, 8, static_cast<std::uint16_t>(base + 1));
+            classify(normalizer, 8, static_cast<std::uint16_t>(base + 2));
+            require(classify(normalizer, 8, static_cast<std::uint16_t>(base + 3)).roundComplete,
+                    "T2 boundary");
+        }
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.physicalDistinctObserved == 12 &&
+                    snapshot.logicalDistinctAccepted == 9 &&
+                    snapshot.countBoundaryResets == 3 && snapshot.roundGeneration == 3,
+                "T2 counters");
+    }
+
+    // T3: a late card for the last logical identity keeps the original
+    // decision after the count boundary and cannot become the next control.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.beginSession(9);
+        classify(normalizer, 9, 200);
+        classify(normalizer, 9, 201);
+        const auto final = classify(normalizer, 9, 202);
+        const auto late = classify(normalizer, 9, 202);
+        require(final.roundComplete && late.decision == PhysicalTriggerDecision::LogicalScan &&
+                    late.logicalTriggerIndex == 1 && !late.roundComplete && !late.newDistinct,
+                "T3 late card");
+        require(classify(normalizer, 9, 203).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "T3 next control");
+        require(normalizer.snapshot().physicalDistinctObserved == 4, "T3 distinct count");
+    }
+
+    // T4: reordered multi-card delivery shares one cached decision per
+    // physical identity and does not advance counters twice.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.beginSession(10);
+        const auto c0 = classify(normalizer, 10, 300);
+        const auto c1 = classify(normalizer, 10, 300);
+        const auto s0 = classify(normalizer, 10, 301);
+        const auto s1 = classify(normalizer, 10, 301);
+        require(c0.decision == c1.decision && s0.decision == s1.decision &&
+                    c0.newDistinct && !c1.newDistinct && s0.newDistinct && !s1.newDistinct,
+                "T4 card sharing");
+        require(normalizer.snapshot().physicalDistinctObserved == 2 &&
+                    normalizer.snapshot().logicalDistinctAccepted == 1,
+                "T4 counters");
+    }
+
+    // T5: completeness is not part of classification; a partial first
+    // identity is still the operational control filter.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.beginSession(11);
+        require(classify(normalizer, 11, 400).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "T5 partial control");
+        require(classify(normalizer, 11, 401).logicalTriggerIndex == 0,
+                "T5 logical after partial control");
+    }
+
+    // T6: a control identity visible on only one card still establishes the
+    // shared decision; the next identity is logical for all cards.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.beginSession(12);
+        const auto card0Control = classify(normalizer, 12, 500);
+        const auto card1Control = classify(normalizer, 12, 500);
+        const auto card1Scan = classify(normalizer, 12, 501);
+        const auto card0Scan = classify(normalizer, 12, 501);
+        require(card0Control.decision == PhysicalTriggerDecision::OperationalStartupControl &&
+                    card1Control.decision == card0Control.decision &&
+                    card1Scan.decision == PhysicalTriggerDecision::LogicalScan &&
+                    card0Scan.decision == card1Scan.decision,
+                "T6 shared decision");
+    }
+
+    // T7: when the operational control is invisible, the first visible scan
+    // is filtered and only N-1 logical scans remain in the round.
+    {
+        PhysicalRoundNormalizer normalizer(4);
+        normalizer.beginSession(13);
+        require(classify(normalizer, 13, 600).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "T7 first visible filter");
+        for (std::uint16_t trigger = 601; trigger <= 603; ++trigger)
+            require(classify(normalizer, 13, trigger).decision ==
+                        PhysicalTriggerDecision::LogicalScan,
+                    "T7 logical");
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.logicalDistinctAccepted == 3 &&
+                    snapshot.currentLogicalDistinctCount == 3 &&
+                    snapshot.countBoundaryResets == 0,
+                "T7 N-1");
+    }
+
+    // T8: a timeout clears a partial logical round and requires a new control.
+    {
+        std::vector<PhysicalRoundEvent> events;
+        PhysicalRoundNormalizer normalizer(4, [&](const auto& event) { events.push_back(event); });
+        normalizer.beginSession(14);
+        classify(normalizer, 14, 700);
+        classify(normalizer, 14, 701);
+        normalizer.timeoutBoundary(14);
+        auto snapshot = normalizer.snapshot();
+        require(snapshot.timeoutBoundaryResets == 1 && snapshot.roundGeneration == 1 &&
+                    snapshot.currentLogicalDistinctCount == 0 &&
+                    snapshot.state == PhysicalRoundState::AwaitingControl,
+                "T8 timeout");
+        require(classify(normalizer, 14, 702).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "T8 control after timeout");
+        require(events.size() == 3 &&
+                    events[1].kind == PhysicalRoundEvent::Kind::TimeoutBoundary &&
+                    events[2].kind == PhysicalRoundEvent::Kind::ControlFiltered,
+                "T8 event");
+    }
+
+    // T9: timeout after a count boundary is an idempotent no-op.
+    {
+        PhysicalRoundNormalizer normalizer(1);
+        normalizer.beginSession(15);
+        classify(normalizer, 15, 800);
+        require(classify(normalizer, 15, 801).roundComplete, "T9 count boundary");
+        normalizer.timeoutBoundary(15);
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.countBoundaryResets == 1 && snapshot.timeoutBoundaryResets == 0 &&
+                    snapshot.roundGeneration == 1,
+                "T9 no double reset");
+        require(classify(normalizer, 15, 802).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "T9 next control");
+    }
+
+    // T10: uint16 trigger sequence wrap does not change identity handling.
+    {
+        PhysicalRoundNormalizer normalizer(3);
+        normalizer.beginSession(16);
+        require(classify(normalizer, 16, 0xffffU - 1U).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "T10 control before wrap");
+        require(classify(normalizer, 16, 0xffffU).logicalTriggerIndex == 0,
+                "T10 65535");
+        require(classify(normalizer, 16, 0).logicalTriggerIndex == 1, "T10 zero");
+        require(classify(normalizer, 16, 1).roundComplete, "T10 one");
+    }
+
+    // T12: a new measurement session clears the prior identity cache and
+    // starts in AwaitingControl even when the wire sequence is reused.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.beginSession(17);
+        classify(normalizer, 17, 900);
+        classify(normalizer, 17, 901);
+        normalizer.beginSession(18);
+        const auto first = classify(normalizer, 18, 900);
+        require(first.decision == PhysicalTriggerDecision::OperationalStartupControl &&
+                    first.newDistinct && normalizer.snapshot().physicalDistinctObserved == 1,
+                    "T12 session reset");
+    }
+
+    // T13 / timeout T1: a production-style monotonic idle gap is detected
+    // while classifying the next distinct identity. That identity becomes the
+    // new operational control and the partial logical count is discarded.
+    {
+        std::vector<PhysicalRoundEvent> events;
+        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { events.push_back(event); });
+        normalizer.setTimeoutResetSec(1.0e-6);
+        normalizer.beginSession(19);
+        classify(normalizer, 19, 100, 1000);
+        classify(normalizer, 19, 101, 1500);
+        const auto late = classify(normalizer, 19, 101, 5000);
+        const auto control = classify(normalizer, 19, 102, 3501);
+        require(!late.newDistinct && control.decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "timeout T1 late card/control classification");
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.timeoutBoundaryResets == 1 && snapshot.roundGeneration == 1 &&
+                    snapshot.currentLogicalDistinctCount == 0 &&
+                    snapshot.lastDistinctTriggerSeq == 102 &&
+                    snapshot.timeoutResetNs == 1000,
+                "timeout T1 snapshot");
+        require(events.size() == 3 &&
+                    events[1].kind == PhysicalRoundEvent::Kind::TimeoutBoundary &&
+                    events[1].basis == "physical-idle-timeout" &&
+                    events[1].idleDurationNs == 2001 &&
+                    events[1].configuredTimeoutNs == 1000 &&
+                    events[1].hasLastDistinctTriggerSeq &&
+                    events[1].lastDistinctTriggerSeq == 101 &&
+                    events[1].hasNextVisibleTriggerSeq &&
+                    events[1].nextVisibleTriggerSeq == 102,
+                "timeout T1 diagnostic event");
+        require(classify(normalizer, 19, 103, 3600).logicalTriggerIndex == 0,
+                "timeout T1 post-control index zero");
+    }
+
+    // T14 / timeout T2: zero disables the idle boundary; a long gap alone
+    // cannot filter the next identity or increment timeout counters.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.setTimeoutResetSec(0.0);
+        normalizer.beginSession(20);
+        require(classify(normalizer, 20, 110, 1000).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "timeout T2 control");
+        require(classify(normalizer, 20, 111, 2000000000LL).logicalTriggerIndex == 0,
+                "timeout T2 first logical");
+        const auto final = classify(normalizer, 20, 112, 4000000000LL);
+        const auto snapshot = normalizer.snapshot();
+        require(final.roundComplete && snapshot.timeoutBoundaryResets == 0 &&
+                    snapshot.countBoundaryResets == 1,
+                "timeout T2 disabled");
+    }
+
+    // T15 / timeout T4: count completion already leaves the normalizer idle;
+    // a later identity starts the next round without a second timeout reset.
+    {
+        PhysicalRoundNormalizer normalizer(1);
+        normalizer.setTimeoutResetSec(1.0e-6);
+        normalizer.beginSession(21);
+        classify(normalizer, 21, 120, 1000);
+        require(classify(normalizer, 21, 121, 1500).roundComplete,
+                "timeout T4 count boundary");
+        const auto next = classify(normalizer, 21, 122, 1000000000LL);
+        const auto snapshot = normalizer.snapshot();
+        require(next.decision == PhysicalTriggerDecision::OperationalStartupControl &&
+                    snapshot.countBoundaryResets == 1 &&
+                    snapshot.timeoutBoundaryResets == 0 &&
+                    snapshot.roundGeneration == 1,
+                "timeout T4 idempotence");
+    }
+
+    // T16 / timeout T5: a cached late card must not move the idle anchor. The
+    // later distinct identity therefore observes the original physical gap.
+    {
+        std::vector<PhysicalRoundEvent> events;
+        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { events.push_back(event); });
+        normalizer.setTimeoutResetSec(1.0e-6);
+        normalizer.beginSession(22);
+        classify(normalizer, 22, 130, 1000);
+        classify(normalizer, 22, 131, 1500);
+        classify(normalizer, 22, 131, 100000);
+        classify(normalizer, 22, 132, 2000);
+        const auto control = classify(normalizer, 22, 133, 4001);
+        const auto snapshot = normalizer.snapshot();
+        require(control.decision == PhysicalTriggerDecision::OperationalStartupControl &&
+                    snapshot.timeoutBoundaryResets == 1 && events.size() == 3 &&
+                    events[1].lastDistinctTriggerSeq == 132 &&
+                    events[1].idleDurationNs == 2001,
+                "timeout T5 late card anchor");
+    }
+
+    // T17 / timeout T6: the idle boundary carries the wire identity across
+    // uint16 wrap without using numeric trigger order.
+    {
+        std::vector<PhysicalRoundEvent> events;
+        PhysicalRoundNormalizer normalizer(2, [&](const auto& event) { events.push_back(event); });
+        normalizer.setTimeoutResetSec(1.0e-6);
+        normalizer.beginSession(23);
+        classify(normalizer, 23, 0xffffU, 1000);
+        classify(normalizer, 23, 0, 1500);
+        const auto control = classify(normalizer, 23, 1, 4000);
+        require(control.decision == PhysicalTriggerDecision::OperationalStartupControl &&
+                    events.size() == 3 &&
+                    events[1].lastDistinctTriggerSeq == 0 &&
+                    events[1].nextVisibleTriggerSeq == 1,
+                "timeout T6 wrap");
+    }
+
+    std::cout << "PASS physical round normalizer contract (T1-T17)\n";
+}

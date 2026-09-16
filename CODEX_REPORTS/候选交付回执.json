@@ -1,0 +1,29 @@
+{
+  "binarySourceCommit": "25a1a5627f987db4f994f6b2874a7d146dffd0c8",
+  "backendId": "paimage-derived",
+  "buildType": "Debug",
+  "executableSha256": "cae54d59a4156000c1690c4664bbfd307a06ca736eb6a533d1d2839324aaf933",
+  "staticImportsUnresolved": [],
+  "noninteractiveTests": {
+    "passed": 24,
+    "latestPaimageSubsetPassed": 11,
+    "independentAnalyzerFixtures": "passed"
+  },
+  "guiAcceptance": "pending unlocked desktop; diagnostic_dialog_test stalls inside QApplication initialization",
+  "physicalNicExperiment": "not performed",
+  "packagePath": "D:\\ChatGPT\\PAERealtimeImaging\\_paimage_acquisition_port_20260909\\artifacts\\PAimageAcquisitionPort",
+  "exampleZipIntegrity": {
+    "missing-middle-28.zip": {
+      "crc": "passed",
+      "rawPartialCardTriggers": 1,
+      "traceIncomplete": false,
+      "associationComplete": true
+    },
+    "normal-70.zip": {
+      "crc": "passed",
+      "rawPartialCardTriggers": 0,
+      "traceIncomplete": false,
+      "associationComplete": true
+    }
+  }
+}

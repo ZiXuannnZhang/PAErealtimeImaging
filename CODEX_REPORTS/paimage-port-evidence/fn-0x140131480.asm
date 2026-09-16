@@ -1,0 +1,41 @@
+0000000140131480: mov      qword ptr [rsp + 8], rbx                                   ; 
+0000000140131485: mov      qword ptr [rsp + 0x10], rbp                                ; 
+000000014013148a: mov      qword ptr [rsp + 0x18], rsi                                ; 
+000000014013148f: push     rdi                                                        ; 
+0000000140131490: sub      rsp, 0x20                                                  ; 
+0000000140131494: mov      rsi, qword ptr [rcx + 0xaf0]                               ; 
+000000014013149b: movzx    ebp, dl                                                    ; 
+000000014013149e: mov      rbx, qword ptr [rcx + 0xae8]                               ; 
+00000001401314a5: mov      rdi, rcx                                                   ; 
+00000001401314a8: cmp      rbx, rsi                                                   ; 
+00000001401314ab: je       0x1401314c8                                                ; 
+00000001401314ad: nop      dword ptr [rax]                                            ; 
+00000001401314b0: mov      rcx, qword ptr [rbx]                                       ; 
+00000001401314b3: cmp      rcx, -1                                                    ; 
+00000001401314b7: je       0x1401314bf                                                ; 
+00000001401314b9: call     qword ptr [rip + 0x32d5b9]                                 ; 0x14045ea78 WS2_32.dll!closesocket
+00000001401314bf: add      rbx, 8                                                     ; 
+00000001401314c3: cmp      rbx, rsi                                                   ; 
+00000001401314c6: jne      0x1401314b0                                                ; 
+00000001401314c8: test     bpl, bpl                                                   ; 
+00000001401314cb: je       0x1401314e4                                                ; 
+00000001401314cd: mov      rax, qword ptr [rdi + 0xae8]                               ; 
+00000001401314d4: cmp      rax, qword ptr [rdi + 0xaf0]                               ; 
+00000001401314db: je       0x1401314e4                                                ; 
+00000001401314dd: mov      qword ptr [rdi + 0xaf0], rax                               ; 
+00000001401314e4: mov      rcx, qword ptr [rdi + 0xb00]                               ; 
+00000001401314eb: cmp      rcx, -1                                                    ; 
+00000001401314ef: je       0x140131502                                                ; 
+00000001401314f1: call     qword ptr [rip + 0x32d581]                                 ; 0x14045ea78 WS2_32.dll!closesocket
+00000001401314f7: mov      qword ptr [rdi + 0xb00], 0xffffffffffffffff                ; 
+0000000140131502: mov      rcx, qword ptr [rdi + 0xb08]                               ; 
+0000000140131509: cmp      rcx, -1                                                    ; 
+000000014013150d: je       0x140131520                                                ; 
+000000014013150f: call     qword ptr [rip + 0x32d563]                                 ; 0x14045ea78 WS2_32.dll!closesocket
+0000000140131515: mov      qword ptr [rdi + 0xb08], 0xffffffffffffffff                ; 
+0000000140131520: mov      rbx, qword ptr [rsp + 0x30]                                ; 
+0000000140131525: mov      rbp, qword ptr [rsp + 0x38]                                ; 
+000000014013152a: mov      rsi, qword ptr [rsp + 0x40]                                ; 
+000000014013152f: add      rsp, 0x20                                                  ; 
+0000000140131533: pop      rdi                                                        ; 
+0000000140131534: ret                                                                 ; 

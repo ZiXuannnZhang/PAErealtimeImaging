@@ -1,0 +1,58 @@
+[OUTPUT] 
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/_paimage_acquisition_port_20260909/build/paimage-host-checks
+
+[HANDLER_OUTPUT] 
+Test project D:/ChatGPT/PAERealtimeImaging/_paimage_acquisition_port_20260909/build/paimage-host-checks
+
+      Start  1: ring_block_assembler_test
+ 1/24 Test  #1: ring_block_assembler_test ..............   Passed    0.09 sec
+      Start  2: diagnostic_recorder_test
+ 2/24 Test  #2: diagnostic_recorder_test ...............   Passed    0.99 sec
+      Start  3: ring_shm_observability_test
+ 3/24 Test  #3: ring_shm_observability_test ............   Passed    0.04 sec
+      Start  4: diagnostic_time_window_test
+ 4/24 Test  #4: diagnostic_time_window_test ............   Passed    0.25 sec
+      Start  5: process_scheduling_test
+ 5/24 Test  #5: process_scheduling_test ................   Passed    0.06 sec
+      Start  6: network_ingress_observability_test
+ 6/24 Test  #6: network_ingress_observability_test .....   Passed    0.07 sec
+      Start  7: network_snapshot_test
+ 7/24 Test  #7: network_snapshot_test ..................   Passed    0.06 sec
+      Start  8: network_diagnostics_test
+ 8/24 Test  #8: network_diagnostics_test ...............   Passed    4.75 sec
+      Start  9: measurement_session_transaction_test
+ 9/24 Test  #9: measurement_session_transaction_test ...   Passed    0.05 sec
+      Start 10: session_boundary_test
+10/24 Test #10: session_boundary_test ..................   Passed    1.61 sec
+      Start 11: session_boundary_receiver_test
+11/24 Test #11: session_boundary_receiver_test .........   Passed   12.25 sec
+      Start 12: data_processor_batch_test
+12/24 Test #12: data_processor_batch_test ..............   Passed    0.07 sec
+      Start 13: card_status_formatting_test
+13/24 Test #13: card_status_formatting_test ............   Passed    0.06 sec
+      Start 14: paimage_network_test
+14/24 Test #14: paimage_network_test ...................   Passed    2.09 sec
+      Start 15: paimage_host_output_test
+15/24 Test #15: paimage_host_output_test ...............   Passed    0.81 sec
+      Start 16: paimage_trace_bundle_test
+16/24 Test #16: paimage_trace_bundle_test ..............   Passed    0.55 sec
+      Start 17: paimage_core_checks
+17/24 Test #17: paimage_core_checks ....................   Passed    0.04 sec
+      Start 18: paimage_output_checks
+18/24 Test #18: paimage_output_checks ..................   Passed    0.02 sec
+      Start 19: paimage_control_checks
+19/24 Test #19: paimage_control_checks .................   Passed    0.02 sec
+      Start 20: paimage_socket_short
+20/24 Test #20: paimage_socket_short ...................   Passed    2.45 sec
+      Start 21: paimage_trace_checks
+21/24 Test #21: paimage_trace_checks ...................   Passed    0.14 sec
+      Start 22: paimage_worker_checks
+22/24 Test #22: paimage_worker_checks ..................   Passed    0.25 sec
+      Start 23: paimage_protocol_checks
+23/24 Test #23: paimage_protocol_checks ................   Passed    0.35 sec
+      Start 24: paimage_conversion_checks
+24/24 Test #24: paimage_conversion_checks ..............   Passed    0.02 sec
+
+100% tests passed, 0 tests failed out of 24
+
+Total Test time (real) =  27.14 sec

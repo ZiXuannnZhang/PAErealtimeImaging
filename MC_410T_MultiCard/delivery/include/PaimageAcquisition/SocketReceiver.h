@@ -1,0 +1,95 @@
+#pragma once
+#include "SourceCore.h"
+#include "TraceWriter.h"
+#include "TimingWriter.h"
+#include "LoopLog.h"
+#include <atomic>
+#include <deque>
+#include <mutex>
+#include <string>
+#include <thread>
+namespace paimage {
+// Windows-only recovered receive scheduling and feedback demultiplexing.
+// Control transaction ownership is deliberately separate from the raw socket loop.
+class SocketReceiver {
+public:
+    struct Endpoint {std::uint16_t port=0;std::string bindIp;};
+    SocketReceiver(Config,std::vector<Endpoint>,Endpoint feedback,std::vector<std::string> targets,
+        TraceWriter*,TimingWriter*,LoopLog*,SourceCore::CardSink,SourceCore::SyncSink);
+    ~SocketReceiver();
+    bool start(std::string& error);
+    void stop();
+    void requestStop(){running_=false;}
+    void observeShutdown();
+    void prepareStart(std::uint64_t session);
+    bool completeStart(bool success);
+    // ControlSocket calls these around each real START sendto().
+    void beforeStartSend(int card);
+    void afterStartSend(int card,bool success);
+    void prepareStop();
+    void completeStop(bool success);
+    std::vector<int> receiveBuffers() const{return receiveBuffers_;}
+    int feedbackReceiveBuffer()const{return feedbackReceiveBuffer_;}
+    std::uint64_t ingress() const{return ingress_.load();}
+    std::uint64_t hardErrors() const{return hardErrors_.load();}
+    bool isRunning()const{return running_.load();}
+    int lastSocketError()const{return lastSocketError_.load();}
+    int priorityResult()const{return priorityResult_.load();}
+    int actualPriority()const{return actualPriority_.load();}
+    SocketTimestampMode socketTimestampMode()const{return config_.socketTimestampMode;}
+    bool socketTimestampEnabled()const{return timestampEnabled_;}
+    bool socketTimestampFunctionAvailable()const{return recvMsgFunction_!=0;}
+    std::string socketTimestampStatus()const{return timestampStatus_;}
+    std::uint64_t socketTimestampedPackets()const{return timestampedPackets_.load();}
+    std::uint64_t socketTimestampControlTruncated()const{return timestampControlTruncated_.load();}
+    std::function<void(int,int,Time)> feedbackSink;
+    SourceCore::Observer observationSink;
+    std::function<void(int,const TraceRecord&)> ingressSink;
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+    // Test-only fault injection point; never defined in delivery builds.
+    std::function<void(std::uint64_t)> testLoopHook;
+#endif
+    Counters counters()const{std::lock_guard<std::mutex> lock(coreMutex_);return core_.counters();}
+    static Time now();
+private:
+    enum class StartCardState : std::uint8_t { AwaitingStart, StartSendPending, StartSent, StartFailed };
+    struct HeldDatagram {
+        int card=-1;
+        std::vector<std::uint8_t> bytes;
+        Time receivedNs=0;
+        std::uint64_t ingressId=0;
+        std::uint32_t sourceIPv4=0;
+        std::uint16_t sourcePort=0,localPort=0,trigger=0,packet=0;
+    };
+    static constexpr std::size_t kMaxStartHoldDatagrams=8192;
+    static constexpr std::size_t kMaxStartHoldBytes=64u*1024u*1024u;
+    void run();void closeSockets();
+    bool admitOrHold(int card,const std::uint8_t*,int,Time,std::uint64_t,std::uint32_t,
+                     std::uint16_t,std::uint16_t,std::uint16_t,std::uint16_t);
+    bool holdStartDatagram(int card,const std::uint8_t*,int,Time,std::uint64_t,std::uint32_t,
+                           std::uint16_t,std::uint16_t,std::uint16_t,std::uint16_t);
+    void discardHeld(Decision);
+    void discardHeldForCard(int,Decision);
+    void resetStartFence(Decision);
+    void observeFence(Decision,int,std::uint16_t,std::uint16_t,std::uint32_t,Time,std::uint64_t);
+    void timing(TimingKind,Time,Time,int card=-1,std::uint16_t port=0,
+                std::uint32_t value0=0,std::uint32_t value1=0,
+                std::uint64_t correlation=0,std::uint16_t flags=0,bool force=false) noexcept;
+    Config config_;std::vector<Endpoint> endpoints_;Endpoint feedback_;
+    std::vector<std::string> targets_;std::vector<std::uint32_t> targetAddresses_;
+    std::vector<std::uintptr_t> sockets_;std::vector<int> receiveBuffers_;
+    int feedbackReceiveBuffer_=-1;
+    std::uintptr_t feedbackSocket_=~std::uintptr_t(0);
+    TraceWriter* trace_;TimingWriter* timing_;LoopLog* loopLog_;SourceCore core_;mutable std::mutex coreMutex_;
+    std::atomic<bool> running_{false};std::atomic<std::uint64_t> session_{0},ingress_{0},hardErrors_{0};
+    std::atomic<int> priorityResult_{-1},actualPriority_{-1};std::thread worker_;
+    std::atomic<int> lastSocketError_{0};
+    bool timestampEnabled_=false;std::uintptr_t recvMsgFunction_=0;std::string timestampStatus_="disabled by configuration";
+    std::atomic<std::uint64_t> timestampedPackets_{0},timestampControlTruncated_{0};
+    std::uint64_t correlation_=0;bool wsa_=false;
+    bool startFenceActive_=false,startFenceFailed_=false,startFenceCallbacksSeen_=false;
+    std::vector<StartCardState> startCardStates_;
+    std::deque<HeldDatagram> startHold_;
+    std::size_t startHoldBytes_=0;
+};
+}

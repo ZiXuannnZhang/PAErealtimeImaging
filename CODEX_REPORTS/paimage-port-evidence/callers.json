@@ -1,0 +1,62 @@
+[
+  {
+    "function": "0x140134da0",
+    "at": "0x1401350c2",
+    "instruction": "call 0x140132980"
+  },
+  {
+    "function": "0x140136000",
+    "at": "0x14013625e",
+    "instruction": "call 0x140132980"
+  },
+  {
+    "function": "0x140136000",
+    "at": "0x140136330",
+    "instruction": "call 0x14013b620"
+  },
+  {
+    "function": "0x140136000",
+    "at": "0x14013642f",
+    "instruction": "call 0x14013b620"
+  },
+  {
+    "function": "0x140138e90",
+    "at": "0x1401391ca",
+    "instruction": "call 0x140132980"
+  },
+  {
+    "function": "0x140138e90",
+    "at": "0x140139250",
+    "instruction": "call 0x14013b620"
+  },
+  {
+    "function": "0x140138e90",
+    "at": "0x140139823",
+    "instruction": "call 0x140132980"
+  },
+  {
+    "function": "0x140138e90",
+    "at": "0x1401398a0",
+    "instruction": "call 0x14013b620"
+  },
+  {
+    "function": "0x14013b9d0",
+    "at": "0x14013bb0b",
+    "instruction": "jmp 0x14013b620"
+  },
+  {
+    "function": "0x140141500",
+    "at": "0x14014169b",
+    "instruction": "call 0x1401505b0"
+  },
+  {
+    "function": "0x140141f10",
+    "at": "0x1401421b7",
+    "instruction": "call 0x140138460"
+  },
+  {
+    "function": "0x140141f10",
+    "at": "0x1401421c6",
+    "instruction": "call 0x140137360"
+  }
+]

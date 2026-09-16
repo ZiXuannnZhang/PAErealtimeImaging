@@ -1,0 +1,3 @@
+cpuMs=1578.12 wallMs=10033.6 traceEnabled=1 injectedMissing=0
+hostRingReturns=1600 maxSenderLateMs=13.1895 stress=1
+PASS production NetworkController stress (saving disabled)

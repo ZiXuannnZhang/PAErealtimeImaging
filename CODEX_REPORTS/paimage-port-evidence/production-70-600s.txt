@@ -1,0 +1,2 @@
+hostRingReturns=96000 maxSenderLateMs=13.7758 stress=1
+PASS production NetworkController stress (saving disabled)
