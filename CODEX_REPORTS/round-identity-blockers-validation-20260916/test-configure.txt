@@ -10,7 +10,7 @@
 -- Performing Test HAVE_STDATOMIC
 -- Performing Test HAVE_STDATOMIC - Success
 -- Found WrapAtomic: TRUE
--- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR) 
+-- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR)
 -- Configuring done (98.9s)
 -- Generating done (7.4s)
 -- Build files have been written to: D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests
