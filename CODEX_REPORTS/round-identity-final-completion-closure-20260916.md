@@ -6,9 +6,9 @@
 ```text
 BASE_SHA        = 23debab2bf64473e5500231689113e567b3ca229（integrated 分支任务基线，merge-base b4376203e7c9c8b369b6b87551f3718bd1edf424，ahead 2 / behind 0，工作树干净）
 SOURCE_SHA      = 26d54b5a2b564a127b046ab213a7f6d09b8c83b9（"Close Ring final reconstruction completion semantics"）
-REPORT_SHA      = 本报告 commit（推送后回填）
+REPORT_SHA      = d721f4c540a2a5ac0b5c1d97a90a38e6e6013e65（"Add final completion closure report and validation evidence"）
 REMOTE_BRANCH   = codex/physical-round-normalizer-integrated-20260916
-REMOTE_HEAD_SHA = 推送后回填
+REMOTE_HEAD_SHA = d721f4c540a2a5ac0b5c1d97a90a38e6e6013e65（git ls-remote 核验 local==remote）
 ```
 
 ## 任务目标回顾
