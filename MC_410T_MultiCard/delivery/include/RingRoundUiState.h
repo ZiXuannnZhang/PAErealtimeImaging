@@ -34,7 +34,7 @@ public:
     struct Snapshot {
         std::uint64_t frameCount = 0;          // per-round output frame counter
         std::uint64_t blockCount = 0;          // per-round submitted block counter
-        std::uint64_t snapshotsThisRound = 0;  // admitted Ring snapshots this round
+        std::uint64_t snapshotsThisRound = 0;  // legacy name: admitted snapshots since epoch reset; diagnostic only
         std::uint64_t submissionsTotal = 0;    // recorded producer identities
         std::uint64_t lastSubmitIndex = 0;     // producer submit_index high-water mark
         std::uint64_t staleCutoffSubmitIndex = 0;
@@ -42,7 +42,7 @@ public:
         std::uint64_t epoch = 0;               // TimeoutBoundary count applied
         std::uint64_t staleSnapshotsDropped = 0;
         std::uint64_t duplicateSnapshots = 0;
-        std::uint64_t frameEndEvents = 0;      // snapshotsThisRound hit a bpf multiple
+        std::uint64_t frameEndEvents = 0;      // source-marked complete snapshots
     };
 
     // Full reset on imaging start / assembler (re)configure.
@@ -62,9 +62,8 @@ public:
     void noteStaleSnapshot();
     void noteDuplicateSnapshot();
 
-    // Count one admitted snapshot. Returns true when it completes a frame,
-    // i.e. admitted snapshots this round reached a multiple of blocksPerFrame.
-    bool noteSnapshot(int blocksPerFrame);
+    // Count diagnostics only; completion comes exclusively from the source marker.
+    bool noteSnapshot(bool roundComplete);
 
     void onFrame();        // one output frame produced (m_imagingFrameCount)
     void resetFrameCount();

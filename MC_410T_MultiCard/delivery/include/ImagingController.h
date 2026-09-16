@@ -61,7 +61,8 @@ public:
                          const QVector<quint8> &channels,
                          const paimage::RoundIdentity &round,
                          int blockSeq,
-                         std::uint64_t *outSubmitIndex = nullptr);
+                         std::uint64_t *outSubmitIndex = nullptr,
+                         bool roundComplete = false);
     // 超时判定新一圈：通知子进程清空重建累积（RingBlockAssembler 超时回调调用）
     bool sendRingReset();
 
@@ -80,7 +81,7 @@ public:
     int frameWidth() const;
     int frameHeight() const;
 
-    int ringBlocksPerFrame() const;   // 一整圈（一帧）包含的块数，用于“最后一帧更新完”判定
+    int ringBlocksPerFrame() const;   // 配置块数，仅用于进度显示，完成由 round_complete 决定
     int ringDisplayNx() const { return m_ringDisplayNx; }  // 方案A：= nx（显示=全分辨率）
     std::uint64_t ringLastSubmitIndex() const;
 
@@ -97,7 +98,7 @@ signals:
                            bool hasSubmitIndex,
                            quint64 measurementSession,
                            quint64 roundGeneration,
-                           int bufferIndex);  // 每块显示快照（UI 线程槽）
+                           bool roundComplete, int bufferIndex);  // 每块显示快照（UI 线程槽）
     void svcStatus(const QString &status, float fps);
     void svcError(const QString &error);
     void svcReady();                   // 子进程就绪（配置已下发）
@@ -123,14 +124,14 @@ private:
     void startRingFrameWorker(int seq,
                               std::uint64_t submitIndex,
                               bool hasSubmitIndex,
-                              const paimage::RoundIdentity &round);   // 请求环形帧转换（最新一帧覆盖）
+                              const paimage::RoundIdentity &round, bool roundComplete);   // 请求环形帧转换（最新一帧覆盖）
     void ensureRingWorkerStarted();
     void stopRingWorker();
     void ringWorkerLoop();
     void processRingFrame(int seq,
                           std::uint64_t submitIndex,
                           bool hasSubmitIndex,
-                          const paimage::RoundIdentity &round);       // 常驻工作线程内的单帧读取/转换/投递
+                          const paimage::RoundIdentity &round, bool roundComplete);       // 常驻工作线程内的单帧读取/转换/投递
     void finishStopSvc();              // 异步停止的收尾清理
 
     QProcess      *m_svcProcess;
@@ -184,6 +185,7 @@ private:
     std::uint64_t        m_ringReqSubmitIndex = 0;
     bool                 m_ringReqHasSubmitIndex = false;
     paimage::RoundIdentity m_ringReqRound;
+    bool m_ringReqRoundComplete = false;
     bool                 m_ringReqPending = false;
     bool                 m_ringWorkerStop = false;
 

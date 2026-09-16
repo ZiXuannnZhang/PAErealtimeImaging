@@ -133,14 +133,18 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
         }
         m_ringObs.observeNotification(ready.seq, ready.submitIndex);
         processRingPulse(ready.seq, ready.submitIndex, ready.submitWallUs,
-                         ready.hasSeq, ready.roundIdentity);
+                         ready.hasSeq, ready.roundIdentity,
+                         msg.value(QStringLiteral("round_complete")).toBool(false));
     } else if (cmd == "ring_reset") {
         // 停机超时判定新一圈：清空重建累积（与圈末重置同一函数）
         sendRingObservation("epoch_reset", m_ringObs.snapshot());
         m_ringObs.resetEpoch();
+        m_ringRound.close();
         resetRingRecon();
     } else if (cmd == "start") {
         m_ringObs.beginSession();
+        m_ringRound.resetSession();
+        resetRingRecon();
         m_running = true;
         m_pulseCount = 0;
         m_ringBlockIndex = 0;
@@ -556,7 +560,7 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
 
 void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
                                   uint64_t submitWallUs, bool notifySeqValid,
-                                  const paimage::RoundIdentity &round)
+                                  const paimage::RoundIdentity &round, bool roundComplete)
 {
     const uint64_t processStartUs = ring_shm_obs::steadyNowUs();
     if (!round.valid()) {
@@ -568,8 +572,19 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
     if (!m_running || !m_ringCuda[0] || !m_ringCuda[1] || !m_ringSharedMemory) return;
 
     const uint64_t copyStartUs = ring_shm_obs::steadyNowUs();
-    m_ringSharedMemory->lock();
+    if (!m_ringSharedMemory->lock()) return;
     auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
+    if (!h) { m_ringSharedMemory->unlock(); return; }
+    // The input slot is latest-wins too. Never apply old metadata to new raw data.
+    if (!notifySeqValid || h->block_seq != notifySeq || !h->block_ready) {
+        const auto actual = h->block_seq;
+        m_ringSharedMemory->unlock();
+        QJsonObject extra;
+        extra[QStringLiteral("notify_seq")] = static_cast<qint64>(notifySeq);
+        extra[QStringLiteral("shm_seq")] = static_cast<qint64>(actual);
+        sendRingObservation("block_copy_rejected", m_ringObs.snapshot(), extra);
+        return;
+    }
     const int blockSize = m_ringBlockSize;
     const int alines    = m_ringAlineCount;
     const uint8_t readyBeforeCopy = h->block_ready;
@@ -603,6 +618,24 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
         extra[QStringLiteral("duplicate_shm_seq")] = observation.duplicateShmSeq;
         extra[QStringLiteral("shm_seq_gap")] = observation.shmSeqGap;
         sendRingObservation("anomaly", m_ringObs.snapshot(), extra);
+    }
+
+    const auto oldRound = m_ringRound.active();
+    const auto admission = m_ringRound.admit(round);
+    using Admission = paimage::RingReconRoundState::Admission;
+    QJsonObject roundDiagnostic;
+    ring_round_identity::add(roundDiagnostic, round);
+    roundDiagnostic[QStringLiteral("old_session")] = QString::number(oldRound.measurementSession);
+    roundDiagnostic[QStringLiteral("old_generation")] = QString::number(oldRound.roundGeneration);
+    roundDiagnostic[QStringLiteral("transitions")] = QString::number(m_ringRound.transitions());
+    roundDiagnostic[QStringLiteral("stale_drops")] = QString::number(m_ringRound.staleDrops());
+    if (admission == Admission::Stale || admission == Admission::Invalid) {
+        sendRingObservation("round_stale_drop", m_ringObs.snapshot(), roundDiagnostic);
+        return;
+    }
+    if (admission == Admission::First || admission == Admission::Transition) {
+        resetRingRecon();
+        sendRingObservation("round_barrier_reset", m_ringObs.snapshot(), roundDiagnostic);
     }
 
     const int sampDepth = m_ringConfig.sampDepth;
@@ -735,17 +768,23 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
                 static_cast<size_t>(m_ringFrameSize) * sizeof(float));
     std::memcpy(fb + m_ringFrameSize, m_ringDisplay1.data(),
                 static_cast<size_t>(m_ringFrameSize) * sizeof(float));
-    h->frame_seq++;
+    const uint32_t snapshotSeq = ++h->frame_seq;
     m_ringSharedMemory->unlock();
 
-    sendRingSnapshotToHost(submitIndex, round);     // 新链路：方案A 显示快照
+    sendRingSnapshotToHost(snapshotSeq, submitIndex, round, roundComplete);     // 新链路：方案A 显示快照
 
     m_ringObs.recordProcessDuration(ring_shm_obs::steadyNowUs() - processStartUs);
     if (observation.periodicDue)
         sendRingObservation("periodic", m_ringObs.snapshot());
 
     // 整圈完成：清零累积器，避免跨圈污染（PNG 保存由接收端窗口在圈末触发点执行）
-    if (m_ringBlocksPerFrame > 0 && m_ringBlockIndex % m_ringBlocksPerFrame == 0) {
+    if (roundComplete) {
+        if (m_ringBlockIndex != m_ringBlocksPerFrame) {
+            roundDiagnostic[QStringLiteral("blocks")] = m_ringBlockIndex;
+            roundDiagnostic[QStringLiteral("expected_blocks")] = m_ringBlocksPerFrame;
+            sendRingObservation("round_block_count_mismatch", m_ringObs.snapshot(), roundDiagnostic);
+        }
+        m_ringRound.close();
         resetRingRecon();
     }
 }
@@ -785,17 +824,11 @@ void ImagingSvc::resetRingRecon()
     }
 }
 
-void ImagingSvc::sendRingSnapshotToHost(uint64_t submitIndex,
-                                        const paimage::RoundIdentity &round)
+void ImagingSvc::sendRingSnapshotToHost(uint32_t seq, uint64_t submitIndex,
+                                        const paimage::RoundIdentity &round, bool roundComplete)
 {
-    if (!m_ringSharedMemory) return;
-    m_ringSharedMemory->lock();
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    const int seq = static_cast<int>(h->frame_seq);
-    m_ringSharedMemory->unlock();
-
     QJsonObject msg = ring_round_identity::makeSnapshotReady(
-        static_cast<std::uint32_t>(seq), submitIndex, round);
+        seq, submitIndex, round, roundComplete);
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
     zmq::message_t zmsg(static_cast<size_t>(data.size()));

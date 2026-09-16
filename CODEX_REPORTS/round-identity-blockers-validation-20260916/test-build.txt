@@ -1,0 +1,27 @@
+[1/27] Automatic MOC for target ring_block_assembler_test
+[2/27] Automatic MOC for target ring_production_blockers_test
+[3/27] Automatic MOC for target ring_shm_observability_test
+[4/27] Automatic MOC for target ring_round_ui_state_test
+[5/27] Building CXX object CMakeFiles/ring_block_assembler_test.dir/ring_block_assembler_test_autogen/mocs_compilation.cpp.obj
+[6/27] Building CXX object CMakeFiles/ring_production_blockers_test.dir/ring_production_blockers_test_autogen/mocs_compilation.cpp.obj
+[7/27] Automatic MOC for target ring_round_identity_test
+[8/27] Building CXX object CMakeFiles/ring_block_assembler_test.dir/5bb020135e0e46f9b2a7ddb664feb4c2/delivery/src/RingBlockAssembler.cpp.obj
+[9/27] Building CXX object CMakeFiles/ring_block_assembler_test.dir/ring_block_assembler_test.cpp.obj
+[10/27] Building CXX object CMakeFiles/ring_production_blockers_test.dir/5bb020135e0e46f9b2a7ddb664feb4c2/delivery/src/RingBlockAssembler.cpp.obj
+[11/27] Building CXX object CMakeFiles/ring_shm_observability_test.dir/ring_shm_observability_test_autogen/mocs_compilation.cpp.obj
+[12/27] Building CXX object CMakeFiles/ring_production_blockers_test.dir/5bb020135e0e46f9b2a7ddb664feb4c2/delivery/src/RingRoundUiState.cpp.obj
+[13/27] Building CXX object CMakeFiles/ring_round_ui_state_test.dir/ring_round_ui_state_test_autogen/mocs_compilation.cpp.obj
+[14/27] Building CXX object CMakeFiles/ring_round_ui_state_test.dir/ring_round_ui_state_test.cpp.obj
+[15/27] Building CXX object CMakeFiles/ring_production_blockers_test.dir/ring_production_blockers_test.cpp.obj
+[16/27] Building CXX object CMakeFiles/ring_round_identity_test.dir/ring_round_identity_test_autogen/mocs_compilation.cpp.obj
+[17/27] Building CXX object CMakeFiles/ring_production_blockers_test.dir/5bb020135e0e46f9b2a7ddb664feb4c2/delivery/src/RingRoundPresentation.cpp.obj
+[18/27] Building CXX object CMakeFiles/ring_round_ui_state_test.dir/5bb020135e0e46f9b2a7ddb664feb4c2/delivery/src/RingRoundUiState.cpp.obj
+[19/27] Building CXX object CMakeFiles/ring_shm_observability_test.dir/ring_shm_observability_test.cpp.obj
+[20/27] Building CXX object CMakeFiles/ring_round_identity_test.dir/5bb020135e0e46f9b2a7ddb664feb4c2/delivery/src/RingRoundUiState.cpp.obj
+[21/27] Linking CXX executable ring_block_assembler_test.exe
+[22/27] Linking CXX executable ring_shm_observability_test.exe
+[23/27] Linking CXX executable ring_production_blockers_test.exe
+[24/27] Building CXX object CMakeFiles/ring_round_identity_test.dir/5bb020135e0e46f9b2a7ddb664feb4c2/delivery/src/RingRoundPresentation.cpp.obj
+[25/27] Linking CXX executable ring_round_ui_state_test.exe
+[26/27] Building CXX object CMakeFiles/ring_round_identity_test.dir/ring_round_identity_test.cpp.obj
+[27/27] Linking CXX executable ring_round_identity_test.exe

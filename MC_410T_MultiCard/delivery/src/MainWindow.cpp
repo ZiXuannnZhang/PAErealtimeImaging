@@ -378,7 +378,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_imagingController, &ImagingController::ringSnapshotReady,
             this, [this](int seq, quint64 submitIndex, bool hasSubmitIndex,
                          quint64 measurementSession, quint64 roundGeneration,
-                         int bufferIndex) {
+                         bool roundComplete, int bufferIndex) {
         if (!m_imagingEnabled ||
             m_ringSnapshotAdmissionBlocked.load(std::memory_order_acquire)) {
             // 停止/故障后的迟到帧：不弹窗、不计数，但必须释放缓冲。
@@ -441,8 +441,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_roundUi.onFrame();
         const int frameIdx = int(m_roundUi.frameCount());
         updateRingImagingStatus();
-        const int bpf = m_imagingController->ringBlocksPerFrame();
-        const bool frameEnd = m_roundUi.noteSnapshot(bpf);
+        const bool frameEnd = m_roundUi.noteSnapshot(roundComplete);
         if (frameEnd)
             m_roundUi.resetFrameCount();
 
@@ -586,7 +585,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_ringAssembler->setBlockCallback(
         [this](std::vector<float> &&raw, std::vector<float> &&angles,
                std::vector<uint8_t> &&channels, int blockSeq,
-               const paimage::RoundIdentity &round) {
+               const paimage::RoundIdentity &round, bool roundComplete) {
             // 回调运行在独立成像 worker；只提交成像服务并更新 per-round 统计。
             m_roundUi.onBlock();
             QVector<float> rawQ(raw.begin(), raw.end());
@@ -597,7 +596,7 @@ MainWindow::MainWindow(QWidget *parent)
             try {
                 submitted = m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire)
                     && m_imagingController->submitRingBlock(
-                        rawQ, angQ, chQ, round, blockSeq, &submitIndex);
+                        rawQ, angQ, chQ, round, blockSeq, &submitIndex, roundComplete);
                 // submit_index is the producer identity domain. Record it
                 // even when dontwait send returned false: the missing
                 // notification is a gap, never an attempt-count alias.
@@ -684,12 +683,12 @@ MainWindow::MainWindow(QWidget *parent)
         if (enabled[chA])
             m_ringAssembler->pushChannelLine(chA, frame->triggerSeq, round,
                                               frame->freqA.data(),
-                                              static_cast<int>(frame->freqA.size()));
+                                              static_cast<int>(frame->freqA.size()), frame->roundComplete);
         fed = fed || enabled[chA];
         if (enabled[chB])
             m_ringAssembler->pushChannelLine(chB, frame->triggerSeq, round,
                                              frame->freqB.data(),
-                                             static_cast<int>(frame->freqB.size()));
+                                             static_cast<int>(frame->freqB.size()), frame->roundComplete);
         fed = fed || enabled[chB];
         return true;
     });

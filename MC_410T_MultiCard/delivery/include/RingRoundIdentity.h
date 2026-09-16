@@ -72,13 +72,15 @@ inline ParseResult parse(const QJsonObject &object)
 
 inline QJsonObject makeSnapshotReady(std::uint32_t seq,
                                      std::uint64_t submitIndex,
-                                     const paimage::RoundIdentity &identity)
+                                     const paimage::RoundIdentity &identity,
+                                     bool roundComplete = false)
 {
     QJsonObject object;
     object[QStringLiteral("cmd")] = QStringLiteral("ring_snapshot_ready");
     object[QStringLiteral("seq")] = static_cast<qint64>(seq);
     object[QStringLiteral("submit_index")] = static_cast<qint64>(submitIndex);
     add(object, identity);
+    object[QStringLiteral("round_complete")] = roundComplete;
     return object;
 }
 

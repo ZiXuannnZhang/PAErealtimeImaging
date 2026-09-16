@@ -1,0 +1,31 @@
+Source baseline: b4376203e7c9c8b369b6b87551f3718bd1edf424
+cmake -S tests -B build/round_fix_tests -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe -DCMAKE_MAKE_PROGRAM=D:/Qt/Qt6.8.0/Tools/Ninja/ninja.exe -DQt6_DIR=D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/cmake/Qt6
+cmake --build build/round_fix_tests --target ring_production_blockers_test ring_block_assembler_test ring_round_identity_test ring_round_ui_state_test ring_shm_observability_test -j 4
+Qt test runtime DLLs copied from this copy build/mingw_debug/bin
+ctest --test-dir build/round_fix_tests -R ring_(production_blockers|block_assembler|round_identity|round_ui_state|shm_observability)_test --output-on-failure
+cmake version 3.30.5
+
+CMake suite maintained and supported by Kitware (kitware.com/cmake).
+g++.exe (x86_64-posix-seh-rev1, Built by MinGW-Builds project) 13.1.0
+Copyright (C) 2023 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+
+Algorithm : SHA256
+Hash      : 2480D8AB849D7E9A375275F6C0278B8764C14AC0C1A3BDACAF256AE4A93C5590
+Path      : D:\ChatGPT\PAERealtimeImaging\_worktrees\physical-round-blockers-fix-20260916\MC_410T_MultiCard\delivery\libs\imaging\cufft64_12.dll
+
+Algorithm : SHA256
+Hash      : C1A37E73147C1B8250F96CCDC1FCFC08CA28CECBF1CB3C046D4AB426F2EA0893
+Path      : D:\ChatGPT\PAERealtimeImaging\_worktrees\physical-round-blockers-fix-20260916\MC_410T_MultiCard\delivery\libs\imaging\pa_recon_core.dll
+
+Algorithm : SHA256
+Hash      : BF40472D5A46363A35DD1084A01A8C15F13EF203F3ED5B4BB5EDF767EEEC14B5
+Path      : D:\ChatGPT\PAERealtimeImaging\_worktrees\physical-round-blockers-fix-20260916\_migration_pack\prebuilt_cuda\bin\ring_recon_cuda.dll
+
+Algorithm : SHA256
+Hash      : C2C9A9C22A9BCBA90E261825968836787B331038047A26770CFFB7A583C28344
+Path      : D:\ChatGPT\PAERealtimeImaging\_worktrees\physical-round-blockers-fix-20260916\_migration_pack\prebuilt_cuda\bin\cudart64_12.dll
+
+
