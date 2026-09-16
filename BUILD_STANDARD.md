@@ -63,24 +63,36 @@ tracked working tree clean
 
 允许存在明确的、本规范认可的未跟踪本机构建依赖，例如 `cufft64_12.dll`；但必须在执行报告中列出来源。
 
-### 2.2 当前 START admission 实机候选
+### 2.2 当前硬件验证候选
 
-截至 `PROJECT_STATUS.md` 当前状态，真实 FPGA/NIC 实机测试对象是：
+截至 `PROJECT_STATUS.md` 当前状态，有两个彼此独立的硬件验证对象。
+
+Physical round / RoundIdentity：
+
+```text
+branch = codex/physical-round-normalizer-integrated-20260916
+SHA    = 52cf7713d7e0e935cb14663ec3470f3a25bfeb90
+```
+
+状态：软件整改、自动化、Windows build、真实 ImagingSvc/CUDA selftest 已通过；**物理轮次归一硬件验收仍 PENDING**。新控制环境约 `4007 physical triggers / round` 的行为仍需从本地实机日志验证，尤其是 CountBoundary / TimeoutBoundary 的真实边界与完整 reset 链。
+
+START admission：
 
 ```text
 branch = codex/start-admission-fence-fix-20260913-003112
 SHA    = 6313540f72544c0f68820c4815903abaa0b8c1e1
 ```
 
-该分支软件验收已 `APPROVE`，但实机测试未完成，因此保持未合并 `main`。
+状态：软件验收已 `APPROVE`，真实 FPGA/NIC 启动 ingress 验证仍 PENDING。
 
-为该候选构建时：
+为任一候选构建时：
 
-- checkout/fast-forward 到候选分支的精确 SHA；
-- 从最新 `origin/main` 读取本构建规范；
+- checkout/fast-forward 到任务要求的候选分支精确 SHA；
+- 从最新 `origin/main` 读取本构建规范和 `PROJECT_STATUS.md`；
 - **不要**为了使用本规范而把 `main` 源码 merge/cherry-pick 到候选分支；
 - 不得静默加入额外源码修改；
-- 任何源码变化都会使原软件验收与实机候选身份失效，必须重新进入审查流程。
+- 任何源码变化都会使原软件验收与实机候选身份失效，必须重新进入审查流程；
+- 两个候选代表不同验证目标，不得用一个候选的现场结果替代另一个候选的 acceptance。
 
 ### 2.3 最终交付构建必须在最终 commit 上重新 configure
 
@@ -365,9 +377,22 @@ libzmq-v141-mt-4_3_5.dll
 - 不允许手工覆盖 DLL 后不更新 manifest/hash；
 - 必须提供 exact Git SHA 和完整 `bin/`；
 - 必须保留 `diagnostic-tools/`；
-- 若 runtime 与软件回归时不同，必须显式标记。
+- 若 runtime 与软件回归时不同，必须显式标记；
+- 现场日志、截图、抓包和最终结论必须能回溯到 exact candidate SHA 与该测试包依赖哈希。
 
-对当前 START admission 候选，任何现场结果都必须关联到 `6313540f...` 和该包的依赖哈希；否则不能直接用于该候选的实机验收。
+当前两个候选分别使用：
+
+```text
+Physical round / RoundIdentity:
+  52cf7713d7e0e935cb14663ec3470f3a25bfeb90
+
+START admission:
+  6313540f72544c0f68820c4815903abaa0b8c1e1
+```
+
+若现场运行的实际二进制不是对应 SHA 的可追溯构建，则结果不能直接用于该候选的 hardware acceptance。
+
+Physical-round 验收还有额外证据要求：不能只根据最终图像“看起来正常”判定通过。必须尽量保存能重建 distinct physical trigger count、CountBoundary、TimeoutBoundary、RoundIdentity、ring reset / epoch reset、stale drop 和 next-round clean start 的诊断记录；日志无证据的链路应标记 `UNVERIFIED`。
 
 ---
 
