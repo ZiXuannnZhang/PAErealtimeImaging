@@ -1,0 +1,86 @@
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-normalizer-integrated-20260916/build/tests
+Test project D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-normalizer-integrated-20260916/build/tests
+      Start  1: ring_block_assembler_test
+ 1/40 Test  #1: ring_block_assembler_test ...............   Passed    0.56 sec
+      Start  2: imaging_bypass_test
+ 2/40 Test  #2: imaging_bypass_test .....................   Passed    0.46 sec
+      Start  3: data_processor_imaging_isolation_test
+ 3/40 Test  #3: data_processor_imaging_isolation_test ...   Passed    0.56 sec
+      Start  4: ring_production_blockers_test
+ 4/40 Test  #4: ring_production_blockers_test ...........   Passed    0.51 sec
+      Start  5: diagnostic_recorder_test
+ 5/40 Test  #5: diagnostic_recorder_test ................   Passed    1.96 sec
+      Start  6: ring_shm_observability_test
+ 6/40 Test  #6: ring_shm_observability_test .............   Passed    0.44 sec
+      Start  7: diagnostic_dialog_test
+ 7/40 Test  #7: diagnostic_dialog_test ..................   Passed    4.41 sec
+      Start  8: diagnostic_time_window_test
+ 8/40 Test  #8: diagnostic_time_window_test .............   Passed    1.04 sec
+      Start  9: process_scheduling_test
+ 9/40 Test  #9: process_scheduling_test .................   Passed    0.46 sec
+      Start 10: network_ingress_observability_test
+10/40 Test #10: network_ingress_observability_test ......   Passed    0.59 sec
+      Start 11: network_snapshot_test
+11/40 Test #11: network_snapshot_test ...................   Passed    0.45 sec
+      Start 12: network_diagnostics_test
+12/40 Test #12: network_diagnostics_test ................   Passed    5.14 sec
+      Start 13: measurement_session_transaction_test
+13/40 Test #13: measurement_session_transaction_test ....   Passed    0.45 sec
+      Start 14: session_boundary_test
+14/40 Test #14: session_boundary_test ...................   Passed    2.16 sec
+      Start 15: session_boundary_receiver_test
+15/40 Test #15: session_boundary_receiver_test ..........   Passed   12.92 sec
+      Start 16: data_processor_batch_test
+16/40 Test #16: data_processor_batch_test ...............   Passed    0.64 sec
+      Start 17: card_status_formatting_test
+17/40 Test #17: card_status_formatting_test .............   Passed    0.31 sec
+      Start 18: paimage_network_test
+18/40 Test #18: paimage_network_test ....................   Passed    2.69 sec
+      Start 19: paimage_start_race
+19/40 Test #19: paimage_start_race ......................   Passed    0.64 sec
+      Start 20: paimage_start_fence_regression
+20/40 Test #20: paimage_start_fence_regression ..........   Passed    0.43 sec
+      Start 21: paimage_start_overflow
+21/40 Test #21: paimage_start_overflow ..................   Passed    0.65 sec
+      Start 22: paimage_host_output_test
+22/40 Test #22: paimage_host_output_test ................   Passed    1.26 sec
+      Start 23: filesaver_round_boundary_test
+23/40 Test #23: filesaver_round_boundary_test ...........   Passed    1.40 sec
+      Start 24: ring_round_ui_state_test
+24/40 Test #24: ring_round_ui_state_test ................   Passed    0.25 sec
+      Start 25: ring_round_identity_test
+25/40 Test #25: ring_round_identity_test ................   Passed    0.41 sec
+      Start 26: auto_save_round_coordinator_test
+26/40 Test #26: auto_save_round_coordinator_test ........   Passed    0.44 sec
+      Start 27: count_boundary_save_binding_test
+27/40 Test #27: count_boundary_save_binding_test ........   Passed    1.12 sec
+      Start 28: paimage_trace_bundle_test
+28/40 Test #28: paimage_trace_bundle_test ...............   Passed    1.02 sec
+      Start 29: paimage_discovery_checks
+29/40 Test #29: paimage_discovery_checks ................   Passed    0.67 sec
+      Start 30: paimage_discovery_socket_checks
+30/40 Test #30: paimage_discovery_socket_checks .........   Passed    3.77 sec
+      Start 31: paimage_core_checks
+31/40 Test #31: paimage_core_checks .....................   Passed    0.29 sec
+      Start 32: paimage_output_checks
+32/40 Test #32: paimage_output_checks ...................   Passed    0.25 sec
+      Start 33: physical_round_normalizer_test
+33/40 Test #33: physical_round_normalizer_test ..........   Passed    0.55 sec
+      Start 34: paimage_control_checks
+34/40 Test #34: paimage_control_checks ..................   Passed    0.37 sec
+      Start 35: paimage_socket_short
+35/40 Test #35: paimage_socket_short ....................   Passed    2.89 sec
+      Start 36: paimage_trace_checks
+36/40 Test #36: paimage_trace_checks ....................   Passed    0.32 sec
+      Start 37: paimage_worker_checks
+37/40 Test #37: paimage_worker_checks ...................   Passed    0.46 sec
+      Start 38: paimage_protocol_checks
+38/40 Test #38: paimage_protocol_checks .................   Passed    0.53 sec
+      Start 39: paimage_conversion_checks
+39/40 Test #39: paimage_conversion_checks ...............   Passed    0.28 sec
+      Start 40: paimage_looplog_checks
+40/40 Test #40: paimage_looplog_checks ..................   Passed    0.34 sec
+
+100% tests passed, 0 tests failed out of 40
+
+Total Test time (real) =  54.36 sec
