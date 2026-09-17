@@ -8,9 +8,10 @@ namespace {std::vector<SocketReceiver::Endpoint> endpoints(const Backend::Settin
 }}
 Backend::Backend(Settings settings,std::vector<DataProcessor*> p,std::vector<FileSaver*> s,TraceWriter* trace,TimingWriter* timing,LoopLog* loopLog)
     :settings_(std::move(settings)),trace_(trace),timing_(timing),
-     output_(settings_.acquisition.bits,settings_.blockSize,std::move(p),std::move(s),trace,timing,
-             settings_.logicalTriggersPerRound,std::move(settings_.normalizerObserver),
-             settings_.physicalRoundTimeoutSec),
+      output_(settings_.acquisition.bits,settings_.blockSize,std::move(p),std::move(s),trace,timing,
+              settings_.logicalTriggersPerRound,std::move(settings_.normalizerObserver),
+              settings_.physicalRoundTimeoutSec,settings_.startupFilterTriggerCount,
+              settings_.disableCountBoundary),
      receiver_(settings_.acquisition,endpoints(settings_),{settings_.feedbackPort,{}},settings_.targets,trace,timing,loopLog,
         [this](Frame f){output_.card(f);},[this](auto t,const auto& f,bool startup){output_.sync(t,f,startup);}),
     control_(settings_.acquisition.cards,[this](const Command& cmd,const auto& cards){

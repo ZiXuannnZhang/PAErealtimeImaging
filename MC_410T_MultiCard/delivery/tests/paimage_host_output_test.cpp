@@ -285,5 +285,21 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
                 "timeout T3 assembly timeout isolation");
         output.stop();
     }
+    // Session A production seam: HostOutput exposes the core policy controls
+    // without requiring callers to reach into PhysicalRoundNormalizer.
+    {
+        DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=64;
+        DataProcessor processor(0,nullptr,&display,nullptr,config,{});
+        HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,4);
+        output.setStartupFilterTriggerCount(7);
+        output.setDisableCountBoundary(true);
+        output.beginSession(81);
+        const auto snapshot = output.normalizerSnapshot();
+        require(snapshot.startupFilterTriggerCount == 7 &&
+                    snapshot.disableCountBoundary &&
+                    snapshot.currentPhysicalDistinctCount == 0 &&
+                    snapshot.lastCompletedPhysicalDistinctCount == 0,
+                "HostOutput Session A policy seam");
+    }
     std::cout<<"PASS production source/output/host boundary: four cards, 28/70, exact float16 files, display and Ring; normalized 1+N save/Ring identity; queued saving generation retains original directory; physical idle timeout shared by save/Ring; SourceCore assembly timeout isolated\n";
 }

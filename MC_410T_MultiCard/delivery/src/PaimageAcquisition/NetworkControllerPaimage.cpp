@@ -51,6 +51,8 @@ bool NetworkController::createPaimageBackend(QString& error){
                           m_config.startupIdleMs,timestampMode};
     settings.logicalTriggersPerRound=static_cast<std::uint64_t>(m_config.logicalTriggersPerRound);
     settings.physicalRoundTimeoutSec=m_physicalRoundTimeoutSec;
+    settings.startupFilterTriggerCount=m_startupFilterTriggerCount;
+    settings.disableCountBoundary=m_disableCountBoundary;
     settings.normalizerObserver=[this](const paimage::PhysicalRoundEvent& event){
         const QString message=QString::fromLatin1(paimage::physicalRoundEventName(event.kind));
         const QJsonObject fields{
@@ -64,10 +66,16 @@ bool NetworkController::createPaimageBackend(QString& error){
             {"physicalDistinctObserved",QString::number(event.physicalDistinctObserved)},
             {"operationalControlFiltered",QString::number(event.operationalControlFiltered)},
             {"logicalDistinctAccepted",QString::number(event.logicalDistinctAccepted)},
-            {"countBoundaryResets",QString::number(event.countBoundaryResets)},
-            {"timeoutBoundaryResets",QString::number(event.timeoutBoundaryResets)},
-            {"currentLogicalDistinctCount",QString::number(event.currentLogicalDistinctCount)},
-            {"physicalRoundTimeoutResetSec",event.timeoutResetSec},
+             {"countBoundaryResets",QString::number(event.countBoundaryResets)},
+             {"timeoutBoundaryResets",QString::number(event.timeoutBoundaryResets)},
+             {"currentLogicalDistinctCount",QString::number(event.currentLogicalDistinctCount)},
+             {"startupFilterTriggerCount",QString::number(event.startupFilterTriggerCount)},
+             {"disableCountBoundary",event.disableCountBoundary},
+             {"currentPhysicalDistinctCount",QString::number(event.currentPhysicalDistinctCount)},
+             {"currentStartupFilteredCount",QString::number(event.currentStartupFilteredCount)},
+             {"lastCompletedPhysicalDistinctCount",QString::number(event.lastCompletedPhysicalDistinctCount)},
+             {"lastCompletedStartupFilteredCount",QString::number(event.lastCompletedStartupFilteredCount)},
+             {"physicalRoundTimeoutResetSec",event.timeoutResetSec},
             {"physicalRoundTimeoutEnabled",event.physicalRoundTimeoutEnabled},
             {"physicalRoundTimeoutSource","RingReconCudaConfig.timeoutResetSec"},
             {"assemblyTimeoutIsNotRoundBoundary",true},
@@ -111,10 +119,12 @@ bool NetworkController::createPaimageBackend(QString& error){
             {"diagnosticModes",QJsonObject{{"0","raw-ingress only"},{"1","raw-ingress plus lightweight timing"},{"2","lightweight timing plus externally managed system capture index"}}},
             {"listenId",m_diagnosticListenId},{"configId",m_currentConfigId},{"samples",m_config.samplesPerTrig()},
             {"bits",m_config.bitsPerChannel},{"cards",m_config.nCards},{"dataPort",8001},{"feedbackPort",8000},
-            {"configuredLogicalTriggersPerRound",m_config.logicalTriggersPerRound},
-            {"logicalRoundConfigSource","AcquisitionParams/LogicalTriggersPerRound; ring mode overrides from RingReconCudaConfig"},
-            {"physicalRoundFilterPolicy","first-visible-operational"},
-            {"physicalRoundTimeoutResetSec",m_physicalRoundTimeoutSec},
+             {"configuredLogicalTriggersPerRound",m_config.logicalTriggersPerRound},
+             {"logicalRoundConfigSource","AcquisitionParams/LogicalTriggersPerRound; ring mode overrides from RingReconCudaConfig"},
+             {"physicalRoundFilterPolicy","configurable-startup-operational"},
+             {"startupFilterTriggerCount",QString::number(m_startupFilterTriggerCount)},
+             {"disableCountBoundary",m_disableCountBoundary},
+             {"physicalRoundTimeoutResetSec",m_physicalRoundTimeoutSec},
             {"physicalRoundTimeoutEnabled",m_physicalRoundTimeoutSec>0.0},
             {"physicalRoundTimeoutSource","RingReconCudaConfig.timeoutResetSec"},
             {"assemblyTimeoutIsNotRoundBoundary",true},
@@ -282,6 +292,12 @@ void NetworkController::recordPaimageSnapshot(){
          {"countBoundaryResets",QString::number(roundStats.countBoundaryResets)},
          {"timeoutBoundaryResets",QString::number(roundStats.timeoutBoundaryResets)},
          {"currentLogicalDistinctCount",QString::number(roundStats.currentLogicalDistinctCount)},
+         {"startupFilterTriggerCount",QString::number(roundStats.startupFilterTriggerCount)},
+         {"disableCountBoundary",roundStats.disableCountBoundary},
+         {"currentPhysicalDistinctCount",QString::number(roundStats.currentPhysicalDistinctCount)},
+         {"currentStartupFilteredCount",QString::number(roundStats.currentStartupFilteredCount)},
+         {"lastCompletedPhysicalDistinctCount",QString::number(roundStats.lastCompletedPhysicalDistinctCount)},
+         {"lastCompletedStartupFilteredCount",QString::number(roundStats.lastCompletedStartupFilteredCount)},
          {"physicalRoundTimeoutResetSec",roundStats.timeoutResetSec},
          {"physicalRoundTimeoutEnabled",roundStats.timeoutResetNs>0},
          {"physicalRoundTimeoutSource","RingReconCudaConfig.timeoutResetSec"},

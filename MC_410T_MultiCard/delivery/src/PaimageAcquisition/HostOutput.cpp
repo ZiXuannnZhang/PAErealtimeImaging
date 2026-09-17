@@ -19,7 +19,8 @@ Time normalizationTime(const Frame& frame) {
 HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors,
     std::vector<FileSaver*> savers,TraceWriter* trace,TimingWriter* timing,
     std::uint64_t logicalTriggersPerRound,PhysicalRoundNormalizer::Observer normalizerObserver,
-    double physicalRoundTimeoutSec)
+    double physicalRoundTimeoutSec,std::uint64_t startupFilterTriggerCount,
+    bool disableCountBoundary)
     :processors_(std::move(processors)),savers_(std::move(savers)),trace_(trace),timing_(timing),
      converter_(bits,QDateTime::currentMSecsSinceEpoch(),SocketReceiver::now()),
      workers_(int(processors_.size()),block,[this](Frame f){consumeCard(f);},
@@ -29,6 +30,8 @@ HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors
     if(logicalTriggersPerRound){
         normalizer_=std::make_unique<PhysicalRoundNormalizer>(logicalTriggersPerRound,std::move(normalizerObserver));
         normalizer_->setTimeoutResetSec(physicalRoundTimeoutSec);
+        normalizer_->setStartupFilterTriggerCount(startupFilterTriggerCount);
+        normalizer_->setDisableCountBoundary(disableCountBoundary);
     }
     for(std::size_t i=0;i<processors_.size();++i){
         auto saver=savers_[i];processors_[i]->setDirectSaveSink([saver](const TriggerGroupPtr& f){return saver->consumeTriggerGroup(f);});

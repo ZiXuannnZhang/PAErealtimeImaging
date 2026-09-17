@@ -693,10 +693,24 @@ void NetworkController::setPhysicalRoundTimeout(double seconds) {
         m_paimage->output().setPhysicalRoundTimeout(seconds);
 }
 
+void NetworkController::setStartupFilterTriggerCount(std::uint64_t count) {
+    m_startupFilterTriggerCount = count;
+    if (m_paimage)
+        m_paimage->output().setStartupFilterTriggerCount(count);
+}
+
+void NetworkController::setDisableCountBoundary(bool disable) {
+    m_disableCountBoundary = disable;
+    if (m_paimage)
+        m_paimage->output().setDisableCountBoundary(disable);
+}
+
 paimage::PhysicalRoundNormalizer::Snapshot NetworkController::physicalRoundSnapshot() const {
     if (m_paimage)
         return m_paimage->output().normalizerSnapshot();
     paimage::PhysicalRoundNormalizer::Snapshot result;
+    result.startupFilterTriggerCount = m_startupFilterTriggerCount;
+    result.disableCountBoundary = m_disableCountBoundary;
     result.firstVisibleFilterMode = false;
     return result;
 }

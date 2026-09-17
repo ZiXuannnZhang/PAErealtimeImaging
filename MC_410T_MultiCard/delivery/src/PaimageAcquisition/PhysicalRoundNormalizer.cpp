@@ -45,12 +45,27 @@ void PhysicalRoundNormalizer::resetSessionLocked(std::uint64_t measurementSessio
     logicalDistinctAccepted_ = 0;
     countBoundaryResets_ = 0;
     timeoutBoundaryResets_ = 0;
+    lastCompletedPhysicalDistinctCount_ = 0;
+    lastCompletedStartupFilteredCount_ = 0;
+    resetCurrentRoundLocked();
+    recentDecisions_.clear();
+}
+
+void PhysicalRoundNormalizer::resetCurrentRoundLocked() {
     currentLogicalDistinctCount_ = 0;
+    currentPhysicalDistinctCount_ = 0;
+    currentStartupFilteredCount_ = 0;
     lastDistinctTriggerTimeNs_ = 0;
     lastDistinctTriggerSeq_ = 0;
     hasLastDistinctTrigger_ = false;
-    state_ = PhysicalRoundState::AwaitingControl;
-    recentDecisions_.clear();
+    state_ = startupFilterTriggerCount_ == 0
+        ? PhysicalRoundState::CollectingScan
+        : PhysicalRoundState::AwaitingControl;
+}
+
+void PhysicalRoundNormalizer::latchCompletedRoundLocked() {
+    lastCompletedPhysicalDistinctCount_ = currentPhysicalDistinctCount_;
+    lastCompletedStartupFilteredCount_ = currentStartupFilteredCount_;
 }
 
 void PhysicalRoundNormalizer::beginSession(std::uint64_t measurementSession) {
@@ -75,6 +90,12 @@ PhysicalRoundEvent PhysicalRoundNormalizer::eventLocked(
     event.countBoundaryResets = countBoundaryResets_;
     event.timeoutBoundaryResets = timeoutBoundaryResets_;
     event.currentLogicalDistinctCount = currentLogicalDistinctCount_;
+    event.startupFilterTriggerCount = startupFilterTriggerCount_;
+    event.disableCountBoundary = disableCountBoundary_;
+    event.currentPhysicalDistinctCount = currentPhysicalDistinctCount_;
+    event.currentStartupFilteredCount = currentStartupFilteredCount_;
+    event.lastCompletedPhysicalDistinctCount = lastCompletedPhysicalDistinctCount_;
+    event.lastCompletedStartupFilteredCount = lastCompletedStartupFilteredCount_;
     event.timeoutResetSec = timeoutResetSec_;
     event.idleDurationNs = idleDurationNs;
     event.configuredTimeoutNs = timeoutResetNs_;
@@ -136,19 +157,21 @@ PhysicalRoundClassification PhysicalRoundNormalizer::classify(
         // Only a new physical identity can close an idle gap. A late card
         // hits the cache above and must not refresh this anchor or create a
         // timeout boundary.
-        if (state_ == PhysicalRoundState::CollectingScan &&
+        if (currentPhysicalDistinctCount_ > 0 &&
             timeoutResetNs_ > 0 && hasLastDistinctTrigger_ &&
             observedMonotonicNs >= lastDistinctTriggerTimeNs_ &&
             observedMonotonicNs - lastDistinctTriggerTimeNs_ >= timeoutResetNs_) {
             const auto idleDurationNs = observedMonotonicNs - lastDistinctTriggerTimeNs_;
-            currentLogicalDistinctCount_ = 0;
-            state_ = PhysicalRoundState::AwaitingControl;
+            const auto hasLastDistinctTriggerSeq = hasLastDistinctTrigger_;
+            const auto lastDistinctTriggerSeq = lastDistinctTriggerSeq_;
+            latchCompletedRoundLocked();
+            resetCurrentRoundLocked();
             ++roundGeneration_;
             ++timeoutBoundaryResets_;
             events.push_back(eventLocked(
                 PhysicalRoundEvent::Kind::TimeoutBoundary, triggerSeq,
-                kTimeoutBasis, idleDurationNs, hasLastDistinctTrigger_,
-                lastDistinctTriggerSeq_, true, triggerSeq));
+                kTimeoutBasis, idleDurationNs, hasLastDistinctTriggerSeq,
+                lastDistinctTriggerSeq, true, triggerSeq));
         }
 
         result.measurementSession = measurementSession_;
@@ -156,6 +179,7 @@ PhysicalRoundClassification PhysicalRoundNormalizer::classify(
         result.triggerSeq = triggerSeq;
         result.newDistinct = true;
         ++physicalDistinctObserved_;
+        ++currentPhysicalDistinctCount_;
 
         // Frame timestamps are monotonic ingress timestamps. Do not move the
         // anchor backwards if a malformed/out-of-order source timestamp is
@@ -168,23 +192,27 @@ PhysicalRoundClassification PhysicalRoundNormalizer::classify(
             hasLastDistinctTrigger_ = true;
         }
 
-        if (state_ == PhysicalRoundState::AwaitingControl) {
+        if (currentStartupFilteredCount_ < startupFilterTriggerCount_) {
             result.decision = PhysicalTriggerDecision::OperationalStartupControl;
             result.logicalTriggerIndex = -1;
-            state_ = PhysicalRoundState::CollectingScan;
+            ++currentStartupFilteredCount_;
             ++operationalControlFiltered_;
+            state_ = currentStartupFilteredCount_ < startupFilterTriggerCount_
+                ? PhysicalRoundState::AwaitingControl
+                : PhysicalRoundState::CollectingScan;
             events.push_back(eventLocked(PhysicalRoundEvent::Kind::ControlFiltered, triggerSeq));
         } else {
             result.decision = PhysicalTriggerDecision::LogicalScan;
             result.logicalTriggerIndex = static_cast<std::int64_t>(currentLogicalDistinctCount_);
             ++currentLogicalDistinctCount_;
             ++logicalDistinctAccepted_;
-            if (currentLogicalDistinctCount_ == configuredLogicalTriggersPerRound_) {
+            if (!disableCountBoundary_ &&
+                currentLogicalDistinctCount_ == configuredLogicalTriggersPerRound_) {
                 result.roundComplete = true;
                 result.isFinalLogicalTrigger = true;
+                latchCompletedRoundLocked();
                 ++countBoundaryResets_;
-                currentLogicalDistinctCount_ = 0;
-                state_ = PhysicalRoundState::AwaitingControl;
+                resetCurrentRoundLocked();
                 ++roundGeneration_;
                 events.push_back(eventLocked(PhysicalRoundEvent::Kind::CountBoundary, triggerSeq));
             }
@@ -207,20 +235,18 @@ void PhysicalRoundNormalizer::timeoutBoundary(std::uint64_t measurementSession,
         std::lock_guard<std::mutex> lock(mutex_);
         if (measurementSession_ != measurementSession)
             resetSessionLocked(measurementSession);
-        if (state_ != PhysicalRoundState::CollectingScan)
+        if (currentPhysicalDistinctCount_ == 0)
             return;
-        currentLogicalDistinctCount_ = 0;
-        state_ = PhysicalRoundState::AwaitingControl;
+        const auto hasLastDistinctTriggerSeq = hasLastDistinctTrigger_;
+        const auto lastDistinctTriggerSeq = lastDistinctTriggerSeq_;
+        latchCompletedRoundLocked();
+        resetCurrentRoundLocked();
         ++roundGeneration_;
         ++timeoutBoundaryResets_;
-        if (observedMonotonicNs > 0 &&
-            (!hasLastDistinctTrigger_ ||
-             observedMonotonicNs >= lastDistinctTriggerTimeNs_)) {
-            lastDistinctTriggerTimeNs_ = observedMonotonicNs;
-        }
+        (void)observedMonotonicNs;
         event = eventLocked(PhysicalRoundEvent::Kind::TimeoutBoundary, 0,
-                            kTimeoutBasis, 0, hasLastDistinctTrigger_,
-                            lastDistinctTriggerSeq_);
+                            kTimeoutBasis, 0, hasLastDistinctTriggerSeq,
+                            lastDistinctTriggerSeq);
         hasEvent = true;
     }
     if (hasEvent)
@@ -246,10 +272,38 @@ void PhysicalRoundNormalizer::setConfiguredLogicalTriggersPerRound(std::uint64_t
     if (configuredLogicalTriggersPerRound_ == count)
         return;
     configuredLogicalTriggersPerRound_ = count;
-    currentLogicalDistinctCount_ = 0;
-    state_ = PhysicalRoundState::AwaitingControl;
+    resetCurrentRoundLocked();
     ++roundGeneration_;
     recentDecisions_.clear();
+}
+
+void PhysicalRoundNormalizer::setStartupFilterTriggerCount(std::uint64_t count) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    startupFilterTriggerCount_ = count;
+    if (currentPhysicalDistinctCount_ == 0) {
+        state_ = startupFilterTriggerCount_ == 0
+            ? PhysicalRoundState::CollectingScan
+            : PhysicalRoundState::AwaitingControl;
+    } else {
+        state_ = currentStartupFilteredCount_ < startupFilterTriggerCount_
+            ? PhysicalRoundState::AwaitingControl
+            : PhysicalRoundState::CollectingScan;
+    }
+}
+
+std::uint64_t PhysicalRoundNormalizer::startupFilterTriggerCount() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return startupFilterTriggerCount_;
+}
+
+void PhysicalRoundNormalizer::setDisableCountBoundary(bool disable) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    disableCountBoundary_ = disable;
+}
+
+bool PhysicalRoundNormalizer::disableCountBoundary() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return disableCountBoundary_;
 }
 
 PhysicalRoundNormalizer::Snapshot PhysicalRoundNormalizer::snapshot() const {
@@ -264,6 +318,12 @@ PhysicalRoundNormalizer::Snapshot PhysicalRoundNormalizer::snapshot() const {
     result.countBoundaryResets = countBoundaryResets_;
     result.timeoutBoundaryResets = timeoutBoundaryResets_;
     result.currentLogicalDistinctCount = currentLogicalDistinctCount_;
+    result.startupFilterTriggerCount = startupFilterTriggerCount_;
+    result.disableCountBoundary = disableCountBoundary_;
+    result.currentPhysicalDistinctCount = currentPhysicalDistinctCount_;
+    result.currentStartupFilteredCount = currentStartupFilteredCount_;
+    result.lastCompletedPhysicalDistinctCount = lastCompletedPhysicalDistinctCount_;
+    result.lastCompletedStartupFilteredCount = lastCompletedStartupFilteredCount_;
     result.timeoutResetSec = timeoutResetSec_;
     result.timeoutResetNs = timeoutResetNs_;
     result.lastDistinctTriggerTimeNs = lastDistinctTriggerTimeNs_;
@@ -272,6 +332,7 @@ PhysicalRoundNormalizer::Snapshot PhysicalRoundNormalizer::snapshot() const {
     result.recentDecisionCacheSize = recentDecisions_.size();
     result.recentDecisionCacheCapacity = cacheCapacity_;
     result.state = state_;
+    result.firstVisibleFilterMode = startupFilterTriggerCount_ > 0;
     return result;
 }
 

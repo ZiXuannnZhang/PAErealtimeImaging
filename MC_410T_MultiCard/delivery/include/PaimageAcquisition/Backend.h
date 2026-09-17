@@ -13,6 +13,8 @@ public:
         std::vector<std::string> targets;std::uint16_t dataPort=8001,feedbackPort=8000,controlPort=8080;
         std::uint64_t logicalTriggersPerRound=0;
         double physicalRoundTimeoutSec=0.0;
+        std::uint64_t startupFilterTriggerCount=1;
+        bool disableCountBoundary=false;
         PhysicalRoundNormalizer::Observer normalizerObserver;};
     Backend(Settings,std::vector<DataProcessor*>,std::vector<FileSaver*>,TraceWriter*,TimingWriter* = nullptr,LoopLog* = nullptr);
     ~Backend();

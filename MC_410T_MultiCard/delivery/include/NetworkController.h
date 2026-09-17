@@ -138,6 +138,10 @@ public:
     // RingReconCudaConfig.timeoutResetSec; this setter is also valid before
     // the PAimage backend is created.
     void setPhysicalRoundTimeout(double seconds);
+    // Physical-round startup policy. These are configuration-boundary
+    // settings and are forwarded to the shared HostOutput normalizer.
+    void setStartupFilterTriggerCount(std::uint64_t count);
+    void setDisableCountBoundary(bool disable);
     paimage::PhysicalRoundNormalizer::Snapshot physicalRoundSnapshot() const;
     // 重新配置（采集时间改变时传入，无需重建线程）
     void reconfigure(const AcqConfig& config);
@@ -240,6 +244,8 @@ private:
     QString m_paimageRunId;
     paimage::PhysicalRoundNormalizer::Observer m_physicalRoundBoundarySink;
     double m_physicalRoundTimeoutSec = 0.0;
+    std::uint64_t m_startupFilterTriggerCount = 1;
+    bool m_disableCountBoundary = false;
     void recordPaimageSnapshot();
     void writeSystemCaptureNotification(quint64 epoch, qint64 burstNs);
 

@@ -22,9 +22,11 @@ public:
     // keeps the historical adapter-only tests in pass-through mode.
     HostOutput(int bits,int blockSize,std::vector<DataProcessor*>,std::vector<FileSaver*>,TraceWriter*,
                TimingWriter* = nullptr,
-               std::uint64_t logicalTriggersPerRound = 0,
-               PhysicalRoundNormalizer::Observer = {},
-               double physicalRoundTimeoutSec = 0.0);
+                std::uint64_t logicalTriggersPerRound = 0,
+                PhysicalRoundNormalizer::Observer = {},
+                double physicalRoundTimeoutSec = 0.0,
+                std::uint64_t startupFilterTriggerCount = 1,
+                bool disableCountBoundary = false);
     ~HostOutput();
     void start(){workers_.start();}
     void stop(){workers_.stop();}
@@ -51,6 +53,14 @@ public:
     }
     void setPhysicalRoundTimeout(double seconds){
         if(normalizer_)normalizer_->setTimeoutResetSec(seconds);
+    }
+    // Configuration-boundary policy controls for the shared physical-round
+    // normalizer. Call before beginSession() for the next measurement.
+    void setStartupFilterTriggerCount(std::uint64_t count){
+        if(normalizer_)normalizer_->setStartupFilterTriggerCount(count);
+    }
+    void setDisableCountBoundary(bool disable){
+        if(normalizer_)normalizer_->setDisableCountBoundary(disable);
     }
     PhysicalRoundNormalizer::Snapshot normalizerSnapshot() const;
     std::uint64_t startSaving(const QString&,int,const QString&);

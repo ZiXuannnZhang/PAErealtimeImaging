@@ -61,6 +61,12 @@ struct PhysicalRoundEvent {
     std::uint64_t countBoundaryResets = 0;
     std::uint64_t timeoutBoundaryResets = 0;
     std::uint64_t currentLogicalDistinctCount = 0;
+    std::uint64_t startupFilterTriggerCount = 1;
+    bool disableCountBoundary = false;
+    std::uint64_t currentPhysicalDistinctCount = 0;
+    std::uint64_t currentStartupFilteredCount = 0;
+    std::uint64_t lastCompletedPhysicalDistinctCount = 0;
+    std::uint64_t lastCompletedStartupFilteredCount = 0;
     double timeoutResetSec = 0.0;
     std::int64_t idleDurationNs = 0;
     std::int64_t configuredTimeoutNs = 0;
@@ -86,6 +92,12 @@ public:
         std::uint64_t countBoundaryResets = 0;
         std::uint64_t timeoutBoundaryResets = 0;
         std::uint64_t currentLogicalDistinctCount = 0;
+        std::uint64_t startupFilterTriggerCount = 1;
+        bool disableCountBoundary = false;
+        std::uint64_t currentPhysicalDistinctCount = 0;
+        std::uint64_t currentStartupFilteredCount = 0;
+        std::uint64_t lastCompletedPhysicalDistinctCount = 0;
+        std::uint64_t lastCompletedStartupFilteredCount = 0;
         double timeoutResetSec = 0.0;
         std::int64_t timeoutResetNs = 0;
         std::int64_t lastDistinctTriggerTimeNs = 0;
@@ -116,8 +128,8 @@ public:
                                          std::uint16_t triggerSeq,
                                          std::int64_t observedMonotonicNs = 0);
 
-    // Clear a partial logical round once, leaving an already-idle boundary
-    // untouched. This makes count-boundary followed by timeout idempotent.
+    // Clear an active physical round once, including a partial startup-filter
+    // round; an already-idle boundary is left untouched.
     void timeoutBoundary(std::uint64_t measurementSession,
                          std::int64_t observedMonotonicNs = 0);
 
@@ -131,6 +143,14 @@ public:
     // measurement. A live session is made to await a new control identity.
     void setConfiguredLogicalTriggersPerRound(std::uint64_t count);
 
+    // These policy knobs are configuration-boundary settings. Production
+    // callers should set them before beginning the next measurement session;
+    // no transactional mid-round reconfiguration is provided here.
+    void setStartupFilterTriggerCount(std::uint64_t count);
+    std::uint64_t startupFilterTriggerCount() const;
+    void setDisableCountBoundary(bool disable);
+    bool disableCountBoundary() const;
+
     Snapshot snapshot() const;
     std::uint64_t configuredLogicalTriggersPerRound() const;
 
@@ -142,6 +162,8 @@ private:
         PhysicalRoundClassification classification;
     };
 
+    void resetCurrentRoundLocked();
+    void latchCompletedRoundLocked();
     PhysicalRoundEvent eventLocked(PhysicalRoundEvent::Kind kind,
                                    std::uint16_t triggerSeq,
                                    const char* basis = "first-visible-operational",
@@ -165,6 +187,12 @@ private:
     std::uint64_t countBoundaryResets_ = 0;
     std::uint64_t timeoutBoundaryResets_ = 0;
     std::uint64_t currentLogicalDistinctCount_ = 0;
+    std::uint64_t startupFilterTriggerCount_ = 1;
+    bool disableCountBoundary_ = false;
+    std::uint64_t currentPhysicalDistinctCount_ = 0;
+    std::uint64_t currentStartupFilteredCount_ = 0;
+    std::uint64_t lastCompletedPhysicalDistinctCount_ = 0;
+    std::uint64_t lastCompletedStartupFilteredCount_ = 0;
     double timeoutResetSec_ = 0.0;
     std::int64_t timeoutResetNs_ = 0;
     std::int64_t lastDistinctTriggerTimeNs_ = 0;

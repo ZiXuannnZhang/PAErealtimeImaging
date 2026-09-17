@@ -396,5 +396,254 @@ int main() {
                 "T18 next control is not terminal");
     }
 
-    std::cout << "PASS physical round normalizer contract (T1-T18)\n";
+    // A1: the default policy remains one startup filter followed by a fixed
+    // logical CountBoundary.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.beginSession(100);
+        require(classify(normalizer, 100, 1).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "A1 default startup filter");
+        require(classify(normalizer, 100, 2).logicalTriggerIndex == 0,
+                "A1 logical zero");
+        require(classify(normalizer, 100, 3).roundComplete,
+                "A1 default CountBoundary");
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.startupFilterTriggerCount == 1 &&
+                    !snapshot.disableCountBoundary &&
+                    snapshot.lastCompletedPhysicalDistinctCount == 3 &&
+                    snapshot.lastCompletedStartupFilteredCount == 1,
+                "A1 default snapshot");
+    }
+
+    // A2: X=0 admits the first distinct identity as logical #0.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.setStartupFilterTriggerCount(0);
+        normalizer.beginSession(101);
+        const auto first = classify(normalizer, 101, 10);
+        require(first.decision == PhysicalTriggerDecision::LogicalScan &&
+                    first.logicalTriggerIndex == 0,
+                "A2 first trigger is logical");
+        require(normalizer.snapshot().currentStartupFilteredCount == 0,
+                "A2 no startup filter");
+        require(classify(normalizer, 101, 11).roundComplete,
+                "A2 CountBoundary");
+    }
+
+    // A3: X=N counts new physical identities, not packets or cards.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.setStartupFilterTriggerCount(7);
+        normalizer.beginSession(102);
+        for (std::uint16_t trigger = 1; trigger <= 7; ++trigger)
+            require(classify(normalizer, 102, trigger).decision ==
+                        PhysicalTriggerDecision::OperationalStartupControl,
+                    "A3 startup trigger filtered");
+        const auto firstLogical = classify(normalizer, 102, 8);
+        require(firstLogical.decision == PhysicalTriggerDecision::LogicalScan &&
+                    firstLogical.logicalTriggerIndex == 0,
+                "A3 eighth trigger is logical zero");
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.currentPhysicalDistinctCount == 8 &&
+                    snapshot.currentStartupFilteredCount == 7,
+                "A3 per-round counts");
+    }
+
+    // A4: duplicate multicard classifications share one physical/filter slot.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.setStartupFilterTriggerCount(2);
+        normalizer.beginSession(103);
+        const auto first = classify(normalizer, 103, 20);
+        const auto duplicate = classify(normalizer, 103, 20);
+        const auto second = classify(normalizer, 103, 21);
+        const auto logical = classify(normalizer, 103, 22);
+        require(first.newDistinct && !duplicate.newDistinct &&
+                    duplicate.decision == first.decision &&
+                    second.decision == PhysicalTriggerDecision::OperationalStartupControl &&
+                    logical.logicalTriggerIndex == 0,
+                "A4 shared classification");
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.currentPhysicalDistinctCount == 3 &&
+                    snapshot.currentStartupFilteredCount == 2 &&
+                    snapshot.operationalControlFiltered == 2 &&
+                    snapshot.logicalDistinctAccepted == 1,
+                "A4 duplicate counters");
+    }
+
+    // A5: a late card from the completed round remains a cache hit after the
+    // boundary and cannot consume the next round's startup slot.
+    {
+        PhysicalRoundNormalizer normalizer(1);
+        normalizer.beginSession(104);
+        classify(normalizer, 104, 30);
+        const auto final = classify(normalizer, 104, 31);
+        const auto late = classify(normalizer, 104, 31);
+        require(final.roundComplete && !late.newDistinct && !late.roundComplete &&
+                    late.logicalTriggerIndex == 0,
+                "A5 late cached final");
+        const auto beforeNext = normalizer.snapshot();
+        require(beforeNext.currentPhysicalDistinctCount == 0 &&
+                    beforeNext.lastCompletedPhysicalDistinctCount == 2,
+                "A5 boundary latch");
+        require(classify(normalizer, 104, 32).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "A5 next round startup");
+        require(normalizer.snapshot().currentPhysicalDistinctCount == 1 &&
+                    normalizer.snapshot().currentStartupFilteredCount == 1,
+                "A5 late card did not consume next slot");
+    }
+
+    // A6: X=0 still uses the normal fixed-count boundary.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.setStartupFilterTriggerCount(0);
+        normalizer.beginSession(105);
+        require(classify(normalizer, 105, 40).logicalTriggerIndex == 0,
+                "A6 logical zero");
+        const auto final = classify(normalizer, 105, 41);
+        const auto snapshot = normalizer.snapshot();
+        require(final.roundComplete && final.isFinalLogicalTrigger &&
+                    snapshot.countBoundaryResets == 1 && snapshot.roundGeneration == 1,
+                "A6 CountBoundary enabled");
+    }
+
+    // A7: X=7 reaches CountBoundary only after the configured logical count,
+    // then starts the next round with seven fresh filter slots.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.setStartupFilterTriggerCount(7);
+        normalizer.beginSession(106);
+        for (std::uint16_t trigger = 50; trigger < 57; ++trigger)
+            classify(normalizer, 106, trigger);
+        classify(normalizer, 106, 57);
+        const auto final = classify(normalizer, 106, 58);
+        require(final.roundComplete && normalizer.snapshot().roundGeneration == 1,
+                "A7 CountBoundary after X=7");
+        for (std::uint16_t trigger = 60; trigger < 67; ++trigger)
+            require(classify(normalizer, 106, trigger).decision ==
+                        PhysicalTriggerDecision::OperationalStartupControl,
+                    "A7 next round refilters");
+    }
+
+    // A8: disabling fixed-count boundaries keeps the logical index and
+    // RoundIdentity in the same round after the configured count.
+    {
+        PhysicalRoundNormalizer normalizer(4);
+        normalizer.setStartupFilterTriggerCount(0);
+        normalizer.setDisableCountBoundary(true);
+        normalizer.beginSession(107);
+        for (std::uint16_t trigger = 70; trigger < 76; ++trigger) {
+            const auto classification = classify(normalizer, 107, trigger);
+            require(classification.decision == PhysicalTriggerDecision::LogicalScan &&
+                        classification.logicalTriggerIndex == trigger - 70 &&
+                        !classification.roundComplete &&
+                        !classification.isFinalLogicalTrigger,
+                    "A8 disabled CountBoundary");
+        }
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.currentLogicalDistinctCount == 6 &&
+                    snapshot.currentPhysicalDistinctCount == 6 &&
+                    snapshot.countBoundaryResets == 0 && snapshot.roundGeneration == 0,
+                "A8 disabled counters");
+    }
+
+    // A9: timeout remains effective in timeout-only mode and resets the
+    // over-counted logical window.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.setStartupFilterTriggerCount(0);
+        normalizer.setDisableCountBoundary(true);
+        normalizer.setTimeoutResetSec(1.0e-6);
+        normalizer.beginSession(108);
+        classify(normalizer, 108, 80, 1000);
+        classify(normalizer, 108, 81, 1500);
+        classify(normalizer, 108, 82, 2000);
+        normalizer.timeoutBoundary(108, 5000);
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.timeoutBoundaryResets == 1 && snapshot.roundGeneration == 1 &&
+                    snapshot.currentPhysicalDistinctCount == 0 &&
+                    snapshot.currentLogicalDistinctCount == 0 &&
+                    snapshot.lastCompletedPhysicalDistinctCount == 3 &&
+                    snapshot.lastCompletedStartupFilteredCount == 0,
+                "A9 timeout-only reset");
+        require(classify(normalizer, 108, 83, 6000).logicalTriggerIndex == 0,
+                "A9 next timeout-only round");
+    }
+
+    // A10: a partial startup-filter round is active and can be sealed by an
+    // explicit timeout, preserving the observed partial counts.
+    {
+        PhysicalRoundNormalizer normalizer(3);
+        normalizer.setStartupFilterTriggerCount(7);
+        normalizer.setTimeoutResetSec(1.0e-6);
+        normalizer.beginSession(109);
+        classify(normalizer, 109, 90, 1000);
+        classify(normalizer, 109, 91, 1500);
+        classify(normalizer, 109, 92, 1800);
+        normalizer.timeoutBoundary(109, 4000);
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.lastCompletedPhysicalDistinctCount == 3 &&
+                    snapshot.lastCompletedStartupFilteredCount == 3 &&
+                    snapshot.currentPhysicalDistinctCount == 0 &&
+                    snapshot.currentStartupFilteredCount == 0 &&
+                    snapshot.roundGeneration == 1,
+                "A10 partial startup latch");
+        require(classify(normalizer, 109, 93, 5000).decision ==
+                    PhysicalTriggerDecision::OperationalStartupControl,
+                "A10 next startup slot");
+    }
+
+    // A11: current/last-completed per-round counters remain distinct from
+    // cumulative counters across a boundary.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.beginSession(110);
+        classify(normalizer, 110, 100);
+        classify(normalizer, 110, 101);
+        classify(normalizer, 110, 102);
+        auto snapshot = normalizer.snapshot();
+        require(snapshot.physicalDistinctObserved == 3 &&
+                    snapshot.logicalDistinctAccepted == 2 &&
+                    snapshot.currentPhysicalDistinctCount == 0 &&
+                    snapshot.lastCompletedPhysicalDistinctCount == 3,
+                "A11 completed versus cumulative");
+        classify(normalizer, 110, 103);
+        classify(normalizer, 110, 104);
+        snapshot = normalizer.snapshot();
+        require(snapshot.physicalDistinctObserved == 5 &&
+                    snapshot.logicalDistinctAccepted == 3 &&
+                    snapshot.currentPhysicalDistinctCount == 2 &&
+                    snapshot.currentStartupFilteredCount == 1 &&
+                    snapshot.lastCompletedPhysicalDistinctCount == 3,
+                "A11 current versus last completed");
+    }
+
+    // A12: beginSession clears both per-round views and the old identity
+    // cache, so a reused trigger sequence starts a fresh startup policy.
+    {
+        PhysicalRoundNormalizer normalizer(2);
+        normalizer.setStartupFilterTriggerCount(2);
+        normalizer.beginSession(111);
+        classify(normalizer, 111, 120);
+        classify(normalizer, 111, 121);
+        normalizer.timeoutBoundary(111);
+        require(normalizer.snapshot().lastCompletedPhysicalDistinctCount == 2,
+                "A12 pre-session completed count");
+        normalizer.beginSession(112);
+        const auto snapshot = normalizer.snapshot();
+        require(snapshot.physicalDistinctObserved == 0 &&
+                    snapshot.currentPhysicalDistinctCount == 0 &&
+                    snapshot.currentStartupFilteredCount == 0 &&
+                    snapshot.lastCompletedPhysicalDistinctCount == 0 &&
+                    snapshot.lastCompletedStartupFilteredCount == 0,
+                "A12 session counter reset");
+        const auto first = classify(normalizer, 112, 120);
+        require(first.newDistinct &&
+                    first.decision == PhysicalTriggerDecision::OperationalStartupControl,
+                "A12 session cache reset");
+    }
+
+    std::cout << "PASS physical round normalizer contract (T1-T18, A1-A12)\n";
 }
