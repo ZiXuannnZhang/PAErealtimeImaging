@@ -645,5 +645,43 @@ int main() {
                 "A12 session cache reset");
     }
 
-    std::cout << "PASS physical round normalizer contract (T1-T18, A1-A12)\n";
+    // C4-C7: active production poll, partial startup, both race orderings,
+    // late cache hits and disabled/backward-clock no-ops.
+    for (bool pollWins : {false, true}) for (int startup : {0, 7}) {
+        int boundaries = 0;
+        PhysicalRoundEvent boundary;
+        PhysicalRoundNormalizer n(4, [&](const auto& e) {
+            if(e.kind == PhysicalRoundEvent::Kind::TimeoutBoundary) { ++boundaries; boundary=e; }
+        });
+        n.setStartupFilterTriggerCount(startup); n.setDisableCountBoundary(true);
+        n.setTimeoutResetSec(1.0); n.beginSession(123);
+        for(int i=0;i<3;++i)n.classify(123,100+i,1000000000LL+i);
+        require(!n.timeoutBoundaryIfIdle(999999999LL), "C4 backwards clock no-op");
+        require(!n.timeoutBoundaryIfIdle(2000000001LL), "C4 before deadline no-op");
+        const auto old=n.classify(123,102,2000000001LL);
+        require(!old.newDistinct && n.snapshot().lastDistinctTriggerTimeNs==1000000002LL,
+                "C7 cached late card never refreshes anchor");
+        if(pollWins) {
+            require(n.timeoutBoundaryIfIdle(2000000002LL), "C4 poll closes without next trigger");
+            const auto s=n.snapshot();
+            require(s.roundGeneration==1 && s.currentPhysicalDistinctCount==0 &&
+                    s.lastCompletedPhysicalDistinctCount==3 &&
+                    s.lastCompletedStartupFilteredCount==static_cast<unsigned>(startup ? 3 : 0),
+                    "C5 partial startup counters latched");
+            require(!boundary.hasNextVisibleTriggerSeq && boundary.idleDurationNs==1000000000LL,
+                    "C4 active poll event has no next trigger");
+            require(!n.timeoutBoundaryIfIdle(2100000000LL), "C6 repeated poll no-op");
+        }
+        const auto next=n.classify(123,200,2100000000LL);
+        require(next.roundGeneration==1 && next.logicalTriggerIndex==(startup ? -1 : 0),
+                "C6 next trigger starts new round");
+        require(!n.timeoutBoundaryIfIdle(2100000000LL), "C6 classify wins, later poll no-op");
+        const auto late=n.classify(123,102,2900000000LL);
+        require(!late.newDistinct && late.roundGeneration==0 &&
+                n.snapshot().lastDistinctTriggerTimeNs==2100000000LL && boundaries==1,
+                "C7 late old classification preserved, no second boundary");
+        n.setTimeoutResetSec(0);
+        require(!n.timeoutBoundaryIfIdle(9900000000LL), "C4 disabled timeout no-op");
+    }
+    std::cout << "PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)\n";
 }

@@ -132,6 +132,8 @@ public:
     // round; an already-idle boundary is left untouched.
     void timeoutBoundary(std::uint64_t measurementSession,
                          std::int64_t observedMonotonicNs = 0);
+    // Atomic idle check + transition. Notification is outside the state lock.
+    bool timeoutBoundaryIfIdle(std::int64_t observedMonotonicNs);
 
     // The product source is RingReconCudaConfig.timeoutResetSec. Updating it
     // is configuration only: it never creates a boundary or filters a

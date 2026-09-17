@@ -220,7 +220,6 @@ MainWindow::MainWindow(QWidget *parent)
     , m_diagnosticStatusTimer(new QTimer(this))
     , m_systemCaptureStatusTimer(new QTimer(this))
     , m_displayTimer(new QTimer(this))
-    , m_ringTimeoutTimer(new QTimer(this))
     , m_isListening(false)
     , m_isMeasuring(false)
     , m_highDataRateWarningShown(false)
@@ -494,13 +493,15 @@ MainWindow::MainWindow(QWidget *parent)
             saveDir = QDir(countPresentation.oldDirectory).filePath("recon_png");
         }
         const bool saveNow = frameEnd && m_reconSaveEnabled && !saveDir.isEmpty();
-        if (saveNow)
-            m_ringTimeoutSaveDone = true;
         const QString saveSuffix = m_reconSaveSuffix;
 
         if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
             if (!m_imagingDisplayWindow) {
                 m_imagingDisplayWindow = new ImagingDisplayWindow();
+                connect(m_imagingDisplayWindow, &ImagingDisplayWindow::presentationChanged, this, [this] {
+                    m_timeoutPresentation.updateWriter(
+                        m_imagingDisplayWindow->capturePngWriter(m_imagingDisplayWindow->lastSeq()));
+                });
             }
             if (!m_imagingDisplayWindow->isVisible()) {
                 m_imagingDisplayWindow->show();
@@ -520,7 +521,9 @@ MainWindow::MainWindow(QWidget *parent)
                 QPointer<ImagingDisplayWindow> win(m_imagingDisplayWindow);
                 QPointer<ImagingController> ctrl(m_imagingController);
                 const int idx = bufferIndex;
-                QThreadPool::globalInstance()->start([ctrl, idx, frame, n, nx, seq, frameIdx, r1, r2, win,
+                const auto presentationEpoch = m_roundUi.snapshot().epoch;
+                QPointer<MainWindow> owner(this);
+                QThreadPool::globalInstance()->start([ctrl, idx, frame, n, nx, seq, frameIdx, r1, r2, win, owner, round, presentationEpoch,
                                    saveNow, saveDir, saveSuffix]() {
                     const float *src = ctrl ? ctrl->snapshotBuffer(idx) : nullptr;
                     if (!src) {
@@ -534,10 +537,17 @@ MainWindow::MainWindow(QWidget *parent)
                     const QImage img2 = ImagingDisplayWindow::renderFrame(
                         frame->data() + n, nx, r2.lower, r2.upper);
                     if (!win) return;
-                    QMetaObject::invokeMethod(qApp, [win, frame, nx, frameIdx, img1, img2,
+                    QMetaObject::invokeMethod(qApp, [win, frame, nx, frameIdx, img1, img2, owner, round, presentationEpoch,
                                                      saveNow, saveDir, saveSuffix]() {
-                        if (!win) return;
+                        if (!win || !owner) return;
+                        std::lock_guard<std::mutex> lock(owner->m_ringAssemblerMutex);
+                        if (owner->m_ringSnapshotAdmissionBlocked.load(std::memory_order_acquire) ||
+                            owner->m_roundUi.snapshot().epoch != presentationEpoch ||
+                            !owner->m_timeoutPresentation.accepts(round.measurementSession, round.roundGeneration))
+                            return;
                         win->applyRingFrame(frame, nx, frameIdx, img1, img2);
+                        owner->m_timeoutPresentation.publish(round.measurementSession, round.roundGeneration,
+                            win->capturePngWriter(win->lastSeq()));
                         if (saveNow)
                             win->saveWindowPngs(saveDir, saveSuffix, win->lastSeq());
                     }, Qt::QueuedConnection);
@@ -608,9 +618,6 @@ MainWindow::MainWindow(QWidget *parent)
                 if (m_imagingBypass) m_imagingBypass->observeBlockException();
             }
         });
-    m_ringAssembler->setProgressCallback([this]() {
-        m_ringTimeoutSaveDone.store(false, std::memory_order_release);
-    });
     // PhysicalRoundNormalizer is the production source of physical idle
     // boundaries. This callback clears queued pre-boundary frames and resets
     // Ring/reconstruction exactly once for each session/generation.
@@ -759,31 +766,6 @@ MainWindow::MainWindow(QWidget *parent)
     m_systemCaptureStatusTimer->setInterval(500);
     connect(m_systemCaptureStatusTimer,&QTimer::timeout,this,&MainWindow::onSystemCaptureStatusTick);
     m_systemCaptureStatusTimer->start();
-
-    // 超时到点检测只负责在没有下一触发时落盘；边界分类和 Ring reset
-    // 仍由 PhysicalRoundNormalizer 的生产链路负责。
-    m_ringTimeoutTimer->setInterval(250);
-    connect(m_ringTimeoutTimer, &QTimer::timeout, this, [this]() {
-        if (!m_imagingEnabled || !m_netController ||
-            !m_reconSaveEnabled || m_reconSaveDir.isEmpty())
-            return;
-        const auto round = m_netController->physicalRoundSnapshot();
-        if (round.timeoutResetNs <= 0 ||
-            round.state != paimage::PhysicalRoundState::CollectingScan ||
-            !round.hasLastDistinctTrigger || round.lastDistinctTriggerTimeNs <= 0)
-            return;
-        const auto nowNs = paimage::SocketReceiver::now();
-        if (nowNs < round.lastDistinctTriggerTimeNs ||
-            nowNs - round.lastDistinctTriggerTimeNs < round.timeoutResetNs)
-            return;
-        if (!m_ringTimeoutSaveDone.exchange(true, std::memory_order_acq_rel)) {
-            if (m_imagingDisplayWindow)
-                m_imagingDisplayWindow->saveWindowPngs(
-                    m_reconSaveDir, m_reconSaveSuffix,
-                    m_imagingDisplayWindow->lastSeq());
-        }
-    });
-    m_ringTimeoutTimer->start();
 
     // ══ 成像馈送定时器（5ms，独立于 33ms 显示刷新，确保捕获 100Hz 触发）══
     m_imagingTimer = new QTimer(this);
@@ -2250,6 +2232,7 @@ void MainWindow::onStartListenClicked()
                 ui->btnToggleSave->style()->unpolish(ui->btnToggleSave);
                 ui->btnToggleSave->style()->polish(ui->btnToggleSave);
                 m_reconSaveEnabled = false;   // 重建图像保存随监听停止而关闭
+        syncTimeoutPngSettings();
                 m_autoSavePresentation.reset();
                 {
                     std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
@@ -2392,7 +2375,6 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                              ? autoCommit.directory : QString()}});
                 }, Qt::QueuedConnection);
                 m_roundUi.onCountBoundary();
-                m_ringTimeoutSaveDone.store(false, std::memory_order_release);
                 return;
             }
             if (event.kind != paimage::PhysicalRoundEvent::Kind::TimeoutBoundary)
@@ -2410,17 +2392,9 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                     QStringLiteral("normalizer_timeout_boundary"));
                 hasAutoCommit = true;
             }
-            // Capture the old presentation directory from the committed
-            // transition, not from the mutable UI target.  A delayed timeout
-            // callback must not save an old reconstruction into a directory
-            // that a later boundary has already applied.
-            const QString oldReconDirectory =
-                hasAutoCommit && !autoCommit.oldDirectory.isEmpty()
-                    ? QDir(autoCommit.oldDirectory).filePath("recon_png")
-                    : QString();
-            // Claim the physical boundary before touching UI state.  The
-            // coordinator makes directory publication idempotent; this gate
-            // makes the corresponding Ring/UI reset idempotent as well.
+            const auto uiBefore = m_roundUi.snapshot();
+            paimage::TimeoutPresentation::Job pngJob;
+            bool resetFailed = false;
             {
                 std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
                 if (m_lastRingTimeoutBoundarySession == event.measurementSession &&
@@ -2428,30 +2402,32 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                     return;
                 m_lastRingTimeoutBoundarySession = event.measurementSession;
                 m_lastRingTimeoutBoundaryGeneration = event.roundGeneration;
+                pngJob = m_timeoutPresentation.close(event.measurementSession, event.roundGeneration,
+                    hasAutoCommit, autoCommit.oldDirectory, [this, &resetFailed] {
+                        m_roundUi.onTimeoutBoundary();
+                        if (m_imagingBypass)
+                            m_imagingBypass->clear(ImagingSubmitResult::StaleSession);
+                        if (!m_ringAssembler || !m_ringAssemblerConfigured) return;
+                        m_ringResetCommandSent.store(false, std::memory_order_release);
+                        m_ringAssembler->resetAfterPhysicalTimeout();
+                        const bool sent = m_ringResetCommandSent.exchange(false, std::memory_order_acq_rel);
+                        const auto cutoff = sent && m_imagingController
+                            ? m_imagingController->ringLastSubmitIndex() : 0;
+                        paimage::TimeoutPresentation::applyResetResult(
+                            sent, cutoff, m_roundUi, m_ringSnapshotAdmissionBlocked);
+                        resetFailed = !sent;
+                    });
             }
-            const auto uiBefore = m_roundUi.snapshot();
-            // Keep stale admission and per-round counters safe even if the UI
-            // event loop is delayed by rendering or PNG work.
-            m_roundUi.onTimeoutBoundary();
-            QMetaObject::invokeMethod(this, [this, event, uiBefore,
-                                             autoCommit, hasAutoCommit,
-                                             oldReconDirectory]() {
+            // The captured payload owns old pixels/ranges and directory.
+            // Render/write after reset without reading live UI/CUDA state.
+            const bool captured = bool(pngJob);
+            if (pngJob) QThreadPool::globalInstance()->start([pngJob] { pngJob(); });
+            QMetaObject::invokeMethod(this, [this, event, uiBefore, autoCommit,
+                                             hasAutoCommit, captured, resetFailed] {
                 updateRingImagingStatus();
-                if (!m_ringTimeoutSaveDone.exchange(true, std::memory_order_acq_rel) &&
-                    m_reconSaveEnabled &&
-                    !(oldReconDirectory.isEmpty() && m_reconSaveDir.isEmpty()) &&
-                    m_imagingDisplayWindow) {
-                    const QString target = oldReconDirectory.isEmpty()
-                        ? m_reconSaveDir : oldReconDirectory;
-                    m_imagingDisplayWindow->saveWindowPngs(
-                        target, m_reconSaveSuffix,
-                        m_imagingDisplayWindow->lastSeq());
-                }
                 if (hasAutoCommit) {
-                    if (autoCommit.failed)
-                        queueAutoSaveFailure(autoCommit);
-                    else
-                        applyAutoSaveCommitToUi(autoCommit);
+                    if (autoCommit.failed) queueAutoSaveFailure(autoCommit);
+                    else applyAutoSaveCommitToUi(autoCommit);
                 }
                 const auto uiAfter = m_roundUi.snapshot();
                 recordDiagnosticAction(QStringLiteral("physical_round_boundary"),
@@ -2462,41 +2438,15 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                      {QStringLiteral("uiFrameCountAfter"), qint64(uiAfter.frameCount)},
                      {QStringLiteral("ringBlockCounterBefore"), qint64(uiBefore.blockCount)},
                      {QStringLiteral("ringBlockCounterAfter"), qint64(uiAfter.blockCount)},
-                     {QStringLiteral("autoSessionGenBefore"),
-                      hasAutoCommit ? qint64(autoCommit.oldSessionGen) : 0},
-                     {QStringLiteral("autoSessionGenAfter"),
-                      hasAutoCommit ? qint64(autoCommit.publishedSessionGen) : 0},
+                     {QStringLiteral("captureBeforeReset"), captured},
+                     {QStringLiteral("oldDirectory"), autoCommit.oldDirectory},
+                     {QStringLiteral("autoSessionGenBefore"), qint64(autoCommit.oldSessionGen)},
+                     {QStringLiteral("autoSessionGenAfter"), qint64(autoCommit.publishedSessionGen)},
                      {QStringLiteral("saveRoundRollover"), QStringLiteral("data_plane_roundGeneration")}});
-            }, Qt::QueuedConnection);
-
-            // Remove queued pre-boundary groups first, then reset the
-            // assembler under its existing mutex so no partial block survives
-            // that boundary. Deduplicate the reset by session/generation.
-            if (m_imagingBypass)
-                m_imagingBypass->clear(ImagingSubmitResult::StaleSession);
-            if (!m_ringAssembler || !m_ringAssemblerConfigured)
-                return;
-            std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
-            if (!m_ringAssemblerConfigured) return;
-            m_ringResetCommandSent.store(false, std::memory_order_release);
-            m_ringAssembler->resetAfterPhysicalTimeout();
-            // ring_reset and ring_block_ready share ImagingController's ZMQ
-            // mutex.  The explicit producer submit_index cutoff is captured
-            // only after the reset command has been handed to that FIFO.
-            if (m_ringResetCommandSent.exchange(false, std::memory_order_acq_rel)) {
-                const auto cutoff = m_imagingController
-                    ? m_imagingController->ringLastSubmitIndex() : 0;
-                m_roundUi.armStaleCutoff(cutoff);
-            } else {
-                // Without a reset acknowledgement, accepting a later
-                // snapshot could mix old CUDA state into the new UI round.
-                // Fail closed until the service lifecycle is re-established.
-                m_ringSnapshotAdmissionBlocked.store(true, std::memory_order_release);
-                m_roundUi.disarmStaleCutoff();
-                recordDiagnosticAction(QStringLiteral("ring_reset_submit_failed"),
+                if (resetFailed) recordDiagnosticAction(QStringLiteral("ring_reset_submit_failed"),
                     {{QStringLiteral("measurementSession"), qint64(event.measurementSession)},
                      {QStringLiteral("roundGeneration"), qint64(event.roundGeneration)}});
-            }
+            }, Qt::QueuedConnection);
         });
     connect(m_netController, &NetworkController::statusMessage, this, &MainWindow::logMessage);
     connect(m_netController, &NetworkController::errorOccurred, this, &MainWindow::logMessage);
@@ -2774,6 +2724,7 @@ void MainWindow::onToggleSaveClicked()
         ui->edtTriggersPerFile->setEnabled(true);
         ui->edtFileSuffix->setEnabled(true);
         m_reconSaveEnabled = false;   // 停止保存时同时停止重建图像保存
+        syncTimeoutPngSettings();
         logMessage("停止保存数据");
     } else {
         // ── 开始保存 ──
@@ -2795,11 +2746,10 @@ void MainWindow::onToggleSaveClicked()
         }
         // 实时重建图像随数据保存联动：整圈最后一帧更新完后保存最终重建图到 保存目录/recon_png
         m_reconSaveEnabled = true;
-        // 开始保存时不立即对“已空闲”画面触发超时到点保存（下一触发到来时复位）
-        m_ringTimeoutSaveDone = true;
         m_reconSaveDir = QDir(saveDir).filePath("recon_png");
         m_reconSaveSuffix = fileSuffix;
         QDir().mkpath(m_reconSaveDir);
+        syncTimeoutPngSettings();
         // 锁定保存参数（主流仪表设计：采集/保存中不可修改配置）
         ui->edtSaveDir->setEnabled(false);
         ui->btnSelectDir->setEnabled(false);
@@ -2869,8 +2819,10 @@ void MainWindow::applyAutoSaveCommitToUi(const AutoSaveCommit& commit)
     m_reconSaveEnabled = true;
     m_reconSaveDir = QDir(commit.directory).filePath("recon_png");
     m_reconSaveSuffix = ui->edtFileSuffix->text().trimmed();
+    syncTimeoutPngSettings();
     if (!QDir().mkpath(m_reconSaveDir)) {
         m_reconSaveEnabled = false;
+        syncTimeoutPngSettings();
         logMessage(QString("错误: 无法创建自动保存重建目录 %1；数据目录仍按已提交代号保存")
                    .arg(m_reconSaveDir));
     }
@@ -2908,6 +2860,7 @@ void MainWindow::queueAutoSaveFailure(const AutoSaveCommit& commit)
         }
         m_autoSaveEnabled = false;
         m_reconSaveEnabled = false;
+        syncTimeoutPngSettings();
         if (ui && ui->chkAutoSave) {
             QSignalBlocker blocker(ui->chkAutoSave);
             ui->chkAutoSave->setChecked(false);
@@ -3002,6 +2955,7 @@ void MainWindow::onAutoSaveToggled(bool checked)
             m_ringPresentation.reset();
         }
         m_reconSaveEnabled = false;   // PNG 保存随自动保存关闭
+        syncTimeoutPngSettings();
         ui->btnToggleSave->setEnabled(m_isListening);
         // 恢复保存参数可写
         ui->edtSaveDir->setEnabled(true);
@@ -3498,6 +3452,7 @@ void MainWindow::onUpdateStatistics()
             ui->btnToggleSave->style()->unpolish(ui->btnToggleSave);
             ui->btnToggleSave->style()->polish(ui->btnToggleSave);
             m_reconSaveEnabled = false;
+        syncTimeoutPngSettings();
             logMessage("警告：数据保存已意外停止，请检查磁盘空间");
         }
     }
@@ -5454,6 +5409,7 @@ void MainWindow::configureRingAssembler()
         : paimage::PhysicalRoundNormalizer::Snapshot{};
     { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
       m_ringPresentation.reset();
+      m_timeoutPresentation.reset();
       m_lastRingTimeoutBoundarySession = 0;
       m_lastRingTimeoutBoundaryGeneration = 0;
       m_ringAssembler->configure(enabled, cfg.alinesPerChannelPerBlock,
@@ -5466,7 +5422,6 @@ void MainWindow::configureRingAssembler()
     m_ringAssemblerConfigured = true;
     m_roundUi.reset();   // 新组包会话：每轮计数与快照准入空间清零
     m_ringInvalidIdentityReported.store(false, std::memory_order_release);
-    m_ringTimeoutSaveDone = false;   // 新会话：允许超时到点保存
     m_ringSnapshotAdmissionBlocked.store(false, std::memory_order_release);
     m_ringResetCommandSent.store(false, std::memory_order_release);
     const auto configureEndNs = paimage::SocketReceiver::now();
@@ -5525,4 +5480,9 @@ void MainWindow::updateRingImagingStatus()
         .arg(displayPulses).arg(perBlock)
         .arg(roundUi.frameCount));
     m_lblImagingStatus->setStyleSheet(amberStyle);
+}
+
+void MainWindow::syncTimeoutPngSettings()
+{
+    m_timeoutPresentation.configure(m_reconSaveEnabled, m_reconSaveDir, m_reconSaveSuffix);
 }

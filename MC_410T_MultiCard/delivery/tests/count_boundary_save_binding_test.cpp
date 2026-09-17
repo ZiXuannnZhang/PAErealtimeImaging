@@ -427,7 +427,7 @@ int main(int argc, char** argv)
         for (int i = 0; i < 3; ++i)
             saver.saveTriggerGroup(makeGroup(oldGen, 0, 1));
         const auto count = coordinator.commitBoundary(
-            701, 1, AutoSaveBoundaryKind::Count, QStringLiteral("test_backlog"));
+            701, 1, AutoSaveBoundaryKind::Timeout, QStringLiteral("C9_timeout_backlog"));
         const auto newGen = coordinator.resolveRound(701, 1).sessionGen;
         for (int i = 0; i < 2; ++i)
             saver.saveTriggerGroup(makeGroup(newGen, 1, 2));
@@ -505,7 +505,10 @@ int main(int argc, char** argv)
         output.card(makeFrame(901, 0, 100, 1000, 1));
         output.card(makeFrame(901, 0, 101, 1500, 1));
         output.card(makeFrame(901, 0, 102, 1800, 1));
-        output.card(makeFrame(901, 0, 200, 20000, 0)); // timeout + control
+        check(output.pollPhysicalRoundTimeout(20000) && timeoutCommits.size()==1 &&
+                  coordinator.resolveRound(901,1).sessionGen==timeoutCommits.front().newSessionGen,
+              "Session C9 active timeout publishes binding before next trigger");
+        output.card(makeFrame(901, 0, 200, 20000, 0)); // new round control
         output.card(makeFrame(901, 0, 201, 20500, 2));
         output.card(makeFrame(901, 0, 202, 20800, 2));
         check(until([&] { return saver.savedCount() == 4; }),

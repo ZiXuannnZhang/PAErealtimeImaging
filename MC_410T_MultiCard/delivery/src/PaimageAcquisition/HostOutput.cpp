@@ -28,7 +28,14 @@ HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors
         [this](auto r,Frame f){observe(f,5,std::uint8_t(r));}) {
     if(processors_.size()!=savers_.size())throw std::invalid_argument("host card mapping");
     if(logicalTriggersPerRound){
-        normalizer_=std::make_unique<PhysicalRoundNormalizer>(logicalTriggersPerRound,std::move(normalizerObserver));
+        normalizer_=std::make_unique<PhysicalRoundNormalizer>(logicalTriggersPerRound,
+            [this, observer=std::move(normalizerObserver)](const PhysicalRoundEvent& event) {
+                if(event.kind==PhysicalRoundEvent::Kind::TimeoutBoundary){
+                    timeoutSession_=event.measurementSession;
+                    timeoutGeneration_=event.roundGeneration;
+                }
+                if(observer)observer(event);
+            });
         normalizer_->setTimeoutResetSec(physicalRoundTimeoutSec);
         normalizer_->setStartupFilterTriggerCount(startupFilterTriggerCount);
         normalizer_->setDisableCountBoundary(disableCountBoundary);
@@ -42,6 +49,7 @@ HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors
 HostOutput::~HostOutput(){stop();}
 void HostOutput::card(Frame f){
     if(!f)return;
+    std::lock_guard<std::mutex> lock(normalizationMutex_);
     PhysicalRoundClassification classification;
     if(normalizer_){
         classification=normalizer_->classify(f->measurementSession,f->trigger,
@@ -67,6 +75,7 @@ void HostOutput::card(Frame f){
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.correlation=link;r.threadId=GetCurrentThreadId();r.card=card;r.kind=std::uint16_t(TimingKind::CardEnqueue);timing_->observe(r,end-begin>=500000);}
 }
 void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
+    std::lock_guard<std::mutex> lock(normalizationMutex_);
     bool filter=false;
     if(normalizer_){
         for(const auto& f:frames){
@@ -75,6 +84,13 @@ void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,boo
                                                               normalizationTime(f));
             converter_.tagNormalization(f,classification);
             if(classification.decision==PhysicalTriggerDecision::OperationalStartupControl)filter=true;
+            if(classification.measurementSession==timeoutSession_ &&
+               classification.roundGeneration<timeoutGeneration_)filter=true;
+            if(normalizer_->disableCountBoundary() &&
+               classification.decision==PhysicalTriggerDecision::LogicalScan &&
+               classification.logicalTriggerIndex >= 0 &&
+               static_cast<std::uint64_t>(classification.logicalTriggerIndex) >=
+                   normalizer_->configuredLogicalTriggersPerRound())filter=true;
         }
         if(filter)return;
     }
@@ -103,6 +119,7 @@ void HostOutput::consumeCard(Frame f){
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=f->measurementSession;r.correlation=f->firstIngressId;r.threadId=GetCurrentThreadId();r.card=f->card;r.kind=std::uint16_t(TimingKind::CardWorker);r.value0=std::uint32_t(result.save);timing_->observe(r,end-begin>=500000);}
 }
 void HostOutput::consumeSync(const SyncFrame& sync){
+    std::lock_guard<std::mutex> lock(normalizationMutex_);
     const auto begin=SocketReceiver::now();
     std::vector<TriggerGroupPtr> groups;groups.reserve(sync.cards.size());
     for(auto f:sync.cards)groups.push_back(converter_.convert(f));

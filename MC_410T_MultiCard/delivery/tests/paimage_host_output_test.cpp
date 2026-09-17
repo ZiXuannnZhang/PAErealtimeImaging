@@ -285,6 +285,73 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
                 "timeout T3 assembly timeout isolation");
         output.stop();
     }
+    // C1-C3/C8/C13: real card FileSaver and sync/display/Ring paths; the
+    // configured cap never limits raw bytes and is shared across both cards.
+    for (int startup : {0,7}) for (bool disable : {false,true}) {
+        QTemporaryDir root; require(root.isValid());
+        AcqConfig config; config.acqTimeNs=64; config.displayPoints=16;
+        DisplayBuffer d0,d1; FileSaver s0(0),s1(1);
+        std::mutex mutex; std::vector<std::int64_t> indices;
+        std::vector<std::uint64_t> generations; int finals=0,counts=0,timeouts=0;
+        auto ring=[&](const TriggerGroupConstPtr& group) {
+            std::lock_guard<std::mutex> lock(mutex);
+            indices.push_back(group->logicalTriggerIndex); generations.push_back(group->roundGeneration);
+            if(group->roundComplete)++finals;
+            return ImagingSubmitResult::Accepted;
+        };
+        DataProcessor p0(0,nullptr,&d0,nullptr,config,ring),p1(1,nullptr,&d1,nullptr,config,ring);
+        HostOutput output(32,50,{&p0,&p1},{&s0,&s1},nullptr,nullptr,4,
+            [&](const auto& e){
+                if(e.kind==PhysicalRoundEvent::Kind::CountBoundary)++counts;
+                if(e.kind==PhysicalRoundEvent::Kind::TimeoutBoundary)++timeouts;
+            },1.0,startup,disable);
+        output.beginSession(900); output.start();
+        auto saved=output.startSaving(root.path(),100,"cap");
+        require(until([&]{return output.savingApplied(saved);}));
+        auto frame=[](int card,int trigger,std::int64_t time) {
+            auto f=std::make_shared<CardFrame>();f->card=card;f->trigger=trigger;
+            f->measurementSession=900;f->first=time;f->closed=time;
+            f->complete=true;f->reason=Decision::Complete;f->bytes.resize(128);return f;
+        };
+        auto send=[&](int trigger,std::int64_t time) {
+            std::vector<Frame> frames{frame(0,trigger,time),frame(1,trigger,time)};
+            for(auto f:frames)output.card(f);
+            output.sync(trigger,frames,false);
+        };
+        const int logical=disable?6:4;
+        for(int i=0;i<startup+logical;++i)send(100+i,1000000000LL+i);
+        require(until([&]{std::lock_guard<std::mutex> lock(mutex);
+            return s0.savedCount()==logical&&s1.savedCount()==logical&&indices.size()==8;}),
+            "C2 raw >=N saved, only four logical indices per card reach Ring");
+        {std::lock_guard<std::mutex> lock(mutex);
+            for(int i=0;i<8;++i)require(indices[i]==i/2 && generations[i]==0,"C3 multicard shared index");
+            // roundComplete is the frozen one-shot boundary marker: for a
+            // multi-card shared trigger exactly one group -- the frame first
+            // classified as newDistinct -- carries it. The other card is
+            // first classified from the cache with the one-shot suppressed;
+            // isFinalLogicalTrigger stays stable on both.
+            require(finals==(disable?0:1),"C1/C2 stable final only when count enabled");}
+        require(counts==(disable?0:1) && timeouts==0,"C1/C2 boundary policy");
+        require(output.normalizerSnapshot().roundGeneration==(disable?0:1),"C2 cap does not advance generation");
+        if(disable) {
+            require(output.pollPhysicalRoundTimeout(3000000000LL),"C8 active timeout after cap");
+            require(timeouts==1,"C8 exactly one timeout");
+            // Late old sync must not reopen Ring after reset; raw keeps old stamp.
+            output.sync(100+startup,{frame(0,100+startup,3100000000LL),frame(1,100+startup,3100000000LL)},false);
+            for(int i=0;i<startup+1;++i)send(200+i,3200000000LL+i);
+            require(until([&]{std::lock_guard<std::mutex> lock(mutex);
+                return indices.size()==10&&s0.savedCount()==7&&s1.savedCount()==7;}),"C8 new cap opens after startup");
+            std::lock_guard<std::mutex> lock(mutex);
+            require(indices[8]==0&&indices[9]==0&&generations[8]==1&&generations[9]==1&&finals==0,
+                    "C7/C8 old late sync suppressed; new index zero, no synthetic final");
+        }
+        auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));output.stop();
+        for(int card=1;card<=2;++card) {
+            QFile file(root.filePath(QString("Card%1_ChA_cap_000.dat").arg(card)));
+            require(file.open(QIODevice::ReadOnly)&&file.size()==logical*16*2,"C2 actual raw bytes beyond cap");
+        }
+        std::cout<<"PASS C1-C3/C8/C13 startup="<<startup<<" disable="<<disable<<" raw="<<logical<<" realtime=4/card\n";
+    }
     // Session A production seam: HostOutput exposes the core policy controls
     // without requiring callers to reach into PhysicalRoundNormalizer.
     {

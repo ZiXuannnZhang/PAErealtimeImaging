@@ -180,6 +180,7 @@ void ImagingDisplayWindow::buildUi()
                 const float *src = m_ringFrame->data()
                     + (index == 1 ? static_cast<size_t>(m_lastDn) * m_lastDn : 0);
                 w->setImage(renderFrame(src, m_lastDn, lo, hi));
+            emit presentationChanged();
             }
         });
         connect(w, &RingImageWidget::autoRangeRequested, this, [this, index]() {
@@ -204,10 +205,12 @@ void ImagingDisplayWindow::buildUi()
                 m_range1 = r;
                 m_bar1->setRange(r.lower, r.upper);
                 m_img1->setImage(renderFrame(src, m_lastDn, r.lower, r.upper));
+            emit presentationChanged();
             } else {
                 m_range2 = r;
                 m_bar2->setRange(r.lower, r.upper);
                 m_img2->setImage(renderFrame(src, m_lastDn, r.lower, r.upper));
+            emit presentationChanged();
             }
         });
         connect(w, &RingImageWidget::resetViewRequested, w, &RingImageWidget::resetView);
@@ -232,6 +235,7 @@ void ImagingDisplayWindow::buildUi()
                 + (index == 1 ? static_cast<size_t>(m_lastDn) * m_lastDn : 0);
             RingImageWidget *w = index == 0 ? m_img1 : m_img2;
             w->setImage(renderFrame(src, m_lastDn, lo, hi));
+            emit presentationChanged();
         }
     };
     connect(m_bar1, &RingColorBarWidget::rangeEdited, this,
@@ -308,11 +312,19 @@ void ImagingDisplayWindow::applyRingFrame(std::shared_ptr<std::vector<float>> fr
 bool ImagingDisplayWindow::saveWindowPngs(const QString &dir, const QString &suffix,
                                           int seq) const
 {
-    constexpr int kOut = 1600;
+    const auto writer = capturePngWriter(seq);
+    return writer && writer(dir, suffix);
+}
+
+ImagingDisplayWindow::PngWriter ImagingDisplayWindow::capturePngWriter(int seq) const
+{
+    const auto frame = m_ringFrame;
+    const auto range1 = m_range1, range2 = m_range2;
     const int srcN = m_lastDn;
-    if (srcN <= 0 || !m_ringFrame ||
-        m_ringFrame->size() < static_cast<size_t>(srcN) * srcN * 2)
-        return false;
+    if (srcN <= 0 || !frame || frame->size() < static_cast<size_t>(srcN) * srcN * 2)
+        return {};
+    return [frame, range1, range2, srcN, seq](const QString& dir, const QString& suffix) {
+    constexpr int kOut = 1600;
 
     // 与窗口渲染一致的映射：当前手动/自适应色标范围（m_range1/2），块平均降采样到 1600²；
     // 方向与 renderFrame 相同（列=x、行自顶向下 y 由小到大，顺时针展开）
@@ -348,9 +360,8 @@ bool ImagingDisplayWindow::saveWindowPngs(const QString &dir, const QString &suf
         return img;
     };
 
-    const QImage img1 = render(m_ringFrame->data(), m_range1);
-    const QImage img2 = render(m_ringFrame->data() + static_cast<size_t>(srcN) * srcN,
-                               m_range2);
+    const QImage img1 = render(frame->data(), range1);
+    const QImage img2 = render(frame->data() + static_cast<size_t>(srcN) * srcN, range2);
     if (img1.isNull() || img2.isNull()) return false;
 
     const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
@@ -361,6 +372,7 @@ bool ImagingDisplayWindow::saveWindowPngs(const QString &dir, const QString &suf
     ok = img1.save(QDir(dir).filePath(base + tag + "_532nm.png"), "PNG") && ok;
     ok = img2.save(QDir(dir).filePath(base + tag + "_1064nm.png"), "PNG") && ok;
     return ok;
+    };
 }
 
 void ImagingDisplayWindow::showImage(const QVector<float> &, int, int, int)

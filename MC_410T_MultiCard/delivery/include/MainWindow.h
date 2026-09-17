@@ -1,5 +1,6 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
+#include "TimeoutPresentation.h"
 
 #include <QMainWindow>
 #include <QTimer>
@@ -206,8 +207,6 @@ private:
     QTimer *m_diagnosticStatusTimer;
     QTimer *m_systemCaptureStatusTimer;
     QTimer *m_displayTimer;   // 30fps pull 定时器
-    QTimer *m_ringTimeoutTimer = nullptr;   // 物理空闲超时到点保存 PNG
-    std::atomic<bool> m_ringTimeoutSaveDone{false};  // shared timeout boundary/UI timer de-dup
 
     // 状态标志
     bool m_isListening;
@@ -319,6 +318,8 @@ private:
     // TimeoutBoundary 立即清零、CountBoundary 保留帧末驱动清零。
     // 取代原 m_ringBlockCounter / m_imagingFrameCount（单一事实来源，可测试）。
     paimage::RingRoundUiState m_roundUi;
+    paimage::TimeoutPresentation m_timeoutPresentation;
+    void syncTimeoutPngSettings();
     // Count/timeout presentation transitions are retained by old physical
     // round identity until the matching final snapshot arrives.
     paimage::RingRoundPresentationState m_ringPresentation;

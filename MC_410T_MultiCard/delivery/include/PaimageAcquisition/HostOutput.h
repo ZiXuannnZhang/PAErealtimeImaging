@@ -32,6 +32,7 @@ public:
     void stop(){workers_.stop();}
     void requestStop(){workers_.requestStop();}
     void beginSession(std::uint64_t s){
+        std::lock_guard<std::mutex> lock(normalizationMutex_);
         if(measurementSessionBinder_)
             measurementSessionBinder_(s);
         if(normalizer_)normalizer_->beginSession(s);
@@ -48,6 +49,10 @@ public:
     }
     void card(Frame f);
     void sync(std::uint16_t,const std::vector<Frame>&,bool startup);
+    bool pollPhysicalRoundTimeout(std::int64_t now){
+        std::lock_guard<std::mutex> lock(normalizationMutex_);
+        return normalizer_ && normalizer_->timeoutBoundaryIfIdle(now);
+    }
     void setConfiguredLogicalTriggersPerRound(std::uint64_t count){
         if(normalizer_)normalizer_->setConfiguredLogicalTriggersPerRound(count);
     }
@@ -77,6 +82,10 @@ private:
     std::vector<DataProcessor*> processors_;std::vector<FileSaver*> savers_;
     TraceWriter* trace_;TimingWriter* timing_;FrameConverter converter_;OutputWorkers workers_;
     std::unique_ptr<PhysicalRoundNormalizer> normalizer_;
+    // Serialize boundary notification/binding/reset with source enqueue, not
+    // merely the normalizer counters. Observers must never wait on the UI.
+    std::mutex normalizationMutex_;
+    std::uint64_t timeoutSession_ = 0, timeoutGeneration_ = 0;
     SaveSessionResolver saveSessionResolver_;
     MeasurementSessionBinder measurementSessionBinder_;
     std::atomic<bool> configurationRestart_{false};

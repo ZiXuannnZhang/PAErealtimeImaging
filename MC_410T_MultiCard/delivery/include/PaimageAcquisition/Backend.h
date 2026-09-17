@@ -25,7 +25,11 @@ public:
     bool startMeasurement(std::uint64_t);
     bool stopMeasurement();
     void feedback(int card,int type){control_.feedback(card,type);}
-    void poll(){control_.poll(SocketReceiver::now());}
+    void poll(){
+        const auto now = SocketReceiver::now();
+        control_.poll(now);
+        output_.pollPhysicalRoundTimeout(now);
+    }
     bool configured()const{return control_.configured();}
     bool configuring()const{return control_.configuring();}
     const std::vector<bool>& ready()const{return control_.ready();}

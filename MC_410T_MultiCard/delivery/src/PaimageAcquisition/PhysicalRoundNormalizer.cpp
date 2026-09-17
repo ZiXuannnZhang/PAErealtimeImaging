@@ -253,6 +253,27 @@ void PhysicalRoundNormalizer::timeoutBoundary(std::uint64_t measurementSession,
         notify(event);
 }
 
+bool PhysicalRoundNormalizer::timeoutBoundaryIfIdle(std::int64_t now) {
+    PhysicalRoundEvent event;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (currentPhysicalDistinctCount_ == 0 || timeoutResetNs_ <= 0 ||
+            !hasLastDistinctTrigger_ || now < lastDistinctTriggerTimeNs_ ||
+            now - lastDistinctTriggerTimeNs_ < timeoutResetNs_)
+            return false;
+        const auto idle = now - lastDistinctTriggerTimeNs_;
+        const auto last = lastDistinctTriggerSeq_;
+        latchCompletedRoundLocked();
+        resetCurrentRoundLocked();
+        ++roundGeneration_;
+        ++timeoutBoundaryResets_;
+        event = eventLocked(PhysicalRoundEvent::Kind::TimeoutBoundary, 0,
+                            kTimeoutBasis, idle, true, last);
+    }
+    notify(event);
+    return true;
+}
+
 void PhysicalRoundNormalizer::setTimeoutResetSec(double seconds) {
     const auto timeoutNs = timeoutToNs(seconds);
     std::lock_guard<std::mutex> lock(mutex_);

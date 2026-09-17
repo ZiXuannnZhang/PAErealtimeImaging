@@ -12,6 +12,10 @@ add_executable(ring_block_assembler_test
 target_include_directories(ring_block_assembler_test PRIVATE ../include)
 target_compile_features(ring_block_assembler_test PRIVATE cxx_std_17)
 enable_testing()
+add_executable(timeout_presentation_test timeout_presentation_test.cpp ../src/RingRoundUiState.cpp)
+target_include_directories(timeout_presentation_test PRIVATE ../include)
+target_link_libraries(timeout_presentation_test PRIVATE Qt6::Core)
+add_test(NAME timeout_presentation_test COMMAND timeout_presentation_test)
 add_test(NAME ring_block_assembler_test COMMAND ring_block_assembler_test)
 
 add_executable(imaging_bypass_test imaging_bypass_test.cpp ../src/ImagingBypass.cpp)
