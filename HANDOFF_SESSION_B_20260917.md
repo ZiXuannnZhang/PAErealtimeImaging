@@ -9,6 +9,11 @@
 - Implementation code commit: `917a71986d01316a8dcb6a2707739b2a7be29d27`
 - Review addendum code commit: `93a2b9ce5cc40133767f6248900526a825e9b7ad`
   （production 跳号统计修复；详见 `SESSION_B_REVIEW_ADDENDUM_RECEIPT_20260917.md`）
+- Test-stability commit: `55898159668cc366dc7a1dd3f6767efa1adf01b7`
+  （CTest 端口 8001 资源锁，仅 tests/CMakeLists.txt）
+- Second review addendum code commit: `35953ee89c06c193667766468f7f47e6796288e3`
+  （同 session triggerSeq 复位恢复，阈值 256；详见
+  `SESSION_B_REVIEW_ADDENDUM2_RECEIPT_20260917.md`）
 - Final remote HEAD: reported out-of-band in the final execution report / execution receipt
   （receipt commit 只含文档，不改动代码，避免自引用）。
 - Tracked working tree: clean at the code commit and again before push.
@@ -72,8 +77,11 @@
   `Decision::TriggerGap`（count = 完全缺失 trigger 数，T100->T104 记 3）；
   `NetworkControllerPaimage.cpp::observationSink` 消费该事件：
   `missingTriggerCount += count`、`packetsDropped += count * expectedPackets`。
-  回退/迟到 trigger（int16 差值 <= 0）不计数也不移动锚点；锚点随 recent
-  窗口生命周期，`prepareStart/completeStart` session 边界清除。
+  小幅回退/迟到 trigger（直接回退 < 256）不计数也不移动锚点；同 session
+  大幅直接回退（>= 256，与 DataProcessor 冻结阈值
+  `kTriggerResetBackJumpThreshold` 同值同语义）判定为 triggerSeq 复位恢复：
+  重新建立锚点且 reset transition 本身不计 gap、不加丢包当量；锚点随
+  recent 窗口生命周期，`prepareStart/completeStart` session 边界清除。
 - Legacy/test path（保留，与 production 语义一致但只服务
   `DataProcessor::processInputBatch()` 包组装路径，production 不经过）：
   1. 触发切换路径 `if (skipGap > 0)`：`missingTriggerCount += skipGap`
@@ -131,14 +139,26 @@
   partial+full gap 并存、adjacent 不计、uint16 wrap T65534->T1 记 +2、
   backstep/stale 不制造假跳号、session reset 锚点隔离）PASS；
   DataProcessor legacy B1-B4 继续 PASS；完整 ctest 套件 42/42 PASS。
+- Second review addendum（详见 `SESSION_B_REVIEW_ADDENDUM2_RECEIPT_20260917.md`）：
+  `paimage_production_gap_test` 扩展 B-ADD-7（同 session 大幅复位
+  T1000->T10 不计 gap、复位后 T10->T14 记 +3）与 B-ADD-8（阈值边界：
+  backJump 255 不重建锚点、backJump 256 重建锚点），B-ADD-1..8 全 PASS；
+  DataProcessor legacy B1-B4 继续 PASS；完整 ctest 套件 42/42 PASS。
 - Windows 构建：`cmd /c build_mingw_debug.cmd`（configure preset `mingw-debug`
   + build preset `mingw-debug-build`），exit 0，四个必需 exe 齐备。
 
 ## Session C inputs
 
-- 从 `codex/session-b-ui-observability-20260917` 的最终远端 HEAD 开始（代码 commit
-  `917a71986d01316a8dcb6a2707739b2a7be29d27` + 其上的文档 commit；以远端
-  HEAD 为准并核对精确 SHA）。
+- Session C baseline = final remote HEAD of
+  `origin/codex/session-b-ui-observability-20260917` after the second review
+  addendum; exact SHA is provided by the final execution report and must be
+  verified by `git fetch` / `git rev-parse` before Session C starts.
+  不得从 `917a719...`、`5f6d3ff...` 或 `2566a028...` 回退开始：Session B 必需实现
+  = 初始代码 commit `917a71986d01316a8dcb6a2707739b2a7be29d27`
+  + 第一次 review addendum 代码 commit `93a2b9ce5cc40133767f6248900526a825e9b7ad`
+  + test-stability commit `55898159668cc366dc7a1dd3f6767efa1adf01b7`
+  + 第二次 review addendum reset-recovery 代码 commit
+  `35953ee89c06c193667766468f7f47e6796288e3`，缺一不可。
 - `startupFilterTriggerCount` 与 `disableCountBoundary` 已可由用户配置
   （RingConfigDialog UI + RingConfigDialog/Defaults 持久化），并经
   NetworkController/HostOutput/Backend::Settings 正确传至
@@ -160,7 +180,9 @@
 
 ```text
 SESSION_B_SOFTWARE_IMPLEMENTATION = PASS
-SESSION_B_AUTOMATED_TESTS = PASS (ctest 41/41)
+SESSION_B_PAIMAGE_PRODUCTION_GAP_ACCOUNTING = PASS
+SESSION_B_SAME_SESSION_SEQ_RESET_RECOVERY = PASS
+SESSION_B_AUTOMATED_TESTS = PASS (ctest 42/42)
 SESSION_B_WINDOWS_BUILD = PASS
 PHYSICAL_ROUND_HARDWARE_VALIDATION = PENDING
 FPGA/LABVIEW_TRIGGER_SEMANTICS = NOT_PROVEN_BY_SESSION_B
