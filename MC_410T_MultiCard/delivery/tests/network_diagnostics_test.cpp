@@ -65,6 +65,7 @@ bool runtimeStatsFieldMapping()
     stats.packetsDropped = 7;
     stats.triggersComplete = 12;
     stats.triggersPartial = 3;
+    stats.missingTriggerCount = 11;
     stats.triggersDiscarded = 2;
     stats.saveQueueDiscards = 1;
     stats.inputQueueDepth = 100;
@@ -105,6 +106,39 @@ bool runtimeStatsFieldMapping()
                      && fields.value("inputQueueDepth").toInt() == 100
                      && fields.value("saveQueueDepth").toInt() == 5,
                  "legacy runtime field mapping") && ok;
+    ok = require(fields.value("missingTriggerCount").toDouble() == 11,
+                 "runtime missingTriggerCount mapping") && ok;
+    return ok;
+}
+
+// Session B：物理轮次启动策略经 NetworkController production setter 传播并
+// 可由 physicalRoundSnapshot() 反映（backend 未创建时经成员回退路径）。
+// 与 RoundPolicySettings helper 组合覆盖“保存 default 后未打开对话框也能
+// 在启动时获得已保存 policy”与“Apply/OK 后更新 controller policy”两条链路。
+bool roundPolicyPropagation()
+{
+    NetworkController controller;
+    // 出厂/无历史默认与 Session A 编译期默认一致：1 / false
+    bool ok = require(controller.physicalRoundSnapshot().startupFilterTriggerCount == 1
+                          && !controller.physicalRoundSnapshot().disableCountBoundary,
+                      "controller default policy 1/false");
+    // Apply/OK 转发路径调用的正是这两个 setter
+    controller.setStartupFilterTriggerCount(7);
+    controller.setDisableCountBoundary(true);
+    const auto applied = controller.physicalRoundSnapshot();
+    ok = require(applied.startupFilterTriggerCount == 7 && applied.disableCountBoundary,
+                 "setter policy reflected in snapshot") && ok;
+    // 参数独立性：X=0 不改变 disable；disable=false 不改变 X
+    controller.setStartupFilterTriggerCount(0);
+    const auto zeroFilter = controller.physicalRoundSnapshot();
+    ok = require(zeroFilter.startupFilterTriggerCount == 0 && zeroFilter.disableCountBoundary,
+                 "X=0 independent of disableCountBoundary") && ok;
+    controller.setStartupFilterTriggerCount(7);
+    controller.setDisableCountBoundary(false);
+    const auto enabledBoundary = controller.physicalRoundSnapshot();
+    ok = require(enabledBoundary.startupFilterTriggerCount == 7
+                     && !enabledBoundary.disableCountBoundary,
+                 "disable=false independent of X=7") && ok;
     return ok;
 }
 
@@ -394,6 +428,7 @@ int main(int argc, char **argv) {
     options.rootDirectory=temporary.path(); options.noiseBurst=0;
     auto *recorder=DiagnosticRecorder::initialize(options);
     const bool ok=runtimeStatsFieldMapping()
+        && roundPolicyPropagation()
         && NetworkDiagnosticTestAccess::exercise(4) && NetworkDiagnosticTestAccess::exercise(5)
         && NetworkDiagnosticTestAccess::pendingSessionCleanup()
         && (legacyControlOnly || (NetworkDiagnosticTestAccess::measurementBoundaryEvidence()

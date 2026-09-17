@@ -174,6 +174,8 @@ QJsonObject NetworkController::runtimeStatsFields(const CardStats::Snapshot& sta
                   static_cast<double>(stats.triggersComplete));
     fields.insert(QStringLiteral("triggersPartial"),
                   static_cast<double>(stats.triggersPartial));
+    fields.insert(QStringLiteral("missingTriggerCount"),
+                  static_cast<double>(stats.missingTriggerCount));
     fields.insert(QStringLiteral("triggersDiscarded"),
                   static_cast<double>(stats.triggersDiscarded));
     fields.insert(QStringLiteral("saveQueueDiscards"),

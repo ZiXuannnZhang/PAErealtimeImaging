@@ -173,6 +173,10 @@ if(WIN32)
     target_include_directories(card_status_formatting_test PRIVATE ../include)
     target_link_libraries(card_status_formatting_test PRIVATE Qt6::Core)
     add_test(NAME card_status_formatting_test COMMAND card_status_formatting_test)
+    add_executable(round_policy_settings_test round_policy_settings_test.cpp)
+    target_include_directories(round_policy_settings_test PRIVATE ../include)
+    target_link_libraries(round_policy_settings_test PRIVATE Qt6::Core)
+    add_test(NAME round_policy_settings_test COMMAND round_policy_settings_test)
     add_subdirectory(paimage_core)
     target_sources(network_diagnostics_test PRIVATE
         ../src/PaimageAcquisition/HostOutput.cpp

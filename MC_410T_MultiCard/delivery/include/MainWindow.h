@@ -68,9 +68,13 @@ public:
     ~MainWindow();
 
     // 逐卡状态栏的稳定文本/tooltip 格式，UI 与无窗口单元测试共用。
+    // round 为全局物理轮次显示态（已采集/已过滤），由 onUpdateStatistics 每个
+    // refresh tick 从 Normalizer snapshot 计算一次后传给每卡格式化。
     static QString formatCardStatusText(int cardNumber,
-                                        const CardStats::Snapshot& stats);
-    static QString formatCardStatusTooltip(const CardStats::Snapshot& stats);
+                                        const CardStats::Snapshot& stats,
+                                        const CardStatusFormatting::RoundDisplay& round);
+    static QString formatCardStatusTooltip(const CardStats::Snapshot& stats,
+                                           const CardStatusFormatting::RoundDisplay& round);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -330,6 +334,7 @@ private:
     void stopRingFeedWorker();
     ImagingSubmitResult ringFeedSink(const TriggerGroupConstPtr& frame);
     void configureRingAssembler();     // 按控制器环形配置初始化组包器
+    void ensureRingConfigDialog();     // 惰性创建环形参数窗口并接通物理轮次策略转发
     bool loadTestImagingData();        // 加载测试数据bin文件
 
     // 实时重建图像保存（随数据保存开关联动）

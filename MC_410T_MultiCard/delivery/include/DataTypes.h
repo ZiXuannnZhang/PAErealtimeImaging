@@ -126,6 +126,10 @@ struct CardStats {
     std::atomic<uint64_t> packetsDropped{0};
     std::atomic<uint64_t> triggersComplete{0};
     std::atomic<uint64_t> triggersPartial{0};
+    // 跳号数：由 forward triggerSeq gap 推断出的、完全 0 包到达的 missing
+    // trigger 累计数量（per-card observability；T100->T104 记 +3）。
+    // 部分到达的 trigger 只计入 triggersPartial/包级丢包，不在此计数。
+    std::atomic<uint64_t> missingTriggerCount{0};
     std::atomic<uint64_t> triggersDiscarded{0};
     std::atomic<uint64_t> saveQueueDiscards{0};  // 存储队列满导致的丢弃（triggersDiscarded 子集）
     // 分层采集计数：socket 成功接收、processor 成功出队，以及
@@ -219,6 +223,7 @@ struct CardStats {
         uint64_t packetsDropped  = 0;
         uint64_t triggersComplete = 0;
         uint64_t triggersPartial  = 0;
+        uint64_t missingTriggerCount = 0;   // 跳号数：完全 0 包到达的 missing trigger 累计
         double   recvMbps         = 0.0;
         double   triggerHz        = 0.0;
         double   packetLossRate   = 0.0;
@@ -250,6 +255,7 @@ struct CardStats {
         s.packetsDropped   = packetsDropped.load(std::memory_order_relaxed);
         s.triggersComplete = triggersComplete.load(std::memory_order_relaxed);
         s.triggersPartial  = triggersPartial.load(std::memory_order_relaxed);
+        s.missingTriggerCount = missingTriggerCount.load(std::memory_order_relaxed);
         s.recvMbps         = recvMbps;
         s.triggerHz        = triggerHz;
         s.packetLossRate   = packetLossRate;

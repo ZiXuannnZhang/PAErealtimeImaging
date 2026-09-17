@@ -31,6 +31,15 @@ public:
     void sysDelayPerChannel(int out[8][2]) const;   // 每通道双波长延时截断（[通道][波长]）
     bool applyConfig();                   // 校验并下发配置（应用/确定共用）
 
+    // 物理轮次启动策略控件当前值（Session B；持久化见 RoundPolicySettings）
+    quint64 startupFilterTriggerCount() const;
+    bool    disableCountBoundary() const;
+
+signals:
+    // applyConfig 成功（应用/确定/成像启动下发）后发出，由 MainWindow 转发给
+    // NetworkController::setStartupFilterTriggerCount / setDisableCountBoundary。
+    void roundPolicyChanged(quint64 startupFilterTriggerCount, bool disableCountBoundary);
+
 protected:
     void showEvent(QShowEvent *event) override;   // 每次显示时套用记忆的大小
     void hideEvent(QHideEvent *event) override;   // 记忆上次关闭前的大小
@@ -59,6 +68,10 @@ private:
     QSpinBox        *m_spnTotalAlines;    // 单圈总A线数（含双波长）
     QDoubleSpinBox  *m_spnSectorStart;
     QDoubleSpinBox  *m_spnTimeoutReset;   // 超时重置（秒，0=关闭）
+    // 物理轮次启动策略（Session B）：持久化于 RingConfigDialog/Defaults，
+    // 经 RoundPolicySettings 读写； Apply/OK 成功后经 roundPolicyChanged 下发
+    QSpinBox        *m_spnStartupFilterTriggers;  // 启动过滤触发数（distinct physical trigger，0=不过滤）
+    QCheckBox       *m_chkDisableCountBoundary;   // 禁用计数重置（勾选后仅超时为轮次边界）
     // 重建参数
     QDoubleSpinBox  *m_spnFovMm;
     QDoubleSpinBox  *m_spnGridMm;

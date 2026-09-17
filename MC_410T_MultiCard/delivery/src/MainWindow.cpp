@@ -6,6 +6,7 @@
 #include "NetworkController.h"
 #include "ImagingController.h"
 #include "RingConfigDialog.h"
+#include "RoundPolicySettings.h"
 #include "ImagingDisplayWindow.h"
 #include "RingBlockAssembler.h"
 #include "RingRoundPresentation.h"
@@ -2308,6 +2309,15 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     m_netController->setDiagnosticContext(
         m_diagnosticListenId,
         targetSourceKind);
+    // 物理轮次启动策略（Session B）：读取“设为默认”保存值。即使本次启动后用户
+    // 尚未打开 RingConfigDialog，保存的 policy 也在 PAimage backend 创建前经
+    // controller 成员生效（createPaimageBackend 时写入 Backend::Settings）；
+    // 无保存历史时 helper 回退出厂 1 / false，与 Session A 编译期默认一致。
+    {
+        const RoundPolicySettings::Policy roundPolicy = RoundPolicySettings::loadDefault();
+        m_netController->setStartupFilterTriggerCount(roundPolicy.startupFilterTriggerCount);
+        m_netController->setDisableCountBoundary(roundPolicy.disableCountBoundary);
+    }
     // Preserve the ring dialog's canonical timeout even if the ImagingSvc
     // is currently stopped. The PAimage normalizer is created with this
     // value when the listener starts.
@@ -3026,9 +3036,7 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
         // 实时成像期间锁定成像参数与采集控制，避免运行中修改参数引发重启竞态/尺寸不匹配
         setImagingParamControlsEnabled(false);
         if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
-            if (!m_ringConfigDialog) {
-                m_ringConfigDialog = new RingConfigDialog(m_imagingController, this);
-            }
+            ensureRingConfigDialog();
             m_ringConfigDialog->setAcquisitionParams(
                 m_sampleIntervalNs, ui->edtDataTime->text().toInt());
             m_ringConfigDialog->applyConfig();
@@ -3430,14 +3438,16 @@ void MainWindow::updateSpectrumPlot(int cardId, int channel,
 // 统计更新（1Hz/2Hz）
 // =====================================================================
 QString MainWindow::formatCardStatusText(int cardNumber,
-                                         const CardStats::Snapshot& stats)
+                                         const CardStats::Snapshot& stats,
+                                         const CardStatusFormatting::RoundDisplay& round)
 {
-    return CardStatusFormatting::text(cardNumber, stats);
+    return CardStatusFormatting::text(cardNumber, stats, round);
 }
 
-QString MainWindow::formatCardStatusTooltip(const CardStats::Snapshot& stats)
+QString MainWindow::formatCardStatusTooltip(const CardStats::Snapshot& stats,
+                                            const CardStatusFormatting::RoundDisplay& round)
 {
-    return CardStatusFormatting::tooltip(stats);
+    return CardStatusFormatting::tooltip(stats, round);
 }
 
 void MainWindow::onUpdateStatistics()
@@ -3512,6 +3522,12 @@ void MainWindow::onUpdateStatistics()
     const double HIGH_RATE_THRESHOLD = 800.0;
     bool anyExceeds = false;
 
+    // 物理轮次显示态（Session B）：每个 refresh tick 最多读取一次 Normalizer
+    // snapshot，按 current/lastCompleted fallback 规则求出 已采集/已过滤，
+    // 再传给每卡格式化（全局轮次数据，各卡行相同是预期行为）。
+    const CardStatusFormatting::RoundDisplay roundDisplay =
+        CardStatusFormatting::roundDisplayForUi(m_netController->physicalRoundSnapshot());
+
     for (int i = 0; i < CARDS_PER_DISPLAY_GROUP; ++i) {
         int globalCard = firstGlobal + i;
         int virtualCardNum = globalCard + 1;
@@ -3527,10 +3543,10 @@ void MainWindow::onUpdateStatistics()
             const auto &s = statsOpt.value();
             if (s.recvMbps > HIGH_RATE_THRESHOLD) anyExceeds = true;
 
-            // 常驻栏只显示“丢失”；详细采集统计集中放入 tooltip，避免
+            // 常驻栏只显示 缺失/跳号数/已采集；详细采集统计集中放入 tooltip，避免
             // 状态栏文本随计数增长而撑宽布局或掩盖关键信息。
-            m_lblStats[i]->setText(formatCardStatusText(virtualCardNum, s));
-            m_lblStats[i]->setToolTip(formatCardStatusTooltip(s));
+            m_lblStats[i]->setText(formatCardStatusText(virtualCardNum, s, roundDisplay));
+            m_lblStats[i]->setToolTip(formatCardStatusTooltip(s, roundDisplay));
 
             // 存储队列满 → 非阻塞告警（冷却期内不重复）
             uint64_t newDisc = s.saveQueueDiscards;
@@ -4412,13 +4428,25 @@ void MainWindow::closeEvent(QCloseEvent *event)
 // 成像相关槽函数
 // =====================================================================
 
+void MainWindow::ensureRingConfigDialog()
+{
+    if (m_ringConfigDialog) return;
+    m_ringConfigDialog = new RingConfigDialog(m_imagingController, this);
+    // Session B：RingConfigDialog 应用/确定（含成像启动下发）成功后，把当前
+    // 物理轮次启动策略转发给当前 NetworkController 的 Session A production API。
+    connect(m_ringConfigDialog, &RingConfigDialog::roundPolicyChanged,
+            this, [this](quint64 startupFilterCount, bool disableCountBoundary) {
+        if (!m_netController) return;
+        m_netController->setStartupFilterTriggerCount(startupFilterCount);
+        m_netController->setDisableCountBoundary(disableCountBoundary);
+    });
+}
+
 void MainWindow::onImagingConfigClicked()
 {
     // 成像方式=环形扫描时，成像参数按钮打开环形扫描参数设定窗口
     if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
-        if (!m_ringConfigDialog) {
-            m_ringConfigDialog = new RingConfigDialog(m_imagingController, this);
-        }
+        ensureRingConfigDialog();
         m_ringConfigDialog->setAcquisitionParams(
             m_sampleIntervalNs, ui->edtDataTime->text().toInt());
         m_ringConfigDialog->exec();
