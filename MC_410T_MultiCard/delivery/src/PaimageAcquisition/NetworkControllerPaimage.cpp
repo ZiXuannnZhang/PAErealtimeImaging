@@ -85,12 +85,15 @@ bool NetworkController::createPaimageBackend(QString& error){
                  ? QJsonValue(static_cast<int>(event.lastDistinctTriggerSeq)) : QJsonValue()},
             {"nextVisibleTriggerSeq",event.hasNextVisibleTriggerSeq
                  ? QJsonValue(static_cast<int>(event.nextVisibleTriggerSeq)) : QJsonValue()},
-            {"firstVisibleFilterMode",true},
+            {"firstVisibleFilterMode",event.startupFilterTriggerCount > 0},
             {"filterLayer","paimage-host-output"},
             {"packetLossAccounting","unchanged"},
             {"filterClassification","software-operational"},
             {"filterIsNotNetworkLoss",true},
-            {"acceptedControlInvisibleRisk","first-visible-scan-may-be-filtered"}};
+            {"acceptedControlInvisibleRisk",
+             event.startupFilterTriggerCount > 0
+                 ? "startup-filter-may-consume-visible-scan"
+                 : "none"}};
         recordDiagnosticEvent(QStringLiteral("paimage.round"),message,
                               DiagnosticRecorder::Severity::Info,fields);
         if(m_physicalRoundBoundarySink)m_physicalRoundBoundarySink(event);
