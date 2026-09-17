@@ -82,10 +82,16 @@ private:
         std::uint32_t sourceIPv4=0;
         std::vector<std::uint32_t> seen; std::vector<std::uint16_t> lengths;
         std::vector<std::uint8_t> bytes; std::deque<std::uint16_t> recent;
-        // Full-trigger-gap anchor: last forward-accepted trigger on this card.
-        // Shares the recent-window lifetime; session resets clear both.
+        // Full-trigger-gap anchor: last forward-accepted (or reset-recovered)
+        // trigger on this card. Shares the recent-window lifetime; session
+        // resets clear both.
         std::uint16_t gapAnchor=0; bool gapAnchorValid=false;
     };
+    // Same-session triggerSeq reset-recovery threshold for the gap tracker:
+    // a large direct back-jump (>= this value) re-establishes the gap anchor
+    // without counting a gap for the reset transition itself. Same value and
+    // frozen semantics as DataProcessor::kTriggerResetBackJumpThreshold.
+    static constexpr std::int32_t kTriggerResetBackJumpThreshold=256;
     struct Pending { std::uint16_t trigger=0; Time first=0; std::vector<Frame> cards; };
     std::list<Pending>::iterator findOrInsertPending(std::uint16_t,Time);
     void clearAssembly(Assembly&,bool recent=false);

@@ -10,12 +10,13 @@
 #include <stdexcept>
 #include <vector>
 
-// Session B review addendum: deterministic production-seam proof that the
+// Session B review addenda: deterministic production-seam proof that the
 // PAimage ingress (NetworkController -> Backend -> SocketReceiver ->
 // SourceCore -> observationSink) accounts full triggerSeq gaps into
 // CardStats::missingTriggerCount / packetsDropped with the frozen semantics
-// (T100 -> T104 == +3 triggers and +3 * expectedPackets). Loopback UDP only;
-// no hardware claim.
+// (T100 -> T104 == +3 triggers and +3 * expectedPackets), including
+// same-session triggerSeq reset recovery at the frozen back-jump threshold
+// 256 aligned with DataProcessor. Loopback UDP only; no hardware claim.
 namespace {
 void require(bool b,const char* message){if(!b)throw std::runtime_error(message);}
 template<class F> bool until(F f){QElapsedTimer timer;timer.start();while(!f()&&timer.elapsed()<5000){QCoreApplication::processEvents();QThread::msleep(1);}return f();}
@@ -196,6 +197,66 @@ void sessionResetClearsAnchor(){
     s.end();
     std::cout<<"PASS B-ADD-6 production session reset: T100 then T120 after restart, missing=0\n";
 }
+// B-ADD-7: same-session large triggerSeq reset recovery. The reset transition
+// itself adds no gap and no dropped equivalents; the re-established anchor
+// immediately resumes normal forward gap accounting.
+void sameSessionResetRecovery(){
+    Scenario s;s.begin(512);
+    s.card.trigger(1000,1);
+    require(until([&]{return s.stats().triggersComplete==1;}),"T1000 complete");
+    s.card.trigger(10,1); // backJump 990 >= 256: reset recovery, no gap
+    require(until([&]{return s.stats().triggersComplete==2;}),"T10 reset trigger complete");
+    s.settle();
+    {
+        const auto v=s.stats();
+        require(v.missingTriggerCount==0,"B-ADD-7 reset transition adds no missing triggers");
+        require(v.packetsDropped==0,"B-ADD-7 reset transition adds no dropped equivalents");
+    }
+    s.card.trigger(14,1); // forward gap from the re-established anchor
+    require(until([&]{return s.stats().triggersComplete==3;}),"T14 complete");
+    s.settle();
+    const auto v=s.stats();
+    require(v.missingTriggerCount==3,"B-ADD-7 post-reset missingTriggerCount == 3");
+    require(v.packetsDropped==3,"B-ADD-7 post-reset packetsDropped == 3 * expectedPackets(1)");
+    s.end();
+    std::cout<<"PASS B-ADD-7 production same-session reset: T1000->T10 no gap, T10->T14 missing=3 dropped=3\n";
+}
+
+// B-ADD-8: reset back-jump threshold boundary. backJump 255 stays a small
+// backstep (anchor kept, later triggers stay adjacent to it); backJump 256 is
+// reset recovery (anchor re-established, later gaps count from it).
+void resetThresholdBoundary(){
+    {
+        Scenario s;s.begin(512);
+        s.card.trigger(400,1);
+        require(until([&]{return s.stats().triggersComplete==1;}),"A: T400 complete");
+        s.card.trigger(145,1); // direct backJump 255 < 256: small backstep
+        require(until([&]{return s.stats().triggersComplete==2;}),"A: T145 backstep assembles");
+        s.card.trigger(401,1); // must stay adjacent to the kept anchor T400
+        require(until([&]{return s.stats().triggersComplete==3;}),"A: T401 complete");
+        s.settle();
+        const auto v=s.stats();
+        require(v.missingTriggerCount==0,"B-ADD-8A backJump 255 must not re-anchor or count a gap");
+        require(v.packetsDropped==0,"B-ADD-8A no dropped equivalents");
+        s.end();
+        std::cout<<"PASS B-ADD-8A production threshold 255: T400->T145 backstep, T401 adjacent, missing=0\n";
+    }
+    {
+        Scenario s;s.begin(512);
+        s.card.trigger(400,1);
+        require(until([&]{return s.stats().triggersComplete==1;}),"B: T400 complete");
+        s.card.trigger(144,1); // direct backJump 256 >= 256: reset recovery
+        require(until([&]{return s.stats().triggersComplete==2;}),"B: T144 reset trigger complete");
+        s.card.trigger(148,1); // forward gap +3 from the re-established anchor
+        require(until([&]{return s.stats().triggersComplete==3;}),"B: T148 complete");
+        s.settle();
+        const auto v=s.stats();
+        require(v.missingTriggerCount==3,"B-ADD-8B backJump 256 must re-anchor then count gap +3");
+        require(v.packetsDropped==3,"B-ADD-8B packetsDropped == 3 * expectedPackets(1)");
+        s.end();
+        std::cout<<"PASS B-ADD-8B production threshold 256: T400->T144 reset, T144->T148 missing=3 dropped=3\n";
+    }
+}
 }
 
 int main(int argc,char** argv){
@@ -209,8 +270,10 @@ int main(int argc,char** argv){
         wrapForward();
         backstepNoFalseGap();
         sessionResetClearsAnchor();
+        sameSessionResetRecovery();
+        resetThresholdBoundary();
     }catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';WSACleanup();return 1;}
     WSACleanup();
-    std::cout<<"PASS paimage production trigger-gap accounting: B-ADD-1..6\n";
+    std::cout<<"PASS paimage production trigger-gap accounting: B-ADD-1..8\n";
     return 0;
 }

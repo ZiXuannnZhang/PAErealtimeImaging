@@ -103,12 +103,21 @@ Decision SourceCore::ingest(int c,const std::uint8_t* p,std::size_t n,Time now,s
     if(!a.active){
         // Full-trigger-gap observation, emitted exactly once per fresh
         // assembly activation (the only point both the TriggerSwitch and the
-        // empty-assembly paths pass through). Forward progression moves the
-        // anchor; backstep/late triggers (delta<=0) never count or move it.
+        // empty-assembly paths pass through). Decision order: signed uint16
+        // wrap-aware forward progression first (delta>0 counts delta-1 and
+        // moves the anchor, so wrap forward is never mistaken for a reset);
+        // then a large direct back-jump (>= kTriggerResetBackJumpThreshold)
+        // is a same-session triggerSeq reset recovery that re-establishes
+        // the anchor without counting a gap; smaller backstep/late triggers
+        // neither count nor move the anchor.
         if(a.gapAnchorValid){
             const auto delta=static_cast<std::int16_t>(trigger-a.gapAnchor);
-            if(delta>1)event(Decision::TriggerGap,c,trigger,packet,std::uint32_t(delta-1),now,ingressId);
-            if(delta>0)a.gapAnchor=trigger;
+            if(delta>0){
+                if(delta>1)event(Decision::TriggerGap,c,trigger,packet,std::uint32_t(delta-1),now,ingressId);
+                a.gapAnchor=trigger;
+            }else if(static_cast<std::int32_t>(a.gapAnchor)-static_cast<std::int32_t>(trigger)>=kTriggerResetBackJumpThreshold){
+                a.gapAnchor=trigger;
+            }
         }else{a.gapAnchor=trigger;a.gapAnchorValid=true;}
         a.active=true;a.trigger=trigger;a.base=packet;a.first=now;a.firstIngressId=ingressId;a.sourceIPv4=sourceIPv4;}
     ++a.actual;a.last=now;
