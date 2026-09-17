@@ -168,6 +168,11 @@ if(WIN32)
         DATA_PROCESSOR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(data_processor_batch_test PRIVATE Qt6::Core ws2_32)
     add_test(NAME data_processor_batch_test COMMAND data_processor_batch_test)
+    # session_boundary_receiver_test and data_processor_batch_test both bind the
+    # fixed production port BASE_PORT(8001) via MultiPortReceiver; a resource
+    # lock keeps them from overlapping under ctest -j (pre-existing race).
+    set_tests_properties(session_boundary_receiver_test data_processor_batch_test
+        PROPERTIES RESOURCE_LOCK paimage_base_port_8001)
 
     add_executable(card_status_formatting_test card_status_formatting_test.cpp)
     target_include_directories(card_status_formatting_test PRIVATE ../include)
