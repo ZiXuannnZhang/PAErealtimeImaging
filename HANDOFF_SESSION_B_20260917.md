@@ -7,6 +7,8 @@
 - Session A base SHA: `eb283f64574d9043f4d4823338c31767c3b811fe`
   （`codex/session-a-round-policy-core-20260917-114452` 最终远端 HEAD，task-specific baseline override）
 - Implementation code commit: `917a71986d01316a8dcb6a2707739b2a7be29d27`
+- Review addendum code commit: `93a2b9ce5cc40133767f6248900526a825e9b7ad`
+  （production 跳号统计修复；详见 `SESSION_B_REVIEW_ADDENDUM_RECEIPT_20260917.md`）
 - Final remote HEAD: reported out-of-band in the final execution report / execution receipt
   （receipt commit 只含文档，不改动代码，避免自引用）。
 - Tracked working tree: clean at the code commit and again before push.
@@ -65,7 +67,15 @@
   进入 `CardStats::Snapshot`、`CardStats::snapshot()` 与
   `NetworkController::runtimeStatsFields()`（runtime diagnostics JSON key
   `missingTriggerCount`）。未复用 `triggersDiscarded`。
-- 增量位置（`MC_410T_MultiCard/delivery/src/DataProcessor.cpp`）：
+- Production owner（review addendum 修复后）：`paimage::SourceCore` 在 production
+  ingress 的 per-card assembly 激活点维护 forward trigger 锚点，发射一次
+  `Decision::TriggerGap`（count = 完全缺失 trigger 数，T100->T104 记 3）；
+  `NetworkControllerPaimage.cpp::observationSink` 消费该事件：
+  `missingTriggerCount += count`、`packetsDropped += count * expectedPackets`。
+  回退/迟到 trigger（int16 差值 <= 0）不计数也不移动锚点；锚点随 recent
+  窗口生命周期，`prepareStart/completeStart` session 边界清除。
+- Legacy/test path（保留，与 production 语义一致但只服务
+  `DataProcessor::processInputBatch()` 包组装路径，production 不经过）：
   1. 触发切换路径 `if (skipGap > 0)`：`missingTriggerCount += skipGap`
      （T100->T104 记 +3）；
   2. 空缓冲区/last-flushed 锚点路径 `if (gap > 0)`：`missingTriggerCount += gap`。
@@ -114,6 +124,13 @@
   + 默认 1/false）——PASS（`--legacy-control-only`，exit 0）。
 - Session A 回归：`physical_round_normalizer_test`、`paimage_host_output_test` PASS；
   完整 ctest 套件 41/41 PASS。
+- Review addendum（详见 `SESSION_B_REVIEW_ADDENDUM_RECEIPT_20260917.md`）：
+  新增 `paimage_production_gap_test`，经 loopback UDP 走完整
+  NetworkController→Backend→SocketReceiver→SourceCore→observationSink→CardStats
+  production 路径，B-ADD-1..6（full gap T100->T104 记 +3 与 +3*expectedPackets、
+  partial+full gap 并存、adjacent 不计、uint16 wrap T65534->T1 记 +2、
+  backstep/stale 不制造假跳号、session reset 锚点隔离）PASS；
+  DataProcessor legacy B1-B4 继续 PASS；完整 ctest 套件 42/42 PASS。
 - Windows 构建：`cmd /c build_mingw_debug.cmd`（configure preset `mingw-debug`
   + build preset `mingw-debug-build`），exit 0，四个必需 exe 齐备。
 
@@ -133,6 +150,11 @@
   Normalizer 状态机、X=0/1/N 与 disableCountBoundary 语义、
   RoundPolicySettings 单一持久化源、missingTriggerCount/缺失/跳号数/丢包/
   已采集/已过滤 口径、current→lastCompleted fallback 均已冻结并通过审查链。
+- `missingTriggerCount` / 完整 missing-trigger 的 `packetsDropped` 包当量统计
+  已在 production PAimage ingress（SourceCore `Decision::TriggerGap` →
+  NetworkControllerPaimage `observationSink`）完成，Session C 不需要也不应
+  再实现一遍；DataProcessor `processInputBatch()` 中的同名逻辑是 legacy/test
+  packet-assembly 路径的保留实现，production 数据不经过它。
 
 ## Hardware/system validation boundary
 
