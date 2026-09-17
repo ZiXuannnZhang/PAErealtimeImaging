@@ -22,7 +22,7 @@ enum class Decision : std::uint16_t { Accepted, Short, Disabled, RecentTrigger,
     CompleteStartPendingSyncDiscard, CompleteStartActiveDiscard,
     StartFencePreStartDiscard, StartFenceHeld, StartFenceReleased,
     StartFenceFailedDiscard, StartFenceOverflow, StartFenceResetDiscard,
-    StartFenceStopDiscard, StartFenceShutdownDiscard };
+    StartFenceStopDiscard, StartFenceShutdownDiscard, TriggerGap };
 struct Observation {
     Decision decision{}; int card=-1; std::uint16_t trigger=0, packet=0;
     std::uint32_t count=0; Time time=0; std::uint64_t firstIngressId=0;
@@ -82,6 +82,9 @@ private:
         std::uint32_t sourceIPv4=0;
         std::vector<std::uint32_t> seen; std::vector<std::uint16_t> lengths;
         std::vector<std::uint8_t> bytes; std::deque<std::uint16_t> recent;
+        // Full-trigger-gap anchor: last forward-accepted trigger on this card.
+        // Shares the recent-window lifetime; session resets clear both.
+        std::uint16_t gapAnchor=0; bool gapAnchorValid=false;
     };
     struct Pending { std::uint16_t trigger=0; Time first=0; std::vector<Frame> cards; };
     std::list<Pending>::iterator findOrInsertPending(std::uint16_t,Time);

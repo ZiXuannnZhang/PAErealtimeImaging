@@ -40,7 +40,7 @@ void SourceCore::clearAssembly(Assembly& a,bool recent) {
     a.active=false;a.trigger=a.base=0;a.actual=a.unique=0;a.first=a.last=0;
     a.firstIngressId=0;
     std::fill(a.seen.begin(),a.seen.end(),0);std::fill(a.lengths.begin(),a.lengths.end(),0);
-    if(recent)a.recent.clear();
+    if(recent){a.recent.clear();a.gapAnchor=0;a.gapAnchorValid=false;}
 }
 void SourceCore::prepareStart(std::uint64_t diagnosticSession,Time now) {
     for(const auto& p:pending_)for(const auto& f:p.cards)if(f)
@@ -100,7 +100,17 @@ Decision SourceCore::ingest(int c,const std::uint8_t* p,std::size_t n,Time now,s
     if(std::find(a.recent.begin(),a.recent.end(),trigger)!=a.recent.end())return reject(Decision::RecentTrigger);
     if(!confirmed_)lastStartup_=now;
     if(a.active&&a.trigger!=trigger){close(c,Decision::TriggerSwitch,now);clearAssembly(a);if(!enabled_)return reject(Decision::Disabled);}
-    if(!a.active){a.active=true;a.trigger=trigger;a.base=packet;a.first=now;a.firstIngressId=ingressId;a.sourceIPv4=sourceIPv4;}
+    if(!a.active){
+        // Full-trigger-gap observation, emitted exactly once per fresh
+        // assembly activation (the only point both the TriggerSwitch and the
+        // empty-assembly paths pass through). Forward progression moves the
+        // anchor; backstep/late triggers (delta<=0) never count or move it.
+        if(a.gapAnchorValid){
+            const auto delta=static_cast<std::int16_t>(trigger-a.gapAnchor);
+            if(delta>1)event(Decision::TriggerGap,c,trigger,packet,std::uint32_t(delta-1),now,ingressId);
+            if(delta>0)a.gapAnchor=trigger;
+        }else{a.gapAnchor=trigger;a.gapAnchorValid=true;}
+        a.active=true;a.trigger=trigger;a.base=packet;a.first=now;a.firstIngressId=ingressId;a.sourceIPv4=sourceIPv4;}
     ++a.actual;a.last=now;
     const auto slot=std::uint16_t(packet-a.base);
     Decision result=Decision::Accepted;

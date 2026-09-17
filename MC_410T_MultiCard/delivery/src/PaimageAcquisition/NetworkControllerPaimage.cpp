@@ -176,6 +176,13 @@ bool NetworkController::createPaimageBackend(QString& error){
             if(o.decision==paimage::Decision::Duplicate)++stats.assemblyDuplicatePackets;
             if(o.decision==paimage::Decision::OffsetOutside)++stats.assemblyOffsetOutOfRangePackets;
             if(o.decision==paimage::Decision::RecentTrigger)++stats.staleTriggerPacketsDiscarded;
+            // Full triggers missing between accepted triggers: SourceCore owns
+            // the per-card forward-gap fact at production ingress; count is
+            // the number of completely missing triggers (T100->T104 = 3).
+            if(o.decision==paimage::Decision::TriggerGap){
+                stats.missingTriggerCount.fetch_add(o.count,std::memory_order_relaxed);
+                stats.packetsDropped.fetch_add(static_cast<uint64_t>(o.count)*static_cast<uint64_t>(expected),std::memory_order_relaxed);
+            }
             if(o.decision==paimage::Decision::Complete)++stats.triggersComplete;
             else if(o.decision==paimage::Decision::TriggerSwitch||o.decision==paimage::Decision::Timeout){
                 ++stats.triggersPartial;stats.packetsDropped.fetch_add(expected>int(o.count)?expected-o.count:0);

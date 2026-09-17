@@ -85,6 +85,7 @@ DECISION_NAMES = {
     31: "StartFenceReleased", 32: "StartFenceFailedDiscard",
     33: "StartFenceOverflow", 34: "StartFenceResetDiscard",
     35: "StartFenceStopDiscard", 36: "StartFenceShutdownDiscard",
+    37: "TriggerGap",
 }
 DIRECT_SOURCE_DECISIONS = frozenset({0, 1, 2, 3, 4, 5, 17})
 FENCE_FAILURE_DECISIONS = frozenset({32, 33})
@@ -152,7 +153,7 @@ def parse_application(root: Path) -> dict[str, Any]:
                     "packet": packet, "reason": reason, "decision": decision_name(reason),
                     "count": value,
                 })
-                if reason not in (6, 7, 8) and reason not in FENCE_DECISIONS:
+                if reason not in (6, 7, 8, 37) and reason not in FENCE_DECISIONS:
                     stage2_rejects.append({
                         "steadyNs": tick, "session": session, "card": card,
                         "trigger": trigger, "reason": reason, "count": value,
