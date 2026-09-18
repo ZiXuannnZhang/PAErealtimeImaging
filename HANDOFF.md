@@ -1,89 +1,113 @@
-# HANDOFF — 当前项目兼容入口
+# HANDOFF — PAERealtimeImaging current canonical state
 
-> 本文件仍只作为兼容入口，不替代 `PROJECT_STATUS.md`。
-> 新会话、构建、验证、分支整理均应先读取当前 `main` 的项目级文档。
+> 更新时间：2026-09-18（UTC+8）
+>
+> 本文件是新会话的快速接力入口。精确状态以 `PROJECT_STATUS.md` 为准。
 
-## 当前必须读取的项目级入口
-
-按以下顺序读取：
-
-1. `PROJECT_STATUS.md` — 当前项目状态、活跃/待验证分支、下一步工作。
-2. `REPOSITORY_BASELINE.md` — canonical branch、分支角色、历史和 merge 治理。
-3. `BUILD_STANDARD.md` — 默认工具链、CMake preset、CUDA/Qt/ZeroMQ、构建与交付规范。
-4. `Codex-GitHub双端联动快速上手.md` — ChatGPT / Codex Desktop 协作流程。
-5. 当前 `codex/task-docs:TASKS/<task>.md` — 本次任务的精确目标、baseline、commit、测试和显式 override。
-
-## 当前关键状态（2026-09-16）
-
-### Physical round / RoundIdentity
-
-当前主要硬件验收候选：
+## 1. Start here
 
 ```text
-codex/physical-round-normalizer-integrated-20260916
-52cf7713d7e0e935cb14663ec3470f3a25bfeb90
+canonical branch = main
+A/B/C/D functional hardware status = PASS_FOR_CURRENT_SCOPE
+FPGA/LabVIEW exact extra-trigger source = NOT_PROVEN
+remote historical branches = retained for traceability
 ```
 
-软件层状态：
+当前 main 已包含此前 START-admission 与 Session A/B/C/D 的 accepted source chain。
+新开发应直接基于 latest `origin/main`，不再基于旧 candidate branch。
+
+## 2. Current architecture
+
+Production ingress：
 
 ```text
-RoundIdentity code fixes = IMPLEMENTED
-Automated tests          = PASS
-Windows build            = PASS
-CUDA service selftest    = PASS
+SocketReceiver -> SourceCore -> HostOutput
 ```
 
-但整体状态仍是：
+保存和实时成像分离：
 
 ```text
-PHYSICAL_ROUND_NORMALIZATION_HARDWARE_ACCEPTANCE = PENDING
+CardFrame -> save queue -> FileSaver
+Sync/TriggerGroup -> ImagingBypass -> RingBlockAssembler -> ImagingSvc/CUDA
 ```
 
-新控制环境中实机观察到完整轮可能从旧环境约 `4001` 个 physical trigger 变为约 `4007`。当前必须先通过本地日志证明：
-
-- 排除有证据的手动暂停短轮后，完整轮是否稳定为 4007；
-- CountBoundary 是否与真实物理圈末一致；
-- TimeoutBoundary 是否完整驱动 Ring/UI/ImagingSvc reset、stale drop 和下一轮 clean start。
-
-在这些证据完成前，不能把物理轮次归一标记为已完成，也不能机械把 logical trigger count 从 4000 改为 4006。
-
-### START admission
-
-独立启动 ingress-loss 候选仍为：
+Round ownership：
 
 ```text
-codex/start-admission-fence-fix-20260913-003112
-6313540f72544c0f68820c4815903abaa0b8c1e1
+RoundIdentity = (measurementSession, roundGeneration)
+PhysicalRoundNormalizer = startup filter / CountBoundary / TimeoutBoundary owner
 ```
 
-软件侧已 APPROVE，但真实 FPGA/NIC 硬件验证仍 PENDING。该工作流与 4007 / PhysicalRoundNormalizer 实机行为必须分开判断。
+`disableCountBoundary=true` 时 configured count 只作为 realtime imaging cap；
+raw/save 继续到 physical idle timeout。
 
-### main / task-docs
+## 3. Accepted validation boundary
 
-- `main`：唯一 canonical source / repository-level docs baseline。
-- `codex/task-docs`：任务规格通道，不是生产实现基线。
-- 两个当前硬件验证候选都保持未合并；软件 APPROVE 不等于硬件 acceptance。
-
-## 当前下一步
-
-当前第一优先级：
-
-1. 本地解析最新大体量诊断日志；
-2. 统计完整 physical round 的 distinct trigger count；
-3. 验证 CountBoundary 时间线；
-4. 验证 TimeoutBoundary 完整 reset 链；
-5. 日志没有证据时明确标记“无法判断”；
-6. 事实明确前不修改 logical trigger count、first-visible filtering、CountBoundary 语义或 FPGA/UDP；
-7. 若实机证据证明现有归一模型不适配新控制环境，再创建独立源码整改任务。
-
-完整约束和状态以 `PROJECT_STATUS.md` 为准。
-
-## 历史迁移记录
-
-2026-09-05/06 的 `realtime_imaging_migration` 原始 handoff 已降级到：
+当前用户实机测试反馈支持：
 
 ```text
-docs/history/HANDOFF_realtime_imaging_migration_20260905-06.md
+当前已执行场景未发现与预期不一致 = PASS_FOR_CURRENT_SCOPE
 ```
 
-历史记录只用于技术考古，其中旧绝对路径、旧 remote、旧 build cache、本地未提交状态和旧候选状态不得覆盖当前 `main` 项目级文档。
+仍未证明：
+
+- 额外 startup trigger 的精确 FPGA/LabVIEW 产生机制；
+- 7/4007 是协议固定常量；
+- 历史 startup ingress-loss 只有一个硬件根因。
+
+因此后续如果控制系统/端口数/FPGA/LabVIEW 逻辑改变，应重新观察实际 physical pattern。
+
+## 4. Documentation map
+
+```text
+PROJECT_STATUS.md
+  current status / accepted scope / next action
+
+REPOSITORY_BASELINE.md
+  branch roles / merge history / local sync governance
+
+BUILD_STANDARD.md
+  exact build / runtime / packaging / hash requirements
+
+MC_410T_MultiCard/delivery/README.md
+  current production architecture
+
+CODEX_REPORTS/
+  historical task reports / diagnostics / receipts / evidence
+```
+
+历史报告中的 PENDING、旧 executable 名、旧 branch 或旧硬件假设不覆盖当前 canonical docs。
+
+## 5. Local workspace synchronization
+
+远端是事实源：
+
+```powershell
+git fetch --prune origin
+git show origin/main:PROJECT_STATUS.md
+git show origin/main:REPOSITORY_BASELINE.md
+git show origin/main:BUILD_STANDARD.md
+```
+
+local `main` 只允许 fast-forward 到 `origin/main`。如果存在 local-only commit、divergence、
+dirty tracked work 或重要 ignored assets，先盘点，不用 reset/clean 强行同步。
+
+## 6. Build
+
+```powershell
+Set-Location <repo>\MC_410T_MultiCard\delivery
+cmd /c build_mingw_debug.cmd
+```
+
+正式 build 要绑定 exact canonical SHA 和 tracked-clean state。详细规则见 `BUILD_STANDARD.md`。
+
+## 7. Historical anchors
+
+旧分支仍保留用于追溯，包括：
+
+- START admission；
+- physical-round normalizer；
+- Session A/B/C/D；
+- A/B/C/D -> main integration。
+
+这些不是后续开发默认 baseline。需要查看历史执行证据时，从 `CODEX_REPORTS/` 对应主题目录进入。

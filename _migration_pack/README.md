@@ -23,14 +23,30 @@ GitHub origin/main
 - 当时的构建/验证上下文；
 - 之后 Session D 用于追溯 `testdata/14.dat`、CUDA runtime 等来源的历史证据。
 
-## 文件角色
+## Frozen package files
 
-- `迁移包SHA256.txt` — 当时 package integrity；
-- `prebuilt_cuda/` — retained CUDA artifacts/provenance；
-- migration scripts — 只用于复现 2026-09-05 migration 场景；
-- `historical/HANDOFF_20260905.md` — 当时工作区 handoff；
-- `historical/迁移包说明_20260905.md` — 当时迁移操作手册。
+`迁移包SHA256.txt` 对本目录若干文件的**原始路径与内容**做了哈希，包括：
 
-历史文档中的 old branch、old build path、`MC410T_Receiver.exe`、200 MHz、未提交状态等都不是当前
-项目事实。当前状态只看仓库根 `PROJECT_STATUS.md` / `REPOSITORY_BASELINE.md` /
-`BUILD_STANDARD.md`。
+```text
+迁移包说明.md
+HANDOFF.md
+migration scripts
+realtime_imaging_migration.bundle
+prebuilt_cuda/*
+```
+
+因此这些文件故意保持原位置/原内容，不把它们移动到 historical 子目录，也不把旧 handoff
+“更新成今天的状态”；否则会破坏冻结 package manifest。
+
+本目录根新增的这个 `README.md` 是外层说明，不属于原 migration-package hash contract。
+
+历史 `HANDOFF.md` / `迁移包说明.md` 中的 old branch、old build path、
+`MC410T_Receiver.exe`、200 MHz、未提交状态等都不是当前项目事实。
+
+当前状态只看仓库根：
+
+```text
+PROJECT_STATUS.md
+REPOSITORY_BASELINE.md
+BUILD_STANDARD.md
+```

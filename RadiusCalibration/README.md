@@ -40,7 +40,7 @@
 ## 运行方法
 
 ```matlab
-cd('D:\DSHWorkspace\realtime_imaging_migration\RadiusCalibration');
+cd('<repo>/RadiusCalibration');
 radius_calibration
 ```
 
