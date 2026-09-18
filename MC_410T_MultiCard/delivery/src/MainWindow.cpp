@@ -6,8 +6,10 @@
 #include "NetworkController.h"
 #include "ImagingController.h"
 #include "RingConfigDialog.h"
+#include "RoundPolicySettings.h"
 #include "ImagingDisplayWindow.h"
 #include "RingBlockAssembler.h"
+#include "RingRoundPresentation.h"
 #include "ImagingBypass.h"
 #include "DiagnosticRecorder.h"
 #include "DiagnosticExportDialog.h"
@@ -53,6 +55,7 @@
 #include <QComboBox>
 #include <QFrame>
 #include <QPointer>
+#include <QThread>
 #include <QThreadPool>
 #include <QtConcurrent/QtConcurrentRun>
 #include <thread>
@@ -217,7 +220,6 @@ MainWindow::MainWindow(QWidget *parent)
     , m_diagnosticStatusTimer(new QTimer(this))
     , m_systemCaptureStatusTimer(new QTimer(this))
     , m_displayTimer(new QTimer(this))
-    , m_ringTimeoutTimer(new QTimer(this))
     , m_isListening(false)
     , m_isMeasuring(false)
     , m_highDataRateWarningShown(false)
@@ -242,7 +244,6 @@ MainWindow::MainWindow(QWidget *parent)
     , m_imagingConfigDialog(nullptr)
     , m_imagingEnabled(false)
     , m_imagingPulseCount(0)
-    , m_imagingFrameCount(0)
     , m_freqColorRange(0, 500)
     , m_pixelColorRange(0, 500)
     , m_freqColorInited(false)
@@ -375,24 +376,132 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onImagingImageReady);
     // 每块显示快照：固定双缓冲 → 显示窗口（方案A：全分辨率 3600²）
     connect(m_imagingController, &ImagingController::ringSnapshotReady,
-            this, [this](int seq, int bufferIndex) {
-        if (!m_imagingEnabled) {         // 停止后的迟到帧：不弹窗、不计数，但必须释放缓冲
+            this, [this](int seq, quint64 submitIndex, bool hasSubmitIndex,
+                         quint64 measurementSession, quint64 roundGeneration,
+                         bool roundComplete, int bufferIndex) {
+        if (!m_imagingEnabled ||
+            m_ringSnapshotAdmissionBlocked.load(std::memory_order_acquire)) {
+            // 停止/故障后的迟到帧：不弹窗、不计数，但必须释放缓冲。
             if (m_imagingController)
                 m_imagingController->releaseSnapshotBuffer(bufferIndex);
             return;
         }
-        ++m_imagingFrameCount;   // 环形重建输出帧计数（反馈显示用）
-        const int frameIdx = m_imagingFrameCount;   // 本帧序号（圈末重置前捕获）
-        updateRingImagingStatus();   // 帧计数变化后即时刷新状态栏
-        // 圈末重置（本帧为整圈最后一帧）：判定为下一圈图像，帧计数重新计算
-        {
-            const int bpf = m_imagingController->ringBlocksPerFrame();
-            if (bpf > 0 && seq > 0 && seq % bpf == 0)
-                m_imagingFrameCount = 0;
+        const paimage::RoundIdentity round{
+            static_cast<std::uint64_t>(measurementSession),
+            static_cast<std::uint64_t>(roundGeneration)};
+        if (!hasSubmitIndex || submitIndex == 0 || !round.valid()) {
+            recordDiagnosticAction(QStringLiteral("ring_snapshot_identity_missing"),
+                {{QStringLiteral("seq"), seq},
+                 {QStringLiteral("submitIndex"), QString::number(
+                     static_cast<qulonglong>(submitIndex))},
+                 {QStringLiteral("measurementSession"), QString::number(
+                     static_cast<qulonglong>(measurementSession))},
+                 {QStringLiteral("roundGeneration"), QString::number(
+                     static_cast<qulonglong>(roundGeneration))}});
+            if (m_imagingController)
+                m_imagingController->releaseSnapshotBuffer(bufferIndex);
+            return;
         }
+        const auto admission = m_roundUi.admitSnapshotDetailed(submitIndex);
+        if (admission != paimage::RingRoundUiState::SnapshotAdmission::Accepted) {
+            const bool duplicate = admission ==
+                paimage::RingRoundUiState::SnapshotAdmission::Duplicate;
+            if (duplicate)
+                m_roundUi.noteDuplicateSnapshot();
+            else if (admission == paimage::RingRoundUiState::SnapshotAdmission::Stale)
+                m_roundUi.noteStaleSnapshot();
+
+            const auto state = m_roundUi.snapshot();
+            const QString action = duplicate
+                ? QStringLiteral("duplicate")
+                : (admission == paimage::RingRoundUiState::SnapshotAdmission::Stale
+                    ? QStringLiteral("stale") : QStringLiteral("missing"));
+            recordDiagnosticAction(duplicate
+                ? QStringLiteral("ring_snapshot_duplicate_dropped")
+                : QStringLiteral("physical_round_stale_frame_dropped"),
+                {{QStringLiteral("seq"), seq},
+                 {QStringLiteral("submitIndex"), QString::number(
+                     static_cast<qulonglong>(submitIndex))},
+                 {QStringLiteral("measurementSession"), QString::number(
+                     static_cast<qulonglong>(round.measurementSession))},
+                 {QStringLiteral("roundGeneration"), QString::number(
+                     static_cast<qulonglong>(round.roundGeneration))},
+                 {QStringLiteral("admission"), action},
+                 {QStringLiteral("staleCutoffSubmitIndex"), QString::number(
+                     static_cast<qulonglong>(state.staleCutoffSubmitIndex))},
+                 {QStringLiteral("uiEpoch"), QString::number(
+                     static_cast<qulonglong>(state.epoch))}});
+            if (m_imagingController)
+                m_imagingController->releaseSnapshotBuffer(bufferIndex);
+            return;
+        }
+
+        // 物理轮次准入：submit_index 只负责 producer snapshot 的 stale/duplicate
+        // cutoff；物理轮次 presentation 决策完全由下方 RoundIdentity 精确匹配。
+        m_roundUi.onFrame();
+        const int frameIdx = int(m_roundUi.frameCount());
+        updateRingImagingStatus();
+        const bool frameEnd = m_roundUi.noteSnapshot(roundComplete);
+        if (frameEnd)
+            m_roundUi.resetFrameCount();
+
+        AutoSaveCommit countPresentation;
+        paimage::RingRoundPresentationState::SnapshotResult presentation;
+        bool hasPresentation = false;
+        std::size_t pendingPresentations = 0;
+        if (frameEnd) {
+            std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+            presentation = m_ringPresentation.completeSnapshot(round);
+            hasPresentation = presentation.exactMatch;
+            if (hasPresentation)
+                countPresentation = presentation.transition.commit;
+            pendingPresentations = m_ringPresentation.pendingCount();
+        }
+
+        if (frameEnd) {
+            const auto action = presentation.action;
+            const QString actionName =
+                action == paimage::RingRoundPresentationState::SnapshotAction::Applied
+                    ? QStringLiteral("applied")
+                : action == paimage::RingRoundPresentationState::SnapshotAction::AlreadyCurrent
+                    ? QStringLiteral("already_current")
+                : action == paimage::RingRoundPresentationState::SnapshotAction::Duplicate
+                    ? QStringLiteral("duplicate")
+                : action == paimage::RingRoundPresentationState::SnapshotAction::Stale
+                    ? QStringLiteral("stale")
+                : action == paimage::RingRoundPresentationState::SnapshotAction::Missing
+                    ? QStringLiteral("missing") : QStringLiteral("invalid");
+            if (hasPresentation && countPresentation.failed)
+                queueAutoSaveFailure(countPresentation);
+            else if (hasPresentation && presentation.shouldApply)
+                applyAutoSaveCommitToUi(countPresentation);
+            recordDiagnosticAction(QStringLiteral("ring_presentation_transition"),
+                {{QStringLiteral("measurementSession"), QString::number(
+                     static_cast<qulonglong>(round.measurementSession))},
+                 {QStringLiteral("roundGeneration"), QString::number(
+                     static_cast<qulonglong>(round.roundGeneration))},
+                 {QStringLiteral("action"), actionName},
+                 {QStringLiteral("exactMatch"), presentation.exactMatch},
+                 {QStringLiteral("shouldApply"), presentation.shouldApply},
+                 {QStringLiteral("pendingTransitions"), QString::number(
+                     static_cast<qulonglong>(pendingPresentations))}});
+        }
+
+        QString saveDir = m_reconSaveDir;
+        if (hasPresentation && presentation.allowOldDirectory &&
+            !countPresentation.oldDirectory.isEmpty()) {
+            saveDir = QDir(countPresentation.oldDirectory).filePath("recon_png");
+        }
+        const bool saveNow = frameEnd && m_reconSaveEnabled && !saveDir.isEmpty();
+        const QString saveSuffix = m_reconSaveSuffix;
+
         if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
             if (!m_imagingDisplayWindow) {
                 m_imagingDisplayWindow = new ImagingDisplayWindow();
+                connect(m_imagingDisplayWindow, &ImagingDisplayWindow::presentationChanged, this, [this] {
+                    m_timeoutPresentation.updateWriter(
+                        m_imagingDisplayWindow->capturePngWriter(m_imagingDisplayWindow->lastSeq()));
+                });
             }
             if (!m_imagingDisplayWindow->isVisible()) {
                 m_imagingDisplayWindow->show();
@@ -412,20 +521,9 @@ MainWindow::MainWindow(QWidget *parent)
                 QPointer<ImagingDisplayWindow> win(m_imagingDisplayWindow);
                 QPointer<ImagingController> ctrl(m_imagingController);
                 const int idx = bufferIndex;
-                const int blocksPerFrame = m_imagingController->ringBlocksPerFrame();
-                const bool saveNow = m_reconSaveEnabled && !m_reconSaveDir.isEmpty()
-                    && blocksPerFrame > 0 && seq > 0 && seq % blocksPerFrame == 0;
-                // 圈末已保存：本次成像的“空闲超时到点保存”不再重复保存同一张图
-                // （两种保存条件互斥；新触发到来时由进度回调复位该标志）
-                if (saveNow)
-                    m_ringTimeoutSaveDone = true;
-                const QString saveDir = m_reconSaveDir;
-                const QString saveSuffix = m_reconSaveSuffix;
-                // 自动保存方案2：圈末即推进会话代（下一会话目录预注册），
-                // 圈末 PNG 已按当前会话目录捕获，下一会话首触发读到的已是新代
-                if (m_autoSaveEnabled && blocksPerFrame > 0 && seq > 0 && seq % blocksPerFrame == 0)
-                    advanceAutoSession();
-                QThreadPool::globalInstance()->start([ctrl, idx, frame, n, nx, seq, frameIdx, r1, r2, win,
+                const auto presentationEpoch = m_roundUi.snapshot().epoch;
+                QPointer<MainWindow> owner(this);
+                QThreadPool::globalInstance()->start([ctrl, idx, frame, n, nx, seq, frameIdx, r1, r2, win, owner, round, presentationEpoch,
                                    saveNow, saveDir, saveSuffix]() {
                     const float *src = ctrl ? ctrl->snapshotBuffer(idx) : nullptr;
                     if (!src) {
@@ -439,11 +537,17 @@ MainWindow::MainWindow(QWidget *parent)
                     const QImage img2 = ImagingDisplayWindow::renderFrame(
                         frame->data() + n, nx, r2.lower, r2.upper);
                     if (!win) return;
-                    // 回投 UI 线程：仅贴图与（圈末）保存
-                    QMetaObject::invokeMethod(qApp, [win, frame, nx, frameIdx, img1, img2,
+                    QMetaObject::invokeMethod(qApp, [win, frame, nx, frameIdx, img1, img2, owner, round, presentationEpoch,
                                                      saveNow, saveDir, saveSuffix]() {
-                        if (!win) return;
+                        if (!win || !owner) return;
+                        std::lock_guard<std::mutex> lock(owner->m_ringAssemblerMutex);
+                        if (owner->m_ringSnapshotAdmissionBlocked.load(std::memory_order_acquire) ||
+                            owner->m_roundUi.snapshot().epoch != presentationEpoch ||
+                            !owner->m_timeoutPresentation.accepts(round.measurementSession, round.roundGeneration))
+                            return;
                         win->applyRingFrame(frame, nx, frameIdx, img1, img2);
+                        owner->m_timeoutPresentation.publish(round.measurementSession, round.roundGeneration,
+                            win->capturePngWriter(win->lastSeq()));
                         if (saveNow)
                             win->saveWindowPngs(saveDir, saveSuffix, win->lastSeq());
                     }, Qt::QueuedConnection);
@@ -472,7 +576,7 @@ MainWindow::MainWindow(QWidget *parent)
                     m_lblImagingStatus->setText(
                         QString("采集脉冲 %1/%2 · 输出 %3 帧 · %4 fps")
                         .arg(progress).arg(total)
-                        .arg(m_imagingFrameCount)
+                        .arg(m_roundUi.frameCount())
                         .arg(fps, 0, 'f', 1));
                 }
             }
@@ -485,54 +589,131 @@ MainWindow::MainWindow(QWidget *parent)
     m_imagingBypass = std::make_unique<ImagingBypass>(256);
     m_imagingBypass->start();
     m_ringAssembler = new RingBlockAssembler();
+    // PhysicalRoundNormalizer owns the production physical-idle boundary.
+    // Keep the assembler's direct timeout path available for its standalone
+    // tests, but prevent a second production reset for the same idle gap.
+    m_ringAssembler->setTimeoutManagedExternally(true);
     m_ringAssembler->setBlockCallback(
         [this](std::vector<float> &&raw, std::vector<float> &&angles,
-               std::vector<uint8_t> &&channels, int blockSeq) {
-            // 回调运行在独立成像 worker；只提交成像服务并更新原子统计。
-            m_ringBlockCounter.fetch_add(1, std::memory_order_relaxed);
-            const int alines = static_cast<int>(channels.size());
+               std::vector<uint8_t> &&channels, int blockSeq,
+               const paimage::RoundIdentity &round, bool sourceRoundComplete) {
+            // 回调运行在独立成像 worker；只提交成像服务并更新 per-round 统计。
+            m_roundUi.onBlock();
             QVector<float> rawQ(raw.begin(), raw.end());
             QVector<float> angQ(angles.begin(), angles.end());
             QVector<quint8> chQ(channels.begin(), channels.end());
             bool submitted = false;
+            std::uint64_t submitIndex = 0;
             try {
                 submitted = m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire)
-                    && m_imagingController->submitRingBlock(rawQ, angQ, chQ, blockSeq);
+                    && m_imagingController->submitRingBlock(
+                        rawQ, angQ, chQ, round, blockSeq, &submitIndex, sourceRoundComplete);
+                // submit_index is the producer identity domain. Record it
+                // even when dontwait send returned false: the missing
+                // notification is a gap, never an attempt-count alias.
+                if (submitIndex != 0)
+                    m_roundUi.recordSubmitIndex(submitIndex);
                 if (m_imagingBypass) m_imagingBypass->observeBlockResult(submitted);
             } catch (...) {
                 if (m_imagingBypass) m_imagingBypass->observeBlockException();
             }
-            Q_UNUSED(alines);
         });
-    m_ringAssembler->setProgressCallback([this]() { m_ringTimeoutSaveDone = false; });
-    // 停机超时判定新一圈：组包器触发级检测，通知子进程清空重建累积，
-    // 输出帧计数从新一圈重新计算
-    // （自动保存的会话代推进在超时到点定时器中提前完成，不在此处处理）
+    // PhysicalRoundNormalizer is the production source of physical idle
+    // boundaries. This callback clears queued pre-boundary frames and resets
+    // Ring/reconstruction exactly once for each session/generation.
     m_ringAssembler->setTimeoutCallback([this]() {
+        bool sent = false;
         if (m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire))
-            m_imagingController->sendRingReset();
+            sent = m_imagingController->sendRingReset();
+        m_ringResetCommandSent.store(sent, std::memory_order_release);
+    });
+    m_ringAssembler->setRoundTransitionCallback(
+        [this](const RingBlockAssembler::RoundTransition &transition) {
+        const auto kind = transition.kind;
+        const QString kindName =
+            kind == RingBlockAssembler::RoundTransition::Kind::FirstRound
+                ? QStringLiteral("first")
+            : kind == RingBlockAssembler::RoundTransition::Kind::Clean
+                ? QStringLiteral("clean")
+            : kind == RingBlockAssembler::RoundTransition::Kind::ResidualDiscard
+                ? QStringLiteral("residual_discard")
+            : kind == RingBlockAssembler::RoundTransition::Kind::StaleDrop
+                ? QStringLiteral("stale_drop")
+            : kind == RingBlockAssembler::RoundTransition::Kind::GenerationGap
+                ? QStringLiteral("generation_gap") : QStringLiteral("invalid_identity");
+        QMetaObject::invokeMethod(this, [this, transition, kindName]() {
+            recordDiagnosticAction(QStringLiteral("ring_round_transition"),
+                {{QStringLiteral("kind"), kindName},
+                 {QStringLiteral("oldMeasurementSession"), QString::number(
+                     static_cast<qulonglong>(transition.oldRound.measurementSession))},
+                 {QStringLiteral("oldRoundGeneration"), QString::number(
+                     static_cast<qulonglong>(transition.oldRound.roundGeneration))},
+                 {QStringLiteral("incomingMeasurementSession"), QString::number(
+                     static_cast<qulonglong>(transition.incomingRound.measurementSession))},
+                 {QStringLiteral("incomingRoundGeneration"), QString::number(
+                     static_cast<qulonglong>(transition.incomingRound.roundGeneration))},
+                 {QStringLiteral("pendingCount"), QString::number(
+                     static_cast<qulonglong>(transition.pendingCount))},
+                 {QStringLiteral("blockTriggers"), transition.blockTriggers},
+                 {QStringLiteral("discardedPendingTriggers"), QString::number(
+                     static_cast<qulonglong>(transition.discardedPendingTriggers))},
+                 {QStringLiteral("discardedBlockTriggers"), QString::number(
+                     static_cast<qulonglong>(transition.discardedBlockTriggers))}});
+        }, Qt::QueuedConnection);
     });
     m_imagingBypass->setConsumer([this](const TriggerGroupConstPtr& frame,
                                         const std::array<bool, 8>& enabled) {
         if (!frame || !m_ringAssembler || !m_ringAssemblerConfigured) return false;
         std::lock_guard<std::mutex> assemblerLock(m_ringAssemblerMutex);
         if (!m_ringAssemblerConfigured) return false;
+        if (!frame->hasPhysicalRoundIdentity()) {
+            if (!m_ringInvalidIdentityReported.exchange(true,
+                                                        std::memory_order_acq_rel)) {
+                QMetaObject::invokeMethod(this, [this, frame]() {
+                    recordDiagnosticAction(QStringLiteral("ring_group_identity_rejected"),
+                        {{QStringLiteral("cardId"), frame ? frame->cardId : -1},
+                         {QStringLiteral("triggerSeq"), frame ? frame->triggerSeq : 0},
+                         {QStringLiteral("measurementSession"), frame
+                             ? QString::number(static_cast<qulonglong>(frame->measurementSession))
+                             : QStringLiteral("0")},
+                         {QStringLiteral("roundGeneration"), frame
+                             ? QString::number(static_cast<qulonglong>(frame->roundGeneration))
+                             : QStringLiteral("0")}});
+                }, Qt::QueuedConnection);
+            }
+            return false;
+        }
         const int chA = frame->cardId * 2;
         const int chB = chA + 1;
+        if (chA < 0 || chB >= 8) return false;
+        const paimage::RoundIdentity round = frame->physicalRoundIdentity();
+        bool fed = false;
+        // Ring final marker sources the stable terminal data property, so the
+        // round end survives even when the first classified card of the final
+        // trigger is Ring-disabled. The one-shot roundComplete pulse is not
+        // used here.
         if (enabled[chA])
-            m_ringAssembler->pushChannelLine(chA, frame->triggerSeq, frame->freqA.data(),
-                                             static_cast<int>(frame->freqA.size()));
+            m_ringAssembler->pushChannelLine(chA, frame->triggerSeq, round,
+                                              frame->freqA.data(),
+                                              static_cast<int>(frame->freqA.size()), frame->isFinalLogicalTrigger);
+        fed = fed || enabled[chA];
         if (enabled[chB])
-            m_ringAssembler->pushChannelLine(chB, frame->triggerSeq, frame->freqB.data(),
-                                             static_cast<int>(frame->freqB.size()));
+            m_ringAssembler->pushChannelLine(chB, frame->triggerSeq, round,
+                                             frame->freqB.data(),
+                                             static_cast<int>(frame->freqB.size()), frame->isFinalLogicalTrigger);
+        fed = fed || enabled[chB];
         return true;
     });
     connect(m_imagingController, &ImagingController::svcStopped, this, [this]() {
         m_imagingServiceReady.store(false, std::memory_order_release);
+        m_ringSnapshotAdmissionBlocked.store(true, std::memory_order_release);
+        m_ringResetCommandSent.store(false, std::memory_order_release);
         if (m_imagingBypass) m_imagingBypass->setServiceReady(false);
         m_ringAssemblerConfigured = false;
         { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+          m_ringPresentation.reset();
           if (m_ringAssembler) m_ringAssembler->reset(); }
+        m_ringInvalidIdentityReported.store(false, std::memory_order_release);
         if (m_imagingController && m_imagingController->isRingMode())
             m_imagingTimer->stop();
 
@@ -557,11 +738,13 @@ MainWindow::MainWindow(QWidget *parent)
         stopRingFeedWorker();
         m_ringAssemblerConfigured = false;
         { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+          m_ringPresentation.reset();
           if (m_ringAssembler) m_ringAssembler->reset(); }
         m_imagingController->stopSvc();
     });
     connect(m_imagingController, &ImagingController::svcReady, this, [this]() {
         m_imagingServiceReady.store(true, std::memory_order_release);
+        m_ringSnapshotAdmissionBlocked.store(false, std::memory_order_release);
         if (m_imagingBypass) m_imagingBypass->setServiceReady(true);
         // 环形模式：配置组包器并启动独立馈送工作线程（不再依赖主线程 5ms 定时器）
         if (m_imagingController && m_imagingController->isRingMode()) {
@@ -583,32 +766,6 @@ MainWindow::MainWindow(QWidget *parent)
     m_systemCaptureStatusTimer->setInterval(500);
     connect(m_systemCaptureStatusTimer,&QTimer::timeout,this,&MainWindow::onSystemCaptureStatusTick);
     m_systemCaptureStatusTimer->start();
-
-    // 超时重置到点检测：空闲超过超时值立即保存当前窗口 PNG（不等新触发）
-    m_ringTimeoutTimer->setInterval(250);
-    connect(m_ringTimeoutTimer, &QTimer::timeout, this, [this]() {
-        if (!m_imagingEnabled || !m_ringAssembler || !m_ringAssemblerConfigured
-            || !m_reconSaveEnabled || m_reconSaveDir.isEmpty())
-            return;
-        double timeoutResetSec = 0.0;
-        double idleSeconds = 0.0;
-        { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
-          timeoutResetSec = m_ringAssembler->timeoutResetSec();
-          idleSeconds = m_ringAssembler->idleSeconds(); }
-        if (timeoutResetSec <= 0.0) return;
-        if (idleSeconds > timeoutResetSec && !m_ringTimeoutSaveDone) {
-            m_ringTimeoutSaveDone = true;
-            if (m_imagingDisplayWindow)
-                m_imagingDisplayWindow->saveWindowPngs(
-                    m_reconSaveDir, m_reconSaveSuffix,
-                    m_imagingDisplayWindow->lastSeq());
-            // 自动保存方案2：超时到点即推进会话代（下一会话目录预注册），
-            // 数十秒空闲后到达的首触发读到的已是新会话代，边界严格分界
-            if (m_autoSaveEnabled)
-                advanceAutoSession();
-        }
-    });
-    m_ringTimeoutTimer->start();
 
     // ══ 成像馈送定时器（5ms，独立于 33ms 显示刷新，确保捕获 100Hz 触发）══
     m_imagingTimer = new QTimer(this);
@@ -2075,6 +2232,12 @@ void MainWindow::onStartListenClicked()
                 ui->btnToggleSave->style()->unpolish(ui->btnToggleSave);
                 ui->btnToggleSave->style()->polish(ui->btnToggleSave);
                 m_reconSaveEnabled = false;   // 重建图像保存随监听停止而关闭
+        syncTimeoutPngSettings();
+                m_autoSavePresentation.reset();
+                {
+                    std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+                    m_ringPresentation.reset();
+                }
 
                 if (m_netController) {
                     m_netController->setParent(nullptr);
@@ -2129,14 +2292,180 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     m_netController->setDiagnosticContext(
         m_diagnosticListenId,
         targetSourceKind);
+    // 物理轮次启动策略（Session B）：读取“设为默认”保存值。即使本次启动后用户
+    // 尚未打开 RingConfigDialog，保存的 policy 也在 PAimage backend 创建前经
+    // controller 成员生效（createPaimageBackend 时写入 Backend::Settings）；
+    // 无保存历史时 helper 回退出厂 1 / false，与 Session A 编译期默认一致。
+    {
+        const RoundPolicySettings::Policy roundPolicy = RoundPolicySettings::loadDefault();
+        m_netController->setStartupFilterTriggerCount(roundPolicy.startupFilterTriggerCount);
+        m_netController->setDisableCountBoundary(roundPolicy.disableCountBoundary);
+    }
+    // Preserve the ring dialog's canonical timeout even if the ImagingSvc
+    // is currently stopped. The PAimage normalizer is created with this
+    // value when the listener starts.
+    if (m_imagingController && m_imagingController->isRingMode())
+        m_netController->setPhysicalRoundTimeout(
+            m_imagingController->ringConfig().timeoutResetSec);
     recordAcquisitionSnapshot(onlineIPs, QStringLiteral("listen_starting"));
     // 环形实时馈送回调：DataProcessor 每触发直连入队（须在 start() 之前设置）
     m_netController->setRingFeedSink(
         [this](const TriggerGroupConstPtr& frame) {
             return ringFeedSink(frame);
         });
+    m_netController->setPhysicalRoundBoundarySink(
+        [this](const paimage::PhysicalRoundEvent& event) {
+            if (event.kind == paimage::PhysicalRoundEvent::Kind::CountBoundary) {
+                // Allocate and publish the next data binding synchronously on
+                // the source boundary.  The old-round identity is the key of
+                // the presentation transition; the observer never resets the
+                // Ring assembler here.
+                AutoSaveCommit autoCommit;
+                bool hasAutoCommit = false;
+                if (m_netController && m_netController->autoSaveEnabled()) {
+                    autoCommit = m_netController->commitAutoSaveBoundary(
+                        event.measurementSession,
+                        event.roundGeneration,
+                        paimage::AutoSaveBoundaryKind::Count,
+                        QStringLiteral("normalizer_count_boundary"));
+                    hasAutoCommit = true;
+                }
+                if (hasAutoCommit && autoCommit.failed)
+                    queueAutoSaveFailure(autoCommit);
+                paimage::RingPresentationTransition transition;
+                paimage::RingRoundPresentationState::RegisterResult registration =
+                    paimage::RingRoundPresentationState::RegisterResult::Invalid;
+                std::size_t pendingTransitions = 0;
+                {
+                    std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+                    if (hasAutoCommit &&
+                        paimage::RingPresentationTransition::fromCommit(
+                            autoCommit, transition)) {
+                        registration = m_ringPresentation.registerTransition(transition);
+                    }
+                    pendingTransitions = m_ringPresentation.pendingCount();
+                }
+                const QString registrationName =
+                    registration == paimage::RingRoundPresentationState::RegisterResult::Registered
+                        ? QStringLiteral("registered")
+                    : registration == paimage::RingRoundPresentationState::RegisterResult::Duplicate
+                        ? QStringLiteral("duplicate") : QStringLiteral("invalid");
+                // 低频业务事件：count 边界不在此清零帧计数（保留帧末驱动清零）。
+                // 边界 sink 运行在网络线程；诊断记录 marshal 到 UI 线程，
+                // 避免跨线程读 UI 成员。
+                QMetaObject::invokeMethod(this, [this, event, autoCommit,
+                                                 hasAutoCommit, registrationName,
+                                                 pendingTransitions]() {
+                    const auto ui = m_roundUi.snapshot();
+                    recordDiagnosticAction(QStringLiteral("physical_round_boundary"),
+                        {{QStringLiteral("measurementSession"), qint64(event.measurementSession)},
+                         {QStringLiteral("roundGeneration"), qint64(event.roundGeneration)},
+                         {QStringLiteral("boundaryKind"), QStringLiteral("count")},
+                         {QStringLiteral("uiFrameCountBefore"), qint64(ui.frameCount)},
+                         {QStringLiteral("uiFrameCountAfter"), qint64(ui.frameCount)},
+                         {QStringLiteral("ringBlockCounterBefore"), qint64(ui.blockCount)},
+                         {QStringLiteral("ringBlockCounterAfter"), qint64(ui.blockCount)},
+                         {QStringLiteral("frameReset"), QStringLiteral("deferred_to_final_frame")},
+                         {QStringLiteral("presentationRegistration"), registrationName},
+                         {QStringLiteral("pendingTransitions"), QString::number(
+                             static_cast<qulonglong>(pendingTransitions))},
+                         {QStringLiteral("oldDirectory"), hasAutoCommit
+                             ? autoCommit.oldDirectory : QString()},
+                         {QStringLiteral("newDirectory"), hasAutoCommit
+                             ? autoCommit.directory : QString()}});
+                }, Qt::QueuedConnection);
+                m_roundUi.onCountBoundary();
+                return;
+            }
+            if (event.kind != paimage::PhysicalRoundEvent::Kind::TimeoutBoundary)
+                return;
+            // TimeoutBoundary is the source-side save authority.  Commit the
+            // directory mapping before this callback returns; UI work below
+            // is deliberately queued and cannot determine the generation.
+            AutoSaveCommit autoCommit;
+            bool hasAutoCommit = false;
+            if (m_netController && m_netController->autoSaveEnabled()) {
+                autoCommit = m_netController->commitAutoSaveBoundary(
+                    event.measurementSession,
+                    event.roundGeneration,
+                    paimage::AutoSaveBoundaryKind::Timeout,
+                    QStringLiteral("normalizer_timeout_boundary"));
+                hasAutoCommit = true;
+            }
+            const auto uiBefore = m_roundUi.snapshot();
+            paimage::TimeoutPresentation::Job pngJob;
+            bool resetFailed = false;
+            {
+                std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+                if (m_lastRingTimeoutBoundarySession == event.measurementSession &&
+                    m_lastRingTimeoutBoundaryGeneration == event.roundGeneration)
+                    return;
+                m_lastRingTimeoutBoundarySession = event.measurementSession;
+                m_lastRingTimeoutBoundaryGeneration = event.roundGeneration;
+                pngJob = m_timeoutPresentation.close(event.measurementSession, event.roundGeneration,
+                    hasAutoCommit, autoCommit.oldDirectory, [this, &resetFailed] {
+                        m_roundUi.onTimeoutBoundary();
+                        if (m_imagingBypass)
+                            m_imagingBypass->clear(ImagingSubmitResult::StaleSession);
+                        if (!m_ringAssembler || !m_ringAssemblerConfigured) return;
+                        m_ringResetCommandSent.store(false, std::memory_order_release);
+                        m_ringAssembler->resetAfterPhysicalTimeout();
+                        const bool sent = m_ringResetCommandSent.exchange(false, std::memory_order_acq_rel);
+                        const auto cutoff = sent && m_imagingController
+                            ? m_imagingController->ringLastSubmitIndex() : 0;
+                        paimage::TimeoutPresentation::applyResetResult(
+                            sent, cutoff, m_roundUi, m_ringSnapshotAdmissionBlocked);
+                        resetFailed = !sent;
+                    });
+            }
+            // The captured payload owns old pixels/ranges and directory.
+            // Render/write after reset without reading live UI/CUDA state.
+            const bool captured = bool(pngJob);
+            if (pngJob) QThreadPool::globalInstance()->start([pngJob] { pngJob(); });
+            QMetaObject::invokeMethod(this, [this, event, uiBefore, autoCommit,
+                                             hasAutoCommit, captured, resetFailed] {
+                updateRingImagingStatus();
+                if (hasAutoCommit) {
+                    if (autoCommit.failed) queueAutoSaveFailure(autoCommit);
+                    else applyAutoSaveCommitToUi(autoCommit);
+                }
+                const auto uiAfter = m_roundUi.snapshot();
+                recordDiagnosticAction(QStringLiteral("physical_round_boundary"),
+                    {{QStringLiteral("measurementSession"), qint64(event.measurementSession)},
+                     {QStringLiteral("roundGeneration"), qint64(event.roundGeneration)},
+                     {QStringLiteral("boundaryKind"), QStringLiteral("timeout")},
+                     {QStringLiteral("uiFrameCountBefore"), qint64(uiBefore.frameCount)},
+                     {QStringLiteral("uiFrameCountAfter"), qint64(uiAfter.frameCount)},
+                     {QStringLiteral("ringBlockCounterBefore"), qint64(uiBefore.blockCount)},
+                     {QStringLiteral("ringBlockCounterAfter"), qint64(uiAfter.blockCount)},
+                     {QStringLiteral("captureBeforeReset"), captured},
+                     {QStringLiteral("oldDirectory"), autoCommit.oldDirectory},
+                     {QStringLiteral("autoSessionGenBefore"), qint64(autoCommit.oldSessionGen)},
+                     {QStringLiteral("autoSessionGenAfter"), qint64(autoCommit.publishedSessionGen)},
+                     {QStringLiteral("saveRoundRollover"), QStringLiteral("data_plane_roundGeneration")}});
+                if (resetFailed) recordDiagnosticAction(QStringLiteral("ring_reset_submit_failed"),
+                    {{QStringLiteral("measurementSession"), qint64(event.measurementSession)},
+                     {QStringLiteral("roundGeneration"), qint64(event.roundGeneration)}});
+            }, Qt::QueuedConnection);
+        });
     connect(m_netController, &NetworkController::statusMessage, this, &MainWindow::logMessage);
     connect(m_netController, &NetworkController::errorOccurred, this, &MainWindow::logMessage);
+    connect(m_netController, &NetworkController::fileSaverRollover, this,
+            [this](int cardId, const QString& reason,
+                   quint64 oldRoundGeneration, quint64 newRoundGeneration,
+                   int oldFileSequence, int newFileSequence,
+                   int oldFileTriggerCount, bool manualMode) {
+        // 低频：仅在文件翻滚时记录；可区分容量翻滚与物理轮次强制翻滚。
+        recordDiagnosticAction(QStringLiteral("save.file_rollover"),
+            {{QStringLiteral("card"), cardId},
+             {QStringLiteral("boundary"), reason},
+             {QStringLiteral("oldRoundGeneration"), static_cast<qint64>(oldRoundGeneration)},
+             {QStringLiteral("newRoundGeneration"), static_cast<qint64>(newRoundGeneration)},
+             {QStringLiteral("oldFileSequence"), oldFileSequence},
+             {QStringLiteral("newFileSequence"), newFileSequence},
+             {QStringLiteral("oldFileTriggerCount"), oldFileTriggerCount},
+             {QStringLiteral("saveMode"), manualMode ? QStringLiteral("manual") : QStringLiteral("auto")}});
+    });
     // ══ 卡片就绪信号：更新网络信息标签 ════════════════════════════
     connect(m_netController, &NetworkController::cardReady, this, [this](int cardIdx) {
         int ready = m_netController ? m_netController->readyCardCount() : 0;
@@ -2165,8 +2494,21 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     });
     connect(m_netController, &NetworkController::measurementStarted,
             this, [this](const QString& sessionId) {
-        // 会话建立时先清掉旧成像旁路；首个新帧携带的源 session 会成为新锚点。
-        if (m_imagingBypass) m_imagingBypass->beginSession(0);
+        // 会话建立时以 normalizer 的 measurementSession 重建 Ring identity
+        // floor；首个新帧不再依赖“当前/latest”状态推断归属。
+        const auto round = m_netController
+            ? m_netController->physicalRoundSnapshot()
+            : paimage::PhysicalRoundNormalizer::Snapshot{};
+        if (m_imagingBypass)
+            m_imagingBypass->beginSession(round.measurementSession);
+        {
+            std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+            m_ringPresentation.reset();
+            if (m_ringAssembler)
+                m_ringAssembler->beginMeasurementSession(round.measurementSession);
+        }
+        m_roundUi.reset();
+        m_ringInvalidIdentityReported.store(false, std::memory_order_release);
         m_isMeasuring = true;
         setBtnText(ui->btnStartMeasure, "停止测量");
         ui->btnStartMeasure->setProperty("state", "measuring");
@@ -2215,6 +2557,7 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     // 数据格式参数：与线性实例相同来源（注册表，默认 250 MSa/s 满速率 32bit Q16.16）
     cfg.bitsPerChannel = m_bitsPerChannel;
     cfg.sampleIntervalNs = m_sampleIntervalNs;
+    cfg.logicalTriggersPerRound = m_logicalTriggersPerRound;
     {
         QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
         cfg.diagnosticLevel = qBound(0, settings.value("Diagnostics/Level", 1).toInt(), 2);
@@ -2381,6 +2724,7 @@ void MainWindow::onToggleSaveClicked()
         ui->edtTriggersPerFile->setEnabled(true);
         ui->edtFileSuffix->setEnabled(true);
         m_reconSaveEnabled = false;   // 停止保存时同时停止重建图像保存
+        syncTimeoutPngSettings();
         logMessage("停止保存数据");
     } else {
         // ── 开始保存 ──
@@ -2402,11 +2746,10 @@ void MainWindow::onToggleSaveClicked()
         }
         // 实时重建图像随数据保存联动：整圈最后一帧更新完后保存最终重建图到 保存目录/recon_png
         m_reconSaveEnabled = true;
-        // 开始保存时不立即对“已空闲”画面触发超时到点保存（下一触发到来时复位）
-        m_ringTimeoutSaveDone = true;
         m_reconSaveDir = QDir(saveDir).filePath("recon_png");
         m_reconSaveSuffix = fileSuffix;
         QDir().mkpath(m_reconSaveDir);
+        syncTimeoutPngSettings();
         // 锁定保存参数（主流仪表设计：采集/保存中不可修改配置）
         ui->edtSaveDir->setEnabled(false);
         ui->btnSelectDir->setEnabled(false);
@@ -2424,13 +2767,13 @@ void MainWindow::onToggleSaveClicked()
 }
 
 // =====================================================================
-// 自动保存（环形模式，方案2 会话代精确分界）：
+// 自动保存（环形模式，物理轮次协调器精确分界）：
 //   基线目录 = 保存目录输入路径忽略最后一层（如 D:\zzx\data\run\01 → D:\zzx\data\run）
 //   勾选时扫描基线目录下三位数命名文件夹的最大编号，从最大编号+1 起分配。
-//   会话边界在空闲期提前判定：圈末快照/超时到点时刻分配下一会话目录并推进
-//   全局会话代；DataProcessor 在数据入队前读取会话代打在触发组上，
-//   FileSaver 按代路由目录——下一个会话首触发到达时已是新代，实现
-//   逐触发严格分界（首触发不丢、不串会话）。
+//   目录准备与 generation 发布由 AutoSaveRoundCoordinator 完成；TimeoutBoundary
+//   与 CountBoundary 都在源线程同步提交，最终旧帧只负责应用已准备的展示目标。
+//   DataProcessor 在数据入队前按 measurementSession+roundGeneration 解析，
+//   FileSaver 按已解析 generation 路由目录。
 // =====================================================================
 static int scanMaxAutoFolder(const QString &base)
 {
@@ -2446,34 +2789,104 @@ static int scanMaxAutoFolder(const QString &base)
     return mx;
 }
 
-// 分配下一自动保存会话：编号+1、创建目录、注册会话代、更新 PNG 目录。
-// 返回新会话目录；失败返回空串。
-QString MainWindow::advanceAutoSession()
+void MainWindow::applyAutoSaveCommitToUi(const AutoSaveCommit& commit)
 {
-    if (!m_autoSaveEnabled || !m_netController) return QString();
-    const QFileInfo fi(ui->edtSaveDir->text().trimmed());
-    const QString base = fi.absolutePath();   // 忽略输入路径最后一层
-    if (base.isEmpty()) return QString();
-    ++m_autoSaveNext;
-    const QString folder = QString("%1").arg(m_autoSaveNext, 3, 10, QChar('0'));
-    const QString dir = QDir(base).filePath(folder);
-    if (!QDir().mkpath(dir)) {
-        logMessage(QString("错误: 无法创建自动保存目录 %1").arg(dir));
-        return QString();
+    if (!m_autoSaveEnabled || !m_isListening)
+        return;
+    if (commit.failed) {
+        queueAutoSaveFailure(commit);
+        return;
     }
-    const uint64_t gen = static_cast<uint64_t>(m_autoSaveNext);
-    m_netController->registerSessionDir(gen, dir);
-    m_netController->setAutoSessionGen(gen);
-    // 方案A：会话边界主动落盘——保存器在队列排空后刷盘关闭当前会话文件，
-    // 采集彻底停止时最后会话的数据也已写入（不依赖下一会话触发到达）
-    m_netController->requestCloseSavers();
-    // PNG 与手动保存一致：保存目录/recon_png
+    if ((!commit.committed && !commit.alreadyApplied) ||
+        commit.newSessionGen == 0 || commit.directory.isEmpty())
+        return;
+
+    const auto presentationResult = m_autoSavePresentation.apply(commit);
+    if (presentationResult == paimage::AutoSavePresentationState::ApplyResult::Stale) {
+        recordDiagnosticAction(QStringLiteral("auto_save_presentation_transition_stale_ignored"),
+            {{QStringLiteral("measurementSession"), qint64(commit.measurementSession)},
+             {QStringLiteral("roundGeneration"), qint64(commit.roundGeneration)},
+             {QStringLiteral("oldSessionGen"), qint64(commit.oldSessionGen)},
+             {QStringLiteral("newSessionGen"), qint64(commit.newSessionGen)},
+             {QStringLiteral("oldDirectory"), commit.oldDirectory},
+             {QStringLiteral("newDirectory"), commit.directory},
+             {QStringLiteral("boundaryKind"),
+              QString::fromLatin1(paimage::autoSaveBoundaryKindName(commit.boundaryKind))},
+             {QStringLiteral("phase"), commit.phase}});
+        return;
+    }
+
     m_reconSaveEnabled = true;
-    m_reconSaveDir = QDir(dir).filePath("recon_png");
+    m_reconSaveDir = QDir(commit.directory).filePath("recon_png");
     m_reconSaveSuffix = ui->edtFileSuffix->text().trimmed();
-    QDir().mkpath(m_reconSaveDir);
-    logMessage(QString("自动保存会话目录：%1").arg(dir));
-    return dir;
+    syncTimeoutPngSettings();
+    if (!QDir().mkpath(m_reconSaveDir)) {
+        m_reconSaveEnabled = false;
+        syncTimeoutPngSettings();
+        logMessage(QString("错误: 无法创建自动保存重建目录 %1；数据目录仍按已提交代号保存")
+                   .arg(m_reconSaveDir));
+    }
+    if (commit.committed)
+        logMessage(QString("自动保存会话目录：%1").arg(commit.directory));
+    recordDiagnosticAction(QStringLiteral("auto_save_round_generation_applied_ui"),
+        {{QStringLiteral("measurementSession"), qint64(commit.measurementSession)},
+         {QStringLiteral("roundGeneration"), qint64(commit.roundGeneration)},
+         {QStringLiteral("boundaryKind"),
+          QString::fromLatin1(paimage::autoSaveBoundaryKindName(commit.boundaryKind))},
+         {QStringLiteral("oldSessionGen"), qint64(commit.oldSessionGen)},
+         {QStringLiteral("newSessionGen"), qint64(commit.newSessionGen)},
+         {QStringLiteral("oldDirectory"), commit.oldDirectory},
+         {QStringLiteral("directory"), commit.directory},
+         {QStringLiteral("phase"), commit.phase},
+         {QStringLiteral("idempotent"), commit.alreadyApplied},
+         {QStringLiteral("presentationTransition"),
+           commit.boundaryKind == paimage::AutoSaveBoundaryKind::Count
+               ? QStringLiteral("count_presentation_applied")
+               : QStringLiteral("round_generation_applied")},
+         {QStringLiteral("presentationApply"),
+           presentationResult == paimage::AutoSavePresentationState::ApplyResult::AlreadyCurrent
+               ? QStringLiteral("already_current") : QStringLiteral("applied")}});
+}
+
+void MainWindow::queueAutoSaveFailure(const AutoSaveCommit& commit)
+{
+    const auto apply = [this, commit]() {
+        if (m_netController) {
+            // Stop the producer/consumer path before clearing the active
+            // controller state.  The coordinator itself also retains its
+            // failed sentinel until the next configure().
+            m_netController->stopSaving();
+            m_netController->disableAutoSave();
+        }
+        m_autoSaveEnabled = false;
+        m_reconSaveEnabled = false;
+        syncTimeoutPngSettings();
+        if (ui && ui->chkAutoSave) {
+            QSignalBlocker blocker(ui->chkAutoSave);
+            ui->chkAutoSave->setChecked(false);
+        }
+        if (ui) {
+            ui->btnToggleSave->setEnabled(m_isListening);
+            ui->edtSaveDir->setEnabled(true);
+            ui->btnSelectDir->setEnabled(true);
+            ui->edtTriggersPerFile->setEnabled(true);
+            ui->edtFileSuffix->setEnabled(true);
+        }
+        recordDiagnosticAction(QStringLiteral("auto_save_round_generation_failed"),
+            {{QStringLiteral("measurementSession"), qint64(commit.measurementSession)},
+             {QStringLiteral("roundGeneration"), qint64(commit.roundGeneration)},
+             {QStringLiteral("boundaryKind"),
+              QString::fromLatin1(paimage::autoSaveBoundaryKindName(commit.boundaryKind))},
+             {QStringLiteral("oldSessionGen"), qint64(commit.oldSessionGen)},
+             {QStringLiteral("error"), commit.error},
+             {QStringLiteral("behavior"), QStringLiteral("save_disabled_fail_closed")}});
+        logMessage(QString("错误: 自动保存已停用（目录未注册，数据不会回退到旧目录）：%1")
+                   .arg(commit.error));
+    };
+    if (QThread::currentThread() == thread())
+        apply();
+    else
+        QMetaObject::invokeMethod(this, apply, Qt::QueuedConnection);
 }
 
 // 方案B：在当前控制器上（重）建自动保存（勾选时与监听重启恢复共用）。
@@ -2481,15 +2894,26 @@ QString MainWindow::advanceAutoSession()
 void MainWindow::initAutoSaveSavers()
 {
     if (!m_netController || !m_autoSaveEnabled) return;
+    m_autoSavePresentation.reset();
+    {
+        std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+        m_ringPresentation.reset();
+    }
     const QFileInfo fi(ui->edtSaveDir->text().trimmed());
     const QString base = fi.absolutePath();
     if (base.isEmpty()) return;
-    m_autoSaveNext = scanMaxAutoFolder(base);   // 重扫：重启后编号从现有最大号继续
-    const QString firstDir = advanceAutoSession();
-    if (!firstDir.isEmpty()) {
+    m_netController->configureAutoSave(base,
+                                       static_cast<std::uint64_t>(scanMaxAutoFolder(base)));
+    const auto first = m_netController->beginAutoSaveSession(
+        0, QStringLiteral("ui_session_start"));
+    if (!first.failed) {
+        applyAutoSaveCommitToUi(first);
         int tpf = ui->edtTriggersPerFile->text().toInt();
         if (tpf <= 0) tpf = 1000;
-        m_netController->startSaving(firstDir, tpf, ui->edtFileSuffix->text().trimmed());
+        m_netController->startSaving(first.directory, tpf,
+                                     ui->edtFileSuffix->text().trimmed());
+    } else {
+        queueAutoSaveFailure(first);
     }
 }
 
@@ -2505,7 +2929,6 @@ void MainWindow::onAutoSaveToggled(bool checked)
             ui->chkAutoSave->setChecked(false);
             return;
         }
-        m_autoSaveNext = scanMaxAutoFolder(base);
         m_autoSaveEnabled = true;
         // 自动保存期间禁用手动保存按钮，避免两者争用同一保存器/目录
         ui->btnToggleSave->setEnabled(false);
@@ -2520,12 +2943,19 @@ void MainWindow::onAutoSaveToggled(bool checked)
         logMessage(QString("自动保存已开启：基线目录 %1").arg(base));
     } else {
         m_autoSaveEnabled = false;
-        // 关闭自动保存：停止保存器（刷盘并关闭文件），会话代归零
+        // 关闭自动保存：先停写并清理队列，再清除活动会话代，避免异步
+        // 停写窗口把新组误标为手动模式并回落到旧目录。
         if (m_netController) {
-            m_netController->setAutoSessionGen(0);
             m_netController->stopSaving();
+            m_netController->disableAutoSave();
+        }
+        m_autoSavePresentation.reset();
+        {
+            std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+            m_ringPresentation.reset();
         }
         m_reconSaveEnabled = false;   // PNG 保存随自动保存关闭
+        syncTimeoutPngSettings();
         ui->btnToggleSave->setEnabled(m_isListening);
         // 恢复保存参数可写
         ui->edtSaveDir->setEnabled(true);
@@ -2560,9 +2990,7 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
         // 实时成像期间锁定成像参数与采集控制，避免运行中修改参数引发重启竞态/尺寸不匹配
         setImagingParamControlsEnabled(false);
         if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
-            if (!m_ringConfigDialog) {
-                m_ringConfigDialog = new RingConfigDialog(m_imagingController, this);
-            }
+            ensureRingConfigDialog();
             m_ringConfigDialog->setAcquisitionParams(
                 m_sampleIntervalNs, ui->edtDataTime->text().toInt());
             m_ringConfigDialog->applyConfig();
@@ -2964,14 +3392,16 @@ void MainWindow::updateSpectrumPlot(int cardId, int channel,
 // 统计更新（1Hz/2Hz）
 // =====================================================================
 QString MainWindow::formatCardStatusText(int cardNumber,
-                                         const CardStats::Snapshot& stats)
+                                         const CardStats::Snapshot& stats,
+                                         const CardStatusFormatting::RoundDisplay& round)
 {
-    return CardStatusFormatting::text(cardNumber, stats);
+    return CardStatusFormatting::text(cardNumber, stats, round);
 }
 
-QString MainWindow::formatCardStatusTooltip(const CardStats::Snapshot& stats)
+QString MainWindow::formatCardStatusTooltip(const CardStats::Snapshot& stats,
+                                            const CardStatusFormatting::RoundDisplay& round)
 {
-    return CardStatusFormatting::tooltip(stats);
+    return CardStatusFormatting::tooltip(stats, round);
 }
 
 void MainWindow::onUpdateStatistics()
@@ -3022,6 +3452,7 @@ void MainWindow::onUpdateStatistics()
             ui->btnToggleSave->style()->unpolish(ui->btnToggleSave);
             ui->btnToggleSave->style()->polish(ui->btnToggleSave);
             m_reconSaveEnabled = false;
+        syncTimeoutPngSettings();
             logMessage("警告：数据保存已意外停止，请检查磁盘空间");
         }
     }
@@ -3046,6 +3477,12 @@ void MainWindow::onUpdateStatistics()
     const double HIGH_RATE_THRESHOLD = 800.0;
     bool anyExceeds = false;
 
+    // 物理轮次显示态（Session B）：每个 refresh tick 最多读取一次 Normalizer
+    // snapshot，按 current/lastCompleted fallback 规则求出 已采集/已过滤，
+    // 再传给每卡格式化（全局轮次数据，各卡行相同是预期行为）。
+    const CardStatusFormatting::RoundDisplay roundDisplay =
+        CardStatusFormatting::roundDisplayForUi(m_netController->physicalRoundSnapshot());
+
     for (int i = 0; i < CARDS_PER_DISPLAY_GROUP; ++i) {
         int globalCard = firstGlobal + i;
         int virtualCardNum = globalCard + 1;
@@ -3061,10 +3498,10 @@ void MainWindow::onUpdateStatistics()
             const auto &s = statsOpt.value();
             if (s.recvMbps > HIGH_RATE_THRESHOLD) anyExceeds = true;
 
-            // 常驻栏只显示“丢失”；详细采集统计集中放入 tooltip，避免
+            // 常驻栏只显示 缺失/跳号数/已采集；详细采集统计集中放入 tooltip，避免
             // 状态栏文本随计数增长而撑宽布局或掩盖关键信息。
-            m_lblStats[i]->setText(formatCardStatusText(virtualCardNum, s));
-            m_lblStats[i]->setToolTip(formatCardStatusTooltip(s));
+            m_lblStats[i]->setText(formatCardStatusText(virtualCardNum, s, roundDisplay));
+            m_lblStats[i]->setToolTip(formatCardStatusTooltip(s, roundDisplay));
 
             // 存储队列满 → 非阻塞告警（冷却期内不重复）
             uint64_t newDisc = s.saveQueueDiscards;
@@ -3291,6 +3728,11 @@ void MainWindow::loadSettings()
     // 修改：reg add "HKCU\Software\MC410T\MC410T_Receiver\AcquisitionParams" /v BitsPerChannel /t REG_DWORD /d 32 /f
     m_bitsPerChannel = settings.value("AcquisitionParams/BitsPerChannel", 32).toInt();
     if (m_bitsPerChannel != 16 && m_bitsPerChannel != 32) m_bitsPerChannel = 32;
+    m_logicalTriggersPerRound = settings.value(
+        "AcquisitionParams/LogicalTriggersPerRound",
+        AcqConfig::kDefaultLogicalTriggersPerRound).toInt();
+    if (m_logicalTriggersPerRound <= 0)
+        m_logicalTriggersPerRound = AcqConfig::kDefaultLogicalTriggersPerRound;
     const double registrySampleIntervalNs =
         settings.value("AcquisitionParams/SampleIntervalNs", FPGA_ADC_INTERVAL_NS).toDouble();
     m_sampleIntervalNs = FPGA_ADC_INTERVAL_NS;   // 全链路唯一采样率来源
@@ -3436,6 +3878,8 @@ void MainWindow::saveSettings()
     settings.setValue("DisplayParams/AutoRescaleAxes",    m_autoRescaleAxes);
     // 数据格式参数
     settings.setValue("AcquisitionParams/BitsPerChannel",   m_bitsPerChannel);
+    settings.setValue("AcquisitionParams/LogicalTriggersPerRound",
+                      m_logicalTriggersPerRound);
     // 采样间隔固定写回 "4.0"（REG_SZ，与线性实例一致；不删除键，仅统一数值）
     settings.setValue("AcquisitionParams/SampleIntervalNs",
                       QString::number(m_sampleIntervalNs, 'f', 1));
@@ -3939,16 +4383,34 @@ void MainWindow::closeEvent(QCloseEvent *event)
 // 成像相关槽函数
 // =====================================================================
 
+void MainWindow::ensureRingConfigDialog()
+{
+    if (m_ringConfigDialog) return;
+    m_ringConfigDialog = new RingConfigDialog(m_imagingController, this);
+    // Session B：RingConfigDialog 应用/确定（含成像启动下发）成功后，把当前
+    // 物理轮次启动策略转发给当前 NetworkController 的 Session A production API。
+    connect(m_ringConfigDialog, &RingConfigDialog::roundPolicyChanged,
+            this, [this](quint64 startupFilterCount, bool disableCountBoundary) {
+        if (!m_netController) return;
+        m_netController->setStartupFilterTriggerCount(startupFilterCount);
+        m_netController->setDisableCountBoundary(disableCountBoundary);
+    });
+}
+
 void MainWindow::onImagingConfigClicked()
 {
     // 成像方式=环形扫描时，成像参数按钮打开环形扫描参数设定窗口
     if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
-        if (!m_ringConfigDialog) {
-            m_ringConfigDialog = new RingConfigDialog(m_imagingController, this);
-        }
+        ensureRingConfigDialog();
         m_ringConfigDialog->setAcquisitionParams(
             m_sampleIntervalNs, ui->edtDataTime->text().toInt());
         m_ringConfigDialog->exec();
+        // Keep the production normalizer configured even while ImagingSvc is
+        // stopped; configureRingAssembler() repeats this at svcReady.
+        if (m_netController && m_imagingController &&
+            m_imagingController->isRingMode())
+            m_netController->setPhysicalRoundTimeout(
+                m_imagingController->ringConfig().timeoutResetSec);
         return;
     }
 
@@ -4499,8 +4961,7 @@ void MainWindow::onImagingConfigClicked()
 void MainWindow::onImagingStarted()
 {
     m_imagingPulseCount = 0;
-    m_imagingFrameCount = 0;
-    m_ringBlockCounter.store(0);
+    m_roundUi.reset();   // 新成像会话：每轮帧/块计数与快照准入空间清零
     // 保存当前频率颜色图色条范围（切到像素图前）并持久化
     if (m_colorMap) {
         m_freqColorRange = m_colorMap->dataRange();
@@ -4576,7 +5037,7 @@ void MainWindow::onImagingStopped()
 void MainWindow::onImagingImageReady(const QImage &image, int seq)
 {
     if (image.isNull()) return;
-    m_imagingFrameCount++;
+    m_roundUi.onFrame();   // 线性模式输出帧沿用同一 per-round 计数
     saveReconImage(image, "linear");
 
     // 从 ImagingController 获取原始 float 帧数据
@@ -4799,7 +5260,7 @@ void MainWindow::feedImagingPulse()
         if (progress == 0) progress = moveAline;
         m_lblImagingStatus->setText(
             QString("测试脉冲 %1/%2 · 输出 %3 帧")
-            .arg(progress).arg(moveAline).arg(m_imagingFrameCount));
+            .arg(progress).arg(moveAline).arg(m_roundUi.frameCount()));
         return;
     }
 
@@ -4859,7 +5320,7 @@ void MainWindow::feedImagingPulse()
     if (progress == 0) progress = moveAline;
     m_lblImagingStatus->setText(QString("采集脉冲 %1/%2 · 输出 %3 帧")
                                 .arg(progress).arg(moveAline)
-                                .arg(m_imagingFrameCount));
+                                .arg(m_roundUi.frameCount()));
 }
 
 // =====================================================================
@@ -4908,9 +5369,30 @@ void MainWindow::configureRingAssembler()
     if (!m_imagingController || !m_ringAssembler) return;
     const auto configureBeginNs = paimage::SocketReceiver::now();
     const RingReconCudaConfig &cfg = m_imagingController->ringConfig();
-    if (cfg.enabledChannelCount <= 0 || cfg.alinesPerChannelPerBlock <= 0 ||
-        cfg.sampDepth <= 0 || cfg.alinesPerChannelPerFrame <= 0)
+    const bool roundConfigValid =
+        cfg.enabledChannelCount > 0 && cfg.alinesPerChannelPerBlock > 0 &&
+        cfg.sampDepth > 0 && cfg.alinesPerChannelPerFrame > 0 &&
+        cfg.alinesPerFrame > 0 && cfg.alinesPerFrame % cfg.enabledChannelCount == 0 &&
+        cfg.alinesPerFrame / cfg.enabledChannelCount == 2 * cfg.alinesPerChannelPerFrame &&
+        cfg.alinesPerFrame % (cfg.enabledChannelCount * cfg.alinesPerChannelPerBlock) == 0;
+    if (!roundConfigValid) {
+        recordDiagnosticAction(QStringLiteral("imaging_assembler_invalid_config"),
+            {{"enabledChannelCount", cfg.enabledChannelCount},
+             {"alinesPerFrame", cfg.alinesPerFrame},
+             {"alinesPerChannelPerFrame", cfg.alinesPerChannelPerFrame},
+             {"alinesPerChannelPerBlock", cfg.alinesPerChannelPerBlock},
+             {"sampDepth", cfg.sampDepth},
+             {"logicalRoundConfigSource", QStringLiteral(
+                 "RingReconCudaConfig.alinesPerFrame/enabledChannelCount")}});
+        logMessage(QStringLiteral("[环形采集] 轮次配置不一致，拒绝初始化组包器"));
         return;
+    }
+    const int logicalTriggersPerRound = cfg.alinesPerFrame / cfg.enabledChannelCount;
+    if (m_netController) {
+        m_netController->setLogicalTriggersPerRound(
+            static_cast<std::uint64_t>(logicalTriggersPerRound));
+        m_netController->setPhysicalRoundTimeout(cfg.timeoutResetSec);
+    }
 
     int enabled[8];
     for (int i = 0; i < 8; ++i) enabled[i] = cfg.enabledChannels[i] ? 1 : 0;
@@ -4922,20 +5404,36 @@ void MainWindow::configureRingAssembler()
     const double sectorWidth = 360.0 / cfg.enabledChannelCount;
     const double step = sectorWidth / cfg.alinesPerChannelPerFrame;
 
+    const auto physicalRound = m_netController
+        ? m_netController->physicalRoundSnapshot()
+        : paimage::PhysicalRoundNormalizer::Snapshot{};
     { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+      m_ringPresentation.reset();
+      m_timeoutPresentation.reset();
+      m_lastRingTimeoutBoundarySession = 0;
+      m_lastRingTimeoutBoundaryGeneration = 0;
       m_ringAssembler->configure(enabled, cfg.alinesPerChannelPerBlock,
                                  cfg.sampDepth, cfg.sectorStartDeg, sectorWidth,
                                  step, cfg.alinesPerChannelPerFrame,
-                                 cfg.triggerWlOdd, cfg.timeoutResetSec); }
+                                 cfg.triggerWlOdd, cfg.timeoutResetSec);
+      if (physicalRound.measurementSession != 0)
+          m_ringAssembler->beginMeasurementSession(
+              physicalRound.measurementSession); }
     m_ringAssemblerConfigured = true;
-    m_ringTimeoutSaveDone = false;   // 新会话：允许超时到点保存
+    m_roundUi.reset();   // 新组包会话：每轮计数与快照准入空间清零
+    m_ringInvalidIdentityReported.store(false, std::memory_order_release);
+    m_ringSnapshotAdmissionBlocked.store(false, std::memory_order_release);
+    m_ringResetCommandSent.store(false, std::memory_order_release);
     const auto configureEndNs = paimage::SocketReceiver::now();
     recordDiagnosticAction(QStringLiteral("imaging_assembler_initialized"),
         {{"startMonotonicNs", QString::number(configureBeginNs)},
          {"endMonotonicNs", QString::number(configureEndNs)},
          {"durationNs", QString::number(configureEndNs - configureBeginNs)},
          {"enabledChannels", cfg.enabledChannelCount},
-         {"alinesPerChannelPerBlock", cfg.alinesPerChannelPerBlock}});
+         {"alinesPerChannelPerBlock", cfg.alinesPerChannelPerBlock},
+         {"configuredLogicalTriggersPerRound", logicalTriggersPerRound},
+         {"logicalRoundConfigSource", QStringLiteral(
+             "RingReconCudaConfig.alinesPerFrame/enabledChannelCount")}});
     logMessage(QString("[环形采集] 组包器已配置: 通道=%1 每块=%2 step=%3°")
                .arg(cfg.enabledChannelCount)
                .arg(cfg.alinesPerChannelPerBlock)
@@ -4945,7 +5443,7 @@ void MainWindow::configureRingAssembler()
 // =====================================================================
 // updateRingImagingStatus — 环形模式“成像中”状态反馈
 // x = 当前块已收到的触发脉冲数，y = 每通道每块 Aline 数（组包器块进度）；
-// 首个触发脉冲到达即由等待状态切换为计数显示；帧计数沿用 m_imagingFrameCount。
+// 首个触发脉冲到达即由等待状态切换为计数显示；帧计数沿用 m_roundUi。
 // 仅主线程调用（工作线程通过 QMetaObject::invokeMethod 切回）。
 // =====================================================================
 void MainWindow::updateRingImagingStatus()
@@ -4967,7 +5465,8 @@ void MainWindow::updateRingImagingStatus()
         return;
     }
 
-    const int blocksDone = m_ringBlockCounter.load(std::memory_order_relaxed);
+    const paimage::RingRoundUiState::Snapshot roundUi = m_roundUi.snapshot();
+    const auto blocksDone = roundUi.blockCount;
     if (pulses <= 0 && blocksDone <= 0) {
         m_lblImagingStatus->setText("成像中，等待重建数据…");
         m_lblImagingStatus->setStyleSheet(amberStyle);
@@ -4979,6 +5478,11 @@ void MainWindow::updateRingImagingStatus()
     m_lblImagingStatus->setText(
         QString("采集脉冲 %1/%2 · 输出 %3 帧")
         .arg(displayPulses).arg(perBlock)
-        .arg(m_imagingFrameCount));
+        .arg(roundUi.frameCount));
     m_lblImagingStatus->setStyleSheet(amberStyle);
+}
+
+void MainWindow::syncTimeoutPngSettings()
+{
+    m_timeoutPresentation.configure(m_reconSaveEnabled, m_reconSaveDir, m_reconSaveSuffix);
 }

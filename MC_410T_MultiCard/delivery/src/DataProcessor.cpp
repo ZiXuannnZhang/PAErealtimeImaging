@@ -305,11 +305,15 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
             //    示例：oldSeq=5, pkt.triggerSeq=8 → skipGap=2 → T6+T7全部丢失
             const int16_t skipGap =
                 static_cast<int16_t>(pkt.triggerSeq - oldSeq) - 1;
-            if (skipGap > 0)
+            if (skipGap > 0) {
                 m_stats.packetsDropped.fetch_add(
                     static_cast<uint32_t>(skipGap) *
                     static_cast<uint32_t>(m_expectedPackets),
                     std::memory_order_relaxed);
+                // 跳号数：完全缺失的 trigger 数量（T100->T104 记 +3，非 +1 次 gap 事件）
+                m_stats.missingTriggerCount.fetch_add(
+                    static_cast<uint32_t>(skipGap), std::memory_order_relaxed);
+            }
 
             m_stats.triggersPartial.fetch_add(1, std::memory_order_relaxed);
             flushAssemblyBuf(assemblyBuf);
@@ -328,11 +332,16 @@ int DataProcessor::processInputBatch(PacketAssemblyBuffer& assemblyBuf) {
         if (!didSwitch && assemblyBuf.receivedCount() == 0 && m_hasFlushedOnce) {
             const int16_t gap =
                 static_cast<int16_t>(pkt.triggerSeq - m_lastFlushedTriggerSeq) - 1;
-            if (gap > 0)
+            if (gap > 0) {
                 m_stats.packetsDropped.fetch_add(
                     static_cast<uint32_t>(gap) *
                     static_cast<uint32_t>(m_expectedPackets),
                     std::memory_order_relaxed);
+                // 跳号数：空缓冲区锚点路径同样按完全缺失 trigger 数量累计；
+                // didSwitch 保证同一 transition 不会被步骤2/步骤3重复计数
+                m_stats.missingTriggerCount.fetch_add(
+                    static_cast<uint32_t>(gap), std::memory_order_relaxed);
+            }
         }
 
         // ══ 步骤4：插入包（bitmask去重 + 直接索引，乱序/重复均安全）───────────

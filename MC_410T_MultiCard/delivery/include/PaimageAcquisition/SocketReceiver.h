@@ -4,6 +4,7 @@
 #include "TimingWriter.h"
 #include "LoopLog.h"
 #include <atomic>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -19,9 +20,12 @@ public:
     bool start(std::string& error);
     void stop();
     void requestStop(){running_=false;}
-    void observeShutdown(){std::lock_guard<std::mutex> lock(coreMutex_);core_.observeShutdown(now());}
+    void observeShutdown();
     void prepareStart(std::uint64_t session);
-    void completeStart(bool success);
+    bool completeStart(bool success);
+    // ControlSocket calls these around each real START sendto().
+    void beforeStartSend(int card);
+    void afterStartSend(int card,bool success);
     void prepareStop();
     void completeStop(bool success);
     std::vector<int> receiveBuffers() const{return receiveBuffers_;}
@@ -48,7 +52,26 @@ public:
     Counters counters()const{std::lock_guard<std::mutex> lock(coreMutex_);return core_.counters();}
     static Time now();
 private:
+    enum class StartCardState : std::uint8_t { AwaitingStart, StartSendPending, StartSent, StartFailed };
+    struct HeldDatagram {
+        int card=-1;
+        std::vector<std::uint8_t> bytes;
+        Time receivedNs=0;
+        std::uint64_t ingressId=0;
+        std::uint32_t sourceIPv4=0;
+        std::uint16_t sourcePort=0,localPort=0,trigger=0,packet=0;
+    };
+    static constexpr std::size_t kMaxStartHoldDatagrams=8192;
+    static constexpr std::size_t kMaxStartHoldBytes=64u*1024u*1024u;
     void run();void closeSockets();
+    bool admitOrHold(int card,const std::uint8_t*,int,Time,std::uint64_t,std::uint32_t,
+                     std::uint16_t,std::uint16_t,std::uint16_t,std::uint16_t);
+    bool holdStartDatagram(int card,const std::uint8_t*,int,Time,std::uint64_t,std::uint32_t,
+                           std::uint16_t,std::uint16_t,std::uint16_t,std::uint16_t);
+    void discardHeld(Decision);
+    void discardHeldForCard(int,Decision);
+    void resetStartFence(Decision);
+    void observeFence(Decision,int,std::uint16_t,std::uint16_t,std::uint32_t,Time,std::uint64_t);
     void timing(TimingKind,Time,Time,int card=-1,std::uint16_t port=0,
                 std::uint32_t value0=0,std::uint32_t value1=0,
                 std::uint64_t correlation=0,std::uint16_t flags=0,bool force=false) noexcept;
@@ -64,5 +87,9 @@ private:
     bool timestampEnabled_=false;std::uintptr_t recvMsgFunction_=0;std::string timestampStatus_="disabled by configuration";
     std::atomic<std::uint64_t> timestampedPackets_{0},timestampControlTruncated_{0};
     std::uint64_t correlation_=0;bool wsa_=false;
+    bool startFenceActive_=false,startFenceFailed_=false,startFenceCallbacksSeen_=false;
+    std::vector<StartCardState> startCardStates_;
+    std::deque<HeldDatagram> startHold_;
+    std::size_t startHoldBytes_=0;
 };
 }

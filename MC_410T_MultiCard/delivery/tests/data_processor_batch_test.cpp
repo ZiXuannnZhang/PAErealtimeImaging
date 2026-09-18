@@ -201,6 +201,128 @@ bool testAssemblyRejectionClassification()
                  QStringLiteral("stale-trigger classification")) && ok;
 }
 
+// ── Session B：missingTriggerCount（跳号数）确定性测试 ─────────────────────
+// 语义：只累计由 forward triggerSeq gap 推断的、完全 0 包到达的 missing
+// trigger 数量；partial trigger 只计 triggersPartial + 包级 packetsDropped。
+namespace {
+DataPacket triggerPacket(uint16_t triggerSeq, uint16_t packetSeq)
+{
+    DataPacket pkt;
+    pkt.triggerSeq = triggerSeq;
+    pkt.packetSeq = packetSeq;
+    pkt.dataSize = 4;
+    return pkt;
+}
+
+// 6 packets/trigger：acqTimeNs=8000, 4ns 间隔, 16bit/通道 -> 8000B/触发 -> 6 包
+AcqConfig sixPacketConfig()
+{
+    AcqConfig config = testConfig();
+    config.acqTimeNs = 8000;
+    return config;
+}
+}
+
+// B1 触发切换路径：T100 部分到达(3/6) 后 T104 到达
+//   missingTriggerCount += 3（仅一次，didSwitch 阻止空缓冲路径双计）
+//   packetsDropped += 3（旧触发缺包） + 3 * expectedPackets（完整缺失触发包当量）
+bool testMissingTriggerSwitchPath()
+{
+    AcqConfig config = sixPacketConfig();
+    const int expectedPackets = config.packetsPerTrig();
+    if (!check(expectedPackets == 6, QStringLiteral("B1 expected 6 packets/trigger")))
+        return false;
+    DataProcessor processor(0, nullptr, nullptr, nullptr, config);
+    processor.setMeasureEnabled(true);
+
+    for (uint16_t p = 0; p < 3; ++p)
+        processor.enqueuePacket(triggerPacket(100, p));
+    processor.enqueuePacket(triggerPacket(104, 0));
+    processor.drainBatchForTest();
+    const auto stats = processor.statsSnapshot();
+    return check(stats.missingTriggerCount == 3
+                     && stats.triggersPartial == 1
+                     && stats.packetsDropped ==
+                            static_cast<uint64_t>(3 + 3 * expectedPackets),
+                 QStringLiteral("B1 T100->T104 switch: +3 missing triggers exactly once"));
+}
+
+// B2 仅 partial trigger：T200 收 4/6 包后切到相邻 T201（无序号缺口）
+//   missingTriggerCount 不变；packetsDropped 只含 partial 内缺包
+bool testMissingTriggerPartialOnly()
+{
+    AcqConfig config = sixPacketConfig();
+    DataProcessor processor(0, nullptr, nullptr, nullptr, config);
+    processor.setMeasureEnabled(true);
+
+    for (uint16_t p = 0; p < 4; ++p)
+        processor.enqueuePacket(triggerPacket(200, p));
+    processor.enqueuePacket(triggerPacket(201, 0));
+    processor.drainBatchForTest();
+    const auto stats = processor.statsSnapshot();
+    return check(stats.triggersPartial == 1
+                     && stats.packetsDropped == 2
+                     && stats.missingTriggerCount == 0,
+                 QStringLiteral("B2 partial trigger does not increment missingTriggerCount"));
+}
+
+// B3 空缓冲区锚点路径：完整触发 flush 后缓冲区为空，下一触发跨 gap
+//   T100(完成) -> T104 -> T108：每条路径按 trigger 数累计且不双计
+bool testMissingTriggerEmptyBufferGapPath()
+{
+    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());  // 1 包/触发
+    processor.setMeasureEnabled(true);
+
+    processor.enqueuePacket(triggerPacket(100, 0));   // 完成并 flush
+    processor.enqueuePacket(triggerPacket(104, 0));   // gap=3：T101/T102/T103 完全缺失
+    processor.enqueuePacket(triggerPacket(108, 0));   // gap=3：T105/T106/T107 完全缺失
+    processor.drainBatchForTest();
+    const auto stats = processor.statsSnapshot();
+    return check(stats.missingTriggerCount == 6
+                     && stats.packetsDropped == 6
+                     && stats.triggersComplete == 3
+                     && stats.triggersPartial == 0,
+                 QStringLiteral("B3 empty-buffer gap accumulates per missing trigger"));
+}
+
+// B4 uint16 wrap / backstep / reset recovery
+bool testMissingTriggerWrapForward()
+{
+    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());  // 1 包/触发
+    processor.setMeasureEnabled(true);
+
+    processor.enqueuePacket(triggerPacket(65534, 0));  // 完成并 flush
+    processor.enqueuePacket(triggerPacket(1, 0));      // wrap forward：T65535/T0 缺失
+    processor.enqueuePacket(triggerPacket(0, 0));      // 小幅回退=迟到包：stale，不计跳号
+    processor.drainBatchForTest();
+    const auto stats = processor.statsSnapshot();
+    return check(stats.missingTriggerCount == 2
+                     && stats.packetsDropped == 2
+                     && stats.triggersComplete == 2
+                     && stats.staleTriggerPacketsDiscarded == 1,
+                 QStringLiteral("B4 wrap-forward gap counts exactly, backstep excluded"));
+}
+
+bool testMissingTriggerResetRecovery()
+{
+    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());  // 1 包/触发
+    processor.setMeasureEnabled(true);
+
+    processor.enqueuePacket(triggerPacket(1000, 0));  // 完成并 flush
+    // 触发序号大幅回退（>= kTriggerResetBackJumpThreshold）：判定新一帧/新一轮，
+    // 锚点重置并接受当前包，不产生跳号/丢包
+    processor.enqueuePacket(triggerPacket(10, 0));
+    processor.enqueuePacket(triggerPacket(9, 0));     // 小幅回退：stale，不计跳号
+    processor.drainBatchForTest();
+    const auto stats = processor.statsSnapshot();
+    return check(stats.missingTriggerCount == 0
+                     && stats.packetsDropped == 0
+                     && stats.triggersComplete == 2
+                     && stats.staleTriggerPacketsDiscarded == 1,
+                 QStringLiteral("B4 reset recovery/backstep do not increment missingTriggerCount"));
+}
+
+
 #ifdef _WIN32
 bool testSocketCounterBoundary()
 {
@@ -274,6 +396,11 @@ int main(int argc, char** argv)
     ok = testMultiBatchConservation() && ok;
     ok = testRawReceiveOrderTracker() && ok;
     ok = testAssemblyRejectionClassification() && ok;
+    ok = testMissingTriggerSwitchPath() && ok;
+    ok = testMissingTriggerPartialOnly() && ok;
+    ok = testMissingTriggerEmptyBufferGapPath() && ok;
+    ok = testMissingTriggerWrapForward() && ok;
+    ok = testMissingTriggerResetRecovery() && ok;
 #ifdef _WIN32
     WSADATA wsa{};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {

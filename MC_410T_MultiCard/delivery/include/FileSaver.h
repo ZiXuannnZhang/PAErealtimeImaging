@@ -6,6 +6,20 @@
 #include "DataTypes.h"
 #include "third_party/concurrentqueue.h"
 
+// Low-frequency observability for file rollovers. Distinguishes capacity
+// rollovers (triggersPerFile) from physical-round rollovers
+// (TriggerGroup::roundGeneration) as required by the round-boundary contract.
+struct FileRolloverInfo {
+    bool happened = false;
+    QString reason;                 // "capacity" | "physical_round"
+    uint64_t oldRoundGeneration = 0;
+    uint64_t newRoundGeneration = 0;
+    int oldFileSequence = 0;
+    int newFileSequence = 0;
+    int oldFileTriggerCount = 0;
+    bool manualMode = true;         // sessionGen == 0
+};
+
 // ============================================================
 // FileSaver  异步存储线程（每卡一个实例）
 //
@@ -48,7 +62,7 @@ public:
     bool consumeTriggerGroup(const TriggerGroupPtr& group);
     void serviceCloseRequest();
     void suspendForSourceRestart();
-    void resumeAfterSourceRestart(){m_saving.store(true,std::memory_order_release);}
+    void resumeAfterSourceRestart();
 
     // 自动保存会话代目录解析：按触发组携带的 sessionGen 查询保存目录。
     // gen=0（手动/无会话代）返回空串=保持当前目录不变。
@@ -59,14 +73,27 @@ public:
     // 提供队列指针供 DataProcessor 直接入队（DataProcessor 构造时注入）
     moodycamel::ConcurrentQueue<TriggerGroupPtr>* saveQueue() { return &m_saveQueue; }
 
-    //  状态查询 
+    //  状态查询
     bool     isSaving()      const { return m_saving.load(); }
     int      queueDepth()    const;
     uint64_t savedCount()    const { return m_savedCount.load(); }
 
+    // Physical-round rollover observability (low frequency, rollover only).
+    const FileRolloverInfo& lastFileRollover() const { return m_lastRollover; }
+    uint64_t fileRolloverCount()         const { return m_rolloverCount; }
+    uint64_t physicalRoundRolloverCount() const { return m_roundRolloverCount; }
+    bool     hasCurrentPhysicalRound()   const { return m_haveCurrentPhysicalRound; }
+    uint64_t currentPhysicalRoundGeneration() const { return m_currentPhysicalRoundGeneration; }
+
 signals:
     void statusMessage(const QString& message);
     void errorOccurred(const QString& error);
+    // Emitted on every file rollover (capacity or physical round). Bridged to
+    // the diagnostic recorder by the owner; tests may connect directly.
+    void fileRolled(int cardId, const QString& reason,
+                    quint64 oldRoundGeneration, quint64 newRoundGeneration,
+                    int oldFileSequence, int newFileSequence,
+                    int oldFileTriggerCount, bool manualMode);
 
 protected:
     void run() override;
@@ -75,6 +102,11 @@ private:
     void openNewFiles(uint32_t sourceIPv4);
     void closeFiles();
     QString generateFileName(const QString& channel) const;
+    // Physical-round file state lifecycle: cleared on start/stop/suspend/resume
+    // and on auto-save session-gen change so an old measurement can never
+    // pollute a new measurement's round boundaries.
+    void resetPhysicalRoundState();
+    void recordRollover(const FileRolloverInfo& info);
 
     // float32  float16 批量转换（软件实现，Release 下可选开启 F16C）
     static uint16_t float32ToFloat16(float value);
@@ -100,6 +132,15 @@ private:
 
     QFile*   m_fileChannelA = nullptr;
     QFile*   m_fileChannelB = nullptr;
+
+    // Physical-round file boundary state (data-plane authoritative):
+    // TriggerGroup::roundGeneration drives the rollover before the first group
+    // of a new generation is written; triggersPerFile remains the capacity cap.
+    bool     m_haveCurrentPhysicalRound = false;
+    uint64_t m_currentPhysicalRoundGeneration = 0;
+    FileRolloverInfo m_lastRollover;
+    uint64_t m_rolloverCount = 0;
+    uint64_t m_roundRolloverCount = 0;
 
     moodycamel::ConcurrentQueue<TriggerGroupPtr> m_saveQueue;
 

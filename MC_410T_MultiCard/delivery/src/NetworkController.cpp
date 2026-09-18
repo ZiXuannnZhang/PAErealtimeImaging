@@ -11,8 +11,10 @@
 #include <thread>
 #include <chrono>
 #include <algorithm>
+#include <cmath>
 #include <cerrno>
 #include <cstring>
+#include <limits>
 #ifdef _WIN32
 #include <iphlpapi.h>
 #include <icmpapi.h>
@@ -44,7 +46,69 @@ DiagnosticRecorder *diagnosticRecorder()
 NetworkController::NetworkController(QObject* parent)
     : QObject(parent)
     , m_controlSocket(INVALID_SOCKET)
-    , m_feedbackSocket(INVALID_SOCKET) {}
+    , m_feedbackSocket(INVALID_SOCKET)
+{
+    m_autoSaveCoordinator.setEventSink([this](
+        const paimage::AutoSaveRoundCoordinator::Event& event) {
+        QString message;
+        QString bindingState;
+        DiagnosticRecorder::Severity severity = DiagnosticRecorder::Severity::Info;
+        switch (event.kind) {
+        case paimage::AutoSaveRoundCoordinator::Event::Kind::Reserved:
+            message = QStringLiteral("auto_save_round_generation_reserved");
+            bindingState = QStringLiteral("prepared");
+            break;
+        case paimage::AutoSaveRoundCoordinator::Event::Kind::Committed:
+            message = QStringLiteral("auto_save_round_generation_committed");
+            bindingState = QStringLiteral("committed");
+            break;
+        case paimage::AutoSaveRoundCoordinator::Event::Kind::AlreadyApplied:
+            message = QStringLiteral("auto_save_round_generation_already_applied");
+            bindingState = QStringLiteral("already_applied");
+            break;
+        case paimage::AutoSaveRoundCoordinator::Event::Kind::Failed:
+            message = QStringLiteral("auto_save_round_generation_failed");
+            bindingState = QStringLiteral("failed");
+            severity = DiagnosticRecorder::Severity::Error;
+            break;
+        case paimage::AutoSaveRoundCoordinator::Event::Kind::LookupFailed:
+            message = QStringLiteral("auto_save_round_binding_lookup_failed");
+            bindingState = QStringLiteral("lookup_failed");
+            severity = DiagnosticRecorder::Severity::Error;
+            break;
+        }
+        const bool bindingFailed =
+            event.kind == paimage::AutoSaveRoundCoordinator::Event::Kind::Failed ||
+            event.kind == paimage::AutoSaveRoundCoordinator::Event::Kind::LookupFailed;
+        const auto resolvedSessionGen = bindingFailed
+            ? paimage::AutoSaveRoundCoordinator::kFailedGeneration
+            : (event.newSessionGen != 0 ? event.newSessionGen
+                                        : event.publishedSessionGen);
+        recordDiagnosticEvent(
+            QStringLiteral("paimage.auto_save"), message, severity,
+            {{QStringLiteral("measurementSession"),
+              QString::number(event.measurementSession)},
+             {QStringLiteral("roundGeneration"),
+              QString::number(event.roundGeneration)},
+             {QStringLiteral("boundaryKind"),
+              QString::fromLatin1(paimage::autoSaveBoundaryKindName(event.boundaryKind))},
+             {QStringLiteral("boundaryKey"), event.boundaryKey},
+             {QStringLiteral("oldSessionGen"),
+              QString::number(event.oldSessionGen)},
+             {QStringLiteral("newSessionGen"),
+               QString::number(event.newSessionGen)},
+              {QStringLiteral("publishedSessionGen"),
+               QString::number(event.publishedSessionGen)},
+              {QStringLiteral("resolvedSessionGen"),
+               QString::number(resolvedSessionGen)},
+             {QStringLiteral("roundBinding"), true},
+             {QStringLiteral("roundBindingState"), bindingState},
+             {QStringLiteral("oldDirectory"), event.oldDirectory},
+             {QStringLiteral("directory"), event.directory},
+             {QStringLiteral("phase"), event.phase},
+             {QStringLiteral("error"), event.error}});
+    });
+}
 
 void NetworkController::setDiagnosticContext(const QString& listenId,
                                               const QString& source)
@@ -110,6 +174,8 @@ QJsonObject NetworkController::runtimeStatsFields(const CardStats::Snapshot& sta
                   static_cast<double>(stats.triggersComplete));
     fields.insert(QStringLiteral("triggersPartial"),
                   static_cast<double>(stats.triggersPartial));
+    fields.insert(QStringLiteral("missingTriggerCount"),
+                  static_cast<double>(stats.missingTriggerCount));
     fields.insert(QStringLiteral("triggersDiscarded"),
                   static_cast<double>(stats.triggersDiscarded));
     fields.insert(QStringLiteral("saveQueueDiscards"),
@@ -514,20 +580,96 @@ void NetworkController::stopSaving() {
 }
 
 // ─
-// 自动保存会话代目录注册表（方案2 精确分界）
+// 自动保存会话代协调器（物理边界权威）
 // ─
-void NetworkController::registerSessionDir(uint64_t gen, const QString& dir) {
-    QMutexLocker locker(&m_sessionDirMutex);
-    m_sessionDirs.insert(gen, dir);
+void NetworkController::configureAutoSave(const QString& baseDirectory,
+                                           std::uint64_t lastDirectoryNumber)
+{
+    m_autoSaveCoordinator.configure(baseDirectory, lastDirectoryNumber);
 }
 
-QString NetworkController::sessionDir(uint64_t gen) const {
-    if (gen == 0) return QString();   // 手动模式：保持当前目录
-    QMutexLocker locker(&m_sessionDirMutex);
-    return m_sessionDirs.value(gen);
+NetworkController::AutoSaveCommit NetworkController::beginAutoSaveSession(
+    std::uint64_t measurementSession, const QString& phase)
+{
+    auto result = m_autoSaveCoordinator.beginSession(measurementSession, phase);
+    if (result.committed)
+        requestCloseSavers();
+    if (!result.failed && m_measurementRunning && m_measurementSessionToken != 0) {
+        const auto round = physicalRoundSnapshot().roundGeneration;
+        const auto binding = bindAutoSaveMeasurementRound(
+            m_measurementSessionToken,
+            round, QStringLiteral("ui_auto_save_enable_active_round"));
+        if (binding.failed)
+            return binding;
+    }
+    return result;
+}
+
+NetworkController::AutoSaveCommit NetworkController::bindAutoSaveMeasurementSession(
+    std::uint64_t measurementSession, const QString& phase)
+{
+    return m_autoSaveCoordinator.bindMeasurementSession(measurementSession, phase);
+}
+
+NetworkController::AutoSaveCommit NetworkController::bindAutoSaveMeasurementRound(
+    std::uint64_t measurementSession,
+    std::uint64_t roundGeneration,
+    const QString& phase)
+{
+    return m_autoSaveCoordinator.bindMeasurementRound(
+        measurementSession, roundGeneration, phase);
+}
+
+NetworkController::AutoSaveCommit NetworkController::commitAutoSaveBoundary(
+    std::uint64_t measurementSession,
+    std::uint64_t roundGeneration,
+    paimage::AutoSaveBoundaryKind boundaryKind,
+    const QString& phase)
+{
+    auto result = m_autoSaveCoordinator.commitBoundary(
+        measurementSession, roundGeneration, boundaryKind, phase);
+    if (result.committed)
+        requestCloseSavers();
+    return result;
+}
+
+void NetworkController::disableAutoSave()
+{
+    m_autoSaveCoordinator.disable();
+}
+
+bool NetworkController::autoSaveEnabled() const
+{
+    return m_autoSaveCoordinator.enabled();
+}
+
+bool NetworkController::autoSaveFaulted() const
+{
+    return m_autoSaveCoordinator.faulted();
+}
+
+uint64_t NetworkController::autoSessionGen() const
+{
+    return m_autoSaveCoordinator.currentGeneration();
+}
+
+QString NetworkController::sessionDir(uint64_t gen) const
+{
+    return m_autoSaveCoordinator.directoryFor(gen);
+}
+
+uint64_t NetworkController::resolveAutoSaveRound(uint64_t measurementSession,
+                                                  uint64_t roundGeneration) const
+{
+    return m_autoSaveCoordinator.resolveRound(
+        measurementSession, roundGeneration).sessionGen;
 }
 
 void NetworkController::requestCloseSavers() {
+    if (m_paimage) {
+        m_paimage->output().requestClose();
+        return;
+    }
     for (auto& s : m_savers) s->requestClose();
 }
 
@@ -537,8 +679,52 @@ void NetworkController::setDisplayPoints(int displayPoints) {
     for (auto& p : m_processors) p->setDisplayPoints(displayPoints);
 }
 
+void NetworkController::setLogicalTriggersPerRound(std::uint64_t count) {
+    if (count == 0 || count > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
+        return;
+    m_config.logicalTriggersPerRound = static_cast<int>(count);
+    if (m_paimage)
+        m_paimage->output().setConfiguredLogicalTriggersPerRound(count);
+}
+
+void NetworkController::setPhysicalRoundTimeout(double seconds) {
+    if (!std::isfinite(seconds) || seconds < 0.0)
+        return;
+    m_physicalRoundTimeoutSec = seconds;
+    if (m_paimage)
+        m_paimage->output().setPhysicalRoundTimeout(seconds);
+}
+
+void NetworkController::setStartupFilterTriggerCount(std::uint64_t count) {
+    m_startupFilterTriggerCount = count;
+    if (m_paimage)
+        m_paimage->output().setStartupFilterTriggerCount(count);
+}
+
+void NetworkController::setDisableCountBoundary(bool disable) {
+    m_disableCountBoundary = disable;
+    if (m_paimage)
+        m_paimage->output().setDisableCountBoundary(disable);
+}
+
+paimage::PhysicalRoundNormalizer::Snapshot NetworkController::physicalRoundSnapshot() const {
+    if (m_paimage)
+        return m_paimage->output().normalizerSnapshot();
+    paimage::PhysicalRoundNormalizer::Snapshot result;
+    result.startupFilterTriggerCount = m_startupFilterTriggerCount;
+    result.disableCountBoundary = m_disableCountBoundary;
+    result.firstVisibleFilterMode = false;
+    return result;
+}
+
 void NetworkController::reconfigure(const AcqConfig& config) {
-    if(m_paimage){m_config.displayPoints=config.displayPoints;setDisplayPoints(config.displayPoints);return;}
+    if(m_paimage){
+        m_config.displayPoints=config.displayPoints;
+        setDisplayPoints(config.displayPoints);
+        if (config.logicalTriggersPerRound > 0)
+            setLogicalTriggersPerRound(static_cast<std::uint64_t>(config.logicalTriggersPerRound));
+        return;
+    }
     m_config = config;
     for (auto& p : m_processors) p->updateConfig(config);
 }

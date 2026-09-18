@@ -1,6 +1,7 @@
 #include "PaimageAcquisition/SettingsPath.h"
 #include "RingConfigDialog.h"
 #include "ImagingController.h"
+#include "RoundPolicySettings.h"
 
 #include <QComboBox>
 #include <QLabel>
@@ -249,6 +250,29 @@ void RingConfigDialog::buildUi()
                                   "后，下一触发判定为新一圈并重置旧图像（建议大于单圈内最大触发间隔）。");
     fCh->addRow("超时重置(0=关闭)", m_spnTimeoutReset);
     scanLayout->addWidget(grpCh);
+
+    // ══ 物理轮次启动策略（Session B）══
+    // 两个参数完全独立；持久化接入现有 RingConfigDialog/Defaults “设为默认/恢复默认”链，
+    // Apply/OK 成功后经 roundPolicyChanged 转发给 NetworkController。
+    auto *grpRound = new QGroupBox("物理轮次启动策略");
+    auto *fRound = new QFormLayout(grpRound);
+    m_spnStartupFilterTriggers = new QSpinBox;
+    m_spnStartupFilterTriggers->setRange(0, 1000000);
+    m_spnStartupFilterTriggers->setValue(1);
+    m_spnStartupFilterTriggers->setToolTip(
+        "每个物理轮次开头过滤的 distinct physical trigger 数（软件侧过滤）。\n"
+        "单位是 distinct physical trigger，不是 packet/卡数：\n"
+        "多卡看到同一 trigger 只消耗一个过滤名额。\n"
+        "0 = 不过滤启动 trigger；1 = 兼容行为（过滤首枚）；N = 过滤前 N 枚。");
+    fRound->addRow("启动过滤触发数", m_spnStartupFilterTriggers);
+    m_chkDisableCountBoundary = new QCheckBox("禁用计数重置");
+    m_chkDisableCountBoundary->setChecked(false);
+    m_chkDisableCountBoundary->setToolTip(
+        "未勾选：达到配置的逻辑触发数仍产生现有计数边界（CountBoundary）。\n"
+        "勾选：达到配置逻辑触发数不产生固定计数边界，物理轮次继续，直到超时重置。\n"
+        "超时仍是轮次边界；与“启动过滤触发数”完全独立。");
+    fRound->addRow("", m_chkDisableCountBoundary);
+    scanLayout->addWidget(grpRound);
     scanLayout->addStretch();
     auto *scanScroll = new QScrollArea;
     scanScroll->setWidgetResizable(true);
@@ -358,6 +382,13 @@ void RingConfigDialog::restoreDefaults()
     // 采样率/采样深度不参与恢复默认：数据来源固定为线性采集参数
     // 优先使用“设为默认”保存的参数；未保存过则回退到出厂硬编码默认值
     QSettings s(paimageSettingsPath(), QSettings::IniFormat);
+    // 物理轮次启动策略：与下方其他参数同一 Defaults group，经共享 helper 读写
+    // （无历史 key 时回退出厂 1 / false）
+    const RoundPolicySettings::Policy roundPolicy = RoundPolicySettings::load(s);
+    m_spnStartupFilterTriggers->setValue(
+        static_cast<int>(std::min<quint64>(roundPolicy.startupFilterTriggerCount,
+                                           m_spnStartupFilterTriggers->maximum())));
+    m_chkDisableCountBoundary->setChecked(roundPolicy.disableCountBoundary);
     s.beginGroup("RingConfigDialog/Defaults");
     auto val = [&s](const QString &k, const QVariant &dflt) {
         return s.contains(k) ? s.value(k) : dflt;
@@ -440,6 +471,11 @@ void RingConfigDialog::saveDefaults()
     s.setValue("imValue1", m_spnImValue1->value());
     s.setValue("imValue2", m_spnImValue2->value());
     s.endGroup();
+    // 物理轮次启动策略与其他默认参数同一次“设为默认”落盘（同一 Defaults group，
+    // 独立 key；helper 内部自行 sync）
+    RoundPolicySettings::save(s, RoundPolicySettings::Policy{
+        static_cast<quint64>(m_spnStartupFilterTriggers->value()),
+        m_chkDisableCountBoundary->isChecked()});
     s.sync();
 }
 
@@ -564,7 +600,19 @@ bool RingConfigDialog::applyConfig()
     int sysDelayCh[8][2] = {{0}};
     sysDelayPerChannel(sysDelayCh);
     m_controller->configureRing(config(), sysDelayCh);
+    // 应用成功后将物理轮次启动策略同步给当前 NetworkController（MainWindow 转发）
+    emit roundPolicyChanged(startupFilterTriggerCount(), disableCountBoundary());
     return true;
+}
+
+quint64 RingConfigDialog::startupFilterTriggerCount() const
+{
+    return static_cast<quint64>(m_spnStartupFilterTriggers->value());
+}
+
+bool RingConfigDialog::disableCountBoundary() const
+{
+    return m_chkDisableCountBoundary->isChecked();
 }
 
 void RingConfigDialog::showEvent(QShowEvent *event)

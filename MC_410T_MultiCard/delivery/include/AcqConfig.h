@@ -20,6 +20,7 @@
 // 接收路线：WinSock（编译期确定，不可运行时切换）
 // ============================================================
 struct AcqConfig {
+    static constexpr int kDefaultLogicalTriggersPerRound = 4000;
     int         nCards       = 4;   // 启用的卡数（默认4；自动识别时由扫描在线数决定）
     std::string localBindIP;        // 控制 socket 本地绑定IP（空=INADDR_ANY）
     // 目标采集卡 IP 列表（网段扫描自动识别结果；非空时优先使用，空则按 192.168.0.2 起递增生成）
@@ -40,6 +41,12 @@ struct AcqConfig {
     // Experimental per-socket timestamping: 0=off (default), 1=software,
     // 2=hardware, 3=auto (hardware then explicit software fallback).
     int socketTimestampMode = 0;
+
+    // Canonical operational logical-trigger count for one physical round.
+    // It is persisted at AcquisitionParams/LogicalTriggersPerRound and is
+    // overridden by the ring configuration when ring mode is active. The
+    // normalizer never owns or guesses this product setting.
+    int logicalTriggersPerRound = kDefaultLogicalTriggersPerRound;
 
     // ══ 数据格式参数（真实采集固定 250 MSa/s 满速率，与 Constants.h 一致）══
     // 32bit Q16.16 差分相位，采样间隔 4.0 ns，不抽取。

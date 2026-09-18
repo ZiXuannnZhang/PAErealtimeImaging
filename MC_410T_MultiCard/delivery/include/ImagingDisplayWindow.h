@@ -5,6 +5,7 @@
 #include <QEvent>
 #include <vector>
 #include <memory>
+#include <functional>
 #include "RingImageWidget.h"
 #include "RingColorBarWidget.h"
 
@@ -36,6 +37,13 @@ public:
     int lastSeq() const { return m_lastSeq; }
     // 按当前色标范围（m_range1/2）将窗口两幅图像渲染为 1600×1600 ARGB32 并保存 PNG
     bool saveWindowPngs(const QString &dir, const QString &suffix, int seq) const;
+    // UI-thread capture only; the returned writer owns immutable pixels and
+    // ranges and can render/save on a worker after Ring/CUDA reset.
+    using PngWriter = std::function<bool(const QString&, const QString&)>;
+    PngWriter capturePngWriter(int seq) const;
+signals:
+    void presentationChanged();
+public:
 
     // 当前色标范围（供后台转换捕获）
     RingImageWidget::Range range1() const { return m_range1; }

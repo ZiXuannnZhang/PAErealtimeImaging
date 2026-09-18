@@ -92,18 +92,157 @@ bool SocketReceiver::start(std::string& error){
     running_=true;worker_=std::thread(&SocketReceiver::run,this);return true;
 }
 void SocketReceiver::closeSockets(){for(auto s:sockets_)closesocket(SOCKET(s));sockets_.clear();if(feedbackSocket_!=INVALID_SOCKET){closesocket(SOCKET(feedbackSocket_));feedbackSocket_=INVALID_SOCKET;}if(wsa_){WSACleanup();wsa_=false;}}
-void SocketReceiver::stop(){running_=false;if(worker_.joinable())worker_.join();closeSockets();}
-void SocketReceiver::prepareStart(std::uint64_t session){auto begin=now();std::unique_lock<std::mutex> lock(coreMutex_);auto acquired=now();session_=session;correlation_=0;core_.prepareStart(session,acquired);auto end=now();
+void SocketReceiver::stop(){
+    running_=false;
+    if(worker_.joinable())worker_.join();
+    {
+        std::lock_guard<std::mutex> lock(coreMutex_);
+        if(startFenceActive_||!startHold_.empty())resetStartFence(Decision::StartFenceShutdownDiscard);
+    }
+    closeSockets();
+}
+void SocketReceiver::observeShutdown(){
+    std::lock_guard<std::mutex> lock(coreMutex_);
+    if(startFenceActive_||!startHold_.empty())resetStartFence(Decision::StartFenceShutdownDiscard);
+    core_.observeShutdown(now());
+}
+void SocketReceiver::observeFence(Decision decision,int card,std::uint16_t trigger,std::uint16_t packet,
+                                  std::uint32_t count,Time at,std::uint64_t ingressId){
+    core_.observeAdmission(decision,card,trigger,packet,count,at,ingressId);
+}
+void SocketReceiver::discardHeld(Decision decision){
+    while(!startHold_.empty()){
+        HeldDatagram held=std::move(startHold_.front());
+        startHold_.pop_front();
+        startHoldBytes_-=held.bytes.size();
+        observeFence(decision,held.card,held.trigger,held.packet,1,now(),held.ingressId);
+    }
+    startHoldBytes_=0;
+}
+void SocketReceiver::discardHeldForCard(int card,Decision decision){
+    for(auto it=startHold_.begin();it!=startHold_.end();){
+        if(it->card!=card){++it;continue;}
+        HeldDatagram held=std::move(*it);
+        startHoldBytes_-=held.bytes.size();
+        it=startHold_.erase(it);
+        observeFence(decision,held.card,held.trigger,held.packet,1,now(),held.ingressId);
+    }
+}
+void SocketReceiver::resetStartFence(Decision decision){
+    if(!startHold_.empty())discardHeld(decision);
+    startFenceActive_=false;startFenceFailed_=false;startFenceCallbacksSeen_=false;
+    startCardStates_.clear();startHoldBytes_=0;
+}
+void SocketReceiver::beforeStartSend(int card){
+    std::lock_guard<std::mutex> lock(coreMutex_);
+    if(!startFenceActive_||card<0||std::size_t(card)>=startCardStates_.size())return;
+    startFenceCallbacksSeen_=true;
+    if(startFenceFailed_)return;
+    auto& state=startCardStates_[std::size_t(card)];
+    if(state==StartCardState::AwaitingStart)state=StartCardState::StartSendPending;
+}
+void SocketReceiver::afterStartSend(int card,bool success){
+    std::lock_guard<std::mutex> lock(coreMutex_);
+    if(!startFenceActive_||card<0||std::size_t(card)>=startCardStates_.size())return;
+    startFenceCallbacksSeen_=true;
+    auto& state=startCardStates_[std::size_t(card)];
+    if(success&&!startFenceFailed_){state=StartCardState::StartSent;return;}
+    state=StartCardState::StartFailed;startFenceFailed_=true;
+    discardHeldForCard(card,Decision::StartFenceFailedDiscard);
+}
+bool SocketReceiver::holdStartDatagram(int card,const std::uint8_t* data,int length,Time received,
+                                       std::uint64_t ingressId,std::uint32_t sourceIPv4,
+                                       std::uint16_t sourcePort,std::uint16_t localPort,
+                                       std::uint16_t trigger,std::uint16_t packet){
+    if(startFenceFailed_){
+        observeFence(Decision::StartFenceFailedDiscard,card,trigger,packet,1,now(),ingressId);
+        return false;
+    }
+    const auto bytes=static_cast<std::size_t>(std::max(length,0));
+    if(startHold_.size()>=kMaxStartHoldDatagrams||startHoldBytes_+bytes>kMaxStartHoldBytes){
+        startFenceFailed_=true;
+        observeFence(Decision::StartFenceOverflow,card,trigger,packet,1,now(),ingressId);
+        discardHeld(Decision::StartFenceFailedDiscard);
+        observeFence(Decision::StartFenceFailedDiscard,card,trigger,packet,1,now(),ingressId);
+        return false;
+    }
+    HeldDatagram held;held.card=card;held.bytes.assign(data,data+bytes);held.receivedNs=received;
+    held.ingressId=ingressId;held.sourceIPv4=sourceIPv4;held.sourcePort=sourcePort;held.localPort=localPort;
+    held.trigger=trigger;held.packet=packet;startHoldBytes_+=bytes;startHold_.push_back(std::move(held));
+    observeFence(Decision::StartFenceHeld,card,trigger,packet,1,received,ingressId);
+    return true;
+}
+bool SocketReceiver::admitOrHold(int card,const std::uint8_t* data,int length,Time received,
+                                  std::uint64_t ingressId,std::uint32_t sourceIPv4,std::uint16_t sourcePort,
+                                  std::uint16_t localPort,std::uint16_t trigger,std::uint16_t packet){
+    if(card<0||card>=config_.cards){
+        core_.ingest(card,data,static_cast<std::size_t>(std::max(length,0)),received,ingressId,sourceIPv4);
+        return false;
+    }
+    if(!startFenceActive_){
+        core_.ingest(card,data,static_cast<std::size_t>(std::max(length,0)),received,ingressId,sourceIPv4);
+        return false;
+    }
+    if(startFenceFailed_||std::size_t(card)>=startCardStates_.size()||
+       startCardStates_[std::size_t(card)]==StartCardState::StartFailed){
+        observeFence(Decision::StartFenceFailedDiscard,card,trigger,packet,1,now(),ingressId);
+        return false;
+    }
+    switch(startCardStates_[std::size_t(card)]){
+    case StartCardState::AwaitingStart:
+        observeFence(Decision::StartFencePreStartDiscard,card,trigger,packet,1,now(),ingressId);
+        return false;
+    case StartCardState::StartSendPending:
+    case StartCardState::StartSent:
+        return holdStartDatagram(card,data,length,received,ingressId,sourceIPv4,sourcePort,localPort,trigger,packet);
+    case StartCardState::StartFailed:
+        break;
+    }
+    observeFence(Decision::StartFenceFailedDiscard,card,trigger,packet,1,now(),ingressId);
+    return false;
+}
+void SocketReceiver::prepareStart(std::uint64_t session){auto begin=now();std::unique_lock<std::mutex> lock(coreMutex_);auto acquired=now();
+    if(startFenceActive_||!startHold_.empty())resetStartFence(Decision::StartFenceResetDiscard);
+    startFenceActive_=true;startFenceFailed_=false;startFenceCallbacksSeen_=false;
+    startCardStates_.assign(std::size_t(config_.cards),StartCardState::AwaitingStart);startHoldBytes_=0;
+    session_=session;correlation_=0;core_.prepareStart(session,acquired);auto end=now();
     timing(TimingKind::ControlMutexWait,begin,acquired,-1,0,1);timing(TimingKind::ControlMutexHold,acquired,end,-1,0,1);
     if(loopLog_){LoopRecord r;r.timeNs=begin;r.spanNs=end-begin;r.session=session;r.threadId=GetCurrentThreadId();
         r.kind=std::uint16_t(LoopKind::ControlMark);r.value0=1;r.payloadB=session;
         r.flags=std::uint16_t((core_.enabled()?1u:0u)|(core_.confirmed()?2u:0u));loopLog_->push(r);}}
-void SocketReceiver::completeStart(bool ok){auto begin=now();std::unique_lock<std::mutex> lock(coreMutex_);auto acquired=now();correlation_=0;core_.completeStart(ok,acquired);auto end=now();
+bool SocketReceiver::completeStart(bool ok){auto begin=now();std::unique_lock<std::mutex> lock(coreMutex_);auto acquired=now();correlation_=0;
+    bool fenceOk=ok;
+    if(startFenceActive_){
+        // Component callers may use prepare/complete without ControlSocket.
+        // Production Backend always supplies the per-card callbacks.
+        if(ok&&!startFenceCallbacksSeen_)
+            for(auto& state:startCardStates_)state=StartCardState::StartSent;
+        fenceOk=ok&&!startFenceFailed_&&std::all_of(startCardStates_.begin(),startCardStates_.end(),
+                                                 [](StartCardState state){return state==StartCardState::StartSent;});
+    }
+    if(!fenceOk){
+        core_.completeStart(false,acquired);
+        discardHeld(Decision::StartFenceFailedDiscard);
+    }else{
+        core_.completeStart(true,acquired);
+        while(!startHold_.empty()){
+            HeldDatagram held=std::move(startHold_.front());startHold_.pop_front();startHoldBytes_-=held.bytes.size();
+            observeFence(Decision::StartFenceReleased,held.card,held.trigger,held.packet,1,held.receivedNs,held.ingressId);
+            core_.ingest(held.card,held.bytes.data(),held.bytes.size(),held.receivedNs,held.ingressId,held.sourceIPv4);
+        }
+        startHoldBytes_=0;
+    }
+    startFenceActive_=false;startFenceFailed_=false;startFenceCallbacksSeen_=false;startCardStates_.clear();
+    auto end=now();
     timing(TimingKind::ControlMutexWait,begin,acquired,-1,0,2);timing(TimingKind::ControlMutexHold,acquired,end,-1,0,2);
     if(loopLog_){LoopRecord r;r.timeNs=begin;r.spanNs=end-begin;r.session=session_.load();r.threadId=GetCurrentThreadId();
-        r.kind=std::uint16_t(LoopKind::ControlMark);r.value0=2;r.value1=ok?1u:0u;r.payloadB=session_.load();
-        r.flags=std::uint16_t((core_.enabled()?1u:0u)|(core_.confirmed()?2u:0u));loopLog_->push(r);}}
-void SocketReceiver::prepareStop(){auto begin=now();std::unique_lock<std::mutex> lock(coreMutex_);auto acquired=now();correlation_=0;core_.prepareStop();auto end=now();
+        r.kind=std::uint16_t(LoopKind::ControlMark);r.value0=2;r.value1=fenceOk?1u:0u;r.payloadB=session_.load();
+        r.flags=std::uint16_t((core_.enabled()?1u:0u)|(core_.confirmed()?2u:0u));loopLog_->push(r);}
+    return fenceOk;
+}
+void SocketReceiver::prepareStop(){auto begin=now();std::unique_lock<std::mutex> lock(coreMutex_);auto acquired=now();
+    if(startFenceActive_||!startHold_.empty())resetStartFence(Decision::StartFenceStopDiscard);
+    correlation_=0;core_.prepareStop();auto end=now();
     timing(TimingKind::ControlMutexWait,begin,acquired,-1,0,3);timing(TimingKind::ControlMutexHold,acquired,end,-1,0,3);
     if(loopLog_){LoopRecord r;r.timeNs=begin;r.spanNs=end-begin;r.session=session_.load();r.threadId=GetCurrentThreadId();
         r.kind=std::uint16_t(LoopKind::ControlMark);r.value0=3;r.payloadB=session_.load();
@@ -169,17 +308,23 @@ void SocketReceiver::run(){
                 const auto ingressId=ingress_.fetch_add(1)+1;
                 timing(TimingKind::Recvfrom,recvStart,recvEnd,card,port,std::uint32_t(n),0,ingressId,0);
                 auto time=now();
+                int admissionCard=card;
+                if(feedback){auto it=std::find(targetAddresses_.begin(),targetAddresses_.end(),source.sin_addr.s_addr);
+                    admissionCard=it==targetAddresses_.end()?-1:int(it-targetAddresses_.begin());}
+                card=admissionCard;
                 TraceRecord r;r.monotonicNs=time;r.session=session_;r.correlation=ingressId;r.threadId=GetCurrentThreadId();r.sourceIPv4=source.sin_addr.s_addr;
+                r.card=std::int16_t(card);
                 r.localPort=port;r.sourcePort=ntohs(source.sin_port);r.length=std::uint16_t(n);r.stage=1;
                 std::memcpy(r.header,buffer.data(),std::min(n,4));if(n>=4){r.packet=std::uint16_t(buffer[0]|unsigned(buffer[1])<<8);r.trigger=std::uint16_t(buffer[2]|unsigned(buffer[3])<<8);}
                 const auto traceStart=now();if(trace_)trace_->push(r);const auto traceEnd=now();timing(TimingKind::TracePush,traceStart,traceEnd,card,port,1,0,ingressId); // strictly before demux, parsing, admission, dedup
-                if(feedback){auto it=std::find(targetAddresses_.begin(),targetAddresses_.end(),source.sin_addr.s_addr);card=it==targetAddresses_.end()?-1:int(it-targetAddresses_.begin());
-                    if(n<=64){int type=feedbackType(buffer.data(),n);r.stage=3;r.reason=std::uint8_t(type);r.card=std::int16_t(card);if(trace_)trace_->push(r);if(card>=0&&type&&feedbackSink)feedbackSink(card,type,time);continue;}}
+                if(feedback){if(n<=64){int type=feedbackType(buffer.data(),n);r.stage=3;r.reason=std::uint8_t(type);if(trace_)trace_->push(r);if(card>=0&&type&&feedbackSink)feedbackSink(card,type,time);continue;}}
                 // Sampling data is every data-port datagram plus feedback-port
                 // acquisition datagrams; ready/ACK feedback is not a sample.
                 if(loopLog_)loopLog_->noteSampleData(time);
                 const auto ingressStart=now();if(ingressSink)ingressSink(card,r);const auto ingressEnd=now();timing(TimingKind::IngressSink,ingressStart,ingressEnd,card,port,1,0,ingressId);
-                const auto waitStart=now();std::unique_lock<std::mutex> lock(coreMutex_);const auto acquired=now();correlation_=ingressId;core_.ingest(card,buffer.data(),n,time,ingressId,source.sin_addr.s_addr);const auto ingestEnd=now();
+                const auto waitStart=now();std::unique_lock<std::mutex> lock(coreMutex_);const auto acquired=now();correlation_=ingressId;
+                admitOrHold(card,buffer.data(),n,time,ingressId,source.sin_addr.s_addr,ntohs(source.sin_port),port,r.trigger,r.packet);
+                const auto ingestEnd=now();
                 timing(TimingKind::CoreMutexWait,waitStart,acquired,card,port,1,0,ingressId);timing(TimingKind::CoreIngest,acquired,ingestEnd,card,port,1,0,ingressId);
                 lastIngress=ingressId;
             }

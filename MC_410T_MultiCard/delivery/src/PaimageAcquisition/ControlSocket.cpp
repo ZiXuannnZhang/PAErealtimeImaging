@@ -20,16 +20,24 @@ bool ControlSocket::open(const std::string& localIp,const std::vector<std::strin
 }
 void ControlSocket::close(){if(socket_!=INVALID_SOCKET){closesocket(SOCKET(socket_));socket_=INVALID_SOCKET;}
     if(wsa_){WSACleanup();wsa_=false;}targets_.clear();localPort_=targetPort_=0;timeoutOptionError_=-1;}
-bool ControlSocket::send(const Command& command,const std::vector<int>& cards,Observer observer){
+bool ControlSocket::send(const Command& command,const std::vector<int>& cards,Observer observer,BeforeObserver before){
     if(socket_==INVALID_SOCKET)return false;
     bool success=true;
     for(int card:cards){
         if(card<0||std::size_t(card)>=targets_.size())return false;
         sockaddr_in target{};target.sin_family=AF_INET;target.sin_port=htons(targetPort_);target.sin_addr.s_addr=targets_[card];
+        if(before)before(command,card);
         int count=sendto(SOCKET(socket_),reinterpret_cast<const char*>(command.data()),int(command.size()),0,reinterpret_cast<sockaddr*>(&target),sizeof(target));
         int error=count==int(command.size())?0:WSAGetLastError();
-        if(count!=int(command.size()))success=false;
-        if(observer)observer(command,{card,count,error,targets_[card]});
+        SendResult result{card,count,error,targets_[card]};
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+        if(testSendResultHook_)testSendResultHook_(command,result);
+#endif
+        if(result.bytes!=int(command.size())||result.error!=0)success=false;
+        if(observer)observer(command,result);
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+        if(testSendHook_)testSendHook_(command,result);
+#endif
     }
     return success;
 }

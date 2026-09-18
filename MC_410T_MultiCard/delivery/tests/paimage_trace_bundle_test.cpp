@@ -17,13 +17,14 @@ quint32 number(const QByteArray& b,int at,int n){quint32 value=0;std::memcpy(&va
 int main(int argc,char** argv){QCoreApplication app(argc,argv);
     QTemporaryDir root(QDir::currentPath()+"/trace-export-XXXXXX");require(root.isValid());
     const QString traces=root.path()+"/traces",run=traces+"/run1",tools=root.path()+"/tools";
-    QDir().mkpath(run);QDir().mkpath(tools);write(tools+"/paimage_trace_analyze.py","fixture tool");write(tools+"/paimage-trace-schema.md","fixture schema");write(tools+"/startup-looplog-schema.md","fixture loop schema");
+    QDir().mkpath(run);QDir().mkpath(tools);write(tools+"/paimage_trace_analyze.py","fixture tool");write(tools+"/paimage-trace-schema.md","fixture schema");write(tools+"/startup-looplog-schema.md","fixture loop schema");write(tools+"/startup_diagnostics_analyze.py","fixture startup analyzer");write(tools+"/Open-AdminCapture.cmd","fixture capture launcher");
     const qint64 wall=QDateTime::currentMSecsSinceEpoch()-100;
     write(run+"/run-config.json",QJsonDocument(QJsonObject{{"runId","run1"},{"wallAnchorMs",double(wall)},{"monotonicAnchorNs","1000000"}}).toJson());
     paimage::TraceWriter writer(std::filesystem::path(run.toStdWString()));
     paimage::LoopLog loopLog(std::filesystem::path(run.toStdWString()));
     paimage::TraceRecord first;first.stage=1;first.monotonicNs=1000000;first.correlation=101;writer.push(first);
     paimage::LoopRecord firstLoop;firstLoop.kind=std::uint16_t(paimage::LoopKind::Loop);firstLoop.timeNs=1000000;loopLog.push(firstLoop);
+    paimage::LoopRecord burst=firstLoop;burst.kind=std::uint16_t(paimage::LoopKind::BurstMark);loopLog.push(burst);
     const QString run2=traces+"/run2";QDir().mkpath(run2);
     write(run2+"/run-config.json",QJsonDocument(QJsonObject{{"runId","run2"},{"wallAnchorMs",double(wall)},{"monotonicAnchorNs","1000000"}}).toJson());
     {paimage::TraceWriter stopped(std::filesystem::path(run2.toStdWString()));stopped.push(first);stopped.stop();}
@@ -40,9 +41,9 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     }
     auto trace=entries.value("paimage/run1/trace-0.bin");require(trace.size()==64);paimage::TraceRecord record;std::memcpy(&record,trace.constData(),64);
     require(record.sequence==1&&record.correlation==101);
-    require(entries.value("paimage/run1/looplog-0.bin").size()==80);
+    require(entries.value("paimage/run1/looplog-0.bin").size()==160);
     auto loopSummary=QJsonDocument::fromJson(entries.value("paimage/run1/looplog-summary.json")).object();
-    require(loopSummary.value("recordsWritten").toInt()==1&&!loopSummary.value("loopLogIncomplete").toBool(true));
+    require(loopSummary.value("recordsWritten").toInt()==2&&!loopSummary.value("loopLogIncomplete").toBool(true));
     auto manifest=QJsonDocument::fromJson(entries.value("paimage/manifest.json")).object();
     require(!manifest.value("traceIncomplete").toBool(true)&&manifest.value("runs").toArray().size()==2);
     require(entries.value("paimage/run2/trace-0.bin").size()==64);

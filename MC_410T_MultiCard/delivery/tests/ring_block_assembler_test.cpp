@@ -19,6 +19,7 @@ struct CapturedBlock {
     std::vector<float> angles;
     std::vector<uint8_t> channels;
     int blockSeq = -1;
+    paimage::RoundIdentity round;
 };
 
 struct Runner {
@@ -78,9 +79,10 @@ struct Fixture {
         assembler.setBlockCallback([this](std::vector<float> &&raw,
                                           std::vector<float> &&angles,
                                           std::vector<uint8_t> &&channelIds,
-                                          int blockSeq) {
+                                          int blockSeq,
+                                          const paimage::RoundIdentity &round, bool roundComplete) {
             blocks.push_back({std::move(raw), std::move(angles),
-                              std::move(channelIds), blockSeq});
+                              std::move(channelIds), blockSeq, round});
         });
         assembler.setProgressCallback([this] { ++progress; });
         assembler.setTimeoutCallback([this] { ++timeouts; });
@@ -93,6 +95,15 @@ struct Fixture {
     {
         const std::vector<float> values(samples);
         assembler.pushChannelLine(channel, trigger, values.data(),
+                                  static_cast<int>(values.size()));
+    }
+
+    void lineForRound(int channel, uint16_t trigger,
+                      const paimage::RoundIdentity &round,
+                      std::initializer_list<float> samples)
+    {
+        const std::vector<float> values(samples);
+        assembler.pushChannelLine(channel, trigger, round, values.data(),
                                   static_cast<int>(values.size()));
     }
 };
@@ -255,6 +266,187 @@ bool testTimeoutReset(Runner &r)
     return true;
 }
 
+bool testExternalTimeoutOwnership(Runner &r)
+{
+    Fixture f;
+    f.configure({1, 1}, 2, 1, 0.0, 10.0, 1.0, 32, 1, 0.02);
+    f.assembler.setTimeoutManagedExternally(true);
+    f.line(0, 5, {5.0f});
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    f.line(0, 6, {6.0f});
+    f.line(1, 6, {60.0f});
+
+    r.check(f.timeouts == 0,
+            "externally managed timeout must not fire the assembler boundary");
+    r.check(f.blocks.empty(),
+            "externally managed timeout must retain the partial block until the owner resets it");
+    f.assembler.resetAfterPhysicalTimeout();
+    r.check(f.timeouts == 1 && f.blocks.empty(),
+            "explicit owner reset must remain available");
+    return true;
+}
+
+bool testLogicalRoundBoundary(Runner &r)
+{
+    Fixture f;
+    f.configure({1}, 2, 1, 0.0, 10.0, 1.0, 4, 1, 0.0);
+    f.line(0, 20, {20.0f});
+    f.line(0, 21, {21.0f});
+
+    r.check(f.blocks.size() == 1, "pre-boundary block must complete");
+    if (f.blocks.size() != 1) return false;
+    r.check(f.assembler.completeLogicalRound(),
+            "logical round boundary must reset angle phase");
+
+    f.line(0, 30, {30.0f});
+    f.line(0, 31, {31.0f});
+    r.check(f.blocks.size() == 2, "post-boundary block must complete");
+    if (f.blocks.size() != 2) return false;
+    r.check(f.blocks[1].blockSeq == 1,
+            "logical round boundary must preserve block sequence monotonicity");
+    r.equal(f.blocks[1].angles, {0.0f, 1.0f},
+            "logical round boundary must restart wavelength angle phase");
+    return true;
+}
+
+bool testIdentityResidualHardBarrier(Runner &r)
+{
+    Fixture f;
+    f.configure({1, 1}, 4, 1);
+    const paimage::RoundIdentity oldRound{77, 4};
+    const paimage::RoundIdentity newRound{77, 5};
+
+    // The old round has only three complete Ring triggers.  The physical
+    // normalizer may already have emitted CountBoundary, but the observer
+    // must not discard this in-flight Ring residual.
+    for (uint16_t trigger = 10; trigger <= 12; ++trigger) {
+        f.lineForRound(0, trigger, oldRound, {static_cast<float>(trigger)});
+        f.lineForRound(1, trigger, oldRound,
+                       {static_cast<float>(100 + trigger)});
+    }
+    const auto beforeBoundary = f.assembler.snapshot();
+    r.check(beforeBoundary.blockTriggers == 3 &&
+                !f.assembler.completeLogicalRound() &&
+                f.assembler.snapshot().blockTriggers == 3,
+            "R1 CountBoundary observer must retain old residual");
+
+    // The first new identity must clear the old residual before any NEW line
+    // can complete a block.  No old line is fabricated or padded into it.
+    for (uint16_t trigger = 20; trigger <= 23; ++trigger) {
+        f.lineForRound(0, trigger, newRound, {static_cast<float>(trigger)});
+        f.lineForRound(1, trigger, newRound,
+                       {static_cast<float>(100 + trigger)});
+    }
+
+    r.check(f.blocks.size() == 1,
+            "R1 residual transition must emit only the new-round block");
+    if (f.blocks.size() != 1) return false;
+    r.rawBytesEqual(f.blocks.front().raw,
+                    {20.0f, 120.0f, 21.0f, 121.0f,
+                     22.0f, 122.0f, 23.0f, 123.0f},
+                    "R1 old residual leaked into new block");
+    r.check(f.blocks.front().round == newRound,
+            "R1 block identity is not the incoming round");
+    const auto state = f.assembler.snapshot();
+    r.check(state.residualTransitions == 1 &&
+                state.residualPendingTriggers == 0 &&
+                state.residualBlockTriggers == 3,
+            "R1 residual diagnostic counters are incomplete");
+    return true;
+}
+
+bool testCountObserverDoesNotDropOldFinalSync(Runner &r)
+{
+    Fixture f;
+    f.configure({1, 1}, 1, 1);
+    const paimage::RoundIdentity oldRound{88, 0};
+    const paimage::RoundIdentity newRound{88, 1};
+
+    // One old block is already complete, so the assembler is clean when the
+    // normalizer's CountBoundary observer runs before the final old sync.
+    f.lineForRound(0, 20, oldRound, {20.0f});
+    f.lineForRound(1, 20, oldRound, {120.0f});
+    r.check(f.assembler.snapshot().blockTriggers == 0 &&
+                f.assembler.completeLogicalRound(),
+            "R2 clean CountBoundary observer must reset only phase");
+
+    // The delayed final old sync remains valid and must form its own old
+    // block after the observer has run.
+    f.lineForRound(0, 21, oldRound, {21.0f});
+    f.lineForRound(1, 21, oldRound, {121.0f});
+    r.check(f.blocks.size() == 2 && f.blocks.back().round == oldRound,
+            "R2 old final sync was dropped by CountBoundary observer");
+
+    f.lineForRound(0, 30, newRound, {30.0f});
+    f.lineForRound(1, 30, newRound, {130.0f});
+    r.check(f.blocks.size() == 3 && f.blocks.back().round == newRound,
+            "R2 new identity did not start a separate block");
+    r.equal(f.blocks.back().angles, {0.0f, 10.0f},
+            "R2 new identity did not reset angle phase");
+    r.check(f.assembler.snapshot().residualTransitions == 0,
+            "R2 clean CountBoundary path recorded a false residual");
+    return true;
+}
+
+bool testStaleRoundDrop(Runner &r)
+{
+    Fixture f;
+    f.configure({1, 1}, 1, 1);
+    const paimage::RoundIdentity oldRound{99, 8};
+    const paimage::RoundIdentity newRound{99, 9};
+    f.lineForRound(0, 40, newRound, {40.0f});
+    f.lineForRound(1, 40, newRound, {140.0f});
+    const std::size_t before = f.blocks.size();
+    f.lineForRound(0, 41, oldRound, {41.0f});
+    f.lineForRound(1, 41, oldRound, {141.0f});
+    r.check(f.blocks.size() == before,
+            "R3 stale old round entered a block");
+    r.check(f.assembler.snapshot().staleRoundDrops >= 2,
+            "R3 stale old round was not counted");
+    return true;
+}
+
+bool testGenerationGapAndSessionFloor(Runner &r)
+{
+    Fixture f;
+    f.configure({1}, 1, 1);
+    f.assembler.beginMeasurementSession(500);
+    const paimage::RoundIdentity first{500, 1};
+    const paimage::RoundIdentity gap{500, 4};
+    const paimage::RoundIdentity oldSession{499, 99};
+    f.lineForRound(0, 50, oldSession, {50.0f});
+    f.lineForRound(0, 51, first, {51.0f});
+    f.lineForRound(0, 52, gap, {52.0f});
+    r.check(f.blocks.size() == 2,
+            "R4 valid incoming identities did not continue after session floor");
+    r.check(f.blocks[0].round == first && f.blocks[1].round == gap,
+            "R4 block identity changed across generation gap");
+    r.check(f.assembler.snapshot().generationGapTransitions == 1,
+            "R4 generation gap was not diagnosed");
+    return true;
+}
+
+bool testMeasurementSessionRestart(Runner &r)
+{
+    Fixture f;
+    f.configure({1}, 1, 1);
+    const paimage::RoundIdentity sessionA{600, 0};
+    const paimage::RoundIdentity sessionB{601, 0};
+
+    f.lineForRound(0, 60, sessionA, {60.0f});
+    f.assembler.beginMeasurementSession(sessionB.measurementSession);
+    f.lineForRound(0, 61, sessionB, {61.0f});
+    f.lineForRound(0, 62, sessionA, {62.0f});
+
+    r.check(f.blocks.size() == 2 &&
+                f.blocks[0].round == sessionA &&
+                f.blocks[1].round == sessionB,
+            "R10 session restart mixed or lost block identity");
+    r.check(f.assembler.snapshot().staleRoundDrops == 1,
+            "R10 old session was not rejected after restart");
+    return true;
+}
+
 bool testNormalGoldenRegression(Runner &r)
 {
     Fixture f;
@@ -317,7 +509,14 @@ int main()
         {"T7 numerically smallest current", testNumericallySmallCurrentTrigger},
         {"T8 sequence wrap overflow", testSequenceWrapOverflow},
         {"T9 timeout reset", testTimeoutReset},
-        {"T10 normal golden regression", testNormalGoldenRegression},
+        {"T10 external timeout ownership", testExternalTimeoutOwnership},
+        {"T11 normal golden regression", testNormalGoldenRegression},
+        {"T12 logical round boundary", testLogicalRoundBoundary},
+        {"R1 identity residual hard barrier", testIdentityResidualHardBarrier},
+        {"R2 CountBoundary final sync retention", testCountObserverDoesNotDropOldFinalSync},
+        {"R3 stale round drop", testStaleRoundDrop},
+        {"R4 generation gap/session floor", testGenerationGapAndSessionFloor},
+        {"R10 measurement session restart", testMeasurementSessionRestart},
     };
 
     for (const auto &test : tests) {
@@ -327,6 +526,6 @@ int main()
             std::cout << "PASS " << test.first << '\n';
     }
     if (!runner.ok) return 1;
-    std::cout << "PASS all RingBlockAssembler tests (T1-T10)\n";
+    std::cout << "PASS all RingBlockAssembler tests (T1-T12,R1-R4,R10)\n";
     return 0;
 }

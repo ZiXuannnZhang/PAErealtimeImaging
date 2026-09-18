@@ -94,6 +94,8 @@ int main(int argc, char** argv) {
     const std::string sosRadiiMm = argStr(args, "--sos-radii-mm");   // 空=单一声速
     const std::string sosSpeeds = argStr(args, "--sos", "1490,1540");
     const double timeoutResetSec = argDouble(args, "--timeout-reset", 0.0);
+    const int identityJumpAt = argInt(args, "--identity-jump-at", -1);
+    const int dropBlock = argInt(args, "--drop-block", -1);   // >=0：确定性不提交该全局块（模拟 SHM latest-wins / notification gap 丢失）
     const bool noLaunch = argInt(args, "--no-launch", 0) != 0;      // svc 由外部启动（沙箱环境用）
     const std::string radiusPerChMm = argStr(args, "--radius-per-ch");  // 空=统一半径；8 个毫米值逗号分隔
     const bool splice = argInt(args, "--splice", 0) != 0;          // 1=拼接模式（需配准模式）
@@ -107,7 +109,13 @@ int main(int argc, char** argv) {
             "[--sector-start 180] [--out <dir>] "
             "[--radius-per-ch 6.57,6.55,...] [--splice 1] [--splice-blend 1.5] "
             "[--sos-radii-mm 3] [--sos 1490,1540] "
-            "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...]\n");
+            "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...] "
+            "[--identity-jump-at N] [--drop-block N]\n");
+        return 2;
+    }
+
+    if (dropBlock >= 0 && (identityJumpAt > 0 || timeoutResetSec > 0.0)) {
+        std::fprintf(stderr, "--drop-block cannot combine with --identity-jump-at/--timeout-reset\n");
         return 2;
     }
 
@@ -160,6 +168,13 @@ int main(int argc, char** argv) {
         return 2;
     }
     const int nBlocks = K / (perChBlock / 2);                  // 每波长每通道块数
+    if (dropBlock >= 0 && (dropBlock >= nBlocks - 1)) {
+        // 只丢第 0 轮的中间块：丢 final 块是另一种语义（无 source end），
+        // 由 UI/服务确定性测试覆盖，不在本自检范围内。
+        std::fprintf(stderr, "--drop-block must select a non-final block of round 0 (0..%d)\n",
+                     nBlocks - 2);
+        return 2;
+    }
     const int alines = cnt * perChBlock;
     const int blockSize = sampDepth * alines;
     const int nx = static_cast<int>(std::ceil(0.036 / (gridMm * 1e-3)));
@@ -341,13 +356,25 @@ int main(int argc, char** argv) {
 
     double totalMs = 0.0;
     std::vector<float> lastWl1, lastWl2;   // 逐块对比缓存
+    std::vector<float> firstWl1, firstWl2;
     ring_shm_obs::Tracker producerObs;
     producerObs.beginSession();
     QJsonObject lastObservation;
+    QJsonObject mismatchObservation;
+    int mismatchCount = 0;
     RingBlockAssembler assembler;
     assembler.setBlockCallback([&](std::vector<float> &&raw, std::vector<float> &&angles,
-                                   std::vector<uint8_t> &&chIds, int blockSeq) {
+                                   std::vector<uint8_t> &&chIds, int blockSeq,
+                                   const paimage::RoundIdentity &round, bool sourceRoundComplete) {
         const auto t0 = std::chrono::steady_clock::now();
+        if (blockSeq == dropBlock) {
+            // 确定性丢块：不写 SHM、不发通知、不等快照。模拟生产链路的
+            // SHM latest-wins / notification gap——svc 永远收不到该块，
+            // 但本轮后续块（含 source-final 块）仍会到达。
+            std::printf("[selftest] deterministically dropping block %d before submit\n",
+                        blockSeq);
+            return;
+        }
         const uint64_t submitWallUs = ring_shm_obs::wallNowUs();
         uint8_t previousReady = 0;
         uint32_t previousSeq = 0;
@@ -371,9 +398,18 @@ int main(int argc, char** argv) {
         ready[QStringLiteral("seq")] = blockSeq;
         ready[QStringLiteral("submit_index")] = static_cast<qint64>(producerEvent.submitIndex);
         ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(producerEvent.submitWallUs);
+        ring_round_identity::add(ready, round);
+        // 输入只承载 source round end；svc 回传的 round_complete 才是
+        // reconstructionComplete（source end + 精确块数）。
+        ready[QStringLiteral("source_round_complete")] = sourceRoundComplete;
         sendJson(sock, ready);
 
+        // 丢块轮的 final 块：svc 实际消费块数 < 期望块数，round_complete 必须
+        // 为 false；其余块保持 sourceRoundComplete 回显。
+        const bool expectedComplete = sourceRoundComplete &&
+            !(dropBlock >= 0 && blockSeq / nBlocks == 0);
         bool got = false;
+        bool identityMatch = false;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kTimeoutMs);
         while (std::chrono::steady_clock::now() < deadline) {
             zmq::message_t msg;
@@ -383,14 +419,27 @@ int main(int argc, char** argv) {
                 const QString cmd = obj["cmd"].toString();
                 if (cmd == QStringLiteral("ring_shm_observation")) {
                     lastObservation = obj;
+                    if (obj.value(QStringLiteral("kind")).toString() ==
+                        QStringLiteral("round_block_count_mismatch")) {
+                        ++mismatchCount;
+                        mismatchObservation = obj;
+                    }
                     continue;
                 }
-                if (cmd == QStringLiteral("ring_snapshot_ready")) { got = true; break; }
+                if (cmd == QStringLiteral("ring_snapshot_ready")) {
+                    const auto snapshotIdentity = ring_round_identity::parse(obj);
+                    identityMatch = snapshotIdentity.valid &&
+                        snapshotIdentity.identity == round &&
+                        obj.value(QStringLiteral("round_complete")).isBool() &&
+                        obj.value(QStringLiteral("round_complete")).toBool() == expectedComplete;
+                    got = true;
+                    break;
+                }
             }
             if (got) break;
             QThread::msleep(5);
         }
-        if (!got) {
+        if (!got || !identityMatch) {
             std::fprintf(stderr, "timeout at block %d\n", blockSeq);
             std::exit(2);
         }
@@ -415,6 +464,35 @@ int main(int argc, char** argv) {
         }
         lastWl1 = wl1;
         lastWl2 = wl2;
+        if (blockSeq == 0) { firstWl1 = wl1; firstWl2 = wl2; }
+        if (identityJumpAt > 0 && blockSeq == identityJumpAt) {
+            double maxDiff = 0.0;
+            for (size_t i = 0; i < wl1.size(); ++i) {
+                maxDiff = std::max(maxDiff, double(std::fabs(wl1[i] - firstWl1[i])));
+                maxDiff = std::max(maxDiff, double(std::fabs(wl2[i] - firstWl2[i])));
+            }
+            std::printf("[barrier-test] fresh-round max_pixel_difference=%.9g\n", maxDiff);
+            if (!std::isfinite(maxDiff) || maxDiff > 1e-6) {
+                std::fprintf(stderr, "cross-round reconstruction contamination\n");
+                std::exit(4);
+            }
+        }
+        if (dropBlock >= 0 && blockSeq == nBlocks) {
+            // 丢块轮（round 0）已随 source end 关闭；round 1 首块输入与 round 0
+            // 首块相同，其重建必须与干净首图逐像素一致，证明不完整轮没有污染
+            // 下一轮、也没有等待“补齐”。
+            double maxDiff = 0.0;
+            for (size_t i = 0; i < wl1.size(); ++i) {
+                maxDiff = std::max(maxDiff, double(std::fabs(wl1[i] - firstWl1[i])));
+                maxDiff = std::max(maxDiff, double(std::fabs(wl2[i] - firstWl2[i])));
+            }
+            std::printf("[completion-test] post-incomplete-round max_pixel_difference=%.9g\n",
+                        maxDiff);
+            if (!std::isfinite(maxDiff) || maxDiff > 1e-6) {
+                std::fprintf(stderr, "incomplete round contaminated the next round\n");
+                std::exit(5);
+            }
+        }
 
         char nm[64];
         std::snprintf(nm, sizeof(nm), "svc_wl1_%03d.raw", blockSeq + 1);
@@ -444,14 +522,25 @@ int main(int argc, char** argv) {
     const int nRounds = 2;   // 复现“第 2 圈起 wl2 最后一帧不刷新”的跨圈行为
     const int nBlocksTotal = nBlocks * nRounds;
     int resetBase = 0;       // 超时复位后新一圈的数据列基准（模拟重新开始采集）
+    std::uint64_t roundGeneration = 0;
     for (int b = 0; b < nBlocksTotal; ++b) {
+        if (identityJumpAt > 0 && b == identityJumpAt) {
+            // No ring_reset and no prior final marker: only RoundIdentity can
+            // discard the partial reconstruction and WL2 cross-block tail.
+            resetBase = b;
+            ++roundGeneration;
+        }
         // 圈中停机模拟：在第 1 圈一半处暂停，验证超时后新触发判定为新一圈
         if (timeoutResetSec > 0.0 && b == nBlocks / 2) {
             resetBase = b;   // 新一圈从该块起，数据列回到 0 基准
+            ++roundGeneration;
             std::fprintf(stderr, "[selftest] pausing %.0f ms (simulate mid-round stop)\n",
                          timeoutResetSec * 1000.0 + 500.0);
             QThread::msleep(static_cast<unsigned long>(timeoutResetSec * 1000.0) + 500);
         }
+        if (b > resetBase && (b - resetBase) % nBlocks == 0)
+            ++roundGeneration;
+        const paimage::RoundIdentity round{1, roundGeneration};
         for (int t = 0; t < perChBlock; ++t) {
             const int kInBlock = t / 2;
             const int kGlobal = (b - resetBase) * (perChBlock / 2) + kInBlock;
@@ -470,7 +559,8 @@ int main(int argc, char** argv) {
                 for (int r = 0; r < sampDepth; ++r)
                     line[r] = static_cast<float>(col[r]);
                 assembler.pushChannelLine(c, static_cast<uint16_t>(b * perChBlock + t),
-                                          line.data(), sampDepth);
+                                          round, line.data(), sampDepth,
+                                          (b - resetBase + 1) % nBlocks == 0 && t == perChBlock - 1);
             }
         }
     }
@@ -483,14 +573,44 @@ int main(int argc, char** argv) {
         while (sock.recv(msg, zmq::recv_flags::dontwait)) {
             const QByteArray data(static_cast<const char*>(msg.data()), static_cast<int>(msg.size()));
             const QJsonObject obj = QJsonDocument::fromJson(data).object();
-            if (obj["cmd"].toString() == QStringLiteral("ring_shm_observation"))
+            if (obj["cmd"].toString() == QStringLiteral("ring_shm_observation")) {
                 lastObservation = obj;
+                if (obj.value(QStringLiteral("kind")).toString() ==
+                    QStringLiteral("round_block_count_mismatch")) {
+                    ++mismatchCount;
+                    mismatchObservation = obj;
+                }
+            }
         }
         QThread::msleep(5);
     }
     if (!noLaunch) {
         svc.terminate();
         if (!svc.waitForFinished(3000)) svc.kill();
+    }
+
+    if (dropBlock >= 0) {
+        // 服务级完成语义验收：中间块丢失、source-final 仍到达时，
+        // svc 必须恰好产生一次 round_block_count_mismatch，且携带足够区分
+        // “物理轮结束”与“最终图不完整”的机器可读字段。
+        const auto mismatchIdentity = ring_round_identity::parse(mismatchObservation);
+        const bool fieldsOk = mismatchCount == 1 &&
+            mismatchIdentity.valid &&
+            mismatchIdentity.identity == paimage::RoundIdentity{1, 0} &&
+            mismatchObservation.value(QStringLiteral("blocks_consumed")).toInt() == nBlocks - 1 &&
+            mismatchObservation.value(QStringLiteral("expected_blocks")).toInt() == nBlocks &&
+            mismatchObservation.value(QStringLiteral("source_round_complete")).toBool() &&
+            !mismatchObservation.value(QStringLiteral("reconstruction_complete")).toBool();
+        if (!fieldsOk) {
+            std::fprintf(stderr,
+                "[completion-test] missing/incorrect round_block_count_mismatch: %s\n",
+                mismatchObservation.isEmpty()
+                    ? "none received"
+                    : QJsonDocument(mismatchObservation).toJson(QJsonDocument::Compact).constData());
+            return 5;
+        }
+        std::printf("[completion-test] round_block_count_mismatch fields verified "
+                    "(blocks_consumed=%d expected_blocks=%d)\n", nBlocks - 1, nBlocks);
     }
 
     std::printf("done: channels=%d K=%d rounds=%d blocks=%d total=%.1f ms avg=%.2f ms\n",

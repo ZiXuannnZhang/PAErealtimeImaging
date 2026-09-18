@@ -1,5 +1,7 @@
 #include "ImagingSvc.h"
 #include "ImagingSharedMemory.h"
+#include "RingReconCompletion.h"
+#include "RingRoundIdentity.h"
 #include "pa_recon_qt.hpp"
 #include "ring_recon.h"
 #include <zmq.hpp>
@@ -123,15 +125,30 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
         processConfigure(msg["params"].toObject());
     } else if (cmd == "ring_block_ready") {
         const ring_shm_obs::ReadyMetadata ready = ring_shm_obs::parseReadyMessage(msg);
+        if (!ready.hasRoundIdentity) {
+            QJsonObject extra;
+            extra[QStringLiteral("error")] = ready.identityError;
+            extra[QStringLiteral("has_identity_fields")] = ready.identityFieldsPresent;
+            sendRingObservation("round_identity_rejected", m_ringObs.snapshot(), extra);
+            return;
+        }
         m_ringObs.observeNotification(ready.seq, ready.submitIndex);
-        processRingPulse(ready.seq, ready.submitIndex, ready.submitWallUs, ready.hasSeq);
+        // The input flag is the data-plane source round end (stable terminal
+        // trigger property), NOT the reconstruction completion published back
+        // to the UI. Missing field fails closed.
+        processRingPulse(ready.seq, ready.submitIndex, ready.submitWallUs,
+                         ready.hasSeq, ready.roundIdentity,
+                         msg.value(QStringLiteral("source_round_complete")).toBool(false));
     } else if (cmd == "ring_reset") {
         // 停机超时判定新一圈：清空重建累积（与圈末重置同一函数）
         sendRingObservation("epoch_reset", m_ringObs.snapshot());
         m_ringObs.resetEpoch();
+        m_ringRound.close();
         resetRingRecon();
     } else if (cmd == "start") {
         m_ringObs.beginSession();
+        m_ringRound.resetSession();
+        resetRingRecon();
         m_running = true;
         m_pulseCount = 0;
         m_ringBlockIndex = 0;
@@ -546,14 +563,32 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
 }
 
 void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
-                                  uint64_t submitWallUs, bool notifySeqValid)
+                                  uint64_t submitWallUs, bool notifySeqValid,
+                                  const paimage::RoundIdentity &round, bool sourceRoundComplete)
 {
     const uint64_t processStartUs = ring_shm_obs::steadyNowUs();
+    if (!round.valid()) {
+        QJsonObject extra;
+        extra[QStringLiteral("error")] = QStringLiteral("invalid physical round identity");
+        sendRingObservation("round_identity_rejected", m_ringObs.snapshot(), extra);
+        return;
+    }
     if (!m_running || !m_ringCuda[0] || !m_ringCuda[1] || !m_ringSharedMemory) return;
 
     const uint64_t copyStartUs = ring_shm_obs::steadyNowUs();
-    m_ringSharedMemory->lock();
+    if (!m_ringSharedMemory->lock()) return;
     auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
+    if (!h) { m_ringSharedMemory->unlock(); return; }
+    // The input slot is latest-wins too. Never apply old metadata to new raw data.
+    if (!notifySeqValid || h->block_seq != notifySeq || !h->block_ready) {
+        const auto actual = h->block_seq;
+        m_ringSharedMemory->unlock();
+        QJsonObject extra;
+        extra[QStringLiteral("notify_seq")] = static_cast<qint64>(notifySeq);
+        extra[QStringLiteral("shm_seq")] = static_cast<qint64>(actual);
+        sendRingObservation("block_copy_rejected", m_ringObs.snapshot(), extra);
+        return;
+    }
     const int blockSize = m_ringBlockSize;
     const int alines    = m_ringAlineCount;
     const uint8_t readyBeforeCopy = h->block_ready;
@@ -587,6 +622,24 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
         extra[QStringLiteral("duplicate_shm_seq")] = observation.duplicateShmSeq;
         extra[QStringLiteral("shm_seq_gap")] = observation.shmSeqGap;
         sendRingObservation("anomaly", m_ringObs.snapshot(), extra);
+    }
+
+    const auto oldRound = m_ringRound.active();
+    const auto admission = m_ringRound.admit(round);
+    using Admission = paimage::RingReconRoundState::Admission;
+    QJsonObject roundDiagnostic;
+    ring_round_identity::add(roundDiagnostic, round);
+    roundDiagnostic[QStringLiteral("old_session")] = QString::number(oldRound.measurementSession);
+    roundDiagnostic[QStringLiteral("old_generation")] = QString::number(oldRound.roundGeneration);
+    roundDiagnostic[QStringLiteral("transitions")] = QString::number(m_ringRound.transitions());
+    roundDiagnostic[QStringLiteral("stale_drops")] = QString::number(m_ringRound.staleDrops());
+    if (admission == Admission::Stale || admission == Admission::Invalid) {
+        sendRingObservation("round_stale_drop", m_ringObs.snapshot(), roundDiagnostic);
+        return;
+    }
+    if (admission == Admission::First || admission == Admission::Transition) {
+        resetRingRecon();
+        sendRingObservation("round_barrier_reset", m_ringObs.snapshot(), roundDiagnostic);
     }
 
     const int sampDepth = m_ringConfig.sampDepth;
@@ -711,6 +764,13 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
     }
     ++m_ringBlockIndex;
 
+    // 完成语义拆分：sourceRoundComplete 只证明上游观察到本轮最后一个逻辑
+    // 触发（决定生命周期关闭）；reconstructionComplete 还要求服务端实际消费
+    // 块数精确等于配置块数（决定 final PNG / presentation 等业务动作）。
+    // 中间块丢失但 source-final 仍到达时，快照 round_complete 必须为 false。
+    const auto completion = paimage::evaluateRingReconCompletion(
+        sourceRoundComplete, m_ringBlockIndex, m_ringBlocksPerFrame);
+
     m_ringSharedMemory->lock();
     h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
     float *fb = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) +
@@ -719,17 +779,26 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
                 static_cast<size_t>(m_ringFrameSize) * sizeof(float));
     std::memcpy(fb + m_ringFrameSize, m_ringDisplay1.data(),
                 static_cast<size_t>(m_ringFrameSize) * sizeof(float));
-    h->frame_seq++;
+    const uint32_t snapshotSeq = ++h->frame_seq;
     m_ringSharedMemory->unlock();
 
-    sendRingSnapshotToHost();     // 新链路：方案A 显示快照
+    sendRingSnapshotToHost(snapshotSeq, submitIndex, round, completion.reconstructionComplete);     // 新链路：方案A 显示快照
 
     m_ringObs.recordProcessDuration(ring_shm_obs::steadyNowUs() - processStartUs);
     if (observation.periodicDue)
         sendRingObservation("periodic", m_ringObs.snapshot());
 
-    // 整圈完成：清零累积器，避免跨圈污染（PNG 保存由接收端窗口在圈末触发点执行）
-    if (m_ringBlocksPerFrame > 0 && m_ringBlockIndex % m_ringBlocksPerFrame == 0) {
+    // 源轮结束即关闭并复位：不完整轮绝不等下一轮数据“补齐”，下一轮从干净
+    // 重建状态开始。最终图业务动作只由 reconstructionComplete 触发。
+    if (completion.sourceRoundComplete) {
+        if (completion.blockCountMismatch) {
+            roundDiagnostic[QStringLiteral("blocks_consumed")] = completion.blocksConsumed;
+            roundDiagnostic[QStringLiteral("expected_blocks")] = completion.expectedBlocks;
+            roundDiagnostic[QStringLiteral("source_round_complete")] = true;
+            roundDiagnostic[QStringLiteral("reconstruction_complete")] = false;
+            sendRingObservation("round_block_count_mismatch", m_ringObs.snapshot(), roundDiagnostic);
+        }
+        m_ringRound.close();
         resetRingRecon();
     }
 }
@@ -769,17 +838,13 @@ void ImagingSvc::resetRingRecon()
     }
 }
 
-void ImagingSvc::sendRingSnapshotToHost()
+void ImagingSvc::sendRingSnapshotToHost(uint32_t seq, uint64_t submitIndex,
+                                        const paimage::RoundIdentity &round, bool reconstructionComplete)
 {
-    if (!m_ringSharedMemory) return;
-    m_ringSharedMemory->lock();
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    const int seq = static_cast<int>(h->frame_seq);
-    m_ringSharedMemory->unlock();
-
-    QJsonObject msg;
-    msg["cmd"] = "ring_snapshot_ready";
-    msg["seq"] = seq;
+    // The outbound round_complete is exclusively the reconstruction completion
+    // fact: source round end AND exactly the configured block count consumed.
+    QJsonObject msg = ring_round_identity::makeSnapshotReady(
+        seq, submitIndex, round, reconstructionComplete);
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
     zmq::message_t zmsg(static_cast<size_t>(data.size()));

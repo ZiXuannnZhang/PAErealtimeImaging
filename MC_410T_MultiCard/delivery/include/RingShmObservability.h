@@ -1,5 +1,7 @@
 #pragma once
 
+#include "RingRoundIdentity.h"
+
 #include <QJsonObject>
 
 #include <chrono>
@@ -15,10 +17,15 @@ struct ReadyMetadata {
     uint64_t submitIndex = 0;
     uint64_t submitWallUs = 0;
     bool hasSeq = false;
+    paimage::RoundIdentity roundIdentity;
+    bool identityFieldsPresent = false;
+    bool hasRoundIdentity = false;
+    QString identityError;
 };
 
-// The optional fields are deliberately ignored when absent so the original
-// {"cmd":"ring_block_ready","seq":N} message remains valid.
+// Legacy sequence/submit metadata remains parseable for observability tests,
+// but production Ring consumers must require hasRoundIdentity.  Physical
+// round identity is never inferred from seq, submit_index, or service state.
 inline ReadyMetadata parseReadyMessage(const QJsonObject &msg)
 {
     ReadyMetadata result;
@@ -33,6 +40,11 @@ inline ReadyMetadata parseReadyMessage(const QJsonObject &msg)
     const QJsonValue submitWallUs = msg.value(QStringLiteral("submit_wall_us"));
     if (!submitWallUs.isUndefined() && !submitWallUs.isNull())
         result.submitWallUs = submitWallUs.toVariant().toULongLong();
+    const auto identity = ring_round_identity::parse(msg);
+    result.roundIdentity = identity.identity;
+    result.identityFieldsPresent = identity.present;
+    result.hasRoundIdentity = identity.valid;
+    result.identityError = identity.error;
     return result;
 }
 

@@ -1,0 +1,100 @@
+Start testing: Sep 16 12:06 中国标准时间
+----------------------------------------------------------
+1/40 Testing: ring_block_assembler_test
+1/40 Test: ring_block_assembler_test
+Command: "D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests/ring_block_assembler_test.exe"
+Directory: D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests
+"ring_block_assembler_test" start time: Sep 16 12:06 中国标准时间
+Output:
+----------------------------------------------------------
+PASS T1 normal full-length
+PASS T2 short line zero-padding
+PASS T3 long line truncation
+PASS T4 duplicate first-wins
+PASS T5 out-of-order triggers
+PASS T6 temporal overflow
+PASS T7 numerically smallest current
+PASS T8 sequence wrap overflow
+PASS T9 timeout reset
+PASS T10 external timeout ownership
+PASS T11 normal golden regression
+PASS T12 logical round boundary
+PASS R1 identity residual hard barrier
+PASS R2 CountBoundary final sync retention
+PASS R3 stale round drop
+PASS R4 generation gap/session floor
+PASS R10 measurement session restart
+PASS all RingBlockAssembler tests (T1-T12,R1-R4,R10)
+<end of output>
+Test time =   0.44 sec
+----------------------------------------------------------
+Test Passed.
+"ring_block_assembler_test" end time: Sep 16 12:06 中国标准时间
+"ring_block_assembler_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/40 Testing: ring_production_blockers_test
+4/40 Test: ring_production_blockers_test
+Command: "D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests/ring_production_blockers_test.exe"
+Directory: D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests
+"ring_production_blockers_test" start time: Sep 16 12:06 中国标准时间
+Output:
+----------------------------------------------------------
+ring_production_blockers_test failures=0
+<end of output>
+Test time =   0.56 sec
+----------------------------------------------------------
+Test Passed.
+"ring_production_blockers_test" end time: Sep 16 12:06 中国标准时间
+"ring_production_blockers_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/40 Testing: ring_shm_observability_test
+6/40 Test: ring_shm_observability_test
+Command: "D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests/ring_shm_observability_test.exe"
+Directory: D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests
+"ring_shm_observability_test" start time: Sep 16 12:06 中国标准时间
+Output:
+----------------------------------------------------------
+ring_shm_observability_test: PASS (T1-T11,T13)
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"ring_shm_observability_test" end time: Sep 16 12:06 中国标准时间
+"ring_shm_observability_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+24/40 Testing: ring_round_ui_state_test
+24/40 Test: ring_round_ui_state_test
+Command: "D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests/ring_round_ui_state_test.exe"
+Directory: D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests
+"ring_round_ui_state_test" start time: Sep 16 12:06 中国标准时间
+Output:
+----------------------------------------------------------
+ring_round_ui_state_test: ALL PASS
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"ring_round_ui_state_test" end time: Sep 16 12:06 中国标准时间
+"ring_round_ui_state_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+25/40 Testing: ring_round_identity_test
+25/40 Test: ring_round_identity_test
+Command: "D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests/ring_round_identity_test.exe"
+Directory: D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-blockers-fix-20260916/MC_410T_MultiCard/delivery/build/round_fix_tests
+"ring_round_identity_test" start time: Sep 16 12:06 中国标准时间
+Output:
+----------------------------------------------------------
+ring_round_identity_test: ALL PASS (R5-R10,R14)
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"ring_round_identity_test" end time: Sep 16 12:06 中国标准时间
+"ring_round_identity_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Sep 16 12:06 中国标准时间

@@ -21,11 +21,26 @@ SourceCore::SourceCore(Config c,CardSink out,SyncSink sync,Observer observe)
 void SourceCore::event(Decision d,int c,std::uint16_t t,std::uint16_t p,std::uint32_t n,Time at,std::uint64_t firstIngressId) {
     if(observer_) observer_({d,c,t,p,n,at,firstIngressId});
 }
+void SourceCore::observeAdmission(Decision d,int c,std::uint16_t t,std::uint16_t p,
+                                  std::uint32_t n,Time at,std::uint64_t firstIngressId) {
+    switch(d){
+    case Decision::StartFenceHeld: counts_.startFenceHeld+=n; break;
+    case Decision::StartFenceReleased: counts_.startFenceReleased+=n; break;
+    case Decision::StartFencePreStartDiscard: counts_.startFencePreStartDiscard+=n; break;
+    case Decision::StartFenceFailedDiscard: counts_.startFenceFailedDiscard+=n; break;
+    case Decision::StartFenceOverflow: counts_.startFenceOverflow+=n; break;
+    case Decision::StartFenceResetDiscard: counts_.startFenceResetDiscard+=n; break;
+    case Decision::StartFenceStopDiscard: counts_.startFenceStopDiscard+=n; break;
+    case Decision::StartFenceShutdownDiscard: counts_.startFenceShutdownDiscard+=n; break;
+    default: break;
+    }
+    event(d,c,t,p,n,at,firstIngressId);
+}
 void SourceCore::clearAssembly(Assembly& a,bool recent) {
     a.active=false;a.trigger=a.base=0;a.actual=a.unique=0;a.first=a.last=0;
     a.firstIngressId=0;
     std::fill(a.seen.begin(),a.seen.end(),0);std::fill(a.lengths.begin(),a.lengths.end(),0);
-    if(recent)a.recent.clear();
+    if(recent){a.recent.clear();a.gapAnchor=0;a.gapAnchorValid=false;}
 }
 void SourceCore::prepareStart(std::uint64_t diagnosticSession,Time now) {
     for(const auto& p:pending_)for(const auto& f:p.cards)if(f)
@@ -85,7 +100,26 @@ Decision SourceCore::ingest(int c,const std::uint8_t* p,std::size_t n,Time now,s
     if(std::find(a.recent.begin(),a.recent.end(),trigger)!=a.recent.end())return reject(Decision::RecentTrigger);
     if(!confirmed_)lastStartup_=now;
     if(a.active&&a.trigger!=trigger){close(c,Decision::TriggerSwitch,now);clearAssembly(a);if(!enabled_)return reject(Decision::Disabled);}
-    if(!a.active){a.active=true;a.trigger=trigger;a.base=packet;a.first=now;a.firstIngressId=ingressId;a.sourceIPv4=sourceIPv4;}
+    if(!a.active){
+        // Full-trigger-gap observation, emitted exactly once per fresh
+        // assembly activation (the only point both the TriggerSwitch and the
+        // empty-assembly paths pass through). Decision order: signed uint16
+        // wrap-aware forward progression first (delta>0 counts delta-1 and
+        // moves the anchor, so wrap forward is never mistaken for a reset);
+        // then a large direct back-jump (>= kTriggerResetBackJumpThreshold)
+        // is a same-session triggerSeq reset recovery that re-establishes
+        // the anchor without counting a gap; smaller backstep/late triggers
+        // neither count nor move the anchor.
+        if(a.gapAnchorValid){
+            const auto delta=static_cast<std::int16_t>(trigger-a.gapAnchor);
+            if(delta>0){
+                if(delta>1)event(Decision::TriggerGap,c,trigger,packet,std::uint32_t(delta-1),now,ingressId);
+                a.gapAnchor=trigger;
+            }else if(static_cast<std::int32_t>(a.gapAnchor)-static_cast<std::int32_t>(trigger)>=kTriggerResetBackJumpThreshold){
+                a.gapAnchor=trigger;
+            }
+        }else{a.gapAnchor=trigger;a.gapAnchorValid=true;}
+        a.active=true;a.trigger=trigger;a.base=packet;a.first=now;a.firstIngressId=ingressId;a.sourceIPv4=sourceIPv4;}
     ++a.actual;a.last=now;
     const auto slot=std::uint16_t(packet-a.base);
     Decision result=Decision::Accepted;

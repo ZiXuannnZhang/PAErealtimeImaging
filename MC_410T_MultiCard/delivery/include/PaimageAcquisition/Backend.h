@@ -10,7 +10,12 @@ namespace paimage {
 class Backend {
 public:
     struct Settings {Config acquisition;int blockSize=50;std::string localIp;
-        std::vector<std::string> targets;std::uint16_t dataPort=8001,feedbackPort=8000,controlPort=8080;};
+        std::vector<std::string> targets;std::uint16_t dataPort=8001,feedbackPort=8000,controlPort=8080;
+        std::uint64_t logicalTriggersPerRound=0;
+        double physicalRoundTimeoutSec=0.0;
+        std::uint64_t startupFilterTriggerCount=1;
+        bool disableCountBoundary=false;
+        PhysicalRoundNormalizer::Observer normalizerObserver;};
     Backend(Settings,std::vector<DataProcessor*>,std::vector<FileSaver*>,TraceWriter*,TimingWriter* = nullptr,LoopLog* = nullptr);
     ~Backend();
     bool listen(std::string&);
@@ -20,7 +25,11 @@ public:
     bool startMeasurement(std::uint64_t);
     bool stopMeasurement();
     void feedback(int card,int type){control_.feedback(card,type);}
-    void poll(){control_.poll(SocketReceiver::now());}
+    void poll(){
+        const auto now = SocketReceiver::now();
+        control_.poll(now);
+        output_.pollPhysicalRoundTimeout(now);
+    }
     bool configured()const{return control_.configured();}
     bool configuring()const{return control_.configuring();}
     const std::vector<bool>& ready()const{return control_.ready();}

@@ -1,0 +1,59 @@
+Preset CMake variables:
+
+  CMAKE_BUILD_TYPE="Debug"
+  CMAKE_CXX_COMPILER="D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe"
+  CMAKE_C_COMPILER="D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gcc.exe"
+  CMAKE_EXPORT_COMPILE_COMMANDS="ON"
+  CMAKE_MAKE_PROGRAM="D:/Qt/Qt6.8.0/Tools/Ninja/ninja.exe"
+  IMAGING_ZMQ_DIR="D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-normalizer-integrated-20260916/MC_410T_MultiCard/delivery/third_party/zeromq"
+  Qt6_DIR="D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/cmake/Qt6"
+  USE_ZEROMQ="ON"
+  ZMQ_INSTALL="D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-normalizer-integrated-20260916/MC_410T_MultiCard/delivery/third_party/zeromq"
+
+-- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR) 
+-- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR) 
+-- Configuring done (0.8s)
+-- Generating done (0.7s)
+-- Build files have been written to: D:/ChatGPT/PAERealtimeImaging/_worktrees/physical-round-normalizer-integrated-20260916/MC_410T_MultiCard/delivery/build/mingw_debug
+[1/2] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/main.cpp.obj
+[2/2] Linking CXX executable bin\PAimageReceiverDiagnostics.exe
+Warning: Translations will not be available due to the following error.
+Cannot open D:/Qt/Qt6.8.0/6.8.0/mingw_64/translations/catalogs.json
+D:\ChatGPT\PAERealtimeImaging\_worktrees\physical-round-normalizer-integrated-20260916\MC_410T_MultiCard\delivery\build\mingw_debug\bin\PAimageReceiverDiagnostics.exe 64 bit, release executable
+Adding in plugin type generic for module: Qt6Gui
+Adding Qt6Network for qtuiotouchplugin.dll from plugin type: generic
+Adding in plugin type iconengines for module: Qt6Gui
+Adding Qt6Svg for qsvgicon.dll from plugin type: iconengines
+Adding in plugin type imageformats for module: Qt6Gui
+Adding in plugin type networkinformation for module: Qt6Network
+Adding in plugin type platforms for module: Qt6Gui
+Adding in plugin type styles for module: Qt6Widgets
+Adding in plugin type tls for module: Qt6Network
+Skipping plugin qopensslbackend.dll. Use -force_openssl or specify -openssl-root if you want to use it.
+Direct dependencies: Qt6Core Qt6Gui Qt6OpenGL Qt6PrintSupport Qt6Widgets
+All dependencies   : Qt6Core Qt6Gui Qt6OpenGL Qt6PrintSupport Qt6Widgets
+To be deployed     : Qt6Core Qt6Gui Qt6Network Qt6OpenGL Qt6PrintSupport Qt6Svg Qt6Widgets
+Warning: Cannot find any version of the dxcompiler.dll and dxil.dll.
+Warning: Runtime libraries not found in Qt binary folder, defaulting to looking in path
+Qt6Core.dll is up to date.
+Qt6Gui.dll is up to date.
+Qt6Network.dll is up to date.
+Qt6OpenGL.dll is up to date.
+Qt6PrintSupport.dll is up to date.
+Qt6Svg.dll is up to date.
+Qt6Widgets.dll is up to date.
+D3Dcompiler_47.dll is up to date.
+libgcc_s_seh-1.dll is up to date.
+libstdc++-6.dll is up to date.
+libwinpthread-1.dll is up to date.
+qtuiotouchplugin.dll is up to date.
+qsvgicon.dll is up to date.
+qgif.dll is up to date.
+qico.dll is up to date.
+qjpeg.dll is up to date.
+qsvg.dll is up to date.
+qnetworklistmanager.dll is up to date.
+qwindows.dll is up to date.
+qmodernwindowsstyle.dll is up to date.
+qcertonlybackend.dll is up to date.
+qschannelbackend.dll is up to date.

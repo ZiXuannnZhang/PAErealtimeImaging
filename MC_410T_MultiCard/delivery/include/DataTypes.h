@@ -5,6 +5,8 @@
 #include <atomic>
 #include <string>
 #include "Constants.h"
+#include "RoundIdentity.h"
+#include "PaimageAcquisition/PhysicalRoundNormalizer.h"
 
 // ============================================================
 // DataPacket  Layer 2  Layer 3 的数据包（接收线程  处理线程）
@@ -33,6 +35,36 @@ struct TriggerGroup {
     uint64_t sessionGen   = 0;        // 自动保存会话代（0=手动/无会话代；DataProcessor 入队前打标）
     uint64_t measurementSession = 0;  // 采集会话令牌；成像旁路用来拒绝旧会话帧
 
+    // PAimage physical-round normalization metadata.  The source frame is
+    // immutable, so FrameConverter copies this decision onto the host group
+    // before either the save or sync worker can consume it.
+    bool normalizationApplied = false;
+    paimage::PhysicalTriggerDecision physicalDecision =
+        paimage::PhysicalTriggerDecision::LogicalScan;
+    uint64_t roundGeneration = 0;
+    int64_t logicalTriggerIndex = -1;
+    // One-shot boundary pulse from the first classification of the final
+    // logical trigger. Kept for control/event compatibility paths.
+    bool roundComplete = false;
+    // Stable per-trigger terminal property (true on first and cached
+    // classifications alike). The Ring data plane must source its final
+    // marker from this field, never from the one-shot pulse.
+    bool isFinalLogicalTrigger = false;
+    bool sourceTimedOut = false;
+
+    // The normalized Ring path consumes this pair as one immutable identity.
+    // Keeping the legacy scalar fields preserves the existing save contract
+    // and makes the shared identity explicit at the Ring boundary.
+    paimage::RoundIdentity physicalRoundIdentity() const noexcept {
+        return {measurementSession, roundGeneration};
+    }
+
+    bool hasPhysicalRoundIdentity() const noexcept {
+        return normalizationApplied &&
+               physicalDecision == paimage::PhysicalTriggerDecision::LogicalScan &&
+               physicalRoundIdentity().valid();
+    }
+
     //  完整采样数据（float32，sampleCount 个点）
     std::vector<float> freqA;         // A 通道瞬时频率（kHz）
     std::vector<float> freqB;         // B 通道瞬时频率（kHz）
@@ -54,6 +86,13 @@ struct TriggerGroup {
         timestamp_ms = 0; isComplete = true; sourceIPv4 = 0;
         sessionGen = 0;
         measurementSession = 0;
+        normalizationApplied = false;
+        physicalDecision = paimage::PhysicalTriggerDecision::LogicalScan;
+        roundGeneration = 0;
+        logicalTriggerIndex = -1;
+        roundComplete = false;
+        isFinalLogicalTrigger = false;
+        sourceTimedOut = false;
         freqA.clear(); freqB.clear();
         phaseA_display.clear(); phaseB_display.clear();
         freqA_display.clear();  freqB_display.clear();
@@ -87,6 +126,10 @@ struct CardStats {
     std::atomic<uint64_t> packetsDropped{0};
     std::atomic<uint64_t> triggersComplete{0};
     std::atomic<uint64_t> triggersPartial{0};
+    // 跳号数：由 forward triggerSeq gap 推断出的、完全 0 包到达的 missing
+    // trigger 累计数量（per-card observability；T100->T104 记 +3）。
+    // 部分到达的 trigger 只计入 triggersPartial/包级丢包，不在此计数。
+    std::atomic<uint64_t> missingTriggerCount{0};
     std::atomic<uint64_t> triggersDiscarded{0};
     std::atomic<uint64_t> saveQueueDiscards{0};  // 存储队列满导致的丢弃（triggersDiscarded 子集）
     // 分层采集计数：socket 成功接收、processor 成功出队，以及
@@ -180,6 +223,7 @@ struct CardStats {
         uint64_t packetsDropped  = 0;
         uint64_t triggersComplete = 0;
         uint64_t triggersPartial  = 0;
+        uint64_t missingTriggerCount = 0;   // 跳号数：完全 0 包到达的 missing trigger 累计
         double   recvMbps         = 0.0;
         double   triggerHz        = 0.0;
         double   packetLossRate   = 0.0;
@@ -211,6 +255,7 @@ struct CardStats {
         s.packetsDropped   = packetsDropped.load(std::memory_order_relaxed);
         s.triggersComplete = triggersComplete.load(std::memory_order_relaxed);
         s.triggersPartial  = triggersPartial.load(std::memory_order_relaxed);
+        s.missingTriggerCount = missingTriggerCount.load(std::memory_order_relaxed);
         s.recvMbps         = recvMbps;
         s.triggerHz        = triggerHz;
         s.packetLossRate   = packetLossRate;

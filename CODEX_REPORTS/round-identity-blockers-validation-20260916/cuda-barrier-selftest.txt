@@ -1,0 +1,23 @@
+block   1/5: 75.00 ms
+  diff vs prev: wl1=217.88 wl2=119.724
+block   2/5: 56.67 ms
+  diff vs prev: wl1=217.88 wl2=119.724
+[barrier-test] fresh-round max_pixel_difference=0
+block   3/5: 63.52 ms
+  diff vs prev: wl1=217.88 wl2=119.724
+block   4/5: 50.98 ms
+  diff vs prev: wl1=169.085 wl2=127.932
+block   5/5: 61.91 ms
+  diff vs prev: wl1=124.451 wl2=99.3833
+block   6/5: 215.64 ms
+  diff vs prev: wl1=75.5464 wl2=222.763
+block   7/5: 225.55 ms
+  diff vs prev: wl1=322.572 wl2=298.681
+block   8/5: 220.10 ms
+  diff vs prev: wl1=217.88 wl2=119.724
+block   9/5: 228.40 ms
+  diff vs prev: wl1=169.085 wl2=127.932
+block  10/5: 229.50 ms
+done: channels=8 K=500 rounds=2 blocks=10 total=1427.3 ms avg=142.73 ms
+[RingSHMObs] service kind=final session=1 epoch=0 submitted=0 notifications=10 consumed=10 mismatch=0 ready_zero=0 duplicate=0 gap=0 avg_queue_us=28954.6 avg_copy_us=18487.3 avg_process_us=117971.7
+[RingSHMObs] producer session=1 submitted=10 slot_busy=0 last_seq=9 last_interval_us=1519010

@@ -7,14 +7,39 @@
 #include <QDateTime>
 #include <stdexcept>
 namespace paimage {
+namespace {
+Time normalizationTime(const Frame& frame) {
+    if (!frame) return 0;
+    // SourceCore records first/closed using SocketReceiver::now(), i.e. the
+    // same steady-clock domain used by the physical-round timeout. Do not
+    // substitute wall-clock time when a source timestamp is absent.
+    return frame->first > 0 ? frame->first : frame->closed;
+}
+}
 HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors,
-    std::vector<FileSaver*> savers,TraceWriter* trace,TimingWriter* timing)
+    std::vector<FileSaver*> savers,TraceWriter* trace,TimingWriter* timing,
+    std::uint64_t logicalTriggersPerRound,PhysicalRoundNormalizer::Observer normalizerObserver,
+    double physicalRoundTimeoutSec,std::uint64_t startupFilterTriggerCount,
+    bool disableCountBoundary)
     :processors_(std::move(processors)),savers_(std::move(savers)),trace_(trace),timing_(timing),
      converter_(bits,QDateTime::currentMSecsSinceEpoch(),SocketReceiver::now()),
      workers_(int(processors_.size()),block,[this](Frame f){consumeCard(f);},
         [this](const SyncFrame& f){consumeSync(f);},
         [this](auto r,Frame f){observe(f,5,std::uint8_t(r));}) {
     if(processors_.size()!=savers_.size())throw std::invalid_argument("host card mapping");
+    if(logicalTriggersPerRound){
+        normalizer_=std::make_unique<PhysicalRoundNormalizer>(logicalTriggersPerRound,
+            [this, observer=std::move(normalizerObserver)](const PhysicalRoundEvent& event) {
+                if(event.kind==PhysicalRoundEvent::Kind::TimeoutBoundary){
+                    timeoutSession_=event.measurementSession;
+                    timeoutGeneration_=event.roundGeneration;
+                }
+                if(observer)observer(event);
+            });
+        normalizer_->setTimeoutResetSec(physicalRoundTimeoutSec);
+        normalizer_->setStartupFilterTriggerCount(startupFilterTriggerCount);
+        normalizer_->setDisableCountBoundary(disableCountBoundary);
+    }
     for(std::size_t i=0;i<processors_.size();++i){
         auto saver=savers_[i];processors_[i]->setDirectSaveSink([saver](const TriggerGroupPtr& f){return saver->consumeTriggerGroup(f);});
     }
@@ -23,12 +48,58 @@ HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors
 }
 HostOutput::~HostOutput(){stop();}
 void HostOutput::card(Frame f){
-    converter_.tagSaveSession(f,processors_.at(f->card)->captureSaveSessionGen());const auto begin=SocketReceiver::now();const auto session=f->measurementSession,link=f->firstIngressId;const int card=f->card;
-    workers_.pushCard(std::move(f));if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.correlation=link;r.threadId=GetCurrentThreadId();r.card=card;r.kind=std::uint16_t(TimingKind::CardEnqueue);timing_->observe(r,end-begin>=500000);}
+    if(!f)return;
+    std::lock_guard<std::mutex> lock(normalizationMutex_);
+    PhysicalRoundClassification classification;
+    if(normalizer_){
+        classification=normalizer_->classify(f->measurementSession,f->trigger,
+                                              normalizationTime(f));
+        converter_.tagNormalization(f,classification);
+        if(classification.decision==PhysicalTriggerDecision::OperationalStartupControl){
+            // SourceCore::Decision::Timeout is a single-card packet assembly
+            // timeout. It must never be promoted to a physical-round idle
+            // boundary; only the normalizer's monotonic idle check owns that
+            // boundary.
+            return;
+        }
+    }
+    const auto saveGeneration = saveSessionResolver_
+        ? saveSessionResolver_(classification.measurementSession,
+                               classification.roundGeneration)
+        : processors_.at(f->card)->captureSaveSessionGen();
+    // The resolver returns the coordinator's fail-closed sentinel for an
+    // enabled lookup miss.  FrameConverter stores it on this source frame so
+    // FileSaver cannot silently reuse its previous directory.
+    converter_.tagSaveSession(f,saveGeneration);const auto begin=SocketReceiver::now();const auto session=f->measurementSession,link=f->firstIngressId;const int card=f->card;
+    workers_.pushCard(f);
+    if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.correlation=link;r.threadId=GetCurrentThreadId();r.card=card;r.kind=std::uint16_t(TimingKind::CardEnqueue);timing_->observe(r,end-begin>=500000);}
 }
 void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
+    std::lock_guard<std::mutex> lock(normalizationMutex_);
+    bool filter=false;
+    if(normalizer_){
+        for(const auto& f:frames){
+            if(!f)continue;
+            const auto classification=normalizer_->classify(f->measurementSession,f->trigger,
+                                                              normalizationTime(f));
+            converter_.tagNormalization(f,classification);
+            if(classification.decision==PhysicalTriggerDecision::OperationalStartupControl)filter=true;
+            if(classification.measurementSession==timeoutSession_ &&
+               classification.roundGeneration<timeoutGeneration_)filter=true;
+            if(normalizer_->disableCountBoundary() &&
+               classification.decision==PhysicalTriggerDecision::LogicalScan &&
+               classification.logicalTriggerIndex >= 0 &&
+               static_cast<std::uint64_t>(classification.logicalTriggerIndex) >=
+                   normalizer_->configuredLogicalTriggersPerRound())filter=true;
+        }
+        if(filter)return;
+    }
     const auto begin=SocketReceiver::now();const auto session=frames.empty()?0:frames.front()->measurementSession;workers_.pushSync(trigger,frames,startup);
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.threadId=GetCurrentThreadId();r.card=-1;r.kind=std::uint16_t(TimingKind::SyncEnqueue);r.value0=std::uint32_t(frames.size());r.flags=startup?1:0;timing_->observe(r,end-begin>=500000);}
+}
+PhysicalRoundNormalizer::Snapshot HostOutput::normalizerSnapshot() const{
+    if(normalizer_)return normalizer_->snapshot();
+    PhysicalRoundNormalizer::Snapshot result;result.firstVisibleFilterMode=false;return result;
 }
 void HostOutput::observe(Frame f,std::uint8_t stage,std::uint8_t reason,std::uint32_t value){
     if(!trace_)return;TraceRecord r;r.monotonicNs=SocketReceiver::now();
@@ -48,6 +119,7 @@ void HostOutput::consumeCard(Frame f){
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=f->measurementSession;r.correlation=f->firstIngressId;r.threadId=GetCurrentThreadId();r.card=f->card;r.kind=std::uint16_t(TimingKind::CardWorker);r.value0=std::uint32_t(result.save);timing_->observe(r,end-begin>=500000);}
 }
 void HostOutput::consumeSync(const SyncFrame& sync){
+    std::lock_guard<std::mutex> lock(normalizationMutex_);
     const auto begin=SocketReceiver::now();
     std::vector<TriggerGroupPtr> groups;groups.reserve(sync.cards.size());
     for(auto f:sync.cards)groups.push_back(converter_.convert(f));

@@ -8,6 +8,8 @@
 #include <vector>
 #include "ImagingParams.h"
 #include "RingShmObservability.h"
+#include "RoundIdentity.h"
+#include "RingReconRoundState.h"
 #include "ring_recon_cuda.h"
 
 namespace zmq { class context_t; class socket_t; }
@@ -42,13 +44,15 @@ private:
     void processRingConfigure(const QJsonObject &ring);
     void processPulse();
     void processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
-                          uint64_t submitWallUs, bool notifySeqValid);
+                          uint64_t submitWallUs, bool notifySeqValid,
+                          const paimage::RoundIdentity &round, bool sourceRoundComplete);
     void resetRingRecon();        // 圈末/超时共用：清空 CUDA 累积与跨圈边界状态
     void sendRingObservation(const char *kind,
                              const ring_shm_obs::Snapshot &snapshot,
                              const QJsonObject &extra = QJsonObject());
     void sendFrameToHost();
-    void sendRingSnapshotToHost();
+    void sendRingSnapshotToHost(uint32_t seq, uint64_t submitIndex,
+                                const paimage::RoundIdentity &round, bool reconstructionComplete);
     void sendStatus(float fps);
     void sendError(const QString &errMsg, int code);
 
@@ -76,6 +80,7 @@ private:
     int                 m_ringBlockSize = 0;
     int                 m_ringFrameSize = 0;
     int                 m_ringBlockIndex = 0;
+    paimage::RingReconRoundState m_ringRound;
     int                 m_ringAlineCount = 0;
     int                 m_ringChannelCount = 0;
     int                 m_ringBlocksPerFrame = 1;

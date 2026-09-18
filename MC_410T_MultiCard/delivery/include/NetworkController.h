@@ -4,8 +4,6 @@
 #include <QByteArray>
 #include <QStringList>
 #include <QVector>
-#include <QHash>
-#include <QMutex>
 #include <QJsonObject>
 #include <vector>
 #include <deque>
@@ -23,6 +21,7 @@
 #include "DisplayBuffer.h"
 #include "DiagnosticRecorder.h"
 #include "NetworkDiagnostics.h"
+#include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -51,6 +50,14 @@ public:
 
     //  环形实时馈送回调（必须在 start() 之前设置，转发给每张卡 DataProcessor）
     void setRingFeedSink(const DataProcessor::RingFeedSink& sink) { m_ringFeedSink = sink; }
+
+    // Physical-round boundary notifications are rare control/timeout events.
+    // The callback is installed before start and may be invoked by the source
+    // output thread; consumers must keep it bounded and thread-safe.
+    void setPhysicalRoundBoundarySink(
+        const paimage::PhysicalRoundNormalizer::Observer& sink) {
+        m_physicalRoundBoundarySink = sink;
+    }
 
     //  主接口（MainWindow 调用）
     // onStarted：初始化完成后的回调（同步调用，可直接操作 UI）
@@ -88,17 +95,54 @@ public:
                      int triggersPerFile,
                      const QString& suffix);
     void stopSaving();
-    //  自动保存会话代（方案2 精确分界）：
-    //  gen=0 表示自动保存未激活；>0 为当前会话代。DataProcessor 入队前
-    //  读取该值打在触发组上，FileSaver 按代路由目录。
-    void     setAutoSessionGen(uint64_t gen) { m_autoSessionGen.store(gen, std::memory_order_release); }
-    uint64_t autoSessionGen() const          { return m_autoSessionGen.load(std::memory_order_acquire); }
-    void     registerSessionDir(uint64_t gen, const QString& dir);   // UI 线程预注册目录
-    QString  sessionDir(uint64_t gen) const;                          // 线程安全查询
+    // 自动保存会话代协调器：目录准备/注册完成后才发布 generation。
+    // 物理边界源调用 commit，HostOutput 按 round identity 解析后再打标。
+    using AutoSaveCommit = paimage::AutoSaveRoundCoordinator::CommitResult;
+    void configureAutoSave(const QString& baseDirectory,
+                           std::uint64_t lastDirectoryNumber);
+    AutoSaveCommit beginAutoSaveSession(
+        std::uint64_t measurementSession,
+        const QString& phase = QStringLiteral("ui_session_start"));
+    // Bind round zero before the first normalized LogicalScan reaches the
+    // HostOutput save stamp.  The source path calls the same method at
+    // measurement-session start; it does not allocate a new directory.
+    AutoSaveCommit bindAutoSaveMeasurementSession(
+        std::uint64_t measurementSession,
+        const QString& phase = QStringLiteral("source_measurement_session_start"));
+    AutoSaveCommit bindAutoSaveMeasurementRound(
+        std::uint64_t measurementSession,
+        std::uint64_t roundGeneration,
+        const QString& phase = QStringLiteral("active_measurement_round_start"));
+    AutoSaveCommit commitAutoSaveBoundary(
+        std::uint64_t measurementSession,
+        std::uint64_t roundGeneration,
+        paimage::AutoSaveBoundaryKind boundaryKind,
+        const QString& phase);
+    void disableAutoSave();
+    bool autoSaveEnabled() const;
+    bool autoSaveFaulted() const;
+    uint64_t autoSessionGen() const;
+    QString sessionDir(uint64_t gen) const;
+    // Round-aware resolver used by HostOutput before a TriggerGroup enters
+    // the save worker.  It returns 0 for manual/disabled save and the
+    // coordinator's fail-closed sentinel for an enabled lookup failure.
+    uint64_t resolveAutoSaveRound(uint64_t measurementSession,
+                                  uint64_t roundGeneration) const;
     // 方案A：请求全部保存器在队列排空后刷盘关闭当前会话文件（会话边界主动落盘）
     void     requestCloseSavers();
     // 实时更新显示降采样点数（不重建线程，直接修改各 DataProcessor 的配置）
     void setDisplayPoints(int displayPoints);
+    // 更新生产输出边界使用的逻辑轮次计数（环形模式由 Ring 配置覆盖）。
+    void setLogicalTriggersPerRound(std::uint64_t count);
+    // Canonical physical-round idle timeout. Ring mode supplies
+    // RingReconCudaConfig.timeoutResetSec; this setter is also valid before
+    // the PAimage backend is created.
+    void setPhysicalRoundTimeout(double seconds);
+    // Physical-round startup policy. These are configuration-boundary
+    // settings and are forwarded to the shared HostOutput normalizer.
+    void setStartupFilterTriggerCount(std::uint64_t count);
+    void setDisableCountBoundary(bool disable);
+    paimage::PhysicalRoundNormalizer::Snapshot physicalRoundSnapshot() const;
     // 重新配置（采集时间改变时传入，无需重建线程）
     void reconfigure(const AcqConfig& config);
 
@@ -160,6 +204,11 @@ signals:
                                const QString& reason);
     void stopped();   // 所有子线程已退出，stop() 后台工作完成
     // started() 已移除，改用 start(config, onStarted回调) 方式通知 UI
+    // 保存文件翻滚低频事件（容量 / 物理轮次），由 UI 桥接进诊断记录
+    void fileSaverRollover(int cardId, const QString& reason,
+                           quint64 oldRoundGeneration, quint64 newRoundGeneration,
+                           int oldFileSequence, int newFileSequence,
+                           int oldFileTriggerCount, bool manualMode);
 
 private slots:
     void onStatsTimer();
@@ -193,6 +242,10 @@ private:
     quint64 m_paimageLastBurstEpoch=0;
     qint64 m_paimageLastStallWarnMs=0;
     QString m_paimageRunId;
+    paimage::PhysicalRoundNormalizer::Observer m_physicalRoundBoundarySink;
+    double m_physicalRoundTimeoutSec = 0.0;
+    std::uint64_t m_startupFilterTriggerCount = 1;
+    bool m_disableCountBoundary = false;
     void recordPaimageSnapshot();
     void writeSystemCaptureNotification(quint64 epoch, qint64 burstNs);
 
@@ -324,10 +377,8 @@ private:
     std::vector<std::unique_ptr<DisplayBuffer>>    m_displayBuffers;
     std::vector<std::unique_ptr<FileSaver>>        m_savers;
 
-    // ══ 自动保存会话代（方案2）══════════════════════════════════
-    std::atomic<uint64_t>          m_autoSessionGen{0};
-    mutable QMutex                 m_sessionDirMutex;
-    QHash<uint64_t, QString>       m_sessionDirs;   // 会话代 → 保存目录
+    // ══ 自动保存会话代（物理边界协调器）══════════════════════════
+    paimage::AutoSaveRoundCoordinator m_autoSaveCoordinator;
 
     std::vector<std::unique_ptr<MultiPortReceiver>> m_receivers;
 

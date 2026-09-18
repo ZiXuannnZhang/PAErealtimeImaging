@@ -4,126 +4,100 @@
 
 `main` is the only canonical branch of `ZiXuannnZhang/PAErealtimeImaging`.
 
+As of 2026-09-18, the accepted A/B/C/D source chain has been integrated back into canonical `main`. New work normally starts from latest `origin/main` unless a future task explicitly defines another reviewed baseline.
+
 Formal project state is split by purpose:
 
-- `PROJECT_STATUS.md` — current project/branch/validation status.
+- `PROJECT_STATUS.md` — current project/validation status.
 - `REPOSITORY_BASELINE.md` — branch/history/merge governance.
 - `BUILD_STANDARD.md` — build, dependency, packaging and delivery governance.
 - `Codex-GitHub双端联动快速上手.md` — ChatGPT/Codex operating workflow.
 - `codex/task-docs:TASKS/<task>.md` — task-specific requirements and explicit overrides.
 
-Historical handoffs, migration records, old reports and old branch notes are traceability material only and must not override these current documents.
+Historical handoffs, receipts, reports and old branch notes are traceability material only.
 
-## Repository-level operating documents
+## Accepted A/B/C/D provenance
 
-Before starting any implementation, build, validation, delivery, or local-workspace cleanup task, Codex Desktop must read the latest versions from `origin/main`:
+The accepted production/test source tree used for Session D validation is:
 
 ```text
-PROJECT_STATUS.md
-REPOSITORY_BASELINE.md
-BUILD_STANDARD.md
+candidate code SHA = d9daa2d7af6bb8341349e405433824e89e42bcd4
+Session D final traceability HEAD = 69a7606f95c97c839fd618115f4092a4291d8906
 ```
 
-Then read the current task document if one exists.
+This ancestry also contains the accepted START-admission software changes. Do not remove or replay only a subset of these ancestors merely to produce a cleaner-looking history; doing so would create a different source combination.
 
-A task document may define task-specific overrides, including a baseline that is not `main`. Codex must identify those overrides explicitly rather than silently bypassing repository-level standards.
+Hardware status for this round:
+
+```text
+A/B/C/D functional validation in current tested scope = PASS
+exact FPGA/LabVIEW source of extra startup triggers   = NOT PROVEN
+7 / 4007                                              = field observation, not protocol constant
+```
 
 ## Branch roles
 
 ### `main`
 
-- Sole source-of-truth branch for formal source baseline and repository-level governance documents.
-- New implementation branches normally start from latest `origin/main` **unless a task explicitly defines a different reviewed baseline**.
-- A reviewed implementation branch may intentionally remain unmerged while hardware/system validation is pending.
-- `main` being canonical does not mean every current hardware-test candidate must already be merged into it.
+- Sole source-of-truth branch for formal source and repository-level governance.
+- Local `main` may follow `origin/main` only by fast-forward.
+- New implementation branches start from latest `origin/main` unless explicitly overridden by a reviewed task.
+- Do not force-push or routinely rewrite main history.
 
 ### `codex/task-docs`
 
-- Dedicated communication branch for task specifications written for Codex Desktop.
-- `TASKS/` and task-channel governance are authoritative there.
-- Temporary handoff/download files may exist for operational transfer, but they do not become repository-level project truth.
-- It is not an implementation baseline and must not carry production source changes.
+- Task specification / communication branch.
+- `TASKS/` is authoritative for task-specific requirements.
+- It is not a production implementation baseline.
 
 ### implementation / validation branches
 
-- Created for one concrete task or one explicitly continued review/addendum series.
-- Must be pushed for ChatGPT review before merge.
-- Software `APPROVE` is not equivalent to hardware/system acceptance.
-- A branch may remain the exact hardware-test candidate after software review, even when `main` has advanced independently.
-- Do not silently rebase, squash, cherry-pick extra code into, or rewrite a reviewed hardware-test candidate; doing so invalidates the exact reviewed commit identity.
+Session A/B/C/D, physical-round, START-admission and other historical `codex/*` branches are retained non-destructively for traceability.
 
-## Current retained validation branches
+They are no longer implicit default development baselines after canonical integration.
 
-### Physical round normalization / RoundIdentity integrated candidate
+Important retained anchors include:
 
 ```text
-branch = codex/physical-round-normalizer-integrated-20260916
-SHA    = 52cf7713d7e0e935cb14663ec3470f3a25bfeb90
+codex/start-admission-fence-fix-20260913-003112
+  6313540f72544c0f68820c4815903abaa0b8c1e1
+
+codex/physical-round-normalizer-integrated-20260916
+  52cf7713d7e0e935cb14663ec3470f3a25bfeb90
+
+codex/session-a-round-policy-core-20260917-114452
+  eb283f64574d9043f4d4823338c31767c3b811fe
+
+codex/session-b-ui-observability-20260917
+  676df4a946fed56b903474354984bff44ab50875
+
+codex/session-c-timeout-variable-round-20260917-214638
+  d9daa2d7af6bb8341349e405433824e89e42bcd4
+
+codex/session-d-integration-validation-20260918-000458
+  69a7606f95c97c839fd618115f4092a4291d8906
 ```
 
-Status:
+The existence of these branch refs does not make them active baselines.
 
-```text
-RoundIdentity code fixes                  = IMPLEMENTED
-software review / automated validation    = PASS / APPROVE
-Windows build                             = PASS
-real ImagingSvc + CUDA service selftests  = PASS
-physical-round hardware acceptance        = PENDING
-CountBoundary behavior in new 4007 env    = UNVERIFIED
-TimeoutBoundary full reset chain          = UNVERIFIED
-merge into main                            = HOLD
-```
+## START-admission status
 
-Important history fact: this branch is not a simple fast-forward continuation of current `main`; the histories have diverged. Do not move `main` directly to this SHA, and do not attempt a “cleanup rebase” merely to make the graph linear. If hardware acceptance eventually passes, integration strategy must be designed and reviewed separately.
+The START-admission software fix is included in the accepted canonical source ancestry and remains software-approved.
 
-The current hardware observation is that a different control environment may produce approximately `4007` physical triggers per full round instead of the previously observed `4001`. This does **not** authorize changing logical round configuration to `4006` without first proving the trigger semantics from logs/hardware evidence.
-
-### START admission validation candidate
-
-```text
-branch = codex/start-admission-fence-fix-20260913-003112
-SHA    = 6313540f72544c0f68820c4815903abaa0b8c1e1
-```
-
-Status:
-
-```text
-software review / deterministic validation = APPROVE
-real FPGA/NIC hardware validation          = PENDING
-merge into main                             = HOLD
-```
-
-This is a separate startup ingress-loss workstream. Do not use START admission results as proof of PhysicalRoundNormalizer behavior, and do not use 4007 physical-round observations as proof about START admission.
-
-### other retained development branches
-
-`codex/ring-pipeline-refactor-20260912` is an older independent, unmerged direction. It must not be implicitly combined with either current validation candidate or used as a new default baseline.
-
-### historical branches
-
-Branches such as diagnostic snapshots, migration snapshots, experiments, backups, old `master`, superseded `codex/*` branches, and one-off verification branches are non-canonical. They may remain for traceability but must not become implicit development baselines.
-
-The user-deleted branch:
-
-```text
-codex/local-docs-sync-20260913
-```
-
-is not a formal artifact. Do not recreate it during local/remote synchronization.
+Do not convert that fact into the stronger hardware claim that the historical FPGA/NIC startup-loss root cause has been uniquely proven. Dedicated hardware/root-cause attribution remains separate.
 
 ## Local workspace synchronization rules
 
-When Codex is asked to organize the local workspace according to the remote repository:
+When Codex organizes the local workspace from the remote repository:
 
-1. Start with `git fetch --prune origin`.
-2. Inspect local branches, worktrees, unpushed commits and tracked modifications before deleting anything.
-3. Local `main` may only follow `origin/main` by fast-forward.
-4. If local `main` diverges, stop and report; do not auto-reset/rebase/force.
-5. Preserve and verify both current hardware-validation candidates:
-   - `codex/physical-round-normalizer-integrated-20260916@52cf7713...`
-   - `codex/start-admission-fence-fix-20260913-003112@6313540f...`
-6. Do not delete ignored local CUDA/runtime dependencies, build evidence, `artifacts/`, user data, diagnostic ZIPs, extracted logs or hardware captures merely because they are absent from Git.
-7. A historical local branch may be removed only after confirming it has no unique unpushed work that needs preservation.
+1. `git fetch --prune origin`.
+2. Treat latest `origin/main` as canonical.
+3. Local `main` may only fast-forward to `origin/main`.
+4. If local `main` diverges or local commits are not on remote, stop and inventory before destructive action.
+5. Do not reset/rebase away unique local work.
+6. Preserve ignored CUDA/runtime dependencies, `testdata/`, `artifacts/`, build evidence, hardware captures, logs and user data.
+7. Historical local branches/worktrees may be removed only after confirming they contain no unique unpushed work that needs preservation.
+8. Remote historical branches are not deleted as part of this canonical integration; remote cleanup is intentionally non-destructive.
 
 ## Task document naming
 
@@ -133,26 +107,24 @@ Single-task documents live under `TASKS/` on `codex/task-docs` and use:
 <简要任务说明>_YYYYMMDD-HHMMSS.md
 ```
 
-The timestamp is the task publication local time, accurate to seconds.
-
-`TASKS/README.md` is the persistent channel specification and is exempt from the per-task naming rule.
+`TASKS/README.md` is exempt.
 
 ## Review and merge policy
 
-1. ChatGPT defines the task and acceptance criteria.
-2. Codex Desktop implements on an isolated implementation branch from the task-defined baseline.
-3. Codex Desktop pushes the branch and reports exact build/test evidence.
-4. ChatGPT independently re-reads remote HEAD, diff, source and test evidence and returns `APPROVE` or `REQUEST_CHANGES`.
-5. Software `APPROVE` is not equivalent to hardware/system acceptance when the task requires real-device validation.
-6. New hardware evidence may invalidate an operational assumption without invalidating already-proven software invariants; distinguish these explicitly.
-7. Merge into `main` remains user-controlled unless the user explicitly delegates merge authority.
-8. For a diverged long-lived validation branch, do not choose merge/rebase/cherry-pick strategy until the exact accepted source set and hardware acceptance boundary are known.
+1. ChatGPT defines task scope and acceptance criteria.
+2. Codex implements on an isolated task branch.
+3. Codex pushes exact build/test evidence.
+4. ChatGPT independently reviews remote source/tests/receipt.
+5. Software approval and hardware/root-cause proof remain distinct claims.
+6. Merge into main is explicit and traceable.
+7. Approved validation histories must not be silently rebased/squashed/cherry-picked into materially different source combinations.
+8. After canonical integration, future tasks should normally use latest `origin/main`.
 
 ## History policy
 
 - No force push to `main`.
-- No routine rewriting of established shared history.
-- No implicit squash/rebase of an approved implementation/validation branch unless explicitly required.
-- If local `main` cannot fast-forward to `origin/main`, stop and diagnose the divergence before continuing.
-- Do not create self-referential report commits merely to embed the final commit SHA inside a report that itself changes that SHA. Report final remote HEAD out-of-band in the execution receipt when necessary.
-- Historical documentation may be downgraded to `docs/history/` or to a compatibility pointer, but its original contents remain recoverable from Git history.
+- No routine rewriting of shared history.
+- No destructive remote branch cleanup in this closeout.
+- No implicit squash/rebase of approved histories.
+- Historical branches may later be pruned only by a separate explicit cleanup decision after local/remote inventory.
+- Do not recreate the previously user-deleted `codex/local-docs-sync-20260913`.

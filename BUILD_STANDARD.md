@@ -63,36 +63,27 @@ tracked working tree clean
 
 允许存在明确的、本规范认可的未跟踪本机构建依赖，例如 `cufft64_12.dll`；但必须在执行报告中列出来源。
 
-### 2.2 当前硬件验证候选
+### 2.2 当前 canonical 构建基线
 
-截至 `PROJECT_STATUS.md` 当前状态，有两个彼此独立的硬件验证对象。
+2026-09-18 A/B/C/D 收尾后，默认正式构建对象是最新 `origin/main`，除非当前 task document 明确指定其他 reviewed commit。
 
-Physical round / RoundIdentity：
-
-```text
-branch = codex/physical-round-normalizer-integrated-20260916
-SHA    = 52cf7713d7e0e935cb14663ec3470f3a25bfeb90
-```
-
-状态：软件整改、自动化、Windows build、真实 ImagingSvc/CUDA selftest 已通过；**物理轮次归一硬件验收仍 PENDING**。新控制环境约 `4007 physical triggers / round` 的行为仍需从本地实机日志验证，尤其是 CountBoundary / TimeoutBoundary 的真实边界与完整 reset 链。
-
-START admission：
+本轮接受链的追溯点：
 
 ```text
-branch = codex/start-admission-fence-fix-20260913-003112
-SHA    = 6313540f72544c0f68820c4815903abaa0b8c1e1
+accepted A/B/C/D candidate code = d9daa2d7af6bb8341349e405433824e89e42bcd4
+Session D final traceability HEAD = 69a7606f95c97c839fd618115f4092a4291d8906
 ```
 
-状态：软件验收已 `APPROVE`，真实 FPGA/NIC 启动 ingress 验证仍 PENDING。
+当前实机结论为“当前验证范围通过；底层额外 trigger 精确 FPGA/LabVIEW 来源未证明”。历史 validation branch 继续保留，但不再是默认正式 build target。
 
-为任一候选构建时：
+START-admission 软件修复已存在于 canonical ancestry；其历史硬件 root-cause attribution 仍是独立命题。
 
-- checkout/fast-forward 到任务要求的候选分支精确 SHA；
-- 从最新 `origin/main` 读取本构建规范和 `PROJECT_STATUS.md`；
-- **不要**为了使用本规范而把 `main` 源码 merge/cherry-pick 到候选分支；
-- 不得静默加入额外源码修改；
-- 任何源码变化都会使原软件验收与实机候选身份失效，必须重新进入审查流程；
-- 两个候选代表不同验证目标，不得用一个候选的现场结果替代另一个候选的 acceptance。
+为 canonical main 构建时：
+
+- checkout/fast-forward 到最新 `origin/main` exact SHA；
+- tracked tree clean；
+- 最终交付必须在该 exact SHA 上重新 configure；
+- 不得因为历史候选曾经通过测试而复用旧 BuildIdentity 作为新 main 的正式交付身份。
 
 ### 2.3 最终交付构建必须在最终 commit 上重新 configure
 

@@ -1,0 +1,74 @@
+# Commands and dependency provenance
+
+Task branch: codex/physical-round-normalizer-integrated-20260916
+Baseline HEAD before this task: 23debab2bf64473e5500231689113e567b3ca229
+merge-base with RoundIdentity chain: b4376203e7c9c8b369b6b87551f3718bd1edf424 (ahead 2 / behind 0)
+Source+test commit: 26d54b5a2b564a127b046ab213a7f6d09b8c83b9
+
+## Toolchain (BUILD_STANDARD.md, origin/main)
+
+cmake version 3.30.5 (D:/Qt/Qt6.8.0/Tools/CMake_64)
+g++.exe (x86_64-posix-seh-rev1, MinGW-Builds 13.1.0) (D:/Qt/Qt6.8.0/Tools/mingw1310_64)
+Ninja (D:/Qt/Qt6.8.0/Tools/Ninja)
+Qt 6.8.0 mingw_64 (D:/Qt/Qt6.8.0/6.8.0/mingw_64)
+
+## Test suite configure/build/run
+
+The tests build tree had to move out of MC_410T_MultiCard/delivery/build/: the
+worktree's absolute path depth plus CMake 3.30 hashed object directories for
+out-of-tree sources exceeded the 260-char Win32 MAX_PATH for
+data_processor_imaging_isolation_test (depfile path = 270 chars), which made
+g++ fail with "opening dependency file ... No such file or directory".
+The suite was therefore configured at the git-ignored worktree-root /build/tests
+(longest generated path about 242 chars). No source or preset was changed.
+
+cmake -S MC_410T_MultiCard/delivery/tests -B build/tests -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe -DCMAKE_MAKE_PROGRAM=D:/Qt/Qt6.8.0/Tools/Ninja/ninja.exe -DCMAKE_PREFIX_PATH=D:/Qt/Qt6.8.0/6.8.0/mingw_64
+cmake --build build/tests -j 8
+ctest --test-dir build/tests --output-on-failure
+Qt runtime DLLs for the test exes copied from this branch's build/mingw_debug/bin; Qt6Concurrent.dll from D:/Qt/Qt6.8.0/6.8.0/mingw_64/bin.
+
+Result: 40/40 passed (see ctest-last-test.txt), including
+ring_production_blockers_test (new completionGateTest C1-C3,
+stableTerminalMarkerTest M2/M3, timeoutCompletionRegressionTest T1),
+physical_round_normalizer_test (new T18 stable terminal property),
+paimage_conversion_checks (new terminal metadata propagation),
+ring_block_assembler_test, ring_round_ui_state_test, ring_round_identity_test,
+ring_shm_observability_test and the full paimage/network/save suite.
+
+## Main Windows build (final commit, BuildIdentity reconfigured after commit)
+
+MC_410T_MultiCard/delivery/build_mingw_debug.cmd (configure preset mingw-debug + build preset mingw-debug-build)
+Result: exit 0; PAimageReceiverDiagnostics.exe / ImagingSvc.exe / ring_svc_selftest.exe / ring_udp_replay.exe present.
+build/mingw_debug/generated/PaimageAcquisition/BuildIdentity.h:
+  PAIMAGE_GIT_SHA = 26d54b5a2b564a127b046ab213a7f6d09b8c83b9
+  PAIMAGE_TRACKED_DIRTY = false
+
+## ImagingSvc + CUDA service-level verification (final binaries, real GPU)
+
+run from MC_410T_MultiCard/delivery/build/mingw_debug/bin:
+
+./ring_svc_selftest.exe --data D:/ChatGPT/PAERealtimeImaging/testdata/14.dat --svc ./ImagingSvc.exe --id 14 --grid-mm 0.5 --block 200 --channels 255 --out <worktree>/build/svc_out_normal
+  exit 0: 2 rounds x 5 blocks, consumed=10 mismatch=0; final snapshots echoed round_complete=true only at exact block count.
+
+./ring_svc_selftest.exe --data ... --identity-jump-at 2 --out <worktree>/build/svc_out_jump
+  exit 0: [barrier-test] fresh-round max_pixel_difference=0 (blocker 1 identity barrier intact).
+
+./ring_svc_selftest.exe --data ... --drop-block 2 --out <worktree>/build/svc_out_drop
+  exit 0: block 2 of round 0 deterministically never submitted;
+  round 0 source-final snapshot published round_complete=false;
+  exactly one round_block_count_mismatch (identity 1/0, blocks_consumed=4,
+  expected_blocks=5, source_round_complete=true, reconstruction_complete=false);
+  round 1 first block pixels identical to clean first image (max diff 0);
+  round 1 completed normally at its own exact count (round_complete=true);
+  service obs: notifications=9 consumed=9 gap=1.
+
+## Dependency SHA256 (this worktree)
+
+2480d8ab849d7e9a375275f6c0278b8764c14ac0c1a3bdacaf256ae4a93c5590  MC_410T_MultiCard/delivery/libs/imaging/cufft64_12.dll (untracked local CUDA 12 runtime, same file as previous validation)
+c1a37e73147c1b8250f96ccdc1fcfc08ca28cecbf1cb3c046d4ab426f2ea0893  MC_410T_MultiCard/delivery/libs/imaging/pa_recon_core.dll (tracked)
+bf40472d5a46363a35dd1084a01a8c15f13ef203f3ed5b4bb5edf767eeec14b5  _migration_pack/prebuilt_cuda/bin/ring_recon_cuda.dll
+c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344  _migration_pack/prebuilt_cuda/bin/cudart64_12.dll
+37610023d91951bc4177db1f96b54b28911976ac70b221a852887709a02a9ad3  MC_410T_MultiCard/delivery/third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll
+
+Ring CUDA source: _migration_pack/prebuilt_cuda (local build/ring_recon_cuda has no import library in this worktree; build script fallback).
+CUDA core was not modified by this task.

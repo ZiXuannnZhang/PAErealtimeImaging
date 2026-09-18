@@ -51,6 +51,9 @@ set(SOURCES
     src/RingImageWidget.cpp
     src/RingColorBarWidget.cpp
     src/RingBlockAssembler.cpp
+    src/RingRoundUiState.cpp
+    src/RingRoundPresentation.cpp
+    src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp
     qcustomplot/qcustomplot.cpp
 )
 
@@ -82,6 +85,12 @@ set(HEADERS
     include/RingImageWidget.h
     include/RingColorBarWidget.h
     include/RingBlockAssembler.h
+    include/RoundIdentity.h
+    include/RingRoundIdentity.h
+    include/RingRoundPresentation.h
+    include/RingRoundUiState.h
+    include/PaimageAcquisition/AutoSaveRoundCoordinator.h
+    include/PaimageAcquisition/PhysicalRoundNormalizer.h
     include/third_party/concurrentqueue.h
     qcustomplot/qcustomplot.h
 )
@@ -111,6 +120,7 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/PaimageAcquisition/OutputWorkers.cpp
     src/PaimageAcquisition/FrameConverter.cpp
     src/PaimageAcquisition/HostOutput.cpp
+    src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
     src/PaimageAcquisition/Backend.cpp
     src/PaimageAcquisition/NetworkControllerPaimage.cpp)
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
