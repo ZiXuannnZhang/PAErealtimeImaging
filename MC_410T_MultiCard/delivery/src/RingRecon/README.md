@@ -1,88 +1,63 @@
-# RingRecon — 双波长环形扫描 DAS 实时重建（C++ CPU 移植）
+# RingRecon — CPU reference / verification implementation
 
-对应 实时重建脚本（原 Handoff）MATLAB 逐块链路的 C++ 实现，当前为 M1 CPU 版本：
+`src/RingRecon` 是环形双波长 DAS 的 **CPU reference 与验证工具**，不是 canonical production
+实时重建 owner。production 环形重建由 ImagingSvc 调用 `ring_recon_cuda.dll`。
 
-- `ring_recon.h/.cpp`：纯 C++17 重建模块（分块读取/解交织/预处理/增量 DAS/归一化）
-- `ring_recon_verify.cpp`：命令行验证工具，逐块导出 wl1/wl2 归一化图、acc、accW
-- `CMakeLists.txt`：独立构建（不依赖 Qt）
+本目录保留 CPU 版的价值是：
 
-## 构建
+- 数值 reference；
+- CUDA A/B / regression；
+- 独立 verify/view 工具；
+- 算法问题定位。
 
-```powershell
-$env:PATH = "D:\Qt\Qt6.8.0\Tools\mingw1310_64\bin;$env:PATH"
-cmake -S src\RingRecon -B build\ring_recon_release -G Ninja -DCMAKE_BUILD_TYPE=Release `
-      -DCMAKE_CXX_COMPILER=D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe `
-      -DCMAKE_MAKE_PROGRAM=D:/Qt/Qt6.8.0/Tools/Ninja/ninja.exe
-cmake --build build\ring_recon_release
-```
+主要文件：
 
-## 运行（360x360、0.1mm 网格）
+- `ring_recon.h/.cpp` — CPU preprocessing / incremental DAS reference；
+- `ring_recon_verify.cpp` — 命令行验证；
+- `ring_recon_view.cpp` — Qt 可视化 reference viewer；
+- `ring_recon_cuda.h/.cu` — CUDA C ABI source（实际 CUDA 工程入口在 ../RingReconCuda）。
 
-```powershell
-build\ring_recon_release\ring_recon_verify.exe `
-  --data D:\zzx\data\20260716\11.dat --id 11 --grid-mm 0.1 --block 200 --out build\ring_recon_out11
-build\ring_recon_release\ring_recon_verify.exe `
-  --data D:\zzx\data\20260519\14.dat --id 14 --grid-mm 0.1 --block 200 --out build\ring_recon_out14
-```
+## Build
 
-## MATLAB 参考与数值对照
-
-```matlab
-cd 实时重建脚本
-export_ring_recon_reference('D:\zzx\data\20260716\11.dat', 'build\ring_recon_ref11', 11, 0.1, 200)
-export_ring_recon_reference('D:\zzx\data\20260519\14.dat', 'build\ring_recon_ref14', 14, 0.1, 200)
-```
+独立 CPU reference：
 
 ```powershell
-python tools\compare_ring_recon.py build\ring_recon_ref11 build\ring_recon_out11 360 360 20 --dataset 11
-python tools\compare_ring_recon.py build\ring_recon_ref14 build\ring_recon_out14 360 360 40 --dataset 14
+cmake -S src/RingRecon -B build/ring_recon_release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/ring_recon_release
 ```
 
-## M1 验证结果（0.1mm 网格，200 A-line/块）
+本地 Qt/MinGW 路径通过 CMake cache/toolchain 指定，不把旧机器绝对路径当规范。
 
-| 数据集 | 累加 acc 最坏相对差 | 权重 accW 最坏相对差 | 归一化图最坏相对差（排除探测器奇异区） |
-|---|---|---|---|
-| 11.dat（20 块） | 3.7e-4 | 4.0e-6 | 3.2e-4 |
-| 14.dat（40 块） | 1.5e-4 | 4.0e-6 | 1.1e-4 |
+## CUDA viewer
 
-说明：DAS 权重含 1/dist^2，探测器附近像素对浮点舍入极敏感（GPU 与 CPU
-求和顺序/FMA 不同）；对照时排除距离任一已出现探测器 10 倍网格步长内的像素。
-非奇异区结果与 MATLAB 一致，误差量级符合单精度浮点预期。
-## 可视化查看器（VSCode 一键运行）
+`ring_recon_view` 可以在提供 MinGW import library 和 CUDA runtime 目录时启用 CUDA engine。
+具体 CUDA rebuild 与 production selftest 见：
 
-`ring_recon_view` 是 M1 的 Qt 可视化验证工具：逐块读取数据并实时刷新左右两幅灰度图
-（左=532nm，右=1064nm），显示效果与 MATLAB 主脚本的 imagesc 双图一致。
-
-### VSCode 运行
-
-1. 用 VSCode 打开工作区 `C:\Users\yyps\Documents\ChatGPT\realtime_imaging_migration`；
-2. 运行任务 `build_ring_recon_view`（或直接按 F5）；
-3. 调试/运行面板选择：
-   - `Run RingRecon View (11.dat)`：D:\zzx\data\20260716\11.dat，20 块；
-   - `Run RingRecon View (14.dat)`：D:\zzx\data\20260519\14.dat，40 块。
-
-窗口会显示两块实时累积重建图、当前块号和单块耗时；全部处理完后状态栏显示总耗时。
-
-### 命令行参数
-
-```powershell
-build\ring_recon_release\bin\ring_recon_view.exe `
-  --data D:\zzx\data\20260716\11.dat --id 11 `
-  --grid-mm 0.1 --block 200 --sleep-ms 50
+```text
+../RingReconCuda/README.md
+仓库根 BUILD_STANDARD.md
 ```
 
-- `--sleep-ms`：块间停顿（模拟 MATLAB 的 pause，默认 50ms）；
-- `--auto-quit 1`：跑完全部块后自动退出（用于无界面自检）。
-### CUDA 引擎（M2 可视化验收）
+## Historical validation
 
-`ring_recon_view` 已支持 `--engine cuda`：重建核心走 `ring_recon_cuda.dll`，
-预处理仍为 CPU。构建时 `build_ring_recon_view.cmd` 会自动链接 CUDA 导入库并部署
-`ring_recon_cuda.dll`/`cudart64_12.dll` 到查看器 bin 目录。
+早期 M1/M2 的 11.dat / 14.dat CPU/CUDA 数值对照和 360/720 网格性能数字属于历史开发里程碑，
+现已归档到：
 
-```powershell
-build\ring_recon_release\bin\ring_recon_view.exe `
-  --data D:\zzx\data\20260519\14.dat --id 14 --grid-mm 0.1 --block 200 `
-  --engine cuda --sleep-ms 50
+```text
+CODEX_REPORTS/ring-reconstruction-history-202608/
 ```
 
-完整验收步骤见 `docs/M2_可视化验收方案.md`。
+后续 4000×4000 benchmark 也在该目录保存。历史数字用于比较，不代表当前 canonical main 的
+formal performance acceptance。
+
+## Production boundary
+
+不要从本 CPU README 推导当前：
+
+- physical round boundary；
+- startup trigger filter；
+- RingBlockAssembler ownership；
+- ImagingSvc timeout/reset；
+- AutoSave directory rollover。
+
+这些以 canonical source、`MC_410T_MultiCard/delivery/README.md` 和 Session A–D closeout 为准。

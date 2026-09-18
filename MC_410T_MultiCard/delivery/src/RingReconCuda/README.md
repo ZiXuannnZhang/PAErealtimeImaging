@@ -1,48 +1,78 @@
-# RingReconCuda — 双波长环形 DAS 重建 CUDA 模块
+# RingReconCuda — production CUDA source / verification
 
-M2 实现：重建核心 CUDA 化，其余环节保持 CPU。
+本目录提供 CUDA DLL 的独立构建/验证入口；实际 CUDA ABI header/source 位于
+`../RingRecon/ring_recon_cuda.h/.cu`。
 
-- `ring_recon_cuda.h`：完整参数结构（与 MATLAB 主脚本初始化一一对应，供前端交互控件填充）+ C 接口
-- `ring_recon_cuda.cu`：DAS kernel（逐像素 x 逐 A-line 反投影/插值/权重/FOV 掩膜/增量累加）与宿主封装
-- `ring_recon_cuda_verify.cpp`：MSVC 验证入口（预处理复用 CPU 版 ring_recon.cpp）
+当前 CUDA API 已不仅是早期“M2 kernel”：
 
-## 构建（需 VS2022 Build Tools + CUDA 12.8）
+- uniform / per-A-line angle append；
+- per-A-line radius（multi-radius calibration）；
+- sector/splice mask + blend；
+- layered sound-speed model；
+- `reset`；
+- normalized `snapshot`；
+- state/grid query；
+- production ImagingSvc selftest。
 
-```bat
-call C:\Program\VC\Auxiliary\Build\vcvars64.bat
-cmake -S src\RingReconCuda -B build\ring_recon_cuda -G Ninja -DCMAKE_BUILD_TYPE=Release ^
-      -DCMAKE_CXX_COMPILER=cl.exe ^
-      -DCMAKE_CUDA_COMPILER="C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin\nvcc.exe" ^
-      -DCMAKE_MAKE_PROGRAM=D:\Qt\Qt6.8.0\Tools\Ninja\ninja.exe
-cmake --build build\ring_recon_cuda
+## Source layout
+
+```text
+src/RingRecon/
+  ring_recon_cuda.h
+  ring_recon_cuda.cu
+  ring_recon.cpp          CPU preprocessing/reference
+
+src/RingReconCuda/
+  CMakeLists.txt
+  ring_recon_cuda_verify.cpp
+  ring_svc_selftest.cpp
 ```
 
-产物：`build/ring_recon_cuda/bin/ring_recon_cuda.dll`、`build/ring_recon_cuda/ring_recon_cuda_verify.exe`
+## Build boundary
 
-## 运行（PATH 需含 CUDA bin 与 DLL 目录）
+CUDA 使用 MSVC host compiler + nvcc；canonical MinGW main build 通常消费已经验证的
+`ring_recon_cuda.dll` + MinGW import library，而不是每次重新编 CUDA。
+
+正式 dependency source、staging 和 SHA256 要求以根目录 `BUILD_STANDARD.md` 为准。
+
+需要源码重编时可使用本目录 CMake 工程：
 
 ```powershell
-$env:PATH = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin;" +
-            "$PWD\build\ring_recon_cuda\bin;$env:PATH"
-build\ring_recon_cuda\ring_recon_cuda_verify.exe --data D:\zzx\data\20260716\11.dat --id 11 --grid-mm 0.1 --block 200 --out build\ring_recon_cuda_out11
-build\ring_recon_cuda\ring_recon_cuda_verify.exe --data D:\zzx\data\20260519\14.dat --id 14 --grid-mm 0.1 --block 200 --out build\ring_recon_cuda_out14
+cmake -S src/RingReconCuda -B build/ring_recon_cuda -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build/ring_recon_cuda
 ```
 
-## 验证结果（CUDA vs CPU，360x360/0.1mm，200 A-line/块）
+实际环境必须显式提供可用的 MSVC/nvcc/Ninja 路径；不要把历史机器的绝对路径视为规范。
 
-| 数据集 | acc 最坏相对差 | accW 最坏相对差 | 归一化图最坏相对差（排除探测器奇异区） |
-|---|---|---|---|
-| 11.dat | 3.8e-4 | 3.4e-6 | 4.1e-4 |
-| 14.dat | 1.8e-4 | 3.4e-6 | 1.1e-4 |
+**ABI 规则：** `RingReconCudaConfig` 结构变化时，DLL 与所有消费者必须同步重建，并重新生成/验证
+MinGW import library；混用不同 ABI 的 DLL/exe 属于禁止状态。
 
-## 性能（单块平均，200 A-line/块，双波长）
+## Verification
 
-| 网格 | CPU 11.dat | CUDA 11.dat | CPU 14.dat | CUDA 14.dat |
-|---|---|---|---|---|
-| 360x360 (0.1mm) | 86 ms | 19.5 ms | 155 ms | 21.1 ms |
-| 720x720 (0.05mm) | 329 ms | 22.3 ms | 583 ms | 23.9 ms |
+独立 verify 用于 CUDA vs CPU / snapshot/reset 等数值检查。
 
-## 未实现但已保留参数
+production chain 软件自检使用主工程生成的：
 
-分层声速（SoundSpeedRadii）、触发去抖、相位去卷积、Gaussfil、滤波、中值、去弧线、扫描伪影等：
-配置字段已按 MATLAB 主脚本初始化完整保留，启用时 CUDA 模块返回明确错误，后续按需实现。
+```text
+ring_svc_selftest.exe
+ImagingSvc.exe
+```
+
+若使用 retained `testdata/14.dat`，必须先确认数据 provenance/hash；正式结果还需绑定 exact
+source SHA、DLL hashes 和 build identity。
+
+Session D 已在 accepted candidate 上完成真实 ImagingSvc + CUDA selftest。详细记录：
+
+```text
+CODEX_REPORTS/session-abcd-closeout-20260918/
+```
+
+## Historical benchmarks
+
+早期 M2 和后续 reconstruction-core benchmark 已归档：
+
+```text
+CODEX_REPORTS/ring-reconstruction-history-202608/
+```
+
+不要把旧 benchmark 的单块耗时直接当作当前 main 在不同 grid/GPU/runtime 下的性能保证。

@@ -1,39 +1,40 @@
-# CODEX_REPORTS — 执行、验证与历史工程证据归档
+# CODEX_REPORTS — execution / validation / historical evidence
 
-`CODEX_REPORTS/` 用于保存**非 canonical 的阶段性工程材料**。这里的内容可用于追溯设计决策、执行过程、测试证据和问题诊断，但不得覆盖仓库根目录的当前项目状态与治理文档。
+本目录保存**非 canonical 的工程执行、验证、诊断和历史设计材料**。当前项目状态与规范不在这里维护。
 
-## 适合放入本目录的内容
+## 当前主题目录
 
-- Codex / ChatGPT 任务执行报告、审查回执、addendum receipt；
-- 阶段性 handoff、候选交付回执、测试/构建证据；
-- 诊断报告、崩溃调查、抓取证据、截图；
-- 已完成或已被后续实现吸收的阶段性设计/实施方案；
-- 历史性能基准、风险评估、操作卡；
-- 与上述报告直接配套的 raw CSV / JSON / log / evidence 子目录。
+| 目录 | 内容 |
+| --- | --- |
+| `ring-reconstruction-history-202608/` | 环扫算法、CUDA、历史 benchmark、M2/M3 里程碑 |
+| `acquisition-startup-history-20260907-13/` | PAimage 迁移、启动段诊断、START admission、system capture、ImagingBypass 隔离 |
+| `round-identity-history-20260907-16/` | RingBlockAssembler/SHM、PhysicalRound、RoundIdentity 修复与验证 |
+| `session-abcd-closeout-20260918/` | Session A–D 最终执行 receipts / handoff / checklist |
 
-## 不应放入本目录的内容
+## 适合放入本目录
 
-以下属于 canonical 项目入口，应保留在仓库根目录或稳定的产品文档目录：
+- Codex/ChatGPT 执行报告、review/addendum receipt；
+- 构建/测试证据、候选交付回执；
+- 诊断报告、dump/log/抓取/截图；
+- 已完成或被后续 source 吸收的阶段设计；
+- 历史 benchmark / 风险评估 / 操作卡。
 
-- `README.md`
+## 不应放入本目录
+
+canonical 当前入口：
+
+- 根 `README.md`
 - `PROJECT_STATUS.md`
 - `REPOSITORY_BASELINE.md`
 - `BUILD_STANDARD.md`
 - `HANDOFF.md`
 - `Codex-GitHub双端联动快速上手.md`
-- 当前仍作为正式规范维护的架构/API/用户文档。
+- 当前仍直接指导某模块运行的 module README/docs。
 
-## 权威性规则
+## 权威性
 
-1. 当前状态以根目录 `PROJECT_STATUS.md` 为准。
-2. 分支与历史治理以 `REPOSITORY_BASELINE.md` 为准。
-3. 构建/交付以 `BUILD_STANDARD.md` 为准。
-4. `CODEX_REPORTS/` 中任何历史结论若与当前 source / canonical docs 冲突，均以当前 source / canonical docs 为准。
-5. 历史报告可以保留当时的 PENDING/假设/路径信息，但应通过所在目录 README 或文件前言标明其历史身份。
+历史材料中的 PENDING、旧路径、旧 executable、旧 branch 或旧硬件假设保留其历史语境，
+但不覆盖 current source/canonical docs。
 
-## 目录整理原则
-
-- 同一阶段多份高度重叠的临时说明，应优先合并为一个索引/总结，精确执行证据放入子目录；
-- 原始证据仍有审计价值时保留；
-- 已被后续总结完全覆盖、没有独有证据价值的临时 handoff/notes 可以从当前树删除，Git 历史仍可恢复；
-- 不为“整洁”修改历史报告里的原始测试数字或结论，只通过归档说明界定其适用范围。
+同一阶段高度重复的临时说明会合并成 archive README；原始证据有审计价值时保留。
+完全被后续总结覆盖且没有独有证据价值的临时 handoff/plan 可以从当前树删除，Git history 仍可恢复。
