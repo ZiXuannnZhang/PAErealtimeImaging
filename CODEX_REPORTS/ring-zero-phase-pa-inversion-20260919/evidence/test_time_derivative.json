@@ -1,0 +1,22 @@
+{
+  "T1_maxErr": 1.8579885363578796E-7,
+  "T1_pass": true,
+  "T1_legacyExprMax": 0,
+  "T2_maxAbs": 0,
+  "T2_pass": true,
+  "T3_interiorMaxRel": 0.0026285558724557347,
+  "T3_endpointMaxRel": 0.054729685727708241,
+  "T3_tolInterior": 0.0026318945069571625,
+  "T3_tolEndpoint": 0.062831853071795868,
+  "T3_pass": true,
+  "T4_endpointExact": true,
+  "T4_vectorPathRel": 1.8098442974476168E-14,
+  "T4_matrixPathRel": 1.8098442974476168E-14,
+  "T4_pass": true,
+  "T5_exportDpRel": 3.1493534534668836E-13,
+  "T5_exportBRel": 3.3332233283971045E-13,
+  "T5_pass": true,
+  "inputChecks_pass": true,
+  "pass": true,
+  "matlabVersion": "9.14.0.2206163 (R2023a)"
+}

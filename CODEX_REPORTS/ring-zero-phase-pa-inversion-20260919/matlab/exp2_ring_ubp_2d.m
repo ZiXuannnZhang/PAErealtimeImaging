@@ -1,24 +1,40 @@
 % EXP2_RING_UBP_2D  判定性实验 2：2D 环形几何下 DAS（q=1）与环-UBP 的端到端对比。
+% 【审查整改版】R1/R2 修复 + 指标方向化，重跑后全部结论重新计算。
 %
-% 目的
+% 相对 9493962 版的修复（TASKS/环形成像阶段A审查整改追加_20260919-201935.md）
 % ----
-% 1) 在与生产一致的环形几何/采样参数下，用闭式 2D 前向模型生成逐线数据；
-% 2) 分别用 (a) 现有 DAS q=1、(b) 环-UBP（Xu-Wang Eq.(20)-(22) 信号组合
-%    b = 2p − 2t·p' + 立体角权重 ΔΩ = Δθ·R·cosα/d²，两种归一化 P/D）、
-%    (c) 错误配对（UBP 信号 + 旧 DAS q=1 权重）重建；
-% 3) 用均匀盘标定 UBP 绝对常数，比较：盘内平坦度、高斯吸收体位置误差、
-%    FWHM、背景伪影、CNR。
+% R1 时间导数：ppdA/ppdB 改用 timeDerivative（逐列中心差分/端点单侧，dim 1）。
+%   旧版 gradient(matrix, dt, 1) 第三参数被当作 dim2 间距、单输出返回列向梯度：
+%   均匀盘（各列相同）导数为零、偏心目标得到跨 A-line 差分。导数约定由
+%   test_time_derivative.m 自动验证。
+% R2 公平对照：旧 "wrong" 模式（reconUBPwrong 仅返回 acc + 单参数 normAcc
+%   自归一化）退化为 sign(acc) 符号图，其误差/FWHM 不可归因于权重。现改为
+%   legacyWeight 模式：与 DAS 完全相同的 acc/accW 显式归一化（reconPairKernels
+%   共享实现，accW 逐元素一致由 test_fair_comparison.m 验证），五模式构成
+%   因子分解（信号 × 权重族 × 归一化），每次只改变一个因素。
+% 指标：FWHM 沿目标相对环心的实际径向/切向方向采样（不再固定 x/y 剖面），
+%   无半高交点/峰在窗边界时标记不可用；环内/环外目标分开汇总。
+% §4.6 导数主导性：以修正后的导数重新实测（RMS 比），不沿用旧 2–3 量级主张。
 %
-% 2D 前向模型（闭式，紧支撑）
-%   均匀盘（半径 a）：圆均值 M(rho0,r) = f0·γ/π，γ=acos(clamp((rho0²+r²−a²)/(2ρ0r)))
+% 五模式（除注明因素外，输入信号/几何/插值/掩码/角度采样/测量方法完全一致）：
+%   das     = p 信号 + q=1 权重(Δθ·cosα/d)      + accW 归一化（生产旧默认基准）
+%   legacyW = b 信号 + q=1 权重                  + accW 归一化（旧权重配对对照）
+%   ubpD    = b 信号 + 立体角权重(Δθ·R·cosα/d²)  + accW 归一化（拟定配对）
+%   ubpP    = b 信号 + 立体角权重                + 原始和式 + C_P 标定（物理标度另列）
+%   saP     = p 信号 + 立体角权重                + accW 归一化（因子分解补格）
+%   其中 b = 2p − 2t·p'，t = τ/fs [s]。
+%
+% 2D 前向模型（闭式，紧支撑，未改动）
+%   均匀盘（半径 a）：圆均值 M(rho0,r) = f0·γ/π，γ=acos(clamp((ρ0²+r²−a²)/(2ρ0r)))
 %   高斯吸收体（σ, 幅度 A, 位置 yk）：M(x0,r) = Σ A·exp(−(r²+ρk²)/2σ²)·I0(r·ρk/σ²)
 %   p(x0,t) = d/dt[ t·G(t) ]，G(t)=∫0^{π/2} M(x0, c t sinψ) sinψ dψ
 %
-% 运行：matlab -batch "run('exp2_ring_ubp_2d.m')"
-% 输出：evidence/exp2_ring_ubp_2d.json、exp2_images.mat
+% 运行：matlab -batch "run('exp2_ring_ubp_2d.m')"   （工作目录 = matlab/）
+% 输出：evidence/exp2_ring_ubp_2d.json、evidence/exp2_images.mat
 
 outdir = fullfile(fileparts(mfilename('fullpath')), '..', 'evidence');
 if ~exist(outdir, 'dir'), mkdir(outdir); end
+K = reconPairKernels();
 
 % ---- 生产一致参数 ----
 fs = 250e6;  c = 1490.0;  R = 6.57e-3;
@@ -39,25 +55,30 @@ aDisc = 6e-3;  f0Disc = 1.0;
 M0 = discMean(R, rGrid, aDisc) * f0Disc;
 pA = forwardP(M0, rGrid, c);
 pAd = pA * ones(1, nd);
-ppdA = gradient(double(pAd), dr / c, 1);          % dp/dt [Pa/s]，沿时间维(1)，端点单侧          % dp/dt [Pa/s]，端点单侧
+ppdA = timeDerivative(pAd, 1 / fs);        % R1 修复：dp/dt [Pa/s]，dim 1 逐列
 
-[accD_ubp, accWd_ubp] = reconUBP(pAd, ppdA, theta, R, X, Y, fs, c, minDist, dtheta);
-imgD_das = reconDAS(pAd, theta, R, X, Y, fs, c, minDist, dtheta);
-imgD_wrong = normAcc(reconUBPwrong(pAd, ppdA, theta, R, X, Y, fs, c, minDist, dtheta));
+[accA, accWA] = K.reconUBP(pAd, ppdA, theta, R, X, Y, fs, c, minDist, dtheta);
+[accAD, accWAD] = K.reconDAS(pAd, theta, R, X, Y, fs, c, minDist, dtheta);
+[accAL, accWAL] = K.reconLegacyWeight(pAd, ppdA, theta, R, X, Y, fs, c, minDist, dtheta);
+[accAS, accWAS] = K.reconSolidAngleP(pAd, theta, R, X, Y, fs, c, minDist, dtheta);
 
 roi = (X.^2 + Y.^2) < (4e-3)^2;
-C_P = f0Disc / mean(accD_ubp(roi));            % P 归一化常数（原始累加标定）
-imgD_ubpP = C_P * accD_ubp;
-imgD_ubpD = normAcc(accD_ubp, accWd_ubp);
-C_D = f0Disc / mean(imgD_ubpD(roi));           % D 归一化标定常数
-imgD_ubpD = C_D * imgD_ubpD;
+C_P = f0Disc / mean(accA(roi));             % P 归一化常数（原始累加标定）
+imgD_ubpP = C_P * accA;
+imgD_ubpD0 = K.normAccW(accA, accWA);
+C_D = f0Disc / mean(imgD_ubpD0(roi));       % D 归一化标定常数
+imgD_ubpD = C_D * imgD_ubpD0;
+imgD_das = K.normAccW(accAD, accWAD);
+imgD_legacyW = K.normAccW(accAL, accWAL);
+imgD_saP = K.normAccW(accAS, accWAS);
 
 % ================= 幻体 B：孤立高斯吸收体（每个单独前向，避免串扰） =================
 sig = 0.5e-3;
 gauss = [0 0 1.0; 3e-3 0 0.7; 0 -5e-3 0.5; -5e-3 5e-3 0.6];
 nAbs = size(gauss, 1);
-imgG_das = cell(nAbs, 1);  imgG_ubpP = cell(nAbs, 1);
-imgG_ubpD = cell(nAbs, 1); imgG_wrong = cell(nAbs, 1);
+imgDas = cell(nAbs,1);  imgLegacyW = cell(nAbs,1);  imgUbpD = cell(nAbs,1);
+imgUbpP = cell(nAbs,1);  imgSaP = cell(nAbs,1);
+imgG.p = cell(nAbs,1);  imgG.pp = cell(nAbs,1);   % 保留前向与导数供主导性/复检
 for k = 1:nAbs
     pB = zeros(Nt, nd);
     for j = 1:nd
@@ -68,33 +89,48 @@ for k = 1:nAbs
              besseli(0, rGrid * rhoK / sig^2, 1);
         pB(:, j) = forwardP(Mk, rGrid, c);
     end
-    ppdB = gradient(double(pB), dr / c, 1);
-    [accG, accWg] = reconUBP(pB, ppdB, theta, R, X, Y, fs, c, minDist, dtheta);
-    imgG_das{k} = reconDAS(pB, theta, R, X, Y, fs, c, minDist, dtheta);
-    imgG_wrong{k} = normAcc(reconUBPwrong(pB, ppdB, theta, R, X, Y, fs, c, minDist, dtheta));
-    imgG_ubpP{k} = C_P * accG;
-    imgG_ubpD{k} = C_D * normAcc(accG, accWg);
+    ppB = timeDerivative(pB, 1 / fs);      % R1 修复
+    imgG.p{k} = pB;  imgG.pp{k} = ppB;
+    [accB, accWB] = K.reconUBP(pB, ppB, theta, R, X, Y, fs, c, minDist, dtheta);
+    [accBD, accWBD] = K.reconDAS(pB, theta, R, X, Y, fs, c, minDist, dtheta);
+    [accBL, accWBL] = K.reconLegacyWeight(pB, ppB, theta, R, X, Y, fs, c, minDist, dtheta);
+    [accBS, accWBS] = K.reconSolidAngleP(pB, theta, R, X, Y, fs, c, minDist, dtheta);
+    imgDas{k} = K.normAccW(accBD, accWBD);                % das
+    imgLegacyW{k} = K.normAccW(accBL, accWBL);            % legacyW
+    imgUbpD{k} = C_D * K.normAccW(accB, accWB);           % ubpD
+    imgUbpP{k} = C_P * accB;                              % ubpP
+    imgSaP{k} = K.normAccW(accBS, accWBS);                % saP
 end
+modes = {'das', imgDas; 'legacyW', imgLegacyW; 'ubpD', imgUbpD; ...
+         'ubpP', imgUbpP; 'saP', imgSaP};
 
 % ================= 指标 =================
 res = struct();
 res.discDas = flatness(imgD_das, roi);
-res.discUbpP = flatness(imgD_ubpP, roi);
+res.discLegacyW = flatness(imgD_legacyW, roi);
 res.discUbpD = flatness(imgD_ubpD, roi);
-res.discWrong = flatness(imgD_wrong, roi);
+res.discUbpP = flatness(imgD_ubpP, roi);
+res.discSaP = flatness(imgD_saP, roi);
 res.C_P = C_P;  res.C_D = C_D;
-res.edgeProfile = struct('x', gv, 'das', imgD_das(round(size(imgD_das,1)/2),:)', ...
-    'ubpP', imgD_ubpP(round(size(imgD_ubpP,1)/2),:)', 'ubpD', imgD_ubpD(round(size(imgD_ubpD,1)/2),:)');
+midRow = round(size(imgD_das, 1) / 2);
+res.edgeProfile = struct('x', gv, 'das', imgD_das(midRow, :)', ...
+    'legacyW', imgD_legacyW(midRow, :)', 'ubpD', imgD_ubpD(midRow, :)', ...
+    'ubpP', imgD_ubpP(midRow, :)', 'saP', imgD_saP(midRow, :)');
 
-% 点指标：孤立幻体、±2mm 窗口
-pts = struct('mode', {}, 'k', {}, 'posErrMm', {}, 'fwhmTanMm', {}, 'fwhmRadMm', {}, 'amp', {});
-modes = {'das', imgG_das; 'ubpP', imgG_ubpP; 'ubpD', imgG_ubpD; 'wrong', imgG_wrong};
+% 点指标：孤立幻体、±2mm 窗口；FWHM 沿相对环心的实际径向/切向方向
+% 环内：k1(0,0) k2(3,0) k3(0,−5)；环外：k4(−5,5)（|r|=7.07mm > R=6.57mm）
+pts = struct('mode', {}, 'k', {}, 'posErrMm', {}, 'fwhmRadMm', {}, ...
+    'fwhmTanMm', {}, 'fwhmRadValid', {}, 'fwhmTanValid', {}, ...
+    'fwhmRadReason', {}, 'fwhmTanReason', {}, 'amp', {}, 'inRing', {});
 for mi = 1:size(modes, 1)
     for k = 1:nAbs
         img = modes{mi, 2}{k};
-        [pe, ft, fr, amp] = pointMetrics(img, gv, gauss(k, 1:2), 2e-3);
-        pts(end+1) = struct('mode', modes{mi,1}, 'k', k, 'posErrMm', pe, ...
-            'fwhmTanMm', ft, 'fwhmRadMm', fr, 'amp', amp); %#ok<AGROW>
+        [pe, fr, ft, amp, vr, vt] = pointMetrics(img, gv, gauss(k, 1:2), 2e-3, R);
+        inRing = norm(gauss(k, 1:2)) <= R;
+        pts(end+1) = struct('mode', modes{mi, 1}, 'k', k, 'posErrMm', pe, ...
+            'fwhmRadMm', fr, 'fwhmTanMm', ft, 'fwhmRadValid', vr, 'fwhmTanValid', vt, ...
+            'fwhmRadReason', fwhmReason(vr), 'fwhmTanReason', fwhmReason(vt), ...
+            'amp', amp, 'inRing', inRing); %#ok<AGROW>
     end
 end
 res.points = pts;
@@ -104,49 +140,124 @@ rr = sqrt(X.^2 + Y.^2);
 farMask = (rr > 8e-3) & (rr < 12e-3);
 nearMask = abs(rr - R) < 1.5e-3;
 res.artifact = struct();
-fields = {'das', imgG_das; 'ubpP', imgG_ubpP; 'ubpD', imgG_ubpD; 'wrong', imgG_wrong};
-for fi = 1:size(fields, 1)
-    % 伪影用点3（孤立、幅度 0.5）的图像度量
-    img = fields{fi, 2}{3};
-    res.artifact.(sprintf('%sFarStd', fields{fi,1})) = std(img(farMask));
-    res.artifact.(sprintf('%sFarMean', fields{fi,1})) = mean(img(farMask));
-    res.artifact.(sprintf('%sNearStd', fields{fi,1})) = std(img(nearMask));
-    res.artifact.(sprintf('%sNearMax', fields{fi,1})) = max(abs(img(nearMask)));
+for mi = 1:size(modes, 1)
+    img = modes{mi, 2}{3};                 % 伪影用点3（孤立、幅度 0.5）
+    nm = modes{mi, 1};
+    res.artifact.([nm 'FarStd']) = std(img(farMask));
+    res.artifact.([nm 'FarMean']) = mean(img(farMask));
+    res.artifact.([nm 'NearStd']) = std(img(nearMask));
+    res.artifact.([nm 'NearMax']) = max(abs(img(nearMask)));
 end
 % CNR：点2 峰值 / 远场 std（各模式自洽比较）
-for fi = 1:size(fields, 1)
-    img = fields{fi, 2}{2};
-    [~, ~, ~, ampPk] = pointMetrics(img, gv, gauss(2, 1:2), 2e-3);
-    res.cnr.(fields{fi,1}) = ampPk / max(std(img(farMask)), eps);
+res.cnr = struct();
+for mi = 1:size(modes, 1)
+    img = modes{mi, 2}{2};
+    [~, ~, ~, ampPk] = pointMetrics(img, gv, gauss(2, 1:2), 2e-3, R);
+    res.cnr.(modes{mi, 1}) = ampPk / max(std(img(farMask)), eps);
 end
 
+% §4.6 导数主导性实测（R5：修正导数后重新测量，替代旧 2–3 量级主张）
+res.derivDominance = struct();
+res.derivDominance.disc = derivDominance(pAd, ppdA, X, Y, roi, theta, R, fs, c, 10, K.interpLine);
+for k = 1:nAbs
+    res.derivDominance.(sprintf('point%d', k)) = ...
+        derivDominance(imgG.p{k}, imgG.pp{k}, X, Y, roi, theta, R, fs, c, 10, K.interpLine);
+end
+
+% ================= 控制台摘要 =================
 fprintf('\n=== EXP2 均匀盘内平坦度（f0=1，ROI 半径<4mm）===\n');
-fprintf('DAS q=1       : mean=%.4f std=%.4f CV=%.4f\n', res.discDas.mean, res.discDas.std, res.discDas.cv);
-fprintf('UBP-P（原始+C）: mean=%.4f std=%.4f CV=%.4f (C_P=%.4g)\n', res.discUbpP.mean, res.discUbpP.std, res.discUbpP.cv, C_P);
+fprintf('DAS q=1        : mean=%.4f std=%.4f CV=%.4f\n', res.discDas.mean, res.discDas.std, res.discDas.cv);
+fprintf('legacyW(b+q1)  : mean=%.4f std=%.4f CV=%.4f\n', res.discLegacyW.mean, res.discLegacyW.std, res.discLegacyW.cv);
 fprintf('UBP-D（accW+C）: mean=%.4f std=%.4f CV=%.4f (C_D=%.4g)\n', res.discUbpD.mean, res.discUbpD.std, res.discUbpD.cv, C_D);
-fprintf('UBP+旧q1权重  : mean=%.4f std=%.4f CV=%.4f\n', res.discWrong.mean, res.discWrong.std, res.discWrong.cv);
-fprintf('\n=== EXP2 孤立高斯点（σ=0.5mm，±2mm 窗）：位置误差[mm] / 切向FWHM / 径向FWHM / 峰值 ===\n');
+fprintf('UBP-P（原始+C）: mean=%.4f std=%.4f CV=%.4f (C_P=%.4g)\n', res.discUbpP.mean, res.discUbpP.std, res.discUbpP.cv, C_P);
+fprintf('saP(p+立体角)  : mean=%.4f std=%.4f CV=%.4f\n', res.discSaP.mean, res.discSaP.std, res.discSaP.cv);
+fprintf('\n=== EXP2 孤立高斯点（σ=0.5mm，±2mm 窗）：posErr[mm] / 径向FWHM / 切向FWHM / 峰值 ===\n');
+fprintf('（FWHM 沿目标相对环心实际方向采样；valid=0 时数值不可用，原因见 reason）\n');
 for k = 1:numel(pts)
-    fprintf('%-6s 点%d: posErr=%.3f fwhmT=%.2f fwhmR=%.2f amp=%.3f\n', ...
-        pts(k).mode, pts(k).k, pts(k).posErrMm, pts(k).fwhmTanMm, pts(k).fwhmRadMm, pts(k).amp);
+    fprintf('%-8s 点%d(环内=%d): posErr=%.3f fwhmR=%.3f(%d,%s) fwhmT=%.3f(%d,%s) amp=%.3f\n', ...
+        pts(k).mode, pts(k).k, pts(k).inRing, pts(k).posErrMm, ...
+        pts(k).fwhmRadMm, pts(k).fwhmRadValid, pts(k).fwhmRadReason, ...
+        pts(k).fwhmTanMm, pts(k).fwhmTanValid, pts(k).fwhmTanReason, pts(k).amp);
 end
 fprintf('\n伪影（点3 幻体）：远场环带 8-12mm std / 近场 |r-R|<1.5mm max|img|\n');
-fprintf('DAS  : farStd=%.4g nearMax=%.4g\n', res.artifact.dasFarStd, res.artifact.dasNearMax);
-fprintf('UBP-P: farStd=%.4g nearMax=%.4g\n', res.artifact.ubpPFarStd, res.artifact.ubpPNearMax);
-fprintf('UBP-D: farStd=%.4g nearMax=%.4g\n', res.artifact.ubpDFarStd, res.artifact.ubpDNearMax);
-fprintf('wrong: farStd=%.4g nearMax=%.4g\n', res.artifact.wrongFarStd, res.artifact.wrongNearMax);
-fprintf('CNR（点2峰值/远场std）：DAS=%.1f UBP-P=%.1f UBP-D=%.1f wrong=%.1f\n', ...
-    res.cnr.das, res.cnr.ubpP, res.cnr.ubpD, res.cnr.wrong);
+for mi = 1:size(modes, 1)
+    nm = modes{mi, 1};
+    fprintf('%-8s: farStd=%.4g nearMax=%.4g\n', nm, ...
+        res.artifact.([nm 'FarStd']), res.artifact.([nm 'NearMax']));
+end
+fprintf('CNR（点2峰值/远场std）：');
+for mi = 1:size(modes, 1)
+    fprintf(' %s=%.1f', modes{mi, 1}, res.cnr.(modes{mi, 1}));
+end
+fprintf('\n导数主导性（查询处 RMS|2t*p''|/RMS|2p|）：盘=%.2f', res.derivDominance.disc);
+for k = 1:nAbs
+    fprintf(' 点%d=%.2f', k, res.derivDominance.(sprintf('point%d', k)));
+end
+fprintf('\n');
 
-save(fullfile(outdir, 'exp2_images.mat'), 'imgD_das', 'imgD_ubpP', 'imgD_ubpD', 'imgD_wrong', ...
-    'imgG_das', 'imgG_ubpP', 'imgG_ubpD', 'imgG_wrong', 'gv', 'gauss', 'aDisc', 'C_P', 'C_D', 'res');
+% ================= 正确性断言门（不含预设优劣结论） =================
+gate.calibP = abs(mean(imgD_ubpP(roi)) - f0Disc) <= 1e-6;
+gate.calibD = abs(mean(imgD_ubpD(roi)) - f0Disc) <= 1e-6;
+% legacyW 不再是符号图：旧版 discWrong cv=0（常数 ±1）；修正后 CV 必须非零
+gate.legacyNotSign = res.discLegacyW.cv >= 0.01;
+% 幅值信息保留：legacyW 点目标峰值/背景（±2mm 窗内 median|img|）≥ 3
+% （符号图该比值 = 1，见 test_fair_comparison U4 反证）
+legContrast = zeros(1, nAbs);
+winAll = zeros(size(gv));
+for k = 1:nAbs
+    win = windowMask(gv, gauss(k, 1:2), 2e-3);
+    legContrast(k) = max(imgLegacyW{k}(win)) / max(median(abs(imgLegacyW{k}(win))), eps);
+end
+gate.legacyContrast = all(legContrast >= 3);
+% 中心目标（对称、无几何偏差）位置误差 ≤ 0.3mm（1.5 网格），对 das/ubpD/ubpP/saP
+posCenter = nan(size(modes, 1), 1);
+for mi = 1:size(modes, 1)
+    sel = strcmp({pts.mode}, modes{mi, 1}) & [pts.k] == 1;
+    posCenter(mi) = pts(sel).posErrMm;
+end
+gate.centerPos = all(posCenter([1 3 4 5]) <= 0.3);   % 中心项：das/ubpD/ubpP/saP
+% 全部图像有限
+fin = all(isfinite(imgD_das(:))) && all(isfinite(imgD_legacyW(:))) && ...
+    all(isfinite(imgD_ubpD(:))) && all(isfinite(imgD_ubpP(:))) && all(isfinite(imgD_saP(:)));
+for mi = 1:size(modes, 1)
+    for k = 1:nAbs
+        fin = fin && all(isfinite(modes{mi, 2}{k}(:)));
+    end
+end
+gate.finite = fin;
+res.gate = gate;
+res.centerPosErrMmByMode = struct('modes', {modes(1,:)}, 'posErrMm', posCenter);
+res.legacyContrastPerPoint = legContrast;
+
+fprintf('\n断言门：标定P=%d 标定D=%d legacyW非符号图=%d legacyW对比度=%d 中心位置=%d 有限=%d\n', ...
+    gate.calibP, gate.calibD, gate.legacyNotSign, gate.legacyContrast, gate.centerPos, gate.finite);
+
+save(fullfile(outdir, 'exp2_images.mat'), 'imgD_das', 'imgD_legacyW', 'imgD_ubpD', ...
+    'imgD_ubpP', 'imgD_saP', 'imgG', 'gv', 'gauss', 'aDisc', 'C_P', 'C_D', 'res', 'pts', ...
+    'modes', '-v7');
+
 out = res;
 out.params = struct('fs', fs, 'c', c, 'R', R, 'nd', nd, 'Nt', Nt, 'fov', fov, ...
-    'gridSize', gridSize, 'minDist', minDist, 'sig', sig, 'gauss', gauss, 'f0Disc', f0Disc, 'aDisc', aDisc);
+    'gridSize', gridSize, 'minDist', minDist, 'sig', sig, 'gauss', gauss, ...
+    'f0Disc', f0Disc, 'aDisc', aDisc);
+out.modesDescription = struct( ...
+    'das', 'p + q1 weight (dtheta*cosAlpha/d) + accW norm (production legacy baseline)', ...
+    'legacyW', 'b + q1 weight + accW norm (fair legacy-weight pairing, was "wrong")', ...
+    'ubpD', 'b + solid-angle weight (dtheta*R*cosAlpha/d^2) + accW norm (proposed pairing)', ...
+    'ubpP', 'b + solid-angle weight + raw-sum with C_P calibration (physical scale, separate)', ...
+    'saP', 'p + solid-angle weight + accW norm (factorial completion)');
+out.fixedFactors = 'same input signals p/pp, geometry, interpolation, maskOob, angle sampling, amplitude calibration and metrics across all modes; only the stated factor differs';
+out.derivativeConvention = 'dF/dt along dim1 via timeDerivative.m: central difference interior, one-sided ends, per-column; verified by test_time_derivative.m';
+out.bDefinition = 'b = 2*p - 2*t*dp/dt with t = tau/fs [s]';
+out.fwhmConvention = 'sampled along actual radial (center->peak) and tangential directions; invalid when no half-height crossing or peak at window edge';
 out.matlabVersion = version;
 fid = fopen(fullfile(outdir, 'exp2_ring_ubp_2d.json'), 'w');
 fwrite(fid, jsonencode(out, 'PrettyPrint', true)); fclose(fid);
 fprintf('EXP2_DONE -> %s\n', fullfile(outdir, 'exp2_ring_ubp_2d.json'));
+
+gateOk = gate.calibP && gate.calibD && gate.legacyNotSign && gate.legacyContrast && ...
+    gate.centerPos && gate.finite;
+assert(gateOk, 'exp2:gateFailed', 'EXP2 正确性断言门未全部通过');
 
 % ================= 局部函数 =================
 function M = discMean(rho0, r, a)
@@ -162,89 +273,7 @@ psi = linspace(0, pi / 2, nPsi);
 tGrid = rGrid / c;
 Mpsi = interp1(rGrid, M, c * tGrid(:) * sin(psi), 'linear', 0);
 G = trapz(psi, Mpsi .* sin(psi), 2);
-p = gradient(tGrid(:) .* G, tGrid);
-end
-
-function img = reconDAS(p, theta, R, X, Y, fs, c, minDist, dtheta)
-% 现有 DAS q=1：w = Δθ·cosα/d，acc/accW 归一化
-[nY, nX] = size(X);
-acc = zeros(nY, nX); accW = zeros(nY, nX);
-r2 = X.^2 + Y.^2;
-for j = 1:size(p, 2)
-    proj = X * (R * cos(theta(j))) + Y * (R * sin(theta(j)));
-    dotp = proj - R^2;
-    dist = sqrt(max((r2 - R^2) - 2 * dotp, 0));
-    dsafe = max(dist, minDist);
-    tf = dist * fs / c;
-    v = interpLine(p(:, j), tf);
-    w = dtheta * (-dotp) ./ (R * dsafe);       % Δθ·cosα/d
-    acc = acc + w .* v;
-    accW = accW + abs(w);
-end
-img = acc ./ max(accW, 1e-12);
-end
-
-function [acc, accW] = reconUBP(p, pp, theta, R, X, Y, fs, c, minDist, dtheta)
-% 环-UBP（立体角权重，每单位 z 长度）：acc = Σ Δθ·R·cosα/d² · b(τ)
-% b = 2p − 2t·p'，t = τ/fs [s]。返回原始累加（不做逐像素归一化）。
-[nY, nX] = size(X);
-acc = zeros(nY, nX); accW = zeros(nY, nX);
-r2 = X.^2 + Y.^2;
-for j = 1:size(p, 2)
-    proj = X * (R * cos(theta(j))) + Y * (R * sin(theta(j)));
-    dotp = proj - R^2;
-    dist = sqrt(max((r2 - R^2) - 2 * dotp, 0));
-    dsafe = max(dist, minDist);
-    tf = dist * fs / c;
-    tsec = tf / fs;
-    v = interpLine(p(:, j), tf);
-    vp = interpLine(pp(:, j), tf);
-    b = 2 * v - 2 * tsec .* vp;
-    cosAlpha = (-dotp) ./ (R * dsafe);
-    w = dtheta * R * cosAlpha ./ (dsafe.^2);   % ΔΩ/dz = Δθ·R·cosα/d²
-    acc = acc + w .* b;
-    accW = accW + abs(w);
-end
-end
-
-function acc = reconUBPwrong(p, pp, theta, R, X, Y, fs, c, minDist, dtheta)
-% 错误配对：UBP 信号 b + 旧 DAS q=1 权重（仅换输入不换权重的失败模式）
-[nY, nX] = size(X);
-acc = zeros(nY, nX);
-r2 = X.^2 + Y.^2;
-for j = 1:size(p, 2)
-    proj = X * (R * cos(theta(j))) + Y * (R * sin(theta(j)));
-    dotp = proj - R^2;
-    dist = sqrt(max((r2 - R^2) - 2 * dotp, 0));
-    dsafe = max(dist, minDist);
-    tf = dist * fs / c;
-    tsec = tf / fs;
-    v = interpLine(p(:, j), tf);
-    vp = interpLine(pp(:, j), tf);
-    b = 2 * v - 2 * tsec .* vp;
-    cosAlpha = (-dotp) ./ (R * dsafe);
-    w = dtheta * cosAlpha ./ dsafe;            % Δθ·cosα/d（错误配对）
-    acc = acc + w .* b;
-end
-end
-
-function img = normAcc(acc, accW)
-if nargin < 2, img = acc ./ max(abs(acc), 1e-12); return; end
-img = acc ./ max(accW, 1e-12);
-end
-
-function v = interpLine(col, tf)
-% 与生产一致的线性插值查询（maskOob：越界置零）
-Nt = numel(col);
-i0f = floor(tf);
-frac = tf - i0f;
-i0 = i0f + 1;
-valid = (i0 >= 1) & (i0 <= Nt - 1);
-i0c = min(max(i0, 1), Nt - 1);
-v0 = col(i0c);
-v1 = col(i0c + 1);
-v = v0 + frac .* (v1 - v0);
-v(~valid) = 0;
+p = gradient(tGrid(:) .* G, tGrid);   % 向量用法（非矩阵导数，不在 R1 误用范围）
 end
 
 function s = flatness(img, roi)
@@ -252,7 +281,19 @@ m = mean(img(roi));
 s = struct('mean', m, 'std', std(img(roi)), 'cv', std(img(roi)) / max(abs(m), eps));
 end
 
-function [posErr, fwhmTan, fwhmRad, amp] = pointMetrics(img, gv, yk, winM)
+function mask = windowMask(gv, yk, winM)
+[~, icx] = min(abs(gv - yk(1)));
+[~, icy] = min(abs(gv - yk(2)));
+w = max(3, round(winM / (gv(2) - gv(1))));
+x1 = max(1, icx - w):min(numel(gv), icx + w);
+y1 = max(1, icy - w):min(numel(gv), icy + w);
+mask = false(numel(gv), numel(gv));
+mask(y1, x1) = true;
+end
+
+function [posErr, fwhmRad, fwhmTan, amp, radValid, tanValid] = pointMetrics(img, gv, yk, winM, Rring)
+% 窗内找峰；径向 = 环心→峰方向，切向 = 垂直方向（沿实际方向采样剖面）。
+% 环心目标（|pos|≈0）径向方向任意，取 x 方向并在 reason 注明。
 [~, icx] = min(abs(gv - yk(1)));
 [~, icy] = min(abs(gv - yk(2)));
 w = max(3, round(winM / (gv(2) - gv(1))));
@@ -264,24 +305,82 @@ sub = img(y1, x1);
 px = gv(x1(ixx));  py = gv(y1(iyy));
 posErr = hypot(px - yk(1), py - yk(2)) * 1e3;
 amp = sub(iyy, ixx);
-fwhmTan = fwhm1d(squeeze(sub(iyy, :)), gv(x1), amp);
-fwhmRad = fwhm1d(squeeze(sub(:, ixx)), gv(y1), amp);
+% 径向方向：环心(0,0)→峰位；中心峰方向未定义时取 x 方向
+uRad = [px; py];
+if norm(uRad) < gv(2) - gv(1)
+    uRad = [1; 0];  % 中心：径向方向任意，约定取 x
+end
+uRad = uRad / norm(uRad);
+uTan = [-uRad(2); uRad(1)];
+p0 = [px; py];
+stepM = gv(2) - gv(1);
+halfLen = (w) * stepM;
+[vR, sR] = sampleAlong(img, gv, p0, uRad, halfLen, stepM);
+[vT, sT] = sampleAlong(img, gv, p0, uTan, halfLen, stepM);
+[fwhmRad, radValid] = fwhmFromProfile(vR, sR, amp, halfLen);
+[fwhmTan, tanValid] = fwhmFromProfile(vT, sT, amp, halfLen);
 end
 
-function w = fwhm1d(prof, x, peak)
-half = peak / 2;
-idx = find(prof >= half);
-if numel(idx) < 2, w = NaN; return; end
-i1 = idx(1); i2 = idx(end);
-if i1 > 1
-    xa = x(i1 - 1) + (half - prof(i1 - 1)) * (x(i1) - x(i1 - 1)) / (prof(i1) - prof(i1 - 1));
-else
-    xa = x(i1);
+function [vals, s] = sampleAlong(img, gv, p0, u, halfLen, stepM)
+% 沿方向 u 从 p0 采样 [−halfLen, +halfLen]（双线性插值，越界 NaN）
+[Xg, Yg] = meshgrid(gv, gv);
+s = (-halfLen:stepM:halfLen)';
+xy = p0' + s * u';
+vals = interp2(Xg, Yg, img, xy(:,1), xy(:,2), 'linear', NaN);
 end
-if i2 < numel(x)
-    xb = x(i2) + (half - prof(i2)) * (x(i2 + 1) - x(i2)) / (prof(i2 + 1) - prof(i2));
-else
-    xb = x(i2);
+
+function [wMm, valid] = fwhmFromProfile(vals, s, amp, halfLen)
+% 由剖面找半高交点：峰在 s=0，向两侧找首次跌破 amp/2 的位置（线性插值）。
+% invalid：无交点 / 峰位于窗边界（剖面端部仍高于半高）。
+valid = true;  wMm = NaN;
+half = amp / 2;
+n0 = find(abs(s) < 1e-12, 1);
+if isempty(n0), n0 = floor((numel(s)+1)/2); end
+if n0 <= 1 || n0 >= numel(s) || abs(s(n0)) > halfLen - 1e-12
+    valid = false;  return;   % 峰在窗边界
 end
-w = (xb - xa) * 1e3;
+% 左侧
+iL = n0;
+while iL > 1 && vals(iL-1) >= half && ~isnan(vals(iL-1))
+    iL = iL - 1;
+end
+if iL == 1 || isnan(vals(iL-1)) || vals(iL-1) >= half
+    valid = false;  return;   % 左侧到窗边界仍高于半高
+end
+sL = s(iL-1) + (half - vals(iL-1)) * (s(iL) - s(iL-1)) / (vals(iL) - vals(iL-1));
+% 右侧
+iR = n0;
+while iR < numel(s) && vals(iR+1) >= half && ~isnan(vals(iR+1))
+    iR = iR + 1;
+end
+if iR == numel(s) || isnan(vals(iR+1)) || vals(iR+1) >= half
+    valid = false;  return;   % 右侧到窗边界仍高于半高
+end
+sR = s(iR+1) + (half - vals(iR+1)) * (s(iR) - s(iR+1)) / (vals(iR+1) - vals(iR));
+wMm = (sR - sL) * 1e3;
+end
+
+function reason = fwhmReason(valid)
+if valid, reason = 'ok'; else, reason = 'noHalfCrossingOrWindowEdge'; end
+end
+
+function ratio = derivDominance(p, pp, X, Y, roiMask, theta, R, fs, c, stepLine, interpFun)
+% 查询位置处的导数项/常数项 RMS 比：RMS(|2·t·p′|)/RMS(|2p|)（抽样线 × ROI 像素）
+xs = X(roiMask);  ys = Y(roiMask);
+r2 = xs.^2 + ys.^2;
+sumD = 0;  sumP = 0;
+for j = 1:stepLine:size(p, 2)
+    proj = xs * (R * cos(theta(j))) + ys * (R * sin(theta(j)));
+    dotp = proj - R^2;
+    dist = sqrt(max((r2 - R^2) - 2 * dotp, 0));
+    tf = dist * fs / c;
+    tsec = tf / fs;
+    v = interpFun(p(:, j), tf);
+    vp = interpFun(pp(:, j), tf);
+    d = 2 * tsec .* vp;
+    p2 = 2 * v;
+    sumD = sumD + sum(d.^2);
+    sumP = sumP + sum(p2.^2);
+end
+ratio = sqrt(sumD / max(sumP, eps));
 end

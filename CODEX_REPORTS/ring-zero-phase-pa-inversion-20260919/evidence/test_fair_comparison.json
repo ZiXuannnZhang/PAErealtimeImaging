@@ -1,0 +1,32 @@
+{
+  "U1_knownValues": true,
+  "U1_missingAccWErrors": true,
+  "U1_pass": true,
+  "U2_accWMaxRel": 0,
+  "U2_pass": true,
+  "U3_accWMaxRel": 0,
+  "U3_pass": true,
+  "U4_contrastLegacy": 5.4078408004284837,
+  "U4_contrastUbp": 3.7869392178280843,
+  "U4_contrastOldSignMap": 1,
+  "U4_pass": true,
+  "U5_corrLegacyUbp": 0.93901114338363689,
+  "U5_pass": true,
+  "pass": true,
+  "params": {
+    "fs": 2.5E+8,
+    "c": 1490,
+    "R": 0.00657,
+    "nd": 180,
+    "Nt": 1600,
+    "fov": 0.02,
+    "gridSize": 0.00025,
+    "minDist": 0.00025,
+    "target": [
+      0.003,
+      0
+    ],
+    "sigSamples": 6
+  },
+  "matlabVersion": "9.14.0.2206163 (R2023a)"
+}

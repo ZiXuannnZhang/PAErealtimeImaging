@@ -1,22 +1,4 @@
 {
-  "A1_maxRelDiff": 0.085682405836390058,
-  "A2_tailSamples_M": 1743,
-  "A2_tailSamples_N": 1747,
-  "A3_start50_M": 1075.6397988485724,
-  "A3_start50_N": 984.70235943979151,
-  "A4_derivStart_M": 1.0403370376471727E+10,
-  "A4_derivStart_N": 8.55972392822232E+9,
-  "A4_derivEcho_M": 4.5179731015704945E+7,
-  "A4_derivEcho_N": 4.4769650927752815E+7,
-  "A6_nanInf": false,
-  "A5_errorAt12": true,
-  "A5_okAt13": true,
-  "pass": {
-    "A1": false,
-    "A6": true,
-    "A5err": true,
-    "A5ok": true
-  },
   "params": {
     "fs": 2.5E+8,
     "Nt": 4000,
@@ -25,7 +7,297 @@
     "nHP": 4,
     "fcHP": 400000,
     "nLP": 4,
-    "fcLP": 4.0E+7
+    "fcLP": 4.0E+7,
+    "burstAmp": 2000,
+    "burstTauDecayUs": 1.5,
+    "burstFMHz": 2,
+    "echoAmp": 0.5,
+    "echoFMHz": 5,
+    "echoSigmaSamples": 62.5,
+    "tEchoList": [
+      400,
+      600,
+      800,
+      1200,
+      2700
+    ],
+    "idealPad": 2000,
+    "runs": "echoOnly=no-interference reference; burstOnly=startup interference; burstEcho=both; ideal=crop start moved pad=2000 earlier, same acoustic scenario"
+  },
+  "B1": {
+    "echoOnly": {
+      "farRelDiff_N_vs_M": 0,
+      "farRelDiff_M_vs_Mff": 1.6130719279829854E-9,
+      "headMax_N": 3.4187849148536429E-18,
+      "headMax_M": 3.4189754969189709E-18,
+      "derivHeadMax_N": 2.455691592042276E-11,
+      "derivHeadMax_M": 2.4556915920422085E-11
+    },
+    "burstOnly": {
+      "farRelDiff_N_vs_M": 0.013302245973516562,
+      "farRelDiff_M_vs_Mff": 3.7584122796795658E-9,
+      "headMax_N": 2133.9840390151144,
+      "headMax_M": 1712.3318768206236,
+      "derivHeadMax_N": 2.406574483724826E+10,
+      "derivHeadMax_M": 2.5052808374506596E+10,
+      "tailSamples_N": 1723,
+      "tailSamples_M": 1722,
+      "residueProfile": [
+        2133.9840390151144,
+        1368.1996433803347,
+        1192.4218935274869,
+        860.28419269385336,
+        651.29196392773588,
+        504.99194980664805,
+        367.3624062127335,
+        284.06101438937804,
+        215.18997549659437,
+        172.10924868123979,
+        124.02978695023684,
+        102.42333119280076,
+        76.033479181887742,
+        54.285741295537051,
+        47.777465193028512,
+        33.398786229695325,
+        27.177551431912597,
+        20.729087578520918,
+        14.606455659431058,
+        12.541047859732966,
+        8.98808454725291,
+        6.9982185810082909,
+        5.4239102486384576,
+        3.8955713521416895,
+        3.2553740756910909,
+        2.3486100706631534,
+        1.8465590886777676,
+        1.4160717027411318,
+        1.0135740951376597,
+        0.8688677070245574,
+        0.62061840696152,
+        0.49436217114355319,
+        0.39732180359199187,
+        0.28168458589633805,
+        0.23862276899588658,
+        0.2159050141848938
+      ],
+      "residueProfileBlk": 100
+    },
+    "burstEcho": {
+      "farRelDiff_N_vs_M": 0.013302245973500791,
+      "farRelDiff_M_vs_Mff": 2.6110510195641234E-9,
+      "headMax_N": 2133.9840390148856,
+      "headMax_M": 1712.3318768205306,
+      "derivHeadMax_N": 2.40657448372487E+10,
+      "derivHeadMax_M": 2.5052808374506935E+10
+    }
+  },
+  "B2": [
+    {
+      "zeroRows": 300,
+      "dbrEndVsCrop": -1,
+      "zeroedRegionOutMax": 0,
+      "stepDiffMax": 0,
+      "stepDiffBelowEcho1pctAt": 0,
+      "memHPSpanCovers": true,
+      "targetAmpRatioInt": 1,
+      "targetPosBiasInt": 0,
+      "targetAmpRatioMasked": 1,
+      "targetPosBiasMasked": 0
+    },
+    {
+      "zeroRows": 313,
+      "dbrEndVsCrop": -1,
+      "zeroedRegionOutMax": 0,
+      "stepDiffMax": 0,
+      "stepDiffBelowEcho1pctAt": 0,
+      "memHPSpanCovers": true,
+      "targetAmpRatioInt": 1,
+      "targetPosBiasInt": 0,
+      "targetAmpRatioMasked": 1,
+      "targetPosBiasMasked": 0
+    },
+    {
+      "zeroRows": 358,
+      "dbrEndVsCrop": 0,
+      "zeroedRegionOutMax": 396.49346109305975,
+      "stepDiffMax": 0,
+      "stepDiffBelowEcho1pctAt": 0,
+      "memHPSpanCovers": true,
+      "targetAmpRatioInt": 1,
+      "targetPosBiasInt": 0,
+      "targetAmpRatioMasked": 0,
+      "targetPosBiasMasked": -106.50134687544505
+    },
+    {
+      "zeroRows": 400,
+      "dbrEndVsCrop": 1,
+      "zeroedRegionOutMax": 561.54487267764989,
+      "stepDiffMax": 2074.1555241364595,
+      "stepDiffBelowEcho1pctAt": 2737,
+      "memHPSpanCovers": false,
+      "targetAmpRatioInt": 1.0355897770160829,
+      "targetPosBiasInt": -0.37173208277550884,
+      "targetAmpRatioMasked": 0,
+      "targetPosBiasMasked": -106.50134687544505
+    },
+    {
+      "zeroRows": 413,
+      "dbrEndVsCrop": 1,
+      "zeroedRegionOutMax": 295.65302035262596,
+      "stepDiffMax": 2031.5570487247307,
+      "stepDiffBelowEcho1pctAt": 2734,
+      "memHPSpanCovers": false,
+      "targetAmpRatioInt": 1.0293069992670463,
+      "targetPosBiasInt": -0.4081563517338509,
+      "targetAmpRatioMasked": 0,
+      "targetPosBiasMasked": -106.50134687544505
+    }
+  ],
+  "memHP": 1914,
+  "B4": [
+    {
+      "combo": "none",
+      "ampP": 0.48989979852406845,
+      "posP": 812.30111076638548,
+      "ampB": 95.868544012904351,
+      "posB": 824.230468651029,
+      "headResP": 6.897968178023407E-29,
+      "headResB": 5.0199506852186794E-27
+    },
+    {
+      "combo": "HP",
+      "ampP": 0.48989979694016522,
+      "posP": 812.30111076122569,
+      "ampB": 95.868543778601776,
+      "posB": 824.23046864317178,
+      "headResP": 1.9328933300332181E-14,
+      "headResB": 5.2670460691050935E-14
+    },
+    {
+      "combo": "LP",
+      "ampP": 0.48989977674793561,
+      "posP": 812.30111083517545,
+      "ampB": 95.868539381375015,
+      "posB": 824.230468794159,
+      "headResP": 6.8979415971571031E-29,
+      "headResB": 5.0199661267807369E-27
+    },
+    {
+      "combo": "HP+LP",
+      "ampP": 0.48989977516403249,
+      "posP": 812.30111083001566,
+      "ampB": 95.868539147072326,
+      "posB": 824.2304687863018,
+      "headResP": 1.9328933300331654E-14,
+      "headResB": 5.267046069105031E-14
+    }
+  ],
+  "B5": [
+    {
+      "Nt": 2000,
+      "cutLen": 1643,
+      "ampRatio": 0.99999999999999456,
+      "posBias": 1.1368683772161603E-13
+    },
+    {
+      "Nt": 4000,
+      "cutLen": 3643,
+      "ampRatio": 1,
+      "posBias": 0
+    },
+    {
+      "Nt": 8000,
+      "cutLen": 7643,
+      "ampRatio": 1.0000000000000133,
+      "posBias": 0
+    }
+  ],
+  "B6": [
+    {
+      "tauEcho": 400,
+      "bcRatioP": 1,
+      "bcBiasP": 0,
+      "bcRatioB": 1,
+      "bcBiasB": 0,
+      "intRatioP": 4355.9604382988427,
+      "intBiasP": -382.8241376229937,
+      "intRatioB": 548.922158013473,
+      "intBiasB": 11.107078649994889
+    },
+    {
+      "tauEcho": 600,
+      "bcRatioP": 1,
+      "bcBiasP": 0,
+      "bcRatioB": 1,
+      "bcBiasB": 0,
+      "intRatioP": 2662.6050595405686,
+      "intBiasP": -457.53451459880074,
+      "intRatioB": 373.13782633830118,
+      "intBiasB": -188.81033308191491
+    },
+    {
+      "tauEcho": 800,
+      "bcRatioP": 1,
+      "bcBiasP": 0,
+      "bcRatioB": 1,
+      "bcBiasB": 0,
+      "intRatioP": 1329.4391974572857,
+      "intBiasP": -406.79976395457061,
+      "intRatioB": 282.66974646050687,
+      "intBiasB": -388.80834331354379
+    },
+    {
+      "tauEcho": 1200,
+      "bcRatioP": 1,
+      "bcBiasP": 0,
+      "bcRatioB": 1,
+      "bcBiasB": 0,
+      "intRatioP": 512.891618201966,
+      "intBiasP": -432.29746632859712,
+      "intRatioB": 133.2166164454907,
+      "intBiasB": -413.86867152005334
+    },
+    {
+      "tauEcho": 2700,
+      "bcRatioP": 1,
+      "bcBiasP": 0,
+      "bcRatioB": 1,
+      "bcBiasB": 0,
+      "intRatioP": 9.2495212458214535,
+      "intBiasP": -432.10403451171442,
+      "intRatioB": 3.1899500004863555,
+      "intBiasB": -542.05974486542027
+    }
+  ],
+  "B7_wl2": {
+    "sysDelay": 371,
+    "ampRatioVsRef": 1.0000000000000133,
+    "posBiasRel": 0
+  },
+  "A5_errorAt12": true,
+  "A5_okAt13": true,
+  "policy": {
+    "order": "raw -> DBR zero (1..maskLength+extra) -> clip -> delayCut -> HP zero-phase (whole cut line) -> LP zero-phase (whole cut line) -> [deriv p' -> b] (per A-line, refZeroPhase implementation)",
+    "endpoints": "refZeroPhase steady-state init + odd extension nfact=3n; error if line length <= 3n or input non-finite",
+    "validQueryRegion": "original-row index m >= max(sysDelay, dbrEnd+1), default margin G=0; when HP/LP filtering (and hence inversion) is enabled, configs with dbrEnd = maskLength+dbrmaskExtra >= sysDelay are REJECTED with an error (default 313 < 358/371 satisfies; measured B2: a chopped startup burst leaves a zero-phase response tail to ~tau 2737, exceeding dbrEnd+memHP=2327 and depending on the removed signal amplitude/length - no fixed margin can guarantee validity)",
+    "headPolicy": "no fixed head-margin discard; boundary-convention error on steady-start lines measured ~0 (B6 BC columns); startup interference is data-dependent, reported via burstOnly residue profile and burstEcho INT columns (B1/B6), not a fixed discard",
+    "derivativeEndpoint": "timeDerivative.m: central difference interior, one-sided ends, per column, applied to the same filtered line",
+    "rejected": "wholesale discard of samples 848-3639 rejected: that span is the impulse-response width of one specific HP design at one threshold (exp6 F5), not a universal contamination bound; B6 BC columns show near-boundary targets recovered exactly when the line starts in steady state; B2 additionally rejects configs that put the DBR step inside the cut line"
+  },
+  "gate": {
+    "calibP": true,
+    "calibD": true,
+    "legacyNotSign": true,
+    "legacyContrast": true,
+    "centerPos": true,
+    "finite": true,
+    "A5err": true,
+    "A5ok": true,
+    "G1_boundaryExact": true,
+    "G2_orderSameImpl": true,
+    "G3_defaultIdentical": true,
+    "G4_finite": true,
+    "G5_reported": true
   },
   "matlabVersion": "9.14.0.2206163 (R2023a)"
 }

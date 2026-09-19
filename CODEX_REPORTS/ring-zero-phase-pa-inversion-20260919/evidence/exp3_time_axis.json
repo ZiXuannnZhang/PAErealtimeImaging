@@ -29,12 +29,192 @@
       "offset": 0.86000000000001364
     }
   ],
+  "T5": {
+    "wl1": {
+      "p": [
+        6.13029799913225E-46,
+        2.8539179523642953E-56,
+        0.98544984804747093,
+        0.58231331653878726,
+        0
+      ],
+      "b": [
+        5.1478547797474332E-40,
+        5.1006598858491472E-50,
+        -0.85527089270252921,
+        1.6369442989591025,
+        0
+      ],
+      "dStateP": [
+        0,
+        9.0104006834325788E-69,
+        9.7699626167013776E-15,
+        0,
+        0
+      ],
+      "dStateB": [
+        0,
+        1.60854917613171E-62,
+        3.1288305279986162E-11,
+        0,
+        0
+      ],
+      "dNaive": [
+        6.13029799913225E-46,
+        2.8539179523642953E-56,
+        0.98544984804747093,
+        0.58231331653878726,
+        0
+      ],
+      "dAnalyticP": [
+        0,
+        2.8079058432031E-56,
+        0.014550151952529067,
+        0.017685467301011171,
+        0
+      ],
+      "dAnalyticB": [
+        5.0859223950662404E-40,
+        5.1001336996771465E-50,
+        2.8552708927025292,
+        1.7544474164496129,
+        0
+      ]
+    },
+    "wl2": {
+      "p": [
+        6.13029799913225E-46,
+        2.8539179523642953E-56,
+        0.98544984804747093,
+        0.58231331653878726,
+        0
+      ],
+      "b": [
+        5.1478547797474332E-40,
+        5.1006598858491472E-50,
+        -0.85527089270252921,
+        1.6369442989591025,
+        0
+      ],
+      "dStateP": [
+        0,
+        9.0104006834325788E-69,
+        9.7699626167013776E-15,
+        0,
+        0
+      ],
+      "dStateB": [
+        0,
+        1.60854917613171E-62,
+        3.1288305279986162E-11,
+        0,
+        0
+      ],
+      "dNaive": [
+        6.13029799913225E-46,
+        2.8539179523642953E-56,
+        0.98544984804747093,
+        0.58231331653878726,
+        0
+      ],
+      "dAnalyticP": [
+        0,
+        2.8079058432031E-56,
+        0.014550151952529067,
+        0.017685467301011171,
+        0
+      ],
+      "dAnalyticB": [
+        5.0859223950662404E-40,
+        5.1001336996771465E-50,
+        2.8552708927025292,
+        1.7544474164496129,
+        0
+      ]
+    },
+    "chVar": {
+      "p": [
+        6.13029799913225E-46,
+        2.8539179523642953E-56,
+        0.98544984804747093,
+        0.58231331653878726,
+        0
+      ],
+      "b": [
+        5.1478547797474332E-40,
+        5.1006598858491472E-50,
+        -0.85527089270252921,
+        1.6369442989591025,
+        0
+      ],
+      "dStateP": [
+        0,
+        9.0104006834325788E-69,
+        9.7699626167013776E-15,
+        0,
+        0
+      ],
+      "dStateB": [
+        0,
+        1.60854917613171E-62,
+        3.1288305279986162E-11,
+        0,
+        0
+      ],
+      "dNaive": [
+        6.13029799913225E-46,
+        2.8539179523642953E-56,
+        0.98544984804747093,
+        0.58231331653878726,
+        0
+      ],
+      "dAnalyticP": [
+        0,
+        2.8079058432031E-56,
+        0.014550151952529067,
+        0.017685467301011171,
+        0
+      ],
+      "dAnalyticB": [
+        5.0859223950662404E-40,
+        5.1001336996771465E-50,
+        2.8552708927025292,
+        1.7544474164496129,
+        0
+      ]
+    },
+    "maxStateDiffP": 9.7699626167013776E-15,
+    "maxStateDiffB": 3.1288305279986162E-11,
+    "maxCrossChannelDiffP": 0,
+    "maxCrossChannelDiffB": 0,
+    "maxNoCompensationDiff": 0.98544984804747093,
+    "maxAnalyticErrP": 0.017685467301011171,
+    "maxAnalyticErrB": 2.8552708927025292,
+    "maxAnalyticErrBRel": 1.7442688150831609,
+    "analyticBNote": "b-vs-analytic is NOT gated: it measures linear-interpolation error of p' at sub-sample tau (same in both states), amplified by 2*t; for the sigma=2-sample stress pulse the derivative swings within a few samples, so the b interpolation error is large. The two-state equivalence (the R3 deliverable) is unaffected because both states share identical interpolation error. Real/LP-filtered signals are much wider (exp2 phantom ~84 samples), making this error negligible there.",
+    "perturbMaxDb": 255.63540851302011,
+    "perturbDetectable": true
+  },
+  "T6_tauL": 1088.3487318051075,
+  "T6_degenErrSamples": 0,
+  "T6": {
+    "maxStateDiff": 0,
+    "maxAnalyticErrP": 0.027833277437611881
+  },
   "pass": {
     "T1_halfSample": true,
     "T2_pmaxQuarter": true,
     "T2_pzeroQuarter": true,
     "T3_halfSample": true,
-    "T4_detectOneSample": true
+    "T4_detectOneSample": true,
+    "T5_stateEquivalence": true,
+    "T5_crossChannel": true,
+    "T5_analyticP": true,
+    "T5_noCompensationLarge": true,
+    "T5_perturbDetectable": true,
+    "T6_stateEquivalence": true,
+    "T6_degenerate": true,
+    "T6_analyticP": true
   },
   "params": {
     "fs": 2.5E+8,
@@ -43,7 +223,31 @@
     "sysDelay": 358,
     "maskLength": 300,
     "d0": 0.004,
-    "sigmaSamp": 2
+    "sigmaSamp": 2,
+    "tauQlist": [
+      700,
+      703.64,
+      671.14093959731542,
+      1090.6,
+      2400
+    ],
+    "channels": [
+      "wl1",
+      "wl2",
+      "chVar",
+      "maxStateDiffP",
+      "maxStateDiffB",
+      "maxCrossChannelDiffP",
+      "maxCrossChannelDiffB",
+      "maxNoCompensationDiff",
+      "maxAnalyticErrP",
+      "maxAnalyticErrB",
+      "maxAnalyticErrBRel",
+      "analyticBNote",
+      "perturbMaxDb",
+      "perturbDetectable"
+    ],
+    "productionDelayCut0": "no delay compensation in query (src/RingRecon: preprocessBlock srcRow0=0; CUDA kernel tf=d*fs/c on stored line, no systemDelay reference) - legacy behavior differs from proposed inversion semantics, stage B adaptation required"
   },
   "matlabVersion": "9.14.0.2206163 (R2023a)"
 }
