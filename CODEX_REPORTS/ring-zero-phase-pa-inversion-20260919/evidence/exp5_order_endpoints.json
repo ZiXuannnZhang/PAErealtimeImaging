@@ -21,8 +21,16 @@
       1200,
       2700
     ],
-    "idealPad": 2000,
-    "runs": "echoOnly=no-interference reference; burstOnly=startup interference; burstEcho=both; ideal=crop start moved pad=2000 earlier, same acoustic scenario"
+    "refPadList": [
+      250,
+      500,
+      1000,
+      2000,
+      4000,
+      8000
+    ],
+    "refPadUsed": 8000,
+    "runs": "echoOnly=no-interference reference; burstOnly=startup interference; burstEcho=both; longReference=independent long-window boundary reference (filtered on extended input, then extracted by physical time; see longReference.m)"
   },
   "B1": {
     "echoOnly": {
@@ -212,63 +220,332 @@
       "posBias": 0
     }
   ],
-  "B6": [
-    {
-      "tauEcho": 400,
-      "bcRatioP": 1,
-      "bcBiasP": 0,
-      "bcRatioB": 1,
-      "bcBiasB": 0,
-      "intRatioP": 4355.9604382988427,
-      "intBiasP": -382.8241376229937,
-      "intRatioB": 548.922158013473,
-      "intBiasB": 11.107078649994889
+  "B6": {
+    "reference": {
+      "method": "long-window reference: same acoustic signal s(tau) filtered with the SAME refZeroPhase SOS chain on the extended input tau in [-padL, Nt-sysD+padR] (pre-trigger tau<0 = excitation-free synthetic model, zeros; real-hardware availability UNVERIFIED), derivative computed on the long line, then extracted for tau in [0, Nt-sysD] by physical time (acoustic origin m=sysD unchanged, b uses the same physical t as the short line); the extra segments are present during filtering - unlike the withdrawn 9ace9e1 construction that shifted sysDelay and cropped them away first",
+      "padList": [
+        250,
+        500,
+        1000,
+        2000,
+        4000,
+        8000
+      ],
+      "padUsed": 8000,
+      "convTolRel": 1E-9,
+      "dbrEnd": 313,
+      "shortFilterLen": 3643,
+      "shortTauRange": [
+        0,
+        3642
+      ],
+      "longFilterLen": 19643,
+      "longTauRange": [
+        -8000,
+        11642
+      ],
+      "extraSamples": 16000,
+      "acousticOriginSample": 358,
+      "longContainsShortBitwise": true,
+      "oldConstructionPads": [
+        2000,
+        8000
+      ],
+      "oldConstructionMaxDiff": [
+        0,
+        0
+      ],
+      "convergence": {
+        "echoOnly": {
+          "padList": [
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "relP": [
+            1.4163905059119074E-17,
+            1.4163905059119074E-17,
+            8.85244066194942E-18,
+            1.4163905059119074E-17,
+            8.85244066194942E-18,
+            0
+          ],
+          "relPP": [
+            5.5737920467475434E-17,
+            5.5737920467475434E-17,
+            2.0437237504740993E-17,
+            5.5737920467475434E-17,
+            2.0437237504740993E-17,
+            0
+          ],
+          "relB": [
+            6.6444778999656977E-17,
+            6.6444778999656977E-17,
+            2.5470498616535175E-17,
+            6.6444778999656977E-17,
+            2.5470498616535175E-17,
+            0
+          ],
+          "scaleP": 0.489899775164039,
+          "scalePP": 1.5664648167336939E+7,
+          "scaleB": 100.25374827095638,
+          "convergedPad": 250
+        },
+        "burstOnly": {
+          "padList": [
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "relP": [
+            2.2540758230689982E-9,
+            7.1500139418948121E-10,
+            2.2602782209630319E-11,
+            4.5406047926760043E-14,
+            8.9087815552503875E-14,
+            0
+          ],
+          "relPP": [
+            7.6931380511925163E-10,
+            1.2972709412871002E-10,
+            3.7602258419314917E-12,
+            3.3913656030942964E-14,
+            2.8356192397485215E-14,
+            0
+          ],
+          "relB": [
+            3.07040316363739E-9,
+            4.8499176377107886E-10,
+            1.6102966019820082E-11,
+            4.249593564099124E-14,
+            4.789740984957052E-14,
+            0
+          ],
+          "scaleP": 791.19505793540452,
+          "scalePP": 1.0896754902221216E+10,
+          "scaleB": 27950.910189390015,
+          "convergedPad": 500
+        },
+        "burstEcho": {
+          "padList": [
+            250,
+            500,
+            1000,
+            2000,
+            4000,
+            8000
+          ],
+          "relP": [
+            2.2540873721546393E-9,
+            7.1500647722407888E-10,
+            2.2603015705919829E-11,
+            1.0510925334944028E-13,
+            2.8163244916596437E-14,
+            0
+          ],
+          "relPP": [
+            7.6931389263835084E-10,
+            1.2972522067270929E-10,
+            3.7598210660368642E-12,
+            2.9931536419567215E-14,
+            1.4353134423418195E-14,
+            0
+          ],
+          "relB": [
+            3.0704033588715773E-9,
+            4.8498405202780945E-10,
+            1.6101273991755685E-11,
+            3.6443681407284052E-14,
+            2.0491436041283155E-14,
+            0
+          ],
+          "scaleP": 791.1950579354484,
+          "scalePP": 1.0896754902221403E+10,
+          "scaleB": 27950.910189388378,
+          "convergedPad": 500
+        }
+      }
     },
-    {
-      "tauEcho": 600,
-      "bcRatioP": 1,
-      "bcBiasP": 0,
-      "bcRatioB": 1,
-      "bcBiasB": 0,
-      "intRatioP": 2662.6050595405686,
-      "intBiasP": -457.53451459880074,
-      "intRatioB": 373.13782633830118,
-      "intBiasB": -188.81033308191491
+    "rows": [
+      {
+        "tauEcho": 400,
+        "bcRatioP": 0.99999999984001431,
+        "bcBiasP": 1.1880274541908875E-10,
+        "bcRatioB": 0.99999999998112865,
+        "bcBiasB": 1.1368683772161603E-13,
+        "bcAbsMaxP": 1.0175421211153043E-9,
+        "bcAbsMaxPP": 0.00968664332936682,
+        "bcAbsMaxB": 2.0802358832102715E-9,
+        "bcRelMaxP": 2.077041412750019E-9,
+        "bcRelMaxPP": 6.1837605453305654E-10,
+        "bcRelMaxB": 4.1499413619688252E-11,
+        "intRatioP": 4355.9604382988427,
+        "intBiasP": -382.8241376229937,
+        "intRatioB": 548.922158013473,
+        "intBiasB": 11.107078649994889
+      },
+      {
+        "tauEcho": 600,
+        "bcRatioP": 1.0000000000000455,
+        "bcBiasP": 1.1368683772161603E-13,
+        "bcRatioB": 0.99999999999999845,
+        "bcBiasB": 1.1368683772161603E-13,
+        "bcAbsMaxP": 3.95628625346478E-14,
+        "bcAbsMaxPP": 2.2910535335540771E-7,
+        "bcAbsMaxB": 1.0729195309977513E-12,
+        "bcRelMaxP": 8.0757053871686234E-14,
+        "bcRelMaxPP": 1.4625630330665697E-14,
+        "bcRelMaxB": 1.4269385427837581E-14,
+        "intRatioP": 2662.6050595405686,
+        "intBiasP": -457.53451459880074,
+        "intRatioB": 373.13782633830118,
+        "intBiasB": -188.81033308191491
+      },
+      {
+        "tauEcho": 800,
+        "bcRatioP": 0.99999999999998679,
+        "bcBiasP": 0,
+        "bcRatioB": 0.999999999999997,
+        "bcBiasB": -1.1368683772161603E-13,
+        "bcAbsMaxP": 3.7712888367735786E-14,
+        "bcAbsMaxPP": 1.8067657947540283E-7,
+        "bcAbsMaxB": 1.1013412404281553E-12,
+        "bcRelMaxP": 7.6980823996312164E-14,
+        "bcRelMaxPP": 1.1534033675402917E-14,
+        "bcRelMaxB": 1.0985536794609953E-14,
+        "intRatioP": 1329.4391974572857,
+        "intBiasP": -406.79976395457061,
+        "intRatioB": 282.66974646050687,
+        "intBiasB": -388.80834331354379
+      },
+      {
+        "tauEcho": 1200,
+        "bcRatioP": 1,
+        "bcBiasP": 0,
+        "bcRatioB": 1,
+        "bcBiasB": 0,
+        "bcAbsMaxP": 1.0842021724855044E-19,
+        "bcAbsMaxPP": 2.1827872842550278E-11,
+        "bcAbsMaxB": 2.4980018054066022E-16,
+        "bcRelMaxP": 2.2131101654873553E-19,
+        "bcRelMaxPP": 1.3934480116868858E-18,
+        "bcRelMaxB": 1.6611194749914242E-18,
+        "intRatioP": 512.891618201966,
+        "intBiasP": -432.29746632859712,
+        "intRatioB": 133.2166164454907,
+        "intBiasB": -413.86867152005334
+      },
+      {
+        "tauEcho": 2700,
+        "bcRatioP": 0.99999999999991229,
+        "bcBiasP": 0,
+        "bcRatioB": 0.99999999999998079,
+        "bcBiasB": 0,
+        "bcAbsMaxP": 6.999956170261612E-14,
+        "bcAbsMaxPP": 2.905726432800293E-7,
+        "bcAbsMaxB": 6.4233063312713057E-12,
+        "bcRelMaxP": 1.4288547423639322E-13,
+        "bcRelMaxPP": 1.8549579931575824E-14,
+        "bcRelMaxB": 1.8983847574341494E-14,
+        "intRatioP": 9.2495212458214535,
+        "intBiasP": -432.10403451171442,
+        "intRatioB": 3.1899500004863555,
+        "intBiasB": -542.05974486542027
+      }
+    ],
+    "validQueryTauRange": [
+      0,
+      3642
+    ],
+    "combos": [
+      {
+        "combo": "none",
+        "absMaxP": 0,
+        "relMaxP": 0,
+        "absMaxPP": 2.5434911129325029E-29,
+        "relMaxPP": 1.6237140801618145E-36,
+        "absMaxPPInterior": 0,
+        "absMaxB": 0,
+        "relMaxB": 0,
+        "absMaxBInterior": 0
+      },
+      {
+        "combo": "HP",
+        "absMaxP": 3.7715490452949751E-14,
+        "relMaxP": 7.6986132038661957E-14,
+        "absMaxPP": 1.6763806343078613E-7,
+        "relMaxPP": 1.0701680196849572E-14,
+        "absMaxPPInterior": 1.6763806343078613E-7,
+        "absMaxB": 1.0160761121369433E-12,
+        "relMaxB": 1.0135043118725148E-14,
+        "absMaxBInterior": 1.0160761121369433E-12
+      },
+      {
+        "combo": "LP",
+        "absMaxP": 3.4253812885263562E-38,
+        "relMaxP": 6.9920041835185227E-38,
+        "absMaxPP": 2.4926320073052813E-29,
+        "relMaxPP": 1.5912467190811295E-36,
+        "absMaxPPInterior": 6.3304558774648291E-30,
+        "absMaxB": 7.446843117468222E-38,
+        "relMaxB": 7.4279946881038441E-40,
+        "absMaxBInterior": 7.446843117468222E-38
+      },
+      {
+        "combo": "HP+LP",
+        "absMaxP": 3.7712888367735786E-14,
+        "relMaxP": 7.6980823996312164E-14,
+        "absMaxPP": 1.8067657947540283E-7,
+        "relMaxPP": 1.1534033675402917E-14,
+        "absMaxPPInterior": 1.8067657947540283E-7,
+        "absMaxB": 1.1013412404281553E-12,
+        "relMaxB": 1.0985536794609953E-14,
+        "absMaxBInterior": 1.1013412404281553E-12
+      }
+    ],
+    "combosNote": "p'/b endpoint values use one-sided differences on each line (timeDerivative convention); the extracted long line has central differences at the same raw samples, so full-line p'/b diffs include a real endpoint-convention difference at the first/last sample (see exp3 T7 endpointProbe). Interior values exclude this convention term; filtered combos additionally carry ~1e-13 relative double-precision rounding accumulation of the longer cascade (~sqrt(N)*eps*|signal|).",
+    "wl2": {
+      "sysDelay": 371,
+      "absMaxP": 5.2698808528378533E-18,
+      "relMaxP": 1.0757059137398617E-17,
+      "absMaxPP": 3.2014213502407074E-10,
+      "relMaxPP": 2.0437237504740993E-17,
+      "absMaxB": 2.55351295663786E-15,
+      "relMaxB": 2.5470498616535175E-17
     },
-    {
-      "tauEcho": 800,
-      "bcRatioP": 1,
-      "bcBiasP": 0,
-      "bcRatioB": 1,
-      "bcBiasB": 0,
-      "intRatioP": 1329.4391974572857,
-      "intBiasP": -406.79976395457061,
-      "intRatioB": 282.66974646050687,
-      "intBiasB": -388.80834331354379
-    },
-    {
-      "tauEcho": 1200,
-      "bcRatioP": 1,
-      "bcBiasP": 0,
-      "bcRatioB": 1,
-      "bcBiasB": 0,
-      "intRatioP": 512.891618201966,
-      "intBiasP": -432.29746632859712,
-      "intRatioB": 133.2166164454907,
-      "intBiasB": -413.86867152005334
-    },
-    {
-      "tauEcho": 2700,
-      "bcRatioP": 1,
-      "bcBiasP": 0,
-      "bcRatioB": 1,
-      "bcBiasB": 0,
-      "intRatioP": 9.2495212458214535,
-      "intBiasP": -432.10403451171442,
-      "intRatioB": 3.1899500004863555,
-      "intBiasB": -542.05974486542027
+    "sensitivity": {
+      "startBurst": {
+        "scenario": "burstOnly: burst onset sits at the crop line start; short-line odd extension mirrors the rising burst vs genuine pre-trigger silence in the reference",
+        "window": [
+          0,
+          1499
+        ],
+        "absMaxP": 532.81004279419847,
+        "scaleP": 1712.2771286508946,
+        "relMaxP": 0.31117044891792733
+      },
+      "endEcho": {
+        "scenario": "echoOnly tau=3600, 43 samples from the cut-line end; short-line tail odd extension mirrors the echo vs genuine continuation in the reference",
+        "tauEcho": 3600,
+        "window": [
+          3099,
+          3642
+        ],
+        "ampRatio": 1.2462096314545301,
+        "posBias": 0.66752714505264521,
+        "absMaxP": 0.30998586122094862,
+        "relMaxP": 0.63275363030561171,
+        "absMaxB": 61.149778163656435,
+        "relMaxB": 0.13554445421030059
+      }
     }
-  ],
+  },
   "B7_wl2": {
     "sysDelay": 371,
     "ampRatioVsRef": 1.0000000000000133,
@@ -279,10 +556,11 @@
   "policy": {
     "order": "raw -> DBR zero (1..maskLength+extra) -> clip -> delayCut -> HP zero-phase (whole cut line) -> LP zero-phase (whole cut line) -> [deriv p' -> b] (per A-line, refZeroPhase implementation)",
     "endpoints": "refZeroPhase steady-state init + odd extension nfact=3n; error if line length <= 3n or input non-finite",
-    "validQueryRegion": "original-row index m >= max(sysDelay, dbrEnd+1), default margin G=0; when HP/LP filtering (and hence inversion) is enabled, configs with dbrEnd = maskLength+dbrmaskExtra >= sysDelay are REJECTED with an error (default 313 < 358/371 satisfies; measured B2: a chopped startup burst leaves a zero-phase response tail to ~tau 2737, exceeding dbrEnd+memHP=2327 and depending on the removed signal amplitude/length - no fixed margin can guarantee validity)",
-    "headPolicy": "no fixed head-margin discard; boundary-convention error on steady-start lines measured ~0 (B6 BC columns); startup interference is data-dependent, reported via burstOnly residue profile and burstEcho INT columns (B1/B6), not a fixed discard",
+    "validQueryRegion": "original-row index m >= max(sysDelay, dbrEnd+1), default margin G=0; when HP or LP zero-phase filtering is enabled (with or without inversion), configs with dbrEnd = maskLength+dbrmaskExtra >= sysDelay are REJECTED with an error (default 313 < 358/371 satisfies; measured B2: a chopped startup burst leaves a zero-phase response tail to ~tau 2737, exceeding dbrEnd+memHP=2327 and depending on the removed signal amplitude/length - no fixed margin can guarantee validity). DBR disabled: dbrEnd interpreted as 0 (no zeroed region, no step; evidence: cut-line output bitwise identical for zeroRows=313 vs 0, gate G3). Inversion-only (no HP/LP): no non-causal filter wrap occurs, so the dbrEnd<sysDelay rejection is not required there; the valid-query rule m >= dbrEnd+1 still excludes the zeroed prefix. delayCut=0 with DBR enabled: the zeroed prefix IS inside the filter input by construction (no crop happens) - the \"step outside the cut line\" rationale does NOT transfer to the uncut line; filtering + delayCut=0 + DBR enabled is treated as unsupported pending an explicit stage-B decision. Short window: line length <= 3n rejected (A5). Out-of-range queries: maskOob zero (production convention). Endpoint derivative: one-sided differences at line ends (timeDerivative.m); the cut-line one-sided vs uncut central-difference difference at the first sample is quantified in exp3 T7 endpointProbe",
+    "headPolicy": "no fixed head-margin discard and no preset quality threshold; boundary-convention error is quantified against a converged INDEPENDENT long-window reference (B6.reference/rows: structural assertions, old self-comparison construction negative-controlled, pad convergence at recorded tolerance 1e-9 relative, p/p'/b waveform errors with absolute+relative scales). Steady-start (pre-trigger-zero model) lines: near-boundary echoOnly differences at ~1e-9 relative or below; burst-contaminated starts and near-tail targets show measurable finite-window effects (B6.sensitivity) - no exact-zero-error claim is made. Startup interference remains a data-dependent quantity reported via burstOnly residue profile and burstEcho INT columns (B1/B6), not a fixed discard",
     "derivativeEndpoint": "timeDerivative.m: central difference interior, one-sided ends, per column, applied to the same filtered line",
-    "rejected": "wholesale discard of samples 848-3639 rejected: that span is the impulse-response width of one specific HP design at one threshold (exp6 F5), not a universal contamination bound; B6 BC columns show near-boundary targets recovered exactly when the line starts in steady state; B2 additionally rejects configs that put the DBR step inside the cut line"
+    "twoStateQuery": "unified notation (algorithm-stage-A.md section 2.2): D systemDelay (raw one-based acoustic zero), T physical travel time, s=fs*T, m raw one-based coordinate, q stored-array zero-based continuous query coordinate; cut line q_cut=s (m=q_cut+D); uncut calibrated query q_raw=s+D-1 (m=q_raw+1=s+D); inversion time multiplier t=T=s/fs=(q_raw+1-D)/fs; the legacy DAS uncut query q_legacy=s (no compensation, \"sample 1 = acoustic zero\") is a separate historical compatibility behavior, documented separately and never mixed into the proposed inversion table",
+    "rejected": "wholesale discard of samples 848-3639 rejected: that span is the impulse-response width of one specific HP design at one threshold (exp6 F5), not a universal contamination bound. WITHDRAWN this round: the 9ace9e1 claim \"boundary-convention error measured exactly 0 (B6 BC columns)\" - that reference degraded to the same filter input as the device under test (B6_filter_input_identical=1, maxdiff=0). Boundary conclusions now come exclusively from the corrected independent long reference; no exact-zero claim is made"
   },
   "gate": {
     "calibP": true,
@@ -291,11 +569,13 @@
     "legacyContrast": true,
     "centerPos": true,
     "finite": true,
+    "modeNameList": true,
     "A5err": true,
     "A5ok": true,
-    "G1_boundaryExact": true,
+    "G1_refIndependent": true,
+    "G1b_refConverged": true,
     "G2_orderSameImpl": true,
-    "G3_defaultIdentical": true,
+    "G3_dbrBeforeCropNoop": true,
     "G4_finite": true,
     "G5_reported": true
   },

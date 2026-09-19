@@ -1,29 +1,36 @@
 % EXP3_TIME_AXIS  判定性实验 3：时间轴/delayCut 索引公式、单采样脉冲测试、
 % 两态完整反演等价（审查整改 R3）。
 %
-% 冻结并验证的索引约定（与 starting SHA 生产代码逐行对应）
+% 统一记号（二轮整改收口，algorithm-stage-A.md §2.2 全篇统一）
 % ----------------------------------------------------------------
+%   D = 每通道/波长 systemDelay（raw 一基声学零点）；T = 物理传播时间 [s]；
+%   s = fs·T（物理走时样本数，连续）；m = raw 一基连续样本坐标；
+%   q = 当前存储数组的零基连续查询坐标。
 % 原始行：样本 m（1 基），m = 1..sampDepth。
 % preprocessBlock（ring_recon.cpp:118-127）：
-%   delayCut=1：输出行数 = Nt − sysDelay + 1；输出样本 k（1 基）= 原始样本 k+sysDelay−1。
-%   delayCut=0：输出样本 k = 原始样本 k。
+%   delayCut=1：输出行数 = Nt − sysDelay + 1；输出样本 k（1 基）= 原始样本 k+D−1。
+%   delayCut=0：输出样本 k = 原始样本 k（全行）。
 % CUDA/CPU 查询（ring_das_kernel / dasReconAppend）：
-%   tf = d·fs/c（+分层修正）为"连续采样数"；1 基样本 k 位于 τ = k−1；
-%   线性插值 v(τ) = col(k) + frac·(col(k+1)−col(k))，k = floor(τ)+1。
-% 由此：裁剪线连续坐标 τ ⟷ 原始样本坐标 m(τ) = τ + sysDelay（delayCut=1）
-%                              或 m(τ) = τ + 1（delayCut=0）。
-% 声学时间约定：原始样本 m 的声学时间 t(m) = (m − sysDelay)/fs
-%   （sysDelay 由经验校准对齐声学零点；每波长/每通道独立 sysDelay，
-%     各自裁剪后 t = τ/fs 对本波长自洽）。
-%   ⟹ delayCut=1：t(τ) = τ/fs；delayCut=0：t(τ) = (τ + 1 − sysDelay)/fs。
+%   tf = d·fs/c（+分层修正）为"连续采样数"；1 基样本 k 位于 q = k−1；
+%   线性插值 v(q) = col(k) + frac·(col(k+1)−col(k))，k = floor(q)+1。
+% 声学时间约定：原始样本 m 的声学时间 t(m) = (m − D)/fs
+%   （D 由经验校准对齐声学零点；每波长/每通道独立 D）。
+% 裁剪线（delayCut=1）：校准查询 q_cut = s，取值原始坐标 m = q_cut + D = s + D。
+% 未裁剪线（delayCut=0）：校准查询 q_raw = s + D − 1，m = q_raw + 1 = s + D
+%   ——本脚本 T5/T6 即按此实现（tau0Q = tauQ + sD − 1）。
+% 反演乘子时间：t = T = s/fs = (q_raw + 1 − D)/fs。
+% 旧 DAS 未裁剪查询 q_legacy = s（无补偿，隐含"样本 1 = 声学零点"）是历史兼容
+%   行为，与上述校准查询不同，单列于"生产语义核对"，不混入拟议反演表格。
 %
 % 生产语义核对（9493962 源码，整改证据）：
 %   preprocessBlock delayCut=0 仅保留全行（srcRow0=0），CUDA 查询 tf=d·fs/c
 %   直接作用于存储行、无任何 systemDelay 补偿（ring_recon_cuda.cu 无该引用）
-%   ⟹ 生产 delayCut=0 的"旧行为"把原始样本 1 当作声学零点，与拟议反演语义
-%   （t=(τ+1−sysDelay)/fs）不等价；T5.4 量化两者差异。区分：旧路径兼容行为
-%   ≠ 拟议反演语义；阶段 B 需局部适配（tf_eff = tf + sysDelay − 1 或强制
-%   delayCut=1），本阶段不修改生产代码。
+%   ⟹ 生产 delayCut=0 的"旧行为"把原始样本 1 当作声学零点（q_legacy=s），与
+%   拟议反演的校准查询（q_raw=s+D−1）不等价；T5 量化两者差异。区分：旧路径
+%   兼容行为 ≠ 拟议反演语义。二轮收口建议（待规划审查，algorithm-stage-A.md
+%   §2.3/§7）：保留两态反演并采用补偿查询 tf_eff = tf + sysDelay − 1（即
+%   q_raw = s + D − 1）；若审查改选"反演仅允许 delayCut=1"，必须显式报错而非
+%   自动切换。本阶段不修改生产代码。
 %
 % 测试内容
 %   T1 索引链：按上式生成 raw（含 sysDelay 偏移的脉冲），经
@@ -39,6 +46,9 @@
 %      两态在同一物理走时处比较 p、p′、b（整数 + 亚样本走时）；±1 样本扰动
 %      可分辨；并量化"不补偿延时"（生产 delayCut=0 旧行为）的偏差。
 %   T6【R3 新增】双声速（分层）路径走时的两态等价 + 同速退化。
+%   T7【二轮整改新增】两态坐标恒等式断言（q_cut/q_raw/m/t 链，D 变体 × 整数/
+%      亚样本 s）+ 独立 p′ 两态差（不依赖 b 间接覆盖，见 T5）+ 线端导数约定
+%      探针（s<1 时裁剪线单侧 vs 全行中心差分的真实端点差异，记录不判 0）。
 %
 % 运行：matlab -batch "run('exp3_time_axis.m')"   （工作目录 = matlab/）
 % 输出：evidence/exp3_time_axis.json
@@ -174,6 +184,7 @@ fprintf('\nT5 两态反演等价：查询 τ=[%s] 样本（小数部分 [%s]—�
 
 chList = struct('name', {'wl1', 'wl2', 'chVar'}, 'sysD', {358, 371, 359});
 res.T5 = struct();
+ppScale5 = 0;                                            % p′ 尺度（两态共享）
 for ic = 1:numel(chList)
     sD = chList(ic).sysD;
     rawC = zeros(sampDepth, 1);
@@ -203,10 +214,12 @@ for ic = 1:numel(chList)
         res.T5.(chList(ic).name).p(iq) = p1;
         res.T5.(chList(ic).name).b(iq) = b1;
         res.T5.(chList(ic).name).dStateP(iq) = abs(p1 - p0);
+        res.T5.(chList(ic).name).dStatePP(iq) = abs(pp1 - pp0);   % 独立 p′ 两态差（二轮整改）
         res.T5.(chList(ic).name).dStateB(iq) = abs(b1 - b0);
         res.T5.(chList(ic).name).dNaive(iq) = abs(pNaive - p1);
         res.T5.(chList(ic).name).dAnalyticP(iq) = abs(p1 - pAn);
         res.T5.(chList(ic).name).dAnalyticB(iq) = abs(b1 - bAn);
+        ppScale5 = max([ppScale5, abs(pp1), abs(pp0)]);
     end
 end
 % 跨通道一致性：同一物理走时处，wl1/wl2/chVar 的 state1 查询应逐位一致
@@ -218,12 +231,23 @@ for iq = 1:numel(tauQlist)
     dCrossB = max(dCrossB, abs(res.T5.wl1.b(iq) - res.T5.chVar.b(iq)));
 end
 maxStateP = max(max([res.T5.wl1.dStateP, res.T5.wl2.dStateP, res.T5.chVar.dStateP]));
+maxStatePP = max(max([res.T5.wl1.dStatePP, res.T5.wl2.dStatePP, res.T5.chVar.dStatePP]));
 maxStateB = max(max([res.T5.wl1.dStateB, res.T5.wl2.dStateB, res.T5.chVar.dStateB]));
 maxNaive = max(max([res.T5.wl1.dNaive, res.T5.wl2.dNaive, res.T5.chVar.dNaive]));
 maxAnP = max(max([res.T5.wl1.dAnalyticP, res.T5.wl2.dAnalyticP, res.T5.chVar.dAnalyticP]));
 maxAnB = max(max([res.T5.wl1.dAnalyticB, res.T5.wl2.dAnalyticB, res.T5.chVar.dAnalyticB]));
 bScale = max(abs(res.T5.wl1.b));
 res.T5.maxStateDiffP = maxStateP;
+res.T5.maxStateDiffPP = maxStatePP;              % 独立 p′ 两态差（二轮整改）
+res.T5.ppScale = ppScale5;
+res.T5.stateDiffPPRel = maxStatePP / ppScale5;
+res.T5.statePPNote = ['the p'' two-state residual (and the p residual) shares one source: the ', ...
+    'raw-state query coordinate q_raw = s + D - 1 is evaluated in double precision, so its ', ...
+    'interpolation fraction can differ from the cut-state fraction by ~1 ulp of the coordinate ', ...
+    '(~1e-13 samples); scaled by the local p'' slope (~|p''|/sigma ~ 1e10 per sample for the ', ...
+    'sigma=2-sample stress pulse) this yields ~1e-6..1e-5 absolute p'' differences (~1e-11 ', ...
+    'relative). It is interpolation-coordinate rounding, not a semantic difference between ', ...
+    'states; gate tolerance 1e-10 relative (measured 1.11e-11).'];
 res.T5.maxStateDiffB = maxStateB;
 res.T5.maxCrossChannelDiffP = dCrossP;
 res.T5.maxCrossChannelDiffB = dCrossB;
@@ -232,7 +256,8 @@ res.T5.maxAnalyticErrP = maxAnP;
 res.T5.maxAnalyticErrB = maxAnB;
 res.T5.maxAnalyticErrBRel = maxAnB / bScale;
 res.T5.analyticBNote = ['b-vs-analytic is NOT gated: it measures linear-interpolation error of p'' at sub-sample tau (same in both states), amplified by 2*t; for the sigma=2-sample stress pulse the derivative swings within a few samples, so the b interpolation error is large. The two-state equivalence (the R3 deliverable) is unaffected because both states share identical interpolation error. Real/LP-filtered signals are much wider (exp2 phantom ~84 samples), making this error negligible there.'];
-fprintf('T5 两态差：max|Δp|=%.3g max|Δb|=%.3g（同一插值误差，浮点级）\n', maxStateP, maxStateB);
+fprintf('T5 两态差：max|Δp|=%.3g max|Δp′|=%.3g（相对 |p′|max %.3g） max|Δb|=%.3g（同一插值误差，浮点级）\n', ...
+    maxStateP, maxStatePP, res.T5.stateDiffPPRel, maxStateB);
 fprintf('T5 跨通道差：p=%.3g b=%.3g；不补偿延时（生产 delayCut=0 旧行为 vs 拟议语义）：max|Δp|=%.4f\n', ...
     dCrossP, dCrossB, maxNaive);
 fprintf('T5 解析参考：p=%.4f（线性插值界 ≤0.04，判定）；b=%.3g（相对 |b|max %.3g，仅报告不判定——亚样本导数插值误差，见 analyticBNote）\n', ...
@@ -280,7 +305,7 @@ res.T6_degenErrSamples = abs(tauLdeg - dPix * fs / c1);
 % 分层声学信号（脉冲置于 τL），两态查询
 pAcL = @(tq) exp(-(tq - tL).^2 / (2 * sigT^2));
 ppAcL = @(tq) -(tq - tL) / sigT^2 .* exp(-(tq - tL).^2 / (2 * sigT^2));
-dL = 0;  dLan = 0;
+dL = 0;  dLan = 0;  dLpp = 0;  ppScaleL = 0;
 for sD = [358, 371]
     rawL = pAcL((mraw - sD) / fs);  rawL(mraw < sD) = 0;
     cutL = rawL(sD:end);
@@ -293,14 +318,71 @@ for sD = [358, 371]
     pp0 = interpSamp(ppFullL, tauL + sD - 1);
     b0 = 2 * p0 - 2 * tL * pp0;
     dL = max(dL, max(abs(p1 - p0), abs(b1 - b0)));
+    dLpp = max(dLpp, abs(pp1 - pp0));            % 独立 p′ 两态差（二轮整改）
+    ppScaleL = max([ppScaleL, abs(pp1), abs(pp0)]);
     pAn = pAcL(tL);
     dLan = max(dLan, abs(p1 - pAn));
 end
 res.T6.maxStateDiff = dL;
+res.T6.maxStateDiffPP = dLpp;                    % 独立 p′ 两态差（二轮整改）
+res.T6.ppScale = ppScaleL;
+res.T6.stateDiffPPRel = dLpp / ppScaleL;
 res.T6.maxAnalyticErrP = dLan;
 fprintf('T6 分层走时 τL=%.4f 样本（像素原点，c1/c2=%.0f/%.0f，L1=%.4fmm）；同速退化 |Δτ|=%.3g 样本\n', ...
     tauL, c1, c2, L1 * 1e3, res.T6_degenErrSamples);
-fprintf('T6 两态差（p 与 b）：%.3g；解析参考误差：%.4f\n', dL, dLan);
+fprintf('T6 两态差（p 与 b）：%.3g；独立 p′ 两态差：%.3g（相对 |p′|max %.3g）；解析参考误差：%.4f\n', ...
+    dL, dLpp, res.T6.stateDiffPPRel, dLan);
+
+% ============ T7【二轮整改】两态坐标恒等式断言 + 线端导数约定探针 ============
+% 统一记号（本文件头/algorithm-stage-A.md §2.2）：
+%   裁剪线：q_cut = s，m = q_cut + D；
+%   未裁剪校准查询：q_raw = s + D − 1，m = q_raw + 1 = s + D；
+%   声学时间 t(m) = (m − D)/fs；反演乘子 t = T = s/fs = (q_raw+1−D)/fs。
+% 断言：上述 m/q/t 恒等式对 D ∈ {358,371,359} × 整数/亚样本 s 全部成立
+% （连续坐标浮点容差 1e-9 样本）；两态取到同一 raw 样本、同一插值分数的
+% 数据链证据由 T5（p/p′/b 两态差）承担。旧 DAS 未裁剪查询 q_legacy = s 为
+% 历史兼容行为，不在本恒等式表内（见"生产语义核对"）。
+res.T7 = struct();
+maxCoordErr = 0;
+for ic7 = 1:numel(chList)
+    sD7 = chList(ic7).sysD;
+    for iq7 = 1:numel(tauQlist)
+        sQ = tauQlist(iq7);  tQ = tQlist(iq7);
+        qCut = sQ;  mCut = qCut + sD7;
+        qRaw = sQ + sD7 - 1;  mRaw = qRaw + 1;
+        errC = max(abs([mRaw - mCut, (mRaw - sD7) / fs - tQ, (qRaw + 1 - sD7) / fs - tQ]));
+        maxCoordErr = max(maxCoordErr, errC);
+    end
+end
+res.T7.maxCoordIdentityErr = maxCoordErr;
+fprintf('T7 坐标恒等式（D∈{358,371,359} × s=[%s]）：max 误差 %.3g 样本\n', ...
+    sprintf('%.2f ', tauQlist), maxCoordErr);
+
+% 线端导数约定探针（burstOnly：信号在 τ=0 起点非零）——s<1 时裁剪线 p′ 端点为
+% 单侧差分、全行为中心差分：真实端点约定差异（非缺陷；b 在线端继承该差异），
+% 单独记录不判 0；s ≥ 1 时两态 p′ 共享同一 raw 邻域 → 应逐位一致
+% （数据链见 T5_stateEquivalencePP）。
+sD7 = 358;
+rawP7 = ringAcousticModel('burstOnly', 0, mraw - sD7, fs);
+cutP7 = rawP7(sD7:end);
+ppCutP7 = timeDerivative(cutP7, 1 / fs);
+ppFullP7 = timeDerivative(rawP7, 1 / fs);
+probeS = [0, 0.5, 1.5];
+res.T7.endpointProbe = struct('s', {}, 'ppCutState', {}, 'ppFullState', {}, 'absDiff', {});
+for ip = 1:numel(probeS)
+    pp1p = interpSamp(ppCutP7, probeS(ip));
+    pp0p = interpSamp(ppFullP7, probeS(ip) + sD7 - 1);
+    res.T7.endpointProbe(ip) = struct('s', probeS(ip), 'ppCutState', pp1p, ...
+        'ppFullState', pp0p, 'absDiff', abs(pp1p - pp0p));
+    fprintf('T7 线端探针 s=%.1f：|p′_cut−p′_full|=%.4g（p′_cut=%.4g p′_full=%.4g）\n', ...
+        probeS(ip), abs(pp1p - pp0p), pp1p, pp0p);
+end
+res.T7.endpointNote = ['uncut-state p'' uses the central difference at raw sample D (genuine ', ...
+    'pre-trigger samples exist in the model), the cut line uses one-sided differences at its ', ...
+    'first sample; within the first stored sample (s<1) the two states differ by a real ', ...
+    'endpoint-convention difference (documented, NOT gated to 0, not a bug; b inherits it at ', ...
+    'the line start). For s>=1 both states share the identical raw stencil and agree to ', ...
+    'floating level (T5_stateEquivalencePP).'];
 
 % 断言汇总
 res.pass = struct( ...
@@ -310,19 +392,25 @@ res.pass = struct( ...
     'T3_halfSample', abs(res.T3_errSamples) <= 0.5, ...
     'T4_detectOneSample', abs(res.T4(1).offset - res.T4(3).offset) >= 0.8, ...
     'T5_stateEquivalence', maxStateP <= 1e-12 && maxStateB <= 1e-9 * bScale, ...
+    'T5_stateEquivalencePP', maxStatePP <= 1e-10 * ppScale5, ...
     'T5_crossChannel', dCrossP == 0 && dCrossB == 0, ...
     'T5_analyticP', maxAnP <= 0.04, ...
     'T5_noCompensationLarge', maxNaive >= 0.2, ...
     'T5_perturbDetectable', res.T5.perturbDetectable, ...
     'T6_stateEquivalence', dL <= 1e-9, ...
+    'T6_stateEquivalencePP', dLpp <= 1e-11 * ppScaleL, ...
     'T6_degenerate', res.T6_degenErrSamples <= 1e-9, ...
-    'T6_analyticP', dLan <= 0.04);
-fprintf('\n断言：T1(±0.5)=%d T2峰=%d T2零=%d T3(±0.5)=%d T4可分辨=%d | T5两态=%d 跨通道=%d 解析=%d 不补偿偏差大=%d 扰动=%d | T6两态=%d 退化=%d 解析=%d\n', ...
+    'T6_analyticP', dLan <= 0.04, ...
+    'T7_coordIdentity', maxCoordErr <= 1e-9, ...
+    'T7_endpointConvention', res.T7.endpointProbe(3).absDiff == 0 && ...
+        res.T7.endpointProbe(1).absDiff > 0 && res.T7.endpointProbe(2).absDiff > 0);
+fprintf('\n断言：T1(±0.5)=%d T2峰=%d T2零=%d T3(±0.5)=%d T4可分辨=%d | T5两态=%d T5两态p′=%d 跨通道=%d 解析=%d 不补偿偏差大=%d 扰动=%d | T6两态=%d T6两态p′=%d 退化=%d 解析=%d | T7恒等式=%d 线端约定=%d\n', ...
     res.pass.T1_halfSample, res.pass.T2_pmaxQuarter, res.pass.T2_pzeroQuarter, ...
     res.pass.T3_halfSample, res.pass.T4_detectOneSample, ...
-    res.pass.T5_stateEquivalence, res.pass.T5_crossChannel, res.pass.T5_analyticP, ...
-    res.pass.T5_noCompensationLarge, res.pass.T5_perturbDetectable, ...
-    res.pass.T6_stateEquivalence, res.pass.T6_degenerate, res.pass.T6_analyticP);
+    res.pass.T5_stateEquivalence, res.pass.T5_stateEquivalencePP, res.pass.T5_crossChannel, ...
+    res.pass.T5_analyticP, res.pass.T5_noCompensationLarge, res.pass.T5_perturbDetectable, ...
+    res.pass.T6_stateEquivalence, res.pass.T6_stateEquivalencePP, res.pass.T6_degenerate, ...
+    res.pass.T6_analyticP, res.pass.T7_coordIdentity, res.pass.T7_endpointConvention);
 
 out = res;
 out.params = struct('fs', fs, 'c', c, 'sampDepth', sampDepth, 'sysDelay', sysDelay, ...

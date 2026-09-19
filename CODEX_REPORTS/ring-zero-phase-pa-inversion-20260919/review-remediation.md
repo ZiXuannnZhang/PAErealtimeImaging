@@ -1,5 +1,7 @@
 # 阶段 A 审查整改回执（R1–R5）
 
+> **二轮整改注记（20260920）**：本回执为一轮整改（R1–R5，基线 9493962 → 9ace9e1）的记录。二轮整改（B1–B3：B6 边界参考重写、时间轴规格收口、exp2 JSON 打包修正）的逐项回应见 [review-spec-closure.md](review-spec-closure.md)；本文件中与二轮冲突的内容（R4 节 B6 结论、"两态查询公式"块）已按二轮证据修正并就地标注，原文见 git 历史 9ace9e1。
+
 任务：`TASKS/环形成像阶段A审查整改追加_20260919-201935.md`（REQUEST_CHANGES）
 分支：`codex/ring-zero-phase-pa-inversion-20260919-025754`
 starting SHA：`94939627f48ccc95f60c4995c99be4e371aaa2ca`（= 任务发布时远端 HEAD，已核对）
@@ -73,7 +75,7 @@ final SHA：见提交（本文件所在提交）；local HEAD == remote HEAD 经
   - 两态差：max|Δp| = **9.77e-15**，max|Δb| = **3.13e-11**（同一插值误差下的浮点级；断言容差 1e-12 / 1e-9·|b|max）→ PASS
   - 跨通道差（同物理走时，wl1/wl2/chVar）：p、b 均为 **0** → PASS
   - ±1 样本扰动：固定走时处 max|Δb| = **255.6**（≥0.1·|b|max=0.164）→ 可分辨 PASS
-  - 不补偿延时（生产旧行为）：max|Δp| = **0.985**（≈信号错位 sysDelay/fs）→ 与拟议语义的差距量化；阶段 B 需局部适配（tf_eff = tf + sysDelay − 1 或反演强制 delayCut=1），本阶段未改生产代码。
+  - 不补偿延时（生产旧行为）：max|Δp| = **0.985**（≈信号错位 sysDelay/fs）→ 与拟议语义的差距量化；二轮确定集成建议：补偿查询 tf_eff = tf + sysDelay − 1（q_raw = s+D−1），替代方案（反演仅允许 delayCut=1）须显式报错（本阶段未改生产代码，见 review-spec-closure.md B2）。
   - 解析参考：p 误差 0.0177（≤线性插值界 0.04，判定项 PASS）；b 误差 2.86（相对 |b|max 1.74）**仅报告不判定**——这是 σ=2 样本应力脉冲在亚样本 τ 处 p′ 线性插值误差被 2t 放大的固有特性（两态共享同一插值误差，不影响两态等价结论；exp2 体模脉宽 ~84 样本下可忽略；JSON `analyticBNote` 字段注明）。
 - **T6 双声速路径**：分层走时（τL=1088.3487 样本，像素原点、c1/c2=1490/1540、L1=4.0000mm）处两态 p/p′/b 差 = **0**；同速退化 |Δτ| = 0；解析 p 误差 0.0278（≤0.04）→ PASS。
 - 完整查询链表格化字段（JSON T5 各通道 p/b 数组 + 查询 τ/小数部分 + 参数说明）：原始索引、裁剪索引、校准声学时间、像素物理走时、实际取样位置与 b 计算的对应关系在 algorithm-stage-A.md §2.2 表中固化。
@@ -104,8 +106,8 @@ final SHA：见提交（本文件所在提交）；local HEAD == remote HEAD 经
   *358 行截断点恰为 burst 起点 t=0（sin0=0），无实际阶跃。置零段输出非零（296–562）本身即"双向滤波非因果回卷污染置零段"的直接证据。
   - **memHP 固定裕量也不足以覆盖实测污染范围**（dbrEnd+1914=2327 < 2737），且污染长度依赖被截断信号的幅度/长度（数据相关）→ 固定裕量方案被证据否定。
 - **近边界目标（B6，边界约定误差 vs 干扰效应分离）**：与"裁剪起点前移 pad=2000 的同声学场景理想参考"比（边界约定误差 BC），与 echoOnly 比（干扰效应 INT）：
-  - **BC：τ = 400/600/800/1200/2700 全部 ampRatio = 1.000000、posBias = +0.0000（p 路与 b 路）**——稳态起点线的边界约定误差精确为 0，包括位于 848–3639"记忆区间"内的 τ=400/600/800 → **否定"机械丢弃 848–3639 样本"**。
-  - INT（burst 干扰效应，数据相关）：τ=400 p 路 4356（被淹没）/ b 路 549；τ=2700 p 路 9.25 / b 路 3.19——本合成 burst 下可检测性受限至 ~3200 样本；实机适用范围 UNVERIFIED。
+  - **【二轮撤回】** 下述"BC：全部 ampRatio = 1.000000、posBias = +0.0000——边界约定误差精确为 0"的结论**已被二轮整改撤回**：该"理想参考"在滤波前退化为与被测相同的输入（B6_filter_input_identical=1, maxdiff=0，自比伪影）。取代证据：收敛独立长参考（longReference.m）量化——稳态起点线近边界 \|Δp\|rel ≤ 2.1e-9（触发前无激励模型），burst 污染起点 0.311、近尾目标 0.633（数据相关）；详见 review-spec-closure.md B1 与 algorithm-stage-A.md §3.3。"否定机械丢弃 848–3639"的结论维持，依据更换。
+  - INT（burst 干扰效应，数据相关）：τ=400 p 路 4356（被淹没）/ b 路 549；τ=2700 p 路 9.25 / b 路 3.19——本合成 burst 下可检测性受限至 ~3200 样本；实机适用范围 UNVERIFIED。（INT 列为同窗对比，非自比，数值维持。）
 - **其余覆盖**：滤波组合 none/HP/LP/HP+LP × 反演 p/b 路（B4：带内目标幅值 0.489900 不受滤波影响，b 路头部残差与 p 路同源）；窗长 Nt ∈ {2000,4000,8000}（B5：幅值比 1.000000）；wl2 sysDelay=371（B7：1.000000）；短窗报错 12 报错/13 正常（A5，维持）。
 
 **冻结的拟定默认策略**（algorithm-stage-A.md §3.3，待审查）：
@@ -144,17 +146,21 @@ final SHA：见提交（本文件所在提交）；local HEAD == remote HEAD 经
 | "错误配对（wrong）实质性劣化（2–2.8mm）" | **撤销**（符号图伪影；公平对照下 0–0.2mm） |
 | "导数项大 2–3 量级" | **撤销**，改为实测 2.0/13.4–13.9 |
 | "起点裕量默认 0、建议后续配置" | **升级为确定策略**：默认 0 + dbrEnd<sysDelay 前置校验（B2 证据） |
-| "848–3639 纳入有效区间定义（建议阶段 B 配置裕量）" | **撤销**该方向，明确不采纳全局丢弃；边界约定误差实测 0 |
+| "848–3639 纳入有效区间定义（建议阶段 B 配置裕量）" | **撤销**该方向，明确不采纳全局丢弃（二轮注记：原依据"边界约定误差实测 0"已撤回，维持不采纳的依据更换为独立长参考量化，见 review-spec-closure.md B1） |
 | 距离权重标签（旧 exp2 的"DAS q=1"） | **勘误**：旧对照实为 wExponent=0 权重；生产默认 = Δθ·cosα/d |
 
-## 两态查询公式（冻结约定，R3）
+## 两态查询公式（二轮修正版；原块将未裁剪查询写为 τ₀ = d·fs/c、遗漏 sysDelay−1，已修正）
 
 ```
-声学时间定义：t(m) = (m − sysDelay)/fs（m 为原始 1 基样本；sysDelay 每波长/通道独立）
-delayCut=1：查询 τ = d·fs/c(+分层)（裁剪线连续坐标）          → t = τ/fs
-delayCut=0：查询 τ₀ = d·fs/c(+分层)（全行连续坐标）           → t = (τ₀ + 1 − sysDelay)/fs
-两态对应同一原始取样位置：连续原始坐标均为 τ + sysDelay（整数 sysDelay 下插值分数相同）
-生产 delayCut=0 旧行为（无补偿）≠ 拟议语义 → 阶段 B 局部适配：tf_eff = tf + sysDelay − 1 或强制 delayCut=1
+统一记号（algorithm-stage-A.md §2.2）：D systemDelay（raw 一基声学零点）；T 物理传播时间；
+s = fs·T（物理走时样本数）；m raw 一基连续坐标；q 存储数组零基连续查询坐标
+声学时间定义：t(m) = (m − D)/fs（m 为原始 1 基样本；D 每波长/通道独立）
+delayCut=1（裁剪线，存储=raw(D:end)）：校准查询 q_cut = s        → t = T = s/fs；m = q_cut + D
+delayCut=0（全行）：校准查询 q_raw = s + D − 1                  → t = T = (q_raw+1−D)/fs；m = q_raw + 1 = s + D
+两态对应同一原始取样位置：连续原始坐标均为 s + D（整数 D 下插值分数相同；exp3 T7 恒等式断言）
+旧 DAS 未裁剪查询 q_legacy = s（无补偿，隐含"样本 1 = 声学零点"）= 历史兼容行为，单列 §2.3，不混入拟议反演表格
+生产 delayCut=0 旧行为（无补偿）≠ 拟议语义 → 二轮确定建议：补偿查询 tf_eff = tf + sysDelay − 1；
+  若改选"反演仅允许 delayCut=1"必须显式报错而非自动切换（algorithm-stage-A.md §2.3/§2.5/§7）
 ```
 
 ## 选定边界策略（拟定默认，待审查）
@@ -164,7 +170,7 @@ delayCut=0：查询 τ₀ = d·fs/c(+分层)（全行连续坐标）           �
 ## 未解决决策点（返回规划主代理）
 
 1. **权重/归一化最终选择**（R2）：维持"反演开启 → 立体角权重 + accW"（ubpD，盘内最优、物理依据明确）还是改选/允许配置 legacyW（点目标 CNR 与环外位置更优）——优劣互现，见 §R2 数据。
-2. **delayCut=0 + 反演的适配方式**（R3）：查询补偿（tf_eff = tf + sysDelay − 1）还是强制 delayCut=1；对用户可见行为（报错/自动切换）的选择。
+2. **delayCut=0 + 反演的适配方式**（R3，二轮已给出确定建议）：查询补偿（tf_eff = tf + sysDelay − 1，即 q_raw = s+D−1）为建议方案；替代方案"反演仅允许 delayCut=1"须显式报错——请规划主代理裁定是否接受建议（见 review-spec-closure.md B2）。
 3. **环外像素策略**（维持原三项选项 a/b/c，本阶段推荐 a+c）。
 4. exp1 球外残差机制如需更强结论，是否要求补充独立网格加密证据（本阶段未做，措辞已收敛）。
 
@@ -214,7 +220,7 @@ delayCut=0：查询 τ₀ = d·fs/c(+分层)（全行连续坐标）           �
 | 两态等价/跨通道/±1/不补偿差距 | exp3 T5 | maxStateDiffP/B、maxCrossChannelDiffP/B、perturbMaxDb、maxNoCompensationDiff |
 | 分层两态等价/同速退化 | exp3 T6 | maxStateDiff、degenErrSamples |
 | 顺序/实现归因 | exp5 B1 | farRelDiff_N_vs_M / farRelDiff_M_vs_Mff |
-| 边界约定误差 = 0 | exp5 B6 | bcRatioP/B、bcBiasP/B |
+| 边界约定误差量化（二轮独立参考） | exp5 B6 / test_boundary_reference | bcAbsMax*/bcRelMax*、b6ref.*、S1–S6（旧 bcRatio≡1 自比结论已撤回） |
 | DBR 阶跃传播与拒绝策略 | exp5 B2 | stepDiffBelowEcho1pctAt、memHPSpanCovers |
 | 干扰残留曲线 | exp5 B1 | burstOnly.residueProfile |
 

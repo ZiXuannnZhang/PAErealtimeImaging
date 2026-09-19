@@ -1,6 +1,10 @@
 % EXP2_RING_UBP_2D  判定性实验 2：2D 环形几何下 DAS（q=1）与环-UBP 的端到端对比。
 % 【审查整改版】R1/R2 修复 + 指标方向化，重跑后全部结论重新计算。
 %
+% 二轮整改（TASKS/环形成像阶段A边界参考与时间轴规格收口_20260919-235753.md B3）：
+%   centerPosErrMmByMode.modes 由 modes(1,:)（名称+图像矩阵）改为名称列 modes(:,1)，
+%   并加入 gate.modeNameList 结构断言；仅修 JSON 打包，重建计算零改动。
+%
 % 相对 9493962 版的修复（TASKS/环形成像阶段A审查整改追加_20260919-201935.md）
 % ----
 % R1 时间导数：ppdA/ppdB 改用 timeDerivative（逐列中心差分/端点单侧，dim 1）。
@@ -226,11 +230,18 @@ for mi = 1:size(modes, 1)
 end
 gate.finite = fin;
 res.gate = gate;
-res.centerPosErrMmByMode = struct('modes', {modes(1,:)}, 'posErrMm', posCenter);
+% B3 修复（二轮整改）：旧 modes(1,:) 取的是 cell 第一行（名称+图像矩阵），
+% 使 JSON centerPosErrMmByMode.modes 混入 4 个图像矩阵；改为名称列 modes(:,1)。
+% 仅影响 JSON 序列化，不触及任何已审重建计算。
+modeNames6 = modes(:, 1);
+res.centerPosErrMmByMode = struct('modes', {modeNames6}, 'posErrMm', posCenter);
+gate.modeNameList = iscell(modeNames6) && all(cellfun(@ischar, modeNames6)) && ...
+    numel(modeNames6) == size(modes, 1);
 res.legacyContrastPerPoint = legContrast;
 
-fprintf('\n断言门：标定P=%d 标定D=%d legacyW非符号图=%d legacyW对比度=%d 中心位置=%d 有限=%d\n', ...
-    gate.calibP, gate.calibD, gate.legacyNotSign, gate.legacyContrast, gate.centerPos, gate.finite);
+fprintf('\n断言门：标定P=%d 标定D=%d legacyW非符号图=%d legacyW对比度=%d 中心位置=%d 有限=%d 模式名列表=%d\n', ...
+    gate.calibP, gate.calibD, gate.legacyNotSign, gate.legacyContrast, gate.centerPos, ...
+    gate.finite, gate.modeNameList);
 
 % imgG.p/imgG.pp（前向与导数大矩阵，~92MB）不入库：可由本脚本确定性重算，
 % 提取标量结果已在 res.derivDominance / JSON 中。
@@ -258,7 +269,7 @@ fwrite(fid, jsonencode(out, 'PrettyPrint', true)); fclose(fid);
 fprintf('EXP2_DONE -> %s\n', fullfile(outdir, 'exp2_ring_ubp_2d.json'));
 
 gateOk = gate.calibP && gate.calibD && gate.legacyNotSign && gate.legacyContrast && ...
-    gate.centerPos && gate.finite;
+    gate.centerPos && gate.finite && gate.modeNameList;
 assert(gateOk, 'exp2:gateFailed', 'EXP2 正确性断言门未全部通过');
 
 % ================= 局部函数 =================

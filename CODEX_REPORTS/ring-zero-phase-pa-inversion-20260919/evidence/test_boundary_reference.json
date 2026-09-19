@@ -1,0 +1,183 @@
+{
+  "params": {
+    "fs": 2.5E+8,
+    "sysDelayD": 358,
+    "Nt": 4000,
+    "dbrEnd": 313,
+    "padL": 4000,
+    "padR": 4000,
+    "padUsed": 8000,
+    "padList": [
+      250,
+      500,
+      1000,
+      2000,
+      4000,
+      8000
+    ],
+    "convTolRel": 1E-9,
+    "shortFilterLen": 3643,
+    "shortTauRange": [
+      0,
+      3642
+    ],
+    "c": 1490
+  },
+  "ranges": {
+    "shortInput": {
+      "len": 3643,
+      "tauStart": 0,
+      "tauEnd": 3642,
+      "originSample": 358
+    },
+    "longInput": {
+      "len": 11643,
+      "tauStart": -4000,
+      "tauEnd": 7642,
+      "originSample": 358,
+      "extractIdx": [
+        4001,
+        7643
+      ]
+    },
+    "extraSamples": 8000,
+    "extraPresentAtFilter": true,
+    "longContainsShortBitwise": true
+  },
+  "oldConstruction": {
+    "pad2000_maxDiff": 0,
+    "pad8000_maxDiff": 0
+  },
+  "misalign": {
+    "ampWrong": 4.3544308962715109E-19,
+    "ampRight": 0.489899775164039,
+    "tauWrong": 1440.1422297338374,
+    "tauRight": 812.30111083001566
+  },
+  "derivOrigin": {
+    "absMaxDiff": 501.26874135478204,
+    "scale": 100.25374827095638
+  },
+  "convergence": {
+    "echoOnly": {
+      "padList": [
+        250,
+        500,
+        1000,
+        2000,
+        4000,
+        8000
+      ],
+      "relP": [
+        1.4163905059119074E-17,
+        1.4163905059119074E-17,
+        8.85244066194942E-18,
+        1.4163905059119074E-17,
+        8.85244066194942E-18,
+        0
+      ],
+      "relPP": [
+        5.5737920467475434E-17,
+        5.5737920467475434E-17,
+        2.0437237504740993E-17,
+        5.5737920467475434E-17,
+        2.0437237504740993E-17,
+        0
+      ],
+      "relB": [
+        6.6444778999656977E-17,
+        6.6444778999656977E-17,
+        2.5470498616535175E-17,
+        6.6444778999656977E-17,
+        2.5470498616535175E-17,
+        0
+      ],
+      "scaleP": 0.489899775164039,
+      "scalePP": 1.5664648167336939E+7,
+      "scaleB": 100.25374827095638,
+      "convergedPad": 250,
+      "convTolRel": 1E-9,
+      "window": [
+        300,
+        1300
+      ]
+    },
+    "burstEcho": {
+      "padList": [
+        250,
+        500,
+        1000,
+        2000,
+        4000,
+        8000
+      ],
+      "relP": [
+        2.2540873721546393E-9,
+        7.1500647722407888E-10,
+        2.2603015705919829E-11,
+        1.0510925334944028E-13,
+        2.8163244916596437E-14,
+        0
+      ],
+      "relPP": [
+        7.6931389263835084E-10,
+        1.2972522067270929E-10,
+        3.7598210660368642E-12,
+        2.9931536419567215E-14,
+        1.4353134423418195E-14,
+        0
+      ],
+      "relB": [
+        3.0704033588715773E-9,
+        4.8498405202780945E-10,
+        1.6101273991755685E-11,
+        3.6443681407284052E-14,
+        2.0491436041283155E-14,
+        0
+      ],
+      "scaleP": 791.1950579354484,
+      "scalePP": 1.0896754902221403E+10,
+      "scaleB": 27950.910189388378,
+      "convergedPad": 500,
+      "convTolRel": 1E-9,
+      "window": [
+        300,
+        1300
+      ]
+    }
+  },
+  "farFieldAlignment": {
+    "tauEcho": 2700,
+    "Nt": 8000,
+    "ampRatio": 1.0000000000000133,
+    "posBias": 0,
+    "relP": 7.6980823996313186E-14,
+    "relPP": 1.1534033675402866E-14,
+    "relB": 1.138190861204983E-14,
+    "tolAmp": 1E-6,
+    "tolPos": 0.001,
+    "tolWave": 1E-6
+  },
+  "sensitivity": {
+    "startBurstRelP": 0.31117044891792733,
+    "startBurstWindow": [
+      0,
+      1499
+    ],
+    "endEchoRelP": 0.63275363030561171,
+    "endEchoTau": 3600
+  },
+  "pass": {
+    "S1_longerByPad": true,
+    "S1_containsShortBitwise": true,
+    "S1_extraPresentAtFilter": true,
+    "S2_oldConstructFlaggedInvalid": true,
+    "S2b_misalignDetectable": true,
+    "S2c_derivOriginDetectable": true,
+    "S3_padConvergence": true,
+    "S4_physicalTimeAligned": true,
+    "S5_boundaryEffectsMeasurable": true,
+    "S6_noneComboBitwise": true
+  },
+  "matlabVersion": "9.14.0.2206163 (R2023a)"
+}

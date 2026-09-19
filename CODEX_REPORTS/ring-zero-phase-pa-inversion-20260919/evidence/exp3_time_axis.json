@@ -52,6 +52,13 @@
         0,
         0
       ],
+      "dStatePP": [
+        0,
+        2.8576086155938363E-57,
+        5.831010639667511E-6,
+        0,
+        0
+      ],
       "dStateB": [
         0,
         1.60854917613171E-62,
@@ -100,6 +107,13 @@
         0,
         9.0104006834325788E-69,
         9.7699626167013776E-15,
+        0,
+        0
+      ],
+      "dStatePP": [
+        0,
+        2.8576086155938363E-57,
+        5.831010639667511E-6,
         0,
         0
       ],
@@ -154,6 +168,13 @@
         0,
         0
       ],
+      "dStatePP": [
+        0,
+        2.8576086155938363E-57,
+        5.831010639667511E-6,
+        0,
+        0
+      ],
       "dStateB": [
         0,
         1.60854917613171E-62,
@@ -184,6 +205,10 @@
       ]
     },
     "maxStateDiffP": 9.7699626167013776E-15,
+    "maxStateDiffPP": 5.831010639667511E-6,
+    "ppScale": 526374.272163529,
+    "stateDiffPPRel": 1.1077689294540573E-11,
+    "statePPNote": "the p' two-state residual (and the p residual) shares one source: the raw-state query coordinate q_raw = s + D - 1 is evaluated in double precision, so its interpolation fraction can differ from the cut-state fraction by ~1 ulp of the coordinate (~1e-13 samples); scaled by the local p' slope (~|p'|/sigma ~ 1e10 per sample for the sigma=2-sample stress pulse) this yields ~1e-6..1e-5 absolute p' differences (~1e-11 relative). It is interpolation-coordinate rounding, not a semantic difference between states; gate tolerance 1e-10 relative (measured 1.11e-11).",
     "maxStateDiffB": 3.1288305279986162E-11,
     "maxCrossChannelDiffP": 0,
     "maxCrossChannelDiffB": 0,
@@ -199,7 +224,34 @@
   "T6_degenErrSamples": 0,
   "T6": {
     "maxStateDiff": 0,
+    "maxStateDiffPP": 0,
+    "ppScale": 420949.44677180424,
+    "stateDiffPPRel": 0,
     "maxAnalyticErrP": 0.027833277437611881
+  },
+  "T7": {
+    "maxCoordIdentityErr": 4.2351647362715017E-22,
+    "endpointProbe": [
+      {
+        "s": 0,
+        "ppCutState": 2.5055255909531876E+10,
+        "ppFullState": 1.2527627954765938E+10,
+        "absDiff": 1.2527627954765938E+10
+      },
+      {
+        "s": 0.5,
+        "ppCutState": 2.500611260532328E+10,
+        "ppFullState": 1.8742298627940315E+10,
+        "absDiff": 6.2638139773829651E+9
+      },
+      {
+        "s": 1.5,
+        "ppCutState": 2.4843243027298141E+10,
+        "ppFullState": 2.4843243027298141E+10,
+        "absDiff": 0
+      }
+    ],
+    "endpointNote": "uncut-state p' uses the central difference at raw sample D (genuine pre-trigger samples exist in the model), the cut line uses one-sided differences at its first sample; within the first stored sample (s<1) the two states differ by a real endpoint-convention difference (documented, NOT gated to 0, not a bug; b inherits it at the line start). For s>=1 both states share the identical raw stencil and agree to floating level (T5_stateEquivalencePP)."
   },
   "pass": {
     "T1_halfSample": true,
@@ -208,13 +260,17 @@
     "T3_halfSample": true,
     "T4_detectOneSample": true,
     "T5_stateEquivalence": true,
+    "T5_stateEquivalencePP": true,
     "T5_crossChannel": true,
     "T5_analyticP": true,
     "T5_noCompensationLarge": true,
     "T5_perturbDetectable": true,
     "T6_stateEquivalence": true,
+    "T6_stateEquivalencePP": true,
     "T6_degenerate": true,
-    "T6_analyticP": true
+    "T6_analyticP": true,
+    "T7_coordIdentity": true,
+    "T7_endpointConvention": true
   },
   "params": {
     "fs": 2.5E+8,
@@ -236,6 +292,10 @@
       "wl2",
       "chVar",
       "maxStateDiffP",
+      "maxStateDiffPP",
+      "ppScale",
+      "stateDiffPPRel",
+      "statePPNote",
       "maxStateDiffB",
       "maxCrossChannelDiffP",
       "maxCrossChannelDiffB",
