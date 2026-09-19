@@ -200,6 +200,8 @@ delayCut=0：查询 τ₀ = d·fs/c(+分层)（全行连续坐标）           �
 
 单项运行示例（均退出码 0）：`matlab -batch "run('test_time_derivative.m')"`、`matlab -batch "run('exp2_ring_ubp_2d.m')"` 等。exp1/exp4/exp6 代码未改动、重跑后 JSON 字节不变（确定性复核）；`filter_reference_vectors.mat` 因重跑重写（内容约定不变，T5 核查相对差 ≤3.3e-13）。
 
+**证据体积说明**：`exp2_images.mat` 首版曾包含前向/导数大矩阵（~92MB，触发 GitHub 大文件警告）；已改为仅存储重建图像与指标（6.3MB），前向/导数可由 exp2 脚本确定性重算，标量结果（derivDominance 等）在 JSON 中不变。瘦身后全套件再次复跑：退出码 0、0 项失败（exp2 50.3s），本回执引用的全部数值不受影响。
+
 主要结论 → 脚本/断言/数据字段映射：
 
 | 结论 | 脚本 | 断言/字段 |
