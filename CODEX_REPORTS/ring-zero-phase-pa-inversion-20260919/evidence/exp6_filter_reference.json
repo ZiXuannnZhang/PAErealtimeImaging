@@ -1,0 +1,174 @@
+{
+  "freq": [
+    {
+      "name": "hp0p4_fs250_n4",
+      "gainFc1pass": 0.70710678118684012,
+      "gainFc2pass": 0.50000000000041378,
+      "gain2Fc1pass": 0.9980529709371363,
+      "gainHalfFc1pass": 0.062376716234285104
+    },
+    {
+      "name": "lp40_fs250_n4",
+      "gainFc1pass": 0.7071067811865468,
+      "gainFc2pass": 0.49999999999999895,
+      "gain2Fc1pass": 0.014814298380457138,
+      "gainHalfFc1pass": 0.9988700692824205
+    },
+    {
+      "name": "hp0p4_fs200_n4",
+      "gainFc1pass": 0.70710678118686032,
+      "gainFc2pass": 0.50000000000044231,
+      "gain2Fc1pass": 0.99805319166814788,
+      "gainHalfFc1pass": 0.062375833160789013
+    },
+    {
+      "name": "lp40_fs200_n4",
+      "gainFc1pass": 0.70710678118654779,
+      "gainFc2pass": 0.50000000000000033,
+      "gain2Fc1pass": 0.0031056050385907192,
+      "gainHalfFc1pass": 0.99920095872179038
+    },
+    {
+      "name": "hp0p4_fs250_n1",
+      "gainFc1pass": 0.70710678118655068,
+      "gainFc2pass": 0.50000000000000444,
+      "gain2Fc1pass": 0.89443171080618966,
+      "gainHalfFc1pass": 0.4472113356096698
+    },
+    {
+      "name": "hp0p4_fs250_n2",
+      "gainFc1pass": 0.70710678118668879,
+      "gainFc2pass": 0.50000000000019973,
+      "gain2Fc1pass": 0.97014538383869986,
+      "gainHalfFc1pass": 0.24253274128848143
+    },
+    {
+      "name": "hp0p4_fs250_n8",
+      "gainFc1pass": 0.70710678118754988,
+      "gainFc2pass": 0.50000000000141753,
+      "gain2Fc1pass": 0.99999237377632211,
+      "gainHalfFc1pass": 0.0039060228139838372
+    },
+    {
+      "name": "lp40_fs250_n1",
+      "gainFc1pass": 0.70710678118654768,
+      "gainFc2pass": 0.50000000000000022,
+      "gain2Fc1pass": 0.32941230933653853,
+      "gainHalfFc1pass": 0.90605413725896156
+    },
+    {
+      "name": "lp40_fs250_n8",
+      "gainFc1pass": 0.70710678118655046,
+      "gainFc2pass": 0.50000000000000411,
+      "gain2Fc1pass": 0.00021951160598915787,
+      "gainHalfFc1pass": 0.99999743784678807
+    }
+  ],
+  "cross": [
+    {
+      "name": "dc",
+      "hpMaxRel": 1,
+      "lpMaxRel": 1.7763568394002524E-15,
+      "hpInteriorRel": 1,
+      "lpInteriorRel": 1.7763568394002532E-15,
+      "hpMaxAbsScale": 0
+    },
+    {
+      "name": "sine_in",
+      "hpMaxRel": 8.3841761208362651E-9,
+      "lpMaxRel": 2.4472789275219863E-15,
+      "hpInteriorRel": 8.2338539497549991E-9,
+      "lpInteriorRel": 2.4473192130319548E-15,
+      "hpMaxAbsScale": 1.416869913210846
+    },
+    {
+      "name": "sine_out",
+      "hpMaxRel": 2.0340010091203775E-8,
+      "lpMaxRel": 2.3314683517128331E-15,
+      "hpInteriorRel": 2.5175605007118537E-8,
+      "lpInteriorRel": 2.3314683517128331E-15,
+      "hpMaxAbsScale": 0.069440737802860225
+    },
+    {
+      "name": "multitone",
+      "hpMaxRel": 7.4310387397841627E-9,
+      "lpMaxRel": 1.9690899189066998E-15,
+      "hpInteriorRel": 7.4310387397841627E-9,
+      "lpInteriorRel": 1.9690899189066998E-15,
+      "hpMaxAbsScale": 1.8249237485490524
+    },
+    {
+      "name": "pulse",
+      "hpMaxRel": 2.6086622292897775E-11,
+      "lpMaxRel": 8.9014609341259274E-16,
+      "hpInteriorRel": 2.6086622292897775E-11,
+      "lpInteriorRel": 8.9014609341259274E-16,
+      "hpMaxAbsScale": 0.99671625581194923
+    },
+    {
+      "name": "burst",
+      "hpMaxRel": 1.9532218119595466E-9,
+      "lpMaxRel": 1.8509847092730224E-15,
+      "hpInteriorRel": 1.9532218119595466E-9,
+      "lpInteriorRel": 1.8509847092730224E-15,
+      "hpMaxAbsScale": 2133.9840493368624
+    },
+    {
+      "name": "noise",
+      "hpMaxRel": 6.65488499492755E-9,
+      "lpMaxRel": 1.377778254927256E-15,
+      "hpInteriorRel": 6.5823204380617756E-9,
+      "lpInteriorRel": 1.377778254927256E-15,
+      "hpMaxAbsScale": 0.39056232886936731
+    }
+  ],
+  "orderSweep": [
+    {
+      "n": 1,
+      "maxRel": 1.2937344605731086E-15,
+      "interiorRel": 1.2937344605731086E-15
+    },
+    {
+      "n": 2,
+      "maxRel": 1.7666052048469415E-13,
+      "interiorRel": 1.7172230936203814E-13
+    },
+    {
+      "n": 3,
+      "maxRel": 1.276969010989635E-10,
+      "interiorRel": 1.276969010989635E-10
+    },
+    {
+      "n": 4,
+      "maxRel": 7.4310387397841627E-9,
+      "interiorRel": 7.4310387397841627E-9
+    },
+    {
+      "n": 5,
+      "maxRel": 1.717549019782058E-6,
+      "interiorRel": 1.717549019782058E-6
+    },
+    {
+      "n": 6,
+      "maxRel": 0.00024410667824072572,
+      "interiorRel": 0.00024410667824072572
+    },
+    {
+      "n": 7,
+      "maxRel": 0.043149097294485794,
+      "interiorRel": 0.043149097294485794
+    },
+    {
+      "n": 8,
+      "maxRel": 1.0000000001976266,
+      "interiorRel": 1.0000000004028369
+    }
+  ],
+  "pass": {
+    "fcGain": true,
+    "crossHP": true,
+    "crossLP": true,
+    "longPad": true
+  },
+  "matlabVersion": "9.14.0.2206163 (R2023a)"
+}

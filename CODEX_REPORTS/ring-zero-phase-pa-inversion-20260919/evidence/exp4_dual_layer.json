@@ -1,0 +1,32 @@
+{
+  "T1_maxDL": 3.1712913545201005E-17,
+  "T1_maxRel": 1.1674817614475863E-13,
+  "T2_maxDTau": 4.5474735088646412E-13,
+  "T2_maxDTauTrueLayers": 69.017681196734884,
+  "T3_posErrLayeredMm": 0,
+  "T3_posErrSingleMm": 0,
+  "T3_degMaxDiff": 0,
+  "T3_ampLayered": 0.99990688035085473,
+  "T3_ampSingle": 0.9999068743526266,
+  "pass": {
+    "T1": true,
+    "T2": true,
+    "T3": true,
+    "T3deg": true
+  },
+  "params": {
+    "fs": 2.5E+8,
+    "R": 0.00657,
+    "rb": 0.004,
+    "c1": 1490,
+    "c2": 1540,
+    "absorber": [
+      0,
+      0
+    ],
+    "sig": 0.0005,
+    "nd": 360,
+    "grid": 0.0001
+  },
+  "matlabVersion": "9.14.0.2206163 (R2023a)"
+}

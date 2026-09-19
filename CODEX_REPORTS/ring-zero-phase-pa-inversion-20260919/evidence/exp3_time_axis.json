@@ -1,0 +1,49 @@
+{
+  "T1_peakTau": 671,
+  "T1_expectedTau": 671.14093959731542,
+  "T1_errSamples": -0.14093959731542327,
+  "T2_tauPmax": 671.00093959731544,
+  "T2_tauPzero": 671.15120112283262,
+  "T2_offsetPmax": -0.13999999999998636,
+  "T2_offsetPzero": 0.010261525517194059,
+  "T2_tauBzero": 671.14404692885807,
+  "T2_offsetBzero": 0.0031073315426510817,
+  "T3_mPeak": 1029,
+  "T3_mExpected": 1029.1409395973155,
+  "T3_errSamples": -0.14093959731553696,
+  "T3_tFormulaErr": -5.6375838926169352E-10,
+  "T4": [
+    {
+      "shift": -1,
+      "tauBpk": 674.00093959731544,
+      "offset": 2.8600000000000136
+    },
+    {
+      "shift": [],
+      "tauBpk": [],
+      "offset": []
+    },
+    {
+      "shift": 1,
+      "tauBpk": 672.00093959731544,
+      "offset": 0.86000000000001364
+    }
+  ],
+  "pass": {
+    "T1_halfSample": true,
+    "T2_pmaxQuarter": true,
+    "T2_pzeroQuarter": true,
+    "T3_halfSample": true,
+    "T4_detectOneSample": true
+  },
+  "params": {
+    "fs": 2.5E+8,
+    "c": 1490,
+    "sampDepth": 4000,
+    "sysDelay": 358,
+    "maskLength": 300,
+    "d0": 0.004,
+    "sigmaSamp": 2
+  },
+  "matlabVersion": "9.14.0.2206163 (R2023a)"
+}

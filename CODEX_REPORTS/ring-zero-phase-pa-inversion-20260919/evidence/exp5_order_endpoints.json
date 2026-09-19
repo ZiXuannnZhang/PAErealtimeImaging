@@ -1,0 +1,31 @@
+{
+  "A1_maxRelDiff": 0.085682405836390058,
+  "A2_tailSamples_M": 1743,
+  "A2_tailSamples_N": 1747,
+  "A3_start50_M": 1075.6397988485724,
+  "A3_start50_N": 984.70235943979151,
+  "A4_derivStart_M": 1.0403370376471727E+10,
+  "A4_derivStart_N": 8.55972392822232E+9,
+  "A4_derivEcho_M": 4.5179731015704945E+7,
+  "A4_derivEcho_N": 4.4769650927752815E+7,
+  "A6_nanInf": false,
+  "A5_errorAt12": true,
+  "A5_okAt13": true,
+  "pass": {
+    "A1": false,
+    "A6": true,
+    "A5err": true,
+    "A5ok": true
+  },
+  "params": {
+    "fs": 2.5E+8,
+    "Nt": 4000,
+    "sysDelay": 358,
+    "maskLength": 300,
+    "nHP": 4,
+    "fcHP": 400000,
+    "nLP": 4,
+    "fcLP": 4.0E+7
+  },
+  "matlabVersion": "9.14.0.2206163 (R2023a)"
+}
