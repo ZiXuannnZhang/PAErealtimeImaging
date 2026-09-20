@@ -89,6 +89,16 @@ private:
     QCheckBox       *m_chkImpair;
     QDoubleSpinBox  *m_spnImValue1;
     QDoubleSpinBox  *m_spnImValue2;
+    // 零相位滤波（阶段 B1）：两个独立开关；关闭时禁用数值输入并保留值。
+    // MHz 显示、Hz 传递（转换只做一次：UI 只存 MHz，config() 导出 Hz）。
+    // 截止为单程 −3dB 点（双程在该频率约 −6dB）；有效范围 (0, 采样率/2)。
+    QCheckBox       *m_chkZpHp;        // 高通零相位滤波
+    QDoubleSpinBox  *m_spnZpHpMhz;     // 高通截止（MHz）
+    QSpinBox        *m_spnZpHpOrder;   // 高通单程阶数（1–8）
+    QCheckBox       *m_chkZpLp;        // 低通零相位滤波
+    QDoubleSpinBox  *m_spnZpLpMhz;     // 低通截止（MHz）
+    QSpinBox        *m_spnZpLpOrder;   // 低通单程阶数（1–8）
+    QLabel          *m_lblZpRange;     // 当前采样率与有效范围提示
 
     QPushButton     *m_btnSaveDefault;
     QPushButton     *m_btnRestore;

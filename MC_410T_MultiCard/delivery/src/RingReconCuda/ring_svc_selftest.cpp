@@ -101,6 +101,15 @@ int main(int argc, char** argv) {
     const bool splice = argInt(args, "--splice", 0) != 0;          // 1=拼接模式（需配准模式）
     const double spliceBlendDeg = argDouble(args, "--splice-blend", 0.0);  // 拼接羽化宽度（°）
     const std::string sysDelayPerCh = argStr(args, "--sys-delay-per-ch");   // 空=各通道统一默认
+    // 阶段 B1：零相位滤波四态对比（0=全关，1=仅HP，2=仅LP，3=HP+LP）
+    const int zpMode = argInt(args, "--zp", 0);
+    const double zpHpMhz = argDouble(args, "--zp-hp-mhz", 0.4);
+    const double zpLpMhz = argDouble(args, "--zp-lp-mhz", 40.0);
+    const int zpOrder = argInt(args, "--zp-order", 4);
+    // C2 组合校验链路验证：--delay-cut 0 + --zp>0 + DBR 默认开 → 服务必须
+    // 在 configure 阶段拒绝（error 2012）且不出图；--mask-len 用于 E>=D 拒绝。
+    const int delayCut = argInt(args, "--delay-cut", 1);
+    const int maskLen = argInt(args, "--mask-len", 300);
 
     if (dataPath.empty() || svcPath.empty()) {
         std::fprintf(stderr,
@@ -110,6 +119,7 @@ int main(int argc, char** argv) {
             "[--radius-per-ch 6.57,6.55,...] [--splice 1] [--splice-blend 1.5] "
             "[--sos-radii-mm 3] [--sos 1490,1540] "
             "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...] "
+            "[--zp 0|1|2|3] [--zp-hp-mhz 0.4] [--zp-lp-mhz 40] [--zp-order 4] "
             "[--identity-jump-at N] [--drop-block N]\n");
         return 2;
     }
@@ -295,9 +305,16 @@ int main(int argc, char** argv) {
     ring["minDistance"] = 0.0;
     ring["maskOutOfRange"] = 1;
     ring["dbrSigRemove"] = 1;
-    ring["maskLength"] = 300;
-    ring["delayCut"] = 1;
+    ring["maskLength"] = maskLen;
+    ring["delayCut"] = delayCut;
     ring["singalImpair"] = 0;
+    // 阶段 B1：零相位滤波（filterLow=高通 / filterHigh=低通；服务端校验+设计）
+    ring["filterLow"] = (zpMode == 1 || zpMode == 3) ? 1 : 0;
+    ring["wLow"] = zpHpMhz * 1e6;
+    ring["n1"] = zpOrder;
+    ring["filterHigh"] = (zpMode == 2 || zpMode == 3) ? 1 : 0;
+    ring["wHigh"] = zpLpMhz * 1e6;
+    ring["n2"] = zpOrder;
     QJsonArray imv; imv.append(2000.0); imv.append(400.0);
     ring["imValue"] = imv;
     QJsonArray sd; sd.append(sysDelay1); sd.append(sysDelay2);
@@ -345,6 +362,39 @@ int main(int argc, char** argv) {
     params["ring"] = ring;
     sendJson(sock, {{"cmd", "configure"}, {"params", params}});
     QThread::msleep(50);
+
+    // 阶段 B1：配置拒绝链路验证。--expect-config-reject 时，非法滤波配置
+    // （如 C2 违规组合）必须在此处收到 svc 的 error 消息（code 2012），
+    // 且不进入成像；收到即 PASS 退出，超时未见 error 则 FAIL。
+    if (argInt(args, "--expect-config-reject", 0)) {
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::milliseconds(5000);
+        bool gotError = false;
+        std::string errMsg;
+        while (std::chrono::steady_clock::now() < deadline) {
+            zmq::message_t msg;
+            while (sock.recv(msg, zmq::recv_flags::dontwait)) {
+                const QByteArray data(static_cast<const char*>(msg.data()),
+                                      static_cast<int>(msg.size()));
+                const QJsonObject obj = QJsonDocument::fromJson(data).object();
+                if (obj["cmd"].toString() == QStringLiteral("error")) {
+                    gotError = true;
+                    errMsg = obj["msg"].toString().toStdString();
+                    break;
+                }
+            }
+            if (gotError) break;
+            QThread::msleep(10);
+        }
+        if (gotError) {
+            std::printf("[config-reject] PASS: svc rejected config: %s\n",
+                        errMsg.c_str());
+            return 0;
+        }
+        std::fprintf(stderr, "[config-reject] FAIL: no error received\n");
+        return 6;
+    }
+
     sendJson(sock, {{"cmd", "start"}});
     QThread::msleep(200);
 

@@ -333,6 +333,62 @@ void RingConfigDialog::buildUi()
     fPre->addRow("imValue2(1064nm)", m_spnImValue2);
     reconLayout->addWidget(grpPre);
 
+    // ══ 零相位滤波（阶段 B1）：高通先于低通；两开关独立 ══
+    auto *grpZp = new QGroupBox("零相位滤波（A-line 预处理，高通先于低通）");
+    auto *fZp = new QFormLayout(grpZp);
+    m_chkZpHp = new QCheckBox("高通零相位滤波"); m_chkZpHp->setChecked(false);
+    m_chkZpHp->setToolTip("启用后在延时截断之后对每根完整 A-line 做零相位高通滤波。\n"
+                          "截止频率为单程 −3dB 点；前后向各滤一次，该频率处约 −6dB。");
+    m_spnZpHpMhz = new QDoubleSpinBox;
+    m_spnZpHpMhz->setRange(0.0001, 500); m_spnZpHpMhz->setDecimals(4);
+    m_spnZpHpMhz->setValue(0.4); m_spnZpHpMhz->setSuffix(" MHz");
+    m_spnZpHpOrder = new QSpinBox;
+    m_spnZpHpOrder->setRange(1, 8); m_spnZpHpOrder->setValue(4);
+    auto *hpRow = new QWidget;
+    auto *hpLay = new QHBoxLayout(hpRow);
+    hpLay->setContentsMargins(0, 0, 0, 0);
+    hpLay->addWidget(m_chkZpHp);
+    hpLay->addWidget(new QLabel("截止"));
+    hpLay->addWidget(m_spnZpHpMhz);
+    hpLay->addWidget(new QLabel("阶数"));
+    hpLay->addWidget(m_spnZpHpOrder);
+    hpLay->addStretch();
+    fZp->addRow("", hpRow);
+
+    m_chkZpLp = new QCheckBox("低通零相位滤波"); m_chkZpLp->setChecked(false);
+    m_chkZpLp->setToolTip("启用后在延时截断之后对每根完整 A-line 做零相位低通滤波（在高通之后）。\n"
+                          "截止频率为单程 −3dB 点；前后向各滤一次，该频率处约 −6dB。");
+    m_spnZpLpMhz = new QDoubleSpinBox;
+    m_spnZpLpMhz->setRange(0.0001, 500); m_spnZpLpMhz->setDecimals(4);
+    m_spnZpLpMhz->setValue(40); m_spnZpLpMhz->setSuffix(" MHz");
+    m_spnZpLpOrder = new QSpinBox;
+    m_spnZpLpOrder->setRange(1, 8); m_spnZpLpOrder->setValue(4);
+    auto *lpRow = new QWidget;
+    auto *lpLay = new QHBoxLayout(lpRow);
+    lpLay->setContentsMargins(0, 0, 0, 0);
+    lpLay->addWidget(m_chkZpLp);
+    lpLay->addWidget(new QLabel("截止"));
+    lpLay->addWidget(m_spnZpLpMhz);
+    lpLay->addWidget(new QLabel("阶数"));
+    lpLay->addWidget(m_spnZpLpOrder);
+    lpLay->addStretch();
+    fZp->addRow("", lpRow);
+
+    m_lblZpRange = new QLabel;
+    fZp->addRow("有效范围", m_lblZpRange);
+    reconLayout->addWidget(grpZp);
+
+    // 开关联动：关闭时禁用该行数值输入并保留值（再次启用可继续编辑）
+    auto syncZpEnabled = [this]() {
+        m_spnZpHpMhz->setEnabled(m_chkZpHp->isChecked());
+        m_spnZpHpOrder->setEnabled(m_chkZpHp->isChecked());
+        m_spnZpLpMhz->setEnabled(m_chkZpLp->isChecked());
+        m_spnZpLpOrder->setEnabled(m_chkZpLp->isChecked());
+    };
+    connect(m_chkZpHp, &QCheckBox::toggled, this, syncZpEnabled);
+    connect(m_chkZpLp, &QCheckBox::toggled, this, syncZpEnabled);
+    syncZpEnabled();
+
     reconLayout->addStretch();
     auto *reconScroll = new QScrollArea;
     reconScroll->setWidgetResizable(true);
@@ -375,6 +431,15 @@ void RingConfigDialog::setAcquisitionParams(double sampleIntervalNs, int acqTime
         m_sampDepth = std::max(1, static_cast<int>(acqTimeNs / sampleIntervalNs));
         m_lblSampDepth->setText(QString::number(m_sampDepth));
     }
+    // 零相位滤波：按当前真实采样率刷新有效范围提示与 UI 上限。
+    // 截止上限动态 = 采样率/2（MHz）；不改变已保存的值（恢复值与采样率
+    // 不匹配时不静默改值——启用/应用前由 applyConfig 校验并提示）。
+    const double halfMhz = m_daqHz * 0.5 / 1e6;
+    m_lblZpRange->setText(QString("当前采样率 %1 Hz；截止必须 ∈ (0, %2 MHz)，"
+                                  "双开时高通 < 低通")
+                              .arg(m_daqHz, 0, 'f', 0).arg(halfMhz, 0, 'f', 1));
+    m_spnZpHpMhz->setMaximum(halfMhz);
+    m_spnZpLpMhz->setMaximum(halfMhz);
 }
 
 void RingConfigDialog::restoreDefaults()
@@ -431,6 +496,13 @@ void RingConfigDialog::restoreDefaults()
     m_chkImpair->setChecked(val("impair", false).toBool());
     m_spnImValue1->setValue(val("imValue1", 2000).toDouble());
     m_spnImValue2->setValue(val("imValue2", 400).toDouble());
+    // 零相位滤波：旧配置缺键默认全关（出厂 0.4MHz/40MHz、单程 4 阶）
+    m_chkZpHp->setChecked(val("zpHp", false).toBool());
+    m_spnZpHpMhz->setValue(val("zpHpMhz", 0.4).toDouble());
+    m_spnZpHpOrder->setValue(val("zpHpOrder", 4).toInt());
+    m_chkZpLp->setChecked(val("zpLp", false).toBool());
+    m_spnZpLpMhz->setValue(val("zpLpMhz", 40).toDouble());
+    m_spnZpLpOrder->setValue(val("zpLpOrder", 4).toInt());
     s.endGroup();
 }
 
@@ -470,6 +542,13 @@ void RingConfigDialog::saveDefaults()
     s.setValue("impair", m_chkImpair->isChecked());
     s.setValue("imValue1", m_spnImValue1->value());
     s.setValue("imValue2", m_spnImValue2->value());
+    // 零相位滤波：关闭时也保存当前值（保留输入值，再次启用无需重填）
+    s.setValue("zpHp", m_chkZpHp->isChecked());
+    s.setValue("zpHpMhz", m_spnZpHpMhz->value());
+    s.setValue("zpHpOrder", m_spnZpHpOrder->value());
+    s.setValue("zpLp", m_chkZpLp->isChecked());
+    s.setValue("zpLpMhz", m_spnZpLpMhz->value());
+    s.setValue("zpLpOrder", m_spnZpLpOrder->value());
     s.endGroup();
     // 物理轮次启动策略与其他默认参数同一次“设为默认”落盘（同一 Defaults group，
     // 独立 key；helper 内部自行 sync）
@@ -537,6 +616,14 @@ RingReconCudaConfig RingConfigDialog::config() const
     cfg.singalImpair = m_chkImpair->isChecked() ? 1 : 0;
     cfg.imValue[0] = m_spnImValue1->value();
     cfg.imValue[1] = m_spnImValue2->value();
+    // 零相位滤波：UI MHz → Hz 只在此处转换一次（服务端全按 Hz 校验/设计）。
+    // 字段沿用基线 reserved 命名：filterLow/wLow/n1 = 高通，filterHigh/wHigh/n2 = 低通。
+    cfg.filterLow = m_chkZpHp->isChecked() ? 1 : 0;
+    cfg.wLow = m_spnZpHpMhz->value() * 1e6;
+    cfg.n1 = m_spnZpHpOrder->value();
+    cfg.filterHigh = m_chkZpLp->isChecked() ? 1 : 0;
+    cfg.wHigh = m_spnZpLpMhz->value() * 1e6;
+    cfg.n2 = m_spnZpLpOrder->value();
     // C 结构体中的 sysDelay[2] 保留为通道1值（兼容旧协议/离线工具）；
     // 实时链路的每通道双波长延时由 sysDelayPerChannel() 随配置一并下发。
     cfg.sysDelay[0] = m_spnSysDelayCh[0][0]->value();
@@ -595,6 +682,74 @@ bool RingConfigDialog::applyConfig()
                               radiiM, &radiiCount, speedsMps, &speedsCount, &sosErr)) {
         QMessageBox::warning(this, "参数错误", sosErr);
         return false;
+    }
+
+    // ══ 零相位滤波前置校验（阶段 B1；服务端会重复校验，此处尽早给出 UI 提示）══
+    // 只校验"启用"的滤波器；全关时不因保留的无效截止值阻塞旧路径。
+    // 使用当前真实采样率 m_daqHz（setAcquisitionParams 刷新），非固定 250MHz。
+    if (m_chkZpHp->isChecked() || m_chkZpLp->isChecked()) {
+        const double halfFs = m_daqHz * 0.5;
+        const double hpHz = m_spnZpHpMhz->value() * 1e6;
+        const double lpHz = m_spnZpLpMhz->value() * 1e6;
+        if (m_chkZpHp->isChecked() && !(hpHz > 0.0 && hpHz < halfFs)) {
+            QMessageBox::warning(this, "参数错误",
+                QString("高通截止 %1 MHz 超出有效范围 (0, %2 MHz)。\n"
+                        "截止为单程 −3dB 点；当前采样率 %3 Hz。")
+                    .arg(m_spnZpHpMhz->value(), 0, 'f', 4)
+                    .arg(halfFs / 1e6, 0, 'f', 1)
+                    .arg(m_daqHz, 0, 'f', 0));
+            return false;
+        }
+        if (m_chkZpLp->isChecked() && !(lpHz > 0.0 && lpHz < halfFs)) {
+            QMessageBox::warning(this, "参数错误",
+                QString("低通截止 %1 MHz 超出有效范围 (0, %2 MHz)。\n"
+                        "截止为单程 −3dB 点；当前采样率 %3 Hz。")
+                    .arg(m_spnZpLpMhz->value(), 0, 'f', 4)
+                    .arg(halfFs / 1e6, 0, 'f', 1)
+                    .arg(m_daqHz, 0, 'f', 0));
+            return false;
+        }
+        if (m_chkZpHp->isChecked() && m_chkZpLp->isChecked() && !(hpHz < lpHz)) {
+            QMessageBox::warning(this, "参数错误",
+                QString("高通截止 %1 MHz 必须低于低通截止 %2 MHz。")
+                    .arg(m_spnZpHpMhz->value(), 0, 'f', 4)
+                    .arg(m_spnZpLpMhz->value(), 0, 'f', 4));
+            return false;
+        }
+        // C2 规则（与阶段 A filterDbrConfigCheck 一致）：逐启用通道/波长
+        // 校验实际置零长度 E 与 D、延时裁剪组合；一条不满足即拒绝本组配置。
+        // E = min(maskLength + 该波长 extra, sampDepth)，DBR 关闭为 0。
+        for (int c = 0; c < 8; ++c) {
+            if (!m_chkCh[c]->isChecked()) continue;
+            for (int w = 0; w < 2; ++w) {
+                const int D = m_spnSysDelayCh[c][w]->value();
+                const int extra = (w == 1)
+                    ? m_spnSysDelayCh[c][1]->value() - m_spnSysDelayCh[c][0]->value()
+                    : 0;
+                const int E = m_chkDbr->isChecked()
+                    ? std::min(std::max(0, m_spnMaskLen->value() + extra), m_sampDepth)
+                    : 0;
+                const bool delayCut = m_chkDelayCut->isChecked();
+                if (E <= 0) continue;   // E=0 允许（含 DBR 关）
+                if (!delayCut) {
+                    QMessageBox::warning(this, "参数错误",
+                        QString("零相位滤波与未裁剪的 DBR 置零前缀不兼容"
+                                "（通道%1 波长%2：实际置零 %3 样本、延时截断未开启）。\n"
+                                "本版不支持该组合（不是数学禁忌）；"
+                                "请启用延时截断或调小 DBR mask长度。")
+                            .arg(c + 1).arg(w + 1).arg(E));
+                    return false;
+                }
+                if (E >= D) {
+                    QMessageBox::warning(this, "参数错误",
+                        QString("DBR 置零末端必须早于延时裁剪起点"
+                                "（通道%1 波长%2：实际置零 %3 ≥ 延时截断起点 %4）。\n"
+                                "请调小 DBR mask长度或调整该通道延时截断。")
+                            .arg(c + 1).arg(w + 1).arg(E).arg(D));
+                    return false;
+                }
+            }
+        }
     }
 
     int sysDelayCh[8][2] = {{0}};

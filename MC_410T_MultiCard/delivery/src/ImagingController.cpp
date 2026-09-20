@@ -917,6 +917,14 @@ void ImagingController::sendConfigureAndStart()
         ring["maskLength"]      = m_ringConfig.maskLength;
         ring["delayCut"]        = m_ringConfig.delayCut;
         ring["singalImpair"]    = m_ringConfig.singalImpair;
+        // 阶段 B1：零相位滤波（filterLow=高通 / filterHigh=低通，与基线
+        // reserved 字段语义一致；服务端独立校验并按配置设计缓存）
+        ring["filterLow"]       = m_ringConfig.filterLow;
+        ring["wLow"]            = m_ringConfig.wLow;
+        ring["n1"]              = m_ringConfig.n1;
+        ring["filterHigh"]      = m_ringConfig.filterHigh;
+        ring["wHigh"]           = m_ringConfig.wHigh;
+        ring["n2"]              = m_ringConfig.n2;
         QJsonArray imv;
         imv.append(m_ringConfig.imValue[0]);
         imv.append(m_ringConfig.imValue[1]);

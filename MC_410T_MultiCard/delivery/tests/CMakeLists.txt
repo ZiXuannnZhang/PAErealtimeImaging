@@ -291,6 +291,49 @@ if(WIN32)
     add_test(NAME paimage_trace_bundle_test COMMAND paimage_trace_bundle_test)
 endif()
 
+# 阶段 B1：零相位滤波数值/配置/回归测试（纯 CPU，无 Qt/ZMQ 依赖）。
+# 参考向量来自阶段 A 已验收 MATLAB 证据的紧凑文本导出（--ref 显式传入；
+# 找不到时自动降级为内部一致性断言并注明，不静默冒充参考对照通过）。
+add_executable(ring_zero_phase_filter_test
+    ring_zero_phase_filter_test.cpp
+    ../src/RingRecon/zero_phase_filter.cpp
+    ../src/RingRecon/zero_phase_filter.h
+    ../src/RingRecon/ring_recon.cpp
+    ../src/RingRecon/ring_recon.h)
+target_include_directories(ring_zero_phase_filter_test PRIVATE
+    ../src/RingRecon)
+target_compile_features(ring_zero_phase_filter_test PRIVATE cxx_std_17)
+add_test(NAME ring_zero_phase_filter_test COMMAND ring_zero_phase_filter_test
+    --ref "${CMAKE_CURRENT_SOURCE_DIR}/../../../CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/stage-B1/matlab/reference_vectors")
+
+# 阶段 B1：RingConfigDialog 零相位滤波控件逻辑联动（offscreen Qt）。
+add_executable(ring_config_zero_phase_dialog_test
+    ring_config_zero_phase_dialog_test.cpp
+    ../src/RingConfigDialog.cpp ../include/RingConfigDialog.h
+    ../src/ImagingController.cpp ../include/ImagingController.h)
+target_include_directories(ring_config_zero_phase_dialog_test PRIVATE
+    ../include ../src/RingRecon
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/include")
+target_compile_definitions(ring_config_zero_phase_dialog_test PRIVATE
+    WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+if(MSVC)
+    set(ZPF_TEST_ZMQ_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq-v141-mt-4_3_5.lib")
+else()
+    set(ZPF_TEST_ZMQ_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a")
+endif()
+target_link_libraries(ring_config_zero_phase_dialog_test PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets "${ZPF_TEST_ZMQ_LIB}" ws2_32)
+# 运行时部署：zmq/Qt 依赖（offscreen 测试可脱离 PATH 运行）
+add_custom_command(TARGET ring_config_zero_phase_dialog_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
+        "$<TARGET_FILE_DIR:ring_config_zero_phase_dialog_test>"
+    COMMENT "Deploying zmq runtime for ring_config_zero_phase_dialog_test")
+add_test(NAME ring_config_zero_phase_dialog_test
+    COMMAND ring_config_zero_phase_dialog_test)
+set_tests_properties(ring_config_zero_phase_dialog_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 if(Python3_Interpreter_FOUND)
     add_test(NAME startup_diagnostics_analyze_test
         COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/startup_diagnostics_analyze_test.py"

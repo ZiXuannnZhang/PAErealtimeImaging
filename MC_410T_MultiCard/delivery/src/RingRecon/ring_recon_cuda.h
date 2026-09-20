@@ -73,12 +73,16 @@ typedef struct RingReconCudaConfig {
     int    gaussfil;            // reserved
     int    gaussfilRowstart;
     int    gaussfilRowsend;
-    int    filterLow;           // reserved
-    double wLow;
-    int    n1;
-    int    filterHigh;          // reserved
-    double wHigh;
-    int    n2;
+    // 零相位滤波（阶段 B1 实装；历史 reserved 字段语义固定）：
+    //   filterLow/wLow/n1 = 高通（高通先于低通；fc=wLow 单程 −3dB，n1 单程阶数）
+    //   filterHigh/wHigh/n2 = 低通
+    // 内部统一命名 highpass/lowpass；两者独立开关；均关闭时逐样本保持旧路径。
+    int    filterLow;           // 1 = 启用高通零相位滤波（旧名保留，勿改 ABI）
+    double wLow;                // 高通截止 [Hz]（单程 −3dB）
+    int    n1;                  // 高通单程阶数（1–8）
+    int    filterHigh;          // 1 = 启用低通零相位滤波（旧名保留，勿改 ABI）
+    double wHigh;               // 低通截止 [Hz]（单程 −3dB）
+    int    n2;                  // 低通单程阶数（1–8）
     int    med;                 // reserved
     int    arcRemove;           // reserved
     int    dbrSigRemove;

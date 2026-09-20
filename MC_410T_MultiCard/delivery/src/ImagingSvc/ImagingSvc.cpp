@@ -433,6 +433,14 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     cfg.maskLength             = ring["maskLength"].toInt(cfg.maskLength);
     cfg.delayCut               = ring["delayCut"].toInt(cfg.delayCut);
     cfg.singalImpair           = ring["singalImpair"].toInt(cfg.singalImpair);
+    // 阶段 B1：零相位滤波开关/截止/阶数。旧键 filterLow（=高通）/filterHigh（=低通）
+    // 语义在 91ca68b 基线即为 reserved，这里启用其真实含义；新客户端统一用同名键。
+    cfg.filterLow              = ring["filterLow"].toInt(cfg.filterLow);
+    cfg.wLow                   = ring["wLow"].toDouble(cfg.wLow);
+    cfg.n1                     = ring["n1"].toInt(cfg.n1);
+    cfg.filterHigh             = ring["filterHigh"].toInt(cfg.filterHigh);
+    cfg.wHigh                  = ring["wHigh"].toDouble(cfg.wHigh);
+    cfg.n2                     = ring["n2"].toInt(cfg.n2);
 
     const QJsonArray imv = ring["imValue"].toArray();
     if (imv.size() >= 2) {
@@ -490,6 +498,100 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
         sendError("组包列数必须为正偶数", 2005);
         return;
     }
+
+    // ══ 阶段 B1：零相位滤波服务端校验 + 设计（先构建完整滤波配置，
+    //    全部通过后才替换运行状态——不出现"一部分字段生效、一部分失败"）══
+    // 服务端不信任 UI：重复做（1）参数有限性/范围（2）逐启用通道/波长的
+    // C2 前置规则（E/D/delayCut）（3）SOS 设计。任一失败整组配置拒绝。
+    const bool hpOn = (cfg.filterLow != 0);
+    const bool lpOn = (cfg.filterHigh != 0);
+    zerophase::FilterSet zpSet;
+    std::string zpErr;
+    bool zpOk = true;
+    if (hpOn || lpOn) {
+        // 参数有限性（JSON 解析可能带 NaN/Inf）
+        const double halfFs = cfg.daqHz * 0.5;
+        auto finiteChk = [&](const char *nm, double v) {
+            if (!std::isfinite(v)) {
+                zpErr = QString("零相位滤波%1截止频率非有限值").arg(nm).toStdString();
+                zpOk = false;
+            }
+        };
+        finiteChk("高通", cfg.wLow);
+        finiteChk("低通", cfg.wHigh);
+        if (hpOn && (cfg.n1 < 1 || cfg.n1 > 8)) {
+            zpErr = QString("高通滤波阶数 %1 必须在 1–8 之间").arg(cfg.n1).toStdString();
+            zpOk = false;
+        }
+        if (lpOn && (cfg.n2 < 1 || cfg.n2 > 8)) {
+            zpErr = QString("低通滤波阶数 %1 必须在 1–8 之间").arg(cfg.n2).toStdString();
+            zpOk = false;
+        }
+        if (hpOn && zpOk && !(cfg.wLow > 0.0 && cfg.wLow < halfFs)) {
+            zpErr = QString("高通截止 %1 Hz 超出有效范围 (0, %2)（当前采样率 %3 Hz）")
+                        .arg(cfg.wLow, 0, 'g', 12).arg(halfFs, 0, 'g', 12)
+                        .arg(cfg.daqHz, 0, 'g', 12).toStdString();
+            zpOk = false;
+        }
+        if (lpOn && zpOk && !(cfg.wHigh > 0.0 && cfg.wHigh < halfFs)) {
+            zpErr = QString("低通截止 %1 Hz 超出有效范围 (0, %2)（当前采样率 %3 Hz）")
+                        .arg(cfg.wHigh, 0, 'g', 12).arg(halfFs, 0, 'g', 12)
+                        .arg(cfg.daqHz, 0, 'g', 12).toStdString();
+            zpOk = false;
+        }
+        // 两个滤波同时开：hpHz < lpHz
+        if (zpOk && hpOn && lpOn && !(cfg.wLow < cfg.wHigh)) {
+            zpErr = QString("高通截止 %1 Hz 必须低于低通截止 %2 Hz")
+                        .arg(cfg.wLow, 0, 'g', 12).arg(cfg.wHigh, 0, 'g', 12).toStdString();
+            zpOk = false;
+        }
+        // C2 前置规则：逐启用通道/波长检查实际置零长度 E 与 D、delayCut
+        if (zpOk) {
+            for (int c = 0; c < 8 && zpOk; ++c) {
+                if (!cfg.enabledChannels[c]) continue;
+                for (int w = 0; w < 2; ++w) {
+                    const int D = m_ringSysDelayCh[c][w];
+                    const int extra = (w == 1)
+                        ? m_ringSysDelayCh[c][1] - m_ringSysDelayCh[c][0] : 0;
+                    const int E = zerophase::actualZeroRows(
+                        cfg.dbrSigRemove != 0, cfg.maskLength, extra, cfg.sampDepth);
+                    std::string nm = QString("通道%1/波长%2").arg(c + 1).arg(w + 1).toStdString();
+                    std::string cerr;
+                    if (!zerophase::checkDbrCombination(
+                            true, E, D, cfg.delayCut != 0, nm, &cerr)) {
+                        zpErr = cerr;
+                        zpOk = false;
+                        break;
+                    }
+                }
+            }
+        }
+        // 短线校验：有效输出线长必须大于每个启用滤波器的 3n
+        if (zpOk) {
+            const int outRows = (cfg.delayCut != 0)
+                ? (cfg.sampDepth - m_ringSysDelayCh[0][0] + 1) : cfg.sampDepth;
+            const int need = 3 * std::max(hpOn ? cfg.n1 : 0, lpOn ? cfg.n2 : 0);
+            if (outRows <= need) {
+                zpErr = QString("有效线长 %1 必须大于延拓长度 %2（3×最大阶数）")
+                            .arg(outRows).arg(need).toStdString();
+                zpOk = false;
+            }
+        }
+        // SOS 设计（一次，缓存于 zpSet）
+        if (zpOk) {
+            zpSet = zerophase::designSet(hpOn, cfg.wLow, cfg.n1,
+                                         lpOn, cfg.wHigh, cfg.n2,
+                                         cfg.daqHz, &zpErr);
+            if (!zpErr.empty()) zpOk = false;
+        }
+    }
+    if (!zpOk) {
+        sendError(QString("零相位滤波配置被拒绝：%1").arg(QString::fromUtf8(zpErr.c_str())), 2012);
+        return;
+    }
+    m_ringZeroPhase = zpSet;
+    m_ringZeroPhaseReady = hpOn || lpOn;
+    m_ringZeroPhaseError.clear();
 
     m_ringConfig = cfg;
     m_ringMode   = true;
@@ -688,8 +790,30 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
             pp.delayCut = m_ringConfig.delayCut != 0;
             pp.signalImpair = m_ringConfig.singalImpair != 0;
             pp.imValue = m_ringConfig.imValue[w];
+            // 阶段 B1：零相位滤波（配置应用时已设计缓存；preprocessBlock
+            // 内部先 delayCut 再 HP→LP；失败抛 runtime_error，下方捕获转发）
+            pp.zeroPhase.highpassOn = (m_ringConfig.filterLow != 0);
+            pp.zeroPhase.highpassHz = m_ringConfig.wLow;
+            pp.zeroPhase.highpassOrder = m_ringConfig.n1;
+            pp.zeroPhase.lowpassOn = (m_ringConfig.filterHigh != 0);
+            pp.zeroPhase.lowpassHz = m_ringConfig.wHigh;
+            pp.zeroPhase.lowpassOrder = m_ringConfig.n2;
+            pp.zeroPhase.fsHz = m_ringConfig.daqHz;
+            pp.zeroPhase.designedSet = (m_ringZeroPhaseReady || m_ringZeroPhase.anyEnabled())
+                                     ? &m_ringZeroPhase : nullptr;
 
-            lists[w].push_back(ringrecon::preprocessBlock(d, sampDepth, 1, pp));
+            try {
+                lists[w].push_back(ringrecon::preprocessBlock(d, sampDepth, 1, pp));
+            } catch (const std::exception &e) {
+                // 滤波失败：不发布看似正常的图像——显式错误传播，整轮重建
+                // 停止该块处理（错误经既有 svcError 链路返回 UI）。
+                sendError(QString("零相位滤波运行时失败（块 %1，通道 %2，波长 %3）：%4")
+                              .arg(m_ringBlockIndex)
+                              .arg(phIdx + 1)
+                              .arg(w + 1)
+                              .arg(QString::fromUtf8(e.what())), 2013);
+                return;
+            }
             angs[w].push_back(ang[pos]);
             rads[w].push_back(static_cast<float>(
                 m_ringConfig.radiusPerChannel[(phCh >= 0 && phCh < 8) ? phCh : 0]));

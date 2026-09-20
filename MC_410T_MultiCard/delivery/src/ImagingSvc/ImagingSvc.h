@@ -11,6 +11,7 @@
 #include "RoundIdentity.h"
 #include "RingReconRoundState.h"
 #include "ring_recon_cuda.h"
+#include "zero_phase_filter.h"
 
 namespace zmq { class context_t; class socket_t; }
 namespace pa_recon_qt { class PAReconstructor; struct Config; }
@@ -94,6 +95,13 @@ private:
     float               m_ringPrevAngle[8] = {0.0f};
     float               m_ringPrevRadius[8] = {0.0f};  // per-channel prev wl2 半径（多半径配准跨块对齐）
     ring_shm_obs::Tracker m_ringObs;
+
+    // 阶段 B1：零相位滤波（HP 先于 LP；服务端独立于 UI 重复校验）
+    // 配置应用时一次设计并缓存（不逐 A-line 重复设计）；校验失败即拒绝
+    // 整组配置（sendError，不进入部分生效状态）。
+    zerophase::FilterSet  m_ringZeroPhase;
+    bool                  m_ringZeroPhaseReady = false;   // 设计成功且通过 C2 前置校验
+    std::string           m_ringZeroPhaseError;           // 最近一次设计/校验失败原因
 
     bool m_initialized;
     bool m_running;

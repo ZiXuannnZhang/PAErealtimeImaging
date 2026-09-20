@@ -1,9 +1,11 @@
 #include "ring_recon.h"
+#include "zero_phase_filter.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <stdexcept>
 
 namespace ringrecon {
 
@@ -116,8 +118,52 @@ std::vector<float> preprocessBlock(const std::vector<double>& in,
     }
 
     const int outRows = p.delayCut ? (Nt - p.systemDelay + 1) : Nt;
-    std::vector<float> out(static_cast<size_t>(outRows) * nCol);
     const int srcRow0 = p.delayCut ? (p.systemDelay - 1) : 0;
+
+    // 阶段 B1：HP → LP 零相位滤波在 delayCut 之后、作用于当前完整输出线
+    // （顺序：DBR置零 → 削顶 → delayCut → HP → LP）。滤波内部 double，
+    // 完成后转 float——与旧路径"先 double 预处理再转 float"的顺序一致。
+    // 两滤波器全关（zeroPhase 全 false 且无预设计）时不进入该分支，
+    // 逐样本保持旧路径。
+    // 设计缓存：调用方可通过 p.zeroPhase 提供一次设计的 FilterSet
+    //（ImagingSvc 每配置设计一次）；未提供时按配置现场设计（无跨线状态，
+    // 成本为 8 阶以内极点计算，验证工具可接受）。
+    const bool anyFilterOn = p.zeroPhase.highpassOn || p.zeroPhase.lowpassOn ||
+                             (p.zeroPhase.designedSet != nullptr &&
+                              p.zeroPhase.designedSet->anyEnabled());
+    if (anyFilterOn) {
+        namespace zp = zerophase;
+        zp::FilterSet local;
+        const zp::FilterSet *fs = p.zeroPhase.designedSet;
+        if (!fs) {
+            std::string derr;
+            local = zp::designSet(
+                p.zeroPhase.highpassOn, p.zeroPhase.highpassHz,
+                p.zeroPhase.highpassOrder,
+                p.zeroPhase.lowpassOn, p.zeroPhase.lowpassHz,
+                p.zeroPhase.lowpassOrder,
+                p.zeroPhase.fsHz, &derr);
+            if (!derr.empty()) {
+                throw std::runtime_error("零相位滤波配置无效: " + derr);
+            }
+            fs = &local;
+        }
+        std::vector<double> line(static_cast<size_t>(outRows));
+        for (int c = 0; c < nCol; ++c) {
+            const double* src = tmp.data() + static_cast<size_t>(c) * Nt + srcRow0;
+            for (int r = 0; r < outRows; ++r)
+                line[static_cast<size_t>(r)] = src[r];
+            std::string aerr;
+            if (!zp::applySet(*fs, line, &aerr)) {
+                throw std::runtime_error("零相位滤波失败: " + aerr);
+            }
+            for (int r = 0; r < outRows; ++r)
+                tmp[static_cast<size_t>(c) * Nt + srcRow0 + r] =
+                    line[static_cast<size_t>(r)];
+        }
+    }
+
+    std::vector<float> out(static_cast<size_t>(outRows) * nCol);
     for (int c = 0; c < nCol; ++c) {
         const double* src = tmp.data() + static_cast<size_t>(c) * Nt + srcRow0;
         float* dst = out.data() + static_cast<size_t>(c) * outRows;

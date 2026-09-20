@@ -18,6 +18,7 @@ add_executable(ImagingSvc
     ProcessScheduling.cpp
     ImagingSvc.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../RingRecon/ring_recon.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../RingRecon/zero_phase_filter.cpp
 )
 
 # ============================================================

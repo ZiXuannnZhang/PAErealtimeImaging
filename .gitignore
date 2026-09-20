@@ -45,3 +45,7 @@ MC_410T_MultiCard/delivery/libs/imaging/cufft64_12.dll
 /build/
 /artifacts/
 MC_410T_MultiCard/delivery/tools/__pycache__/
+
+# Stage-B1 C++ reference vectors (regenerable via stage-B1/matlab/export_zpf_reference.m
+# from the stage-A evidence .mat; 43 text files ~2.5MB)
+CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/stage-B1/matlab/reference_vectors/

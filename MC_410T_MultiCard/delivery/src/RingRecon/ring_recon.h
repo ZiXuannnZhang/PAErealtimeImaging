@@ -4,6 +4,9 @@
 #include <string>
 #include <vector>
 
+// 零相位滤波数值模块（阶段 B1）
+namespace zerophase { struct FilterSet; }
+
 // =====================================================================
 // RingRecon — 双波长环形扫描 DAS 实时重建（MATLAB Handoff 的 C++ CPU 移植）
 //
@@ -17,6 +20,23 @@
 // =====================================================================
 
 namespace ringrecon {
+
+// 零相位滤波预处理配置（阶段 B1）。启用时滤波在 delayCut 之后作用于
+// 当前完整输出线（DBR置零 → 削顶 → delayCut → HP → LP）。
+// 复用 reserved 字段语义（旧命名 filterLow 实指高通、filterHigh 指低通）：
+// 内部统一命名 highpass/lowpass；wLow=高通截止、wHigh=低通截止（Hz）。
+// designedSet 非空时优先使用（服务层按配置设计一次并缓存，不逐 A-line
+// 重复设计）；为空时按开关/截止/阶数现场设计。
+struct ZeroPhaseConfig {
+    bool   highpassOn = false;   // 高通零相位滤波开关
+    double highpassHz = 0.4e6;    // 高通截止（Hz，单程 −3dB；显示 0.4MHz）
+    int    highpassOrder = 4;     // 高通单程阶数（1–8）
+    bool   lowpassOn = false;    // 低通零相位滤波开关
+    double lowpassHz = 40e6;      // 低通截止（Hz，单程 −3dB；显示 40MHz）
+    int    lowpassOrder = 4;      // 低通单程阶数（1–8）
+    double fsHz = 250e6;          // 运行时采样率（Hz，真实 daqHz；非固定 250M）
+    const zerophase::FilterSet *designedSet = nullptr;   // 预设计缓存（可选）
+};
 
 struct ReconParams {
     double fs = 250e6;              // 采样率 [Hz]
@@ -33,7 +53,7 @@ struct ReconParams {
     bool   maskOutOfRange = true;
     std::string interpolation = "linear";  // linear / nearest
     std::vector<double> soundSpeedRadii;   // 分层声速边界 [m]（空=单声速）
-    std::vector<double> soundSpeeds;       // 分层声速 [m/s]（空=用 c）
+    std::vector<double> soundSpeeds;        // 分层声速 [m/s]（空=用 c）
 };
 
 struct PreprocessParams {
@@ -44,6 +64,7 @@ struct PreprocessParams {
     bool   delayCut = true;
     bool   signalImpair = false;
     double imValue = 2000.0;
+    ZeroPhaseConfig zeroPhase;      // 阶段 B1：HP/LP 零相位滤波（默认全关）
 };
 
 struct StreamConfig {
