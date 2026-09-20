@@ -1,0 +1,331 @@
+{
+  "params": {
+    "fs": 2.5E+8,
+    "sysDelayD": 358,
+    "Nt": 4000,
+    "dbrEnd": 313,
+    "nHP": 4,
+    "fcHP": 400000,
+    "nLP": 4,
+    "fcLP": 4.0E+7,
+    "shortLen": 3643,
+    "shortTauRange": [
+      0,
+      3642
+    ],
+    "convTolRel": 1E-9,
+    "padAttempt1": [
+      2000,
+      4000,
+      8000
+    ],
+    "padAttempt2": [
+      4000,
+      8000,
+      16000
+    ],
+    "anchorStartRelP": 0.31117044891792733,
+    "anchorEndRelP": 0.63275363030561171,
+    "anchorEndRelB": 0.13554445421030059,
+    "runs": "longReference pad stability on the two endpoint report windows; criterion = padConvergenceCheck (shared entry with S3/exp5 B6); 8000 is the REFERENCE pad, not a non-reference candidate"
+  },
+  "scenarios": [
+    {
+      "name": "startBurst",
+      "runName": "burstOnly",
+      "tauEcho": 800,
+      "winMatlabIdx": [
+        1,
+        1500
+      ],
+      "winTau0Based": [
+        0,
+        1499
+      ],
+      "windowNote": "原报告区间 MATLAB 索引 1:1500；0 基声学坐标 τ=0..1499",
+      "shortLen": 3643,
+      "attemptsUsed": 1,
+      "attempts": {
+        "padList": [
+          2000,
+          4000,
+          8000
+        ],
+        "padRef": 8000,
+        "absP": [
+          2.2191670723259449E-10,
+          1.3177725577406818E-10,
+          0
+        ],
+        "absPP": [
+          0.001003265380859375,
+          0.000865936279296875,
+          0
+        ],
+        "absB": [
+          1.6818830772535875E-9,
+          1.3387762010097504E-9,
+          0
+        ],
+        "scaleP": 1712.2771286508946,
+        "scalePP": 2.6092481582286377E+10,
+        "scaleB": 27950.910189390015,
+        "relP": [
+          1.2960326545238793E-13,
+          7.69602382517926E-14,
+          0
+        ],
+        "relPP": [
+          3.8450362710631179E-14,
+          3.318719519130524E-14,
+          0
+        ],
+        "relB": [
+          6.01727480735858E-14,
+          4.789740984957052E-14,
+          0
+        ],
+        "candPairDiff": {
+          "padA": 2000,
+          "padB": 4000,
+          "diffP": 1.2502200248301561E-13,
+          "diffPP": 4.6198914891861042E-14,
+          "diffB": 6.0327308329554177E-14
+        },
+        "sensP": [
+          0.31117044891803208,
+          0.31117044891802564,
+          0.31117044891792733
+        ],
+        "sensPP": [
+          0.4429815537581942,
+          0.44298155375819243,
+          0.44298155375820408
+        ],
+        "sensB": [
+          0.039607760601844476,
+          0.039607760601843019,
+          0.039607760601834491
+        ],
+        "sensSpreadP": 3.3663075249467679E-13,
+        "sensSpreadPP": 2.6315636982318132E-14,
+        "sensSpreadB": 2.5209878508651438E-13,
+        "verdict": "PASS",
+        "failReason": "",
+        "detail": {
+          "ok": true,
+          "failReason": "",
+          "tol": 1E-9,
+          "padRef": 8000,
+          "padList": [
+            2000,
+            4000,
+            8000
+          ],
+          "relP": [
+            1.2960326545238793E-13,
+            7.69602382517926E-14,
+            0
+          ],
+          "relPP": [
+            3.8450362710631179E-14,
+            3.318719519130524E-14,
+            0
+          ],
+          "relB": [
+            6.01727480735858E-14,
+            4.789740984957052E-14,
+            0
+          ],
+          "candIdx": [
+            1,
+            2
+          ],
+          "okIdx": [
+            1,
+            2
+          ],
+          "firstOkPad": 2000,
+          "maxOkPad": 4000,
+          "nOk": 2,
+          "pairSource": "actual",
+          "maxPairRel": 1.2502200248301561E-13,
+          "adjPairP": 1.2502200248301561E-13,
+          "adjPairPP": 4.6198914891861042E-14,
+          "adjPairB": 6.0327308329554177E-14,
+          "relapse": false,
+          "relapsePad": null
+        }
+      },
+      "finalVerdict": "PASS",
+      "finalSensSpreadP": 3.3663075249467679E-13,
+      "finalSensSpreadPP": 2.6315636982318132E-14,
+      "finalSensSpreadB": 2.5209878508651438E-13,
+      "finalCandPairDiff": {
+        "padA": 2000,
+        "padB": 4000,
+        "diffP": 1.2502200248301561E-13,
+        "diffPP": 4.6198914891861042E-14,
+        "diffB": 6.0327308329554177E-14
+      },
+      "anchorRelP": 0.31117044891792733,
+      "anchorErrRelP": 0,
+      "anchorRelB": 0.039607760601834491,
+      "anchorErrRelB": null,
+      "anchorPass": true
+    },
+    {
+      "name": "endEcho",
+      "runName": "echoOnly",
+      "tauEcho": 3600,
+      "winMatlabIdx": [
+        3100,
+        3643
+      ],
+      "winTau0Based": [
+        3099,
+        3642
+      ],
+      "windowNote": "原敏感性实际计算区间 MATLAB 3100:3643（i1=3600−500，i2=min(线末3643, 4100)）；0 基 τ=3099..3642，上限被短窗线末截断——不是未截断的 [3100,4100]",
+      "shortLen": 3643,
+      "attemptsUsed": 1,
+      "attempts": {
+        "padList": [
+          2000,
+          4000,
+          8000
+        ],
+        "padRef": 8000,
+        "absP": [
+          4.5963233219481481E-14,
+          0,
+          0
+        ],
+        "absPP": [
+          2.4214386940002441E-7,
+          0,
+          0
+        ],
+        "absB": [
+          7.0485839387401938E-12,
+          0,
+          0
+        ],
+        "scaleP": 0.489899775164039,
+        "scalePP": 1.5664648167336939E+7,
+        "scaleB": 451.14186721930383,
+        "relP": [
+          9.3821707111604747E-14,
+          0,
+          0
+        ],
+        "relPP": [
+          1.5457983276313187E-14,
+          0,
+          0
+        ],
+        "relB": [
+          1.562387455233415E-14,
+          0,
+          0
+        ],
+        "candPairDiff": {
+          "padA": 2000,
+          "padB": 4000,
+          "diffP": 9.3821707111604747E-14,
+          "diffPP": 1.5457983276313187E-14,
+          "diffB": 1.562387455233415E-14
+        },
+        "sensP": [
+          0.63275363030561582,
+          0.63275363030561171,
+          0.63275363030561171
+        ],
+        "sensPP": [
+          0.13534999630530953,
+          0.13534999630531863,
+          0.13534999630531863
+        ],
+        "sensB": [
+          0.13554445421029129,
+          0.13554445421030059,
+          0.13554445421030059
+        ],
+        "sensSpreadP": 6.4919820201253159E-15,
+        "sensSpreadPP": 6.72613893641351E-14,
+        "sensSpreadB": 6.8598290394156773E-14,
+        "verdict": "PASS",
+        "failReason": "",
+        "detail": {
+          "ok": true,
+          "failReason": "",
+          "tol": 1E-9,
+          "padRef": 8000,
+          "padList": [
+            2000,
+            4000,
+            8000
+          ],
+          "relP": [
+            9.3821707111604747E-14,
+            0,
+            0
+          ],
+          "relPP": [
+            1.5457983276313187E-14,
+            0,
+            0
+          ],
+          "relB": [
+            1.562387455233415E-14,
+            0,
+            0
+          ],
+          "candIdx": [
+            1,
+            2
+          ],
+          "okIdx": [
+            1,
+            2
+          ],
+          "firstOkPad": 2000,
+          "maxOkPad": 4000,
+          "nOk": 2,
+          "pairSource": "actual",
+          "maxPairRel": 9.3821707111604747E-14,
+          "adjPairP": 9.3821707111604747E-14,
+          "adjPairPP": 1.5457983276313187E-14,
+          "adjPairB": 1.562387455233415E-14,
+          "relapse": false,
+          "relapsePad": null
+        }
+      },
+      "finalVerdict": "PASS",
+      "finalSensSpreadP": 6.4919820201253159E-15,
+      "finalSensSpreadPP": 6.72613893641351E-14,
+      "finalSensSpreadB": 6.8598290394156773E-14,
+      "finalCandPairDiff": {
+        "padA": 2000,
+        "padB": 4000,
+        "diffP": 9.3821707111604747E-14,
+        "diffPP": 1.5457983276313187E-14,
+        "diffB": 1.562387455233415E-14
+      },
+      "anchorRelP": 0.63275363030561171,
+      "anchorErrRelP": 0,
+      "anchorRelB": 0.13554445421030059,
+      "anchorErrRelB": 0,
+      "anchorPass": true
+    }
+  ],
+  "pass": {
+    "E1_startRefStable": true,
+    "E3_anchorStartReproduced": true,
+    "E5_startSensStable": true,
+    "E2_endRefStable": true,
+    "E4_anchorEndReproduced": true,
+    "E6_endSensStable": true
+  },
+  "matlabVersion": "9.14.0.2206163 (R2023a)"
+}

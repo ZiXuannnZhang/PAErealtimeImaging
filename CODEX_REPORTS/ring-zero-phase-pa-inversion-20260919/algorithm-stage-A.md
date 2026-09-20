@@ -4,11 +4,12 @@
 一轮整改依据：`TASKS/环形成像阶段A审查整改追加_20260919-201935.md`（REQUEST_CHANGES，R1–R5，回执 review-remediation.md）
 二轮整改依据：`TASKS/环形成像阶段A边界参考与时间轴规格收口_20260919-235753.md`（REQUEST_CHANGES，B1–B3，回执 [review-spec-closure.md](review-spec-closure.md)）
 三轮整改依据：`TASKS/环形成像阶段A收敛判据与配置规则最终收口_20260920-101451.md`（REQUEST_CHANGES，C1/C2/C3，回执 [review-final-closure.md](review-final-closure.md)）
+四轮收尾依据：`TASKS/环形成像阶段A最小收尾与方向校准_20260920-122834.md`（最小收尾，回执 [stage-A-closeout.md](stage-A-closeout.md)）
 实现分支：`codex/ring-zero-phase-pa-inversion-20260919-025754`
-一轮整改基线 SHA：`9ace9e10f0886512954dac6f69ce01e715a4591e`（二轮起点）；二轮基线 `63e088a25a67e941d710be79ca501b3904801bc7`（三轮起点）；原审查基线 `94939627f48ccc95f60c4995c99be4e371aaa2ca`；原任务源码基线 `fb10721e07f9ea8c9e46bc308d250b788defb829`。
-阶段：**A（算法基准先行），三轮收口后待审查**。B/C 未开始。
-数值证据：`evidence/exp1..exp6`（JSON/MAT）+ `test_time_derivative.json` + `test_fair_comparison.json` + `test_boundary_reference.json` + `test_filter_dbr_config.json`（C2）+ `test_query_policy.json`（C3）；生成脚本：`matlab/`（MATLAB R2023a 9.14.0.2206163 + Signal Processing Toolbox，`refZeroPhase.m` 共享滤波参考实现）。
-统一复跑入口：`matlab/run_all_remediation.m`（任一断言失败 → 非零退出），逐项回执见 review-remediation.md（R1–R5）、review-spec-closure.md（B1–B3）与 review-final-closure.md（C1/C2/C3）。
+一轮整改基线 SHA：`9ace9e10f0886512954dac6f69ce01e715a4591e`（二轮起点）；二轮基线 `63e088a25a67e941d710be79ca501b3904801bc7`（三轮起点）；三轮基线 `77b1d37e34dfbbf4b4f799328b8737a14f026339`（四轮起点）；原审查基线 `94939627f48ccc95f60c4995c99be4e371aaa2ca`；原任务源码基线 `fb10721e07f9ea8c9e46bc308d250b788defb829`。
+阶段：**A（算法基准先行），四轮最小收尾后待最终审查**。B/C 未开始。
+数值证据：`evidence/exp1..exp6`（JSON/MAT）+ `test_time_derivative.json` + `test_fair_comparison.json` + `test_boundary_reference.json` + `test_filter_dbr_config.json`（C2）+ `test_query_policy.json`（C3）+ `test_endpoint_stability.json`（四轮端点补测）；生成脚本：`matlab/`（MATLAB R2023a 9.14.0.2206163 + Signal Processing Toolbox，`refZeroPhase.m` 共享滤波参考实现）。
+统一复跑入口：`matlab/run_all_remediation.m`（任一断言失败 → 非零退出），逐项回执见 review-remediation.md（R1–R5）、review-spec-closure.md（B1–B3）、review-final-closure.md（C1/C2/C3）与 stage-A-closeout.md（四轮收尾）。
 
 措辞约定：本文档中"拟定/建议"均为**待规划主代理审查的方案**，不使用"生产冻结"措辞（C2/C3 的"冻结"指本版规则表内容固定、不再留待阶段 B 任选，仍属待审建议）；已验证的事实以实验编号标注。原 9493962 报告中与本版冲突的结论一律以本版为准（撤回项逐条列于 §10、review-remediation.md 与 review-final-closure.md）。
 
@@ -280,6 +281,7 @@ minDistance 保留数值保护（默认自动=gridSize，只作用权重分母�
 | test_boundary_reference（二轮新，三轮 C1 改） | B1 长参考结构/旧构造负例/pad 收敛（C1 统一判据+人工误差表正负例）/物理对齐/敏感性可测性 | S1–S6 + S3n 全 PASS（收敛容差 1e-9；判据负例 6 必败 + 正例 3 必过） | PASS | 重跑（S3 判据换 padConvergenceCheck，S3n 新增） |
 | test_filter_dbr_config（三轮 C2 新） | 滤波×DBR×delayCut 配置矩阵/逐通道拒绝/E 真实语义/旧行为保持/非法参数报错 | 80 用例（50 接受/30 拒绝）全按冻结规则表 | PASS | 新增 |
 | test_query_policy（三轮 C3 新） | 三组合查询规则/偏移 D−1/分层后偏移/乘子恒等/选择唯一性/两态同位 | Q1–Q6 全 PASS（偏移 1.14e-13 浮点级；乘子错用可分辨 (D−1)/fs） | PASS | 新增 |
+| test_endpoint_stability（四轮新） | 起端/近尾报告区间的长参考 pad 稳定性（实际取样区间 + 锚定复算） | 两场景 PASS（firstOkPad=2000、maxPairRel 1.25e-13/9.38e-14；77b1d37 敏感性数值逐位复现） | PASS | 新增 |
 | exp1 | UBP 常数（紧支撑均匀球） | 球内 6.4e-8；球外收敛序列见 §1.2 | PASS（复核） | 重跑（未改码） |
 | exp2 | 2D 环形 DAS vs UBP（五模式因子分解） | §4.2；B3 修复后数值逐位不变 | PASS | 重跑（B3 打包修正） |
 | exp3 | 时间轴/脉冲/两态完整反演 + T7 恒等式/线端探针 | §2；独立 p′ 两态差 1.1e-11（相对） | PASS | 重跑（新增 T7/p′ 字段） |
@@ -287,7 +289,7 @@ minDistance 保留数值保护（默认自动=gridSize，只作用权重分母�
 | exp5 | 顺序/端点/DBR 边界策略 + B6 独立长参考 | §3（收敛判据 C1 版；policy 字段 C2/C3 冻结规则同步） | PASS | 重跑（B6 收敛块与 policy 改） |
 | exp6 | 滤波参考/频响/记忆长度/参考向量 | §3.2/§3.6 | PASS（复核） | 重跑（未改码） |
 
-统一复跑：`matlab -batch "run_all_remediation"`（工作目录 = `matlab/`；三轮收口后 11 项；复跑记录见收口回执 review-final-closure.md）。单实验：`matlab -batch "run('expN_xxx.m')"`（同目录）。
+统一复跑：`matlab -batch "run_all_remediation"`（工作目录 = `matlab/`；四轮收尾后 12 项；复跑记录见收口回执 review-final-closure.md 与 stage-A-closeout.md）。单实验：`matlab -batch "run('expN_xxx.m')"`（同目录）。
 
 生成环境：MATLAB R2023a（9.14.0.2206163）+ Signal Processing Toolbox，Windows。
 
@@ -329,3 +331,28 @@ minDistance 保留数值保护（默认自动=gridSize，只作用权重分母�
 9. **三轮 C1**：收敛判据（padConvergenceCheck 唯一入口）——padRef 自比不计入、≥2 非参考 pad、两两稳定、无再次超差、负例 6 项全 FAIL——与真实 pad 曲线重算结果是否接受；旧 convergedPad≤padRef 门已撤回是否确认。
 10. **三轮 C2**：冻结配置规则表（filterDbrConfigCheck + test_filter_dbr_config 80 用例）的接受/拒绝边界（尤其 filterEnabled=true、E>0、delayCut=false 明确报错）是否接受为阶段 B 实现的前置校验依据。
 11. **三轮 C3**：唯一查询规则表（test_query_policy Q1–Q6）与全部规范位置同步（§0.5/§2.3/§2.5/§7/回执/JSON policy）是否一致。
+12. **四轮收尾**：起端/近尾报告区间的长参考稳定性补测（test_endpoint_stability.m，实际取样区间 τ=0..1499 与 τ=3099..3642，非参考 pad {2000,4000} vs 参考 8000，两场景 PASS；77b1d37 敏感性数值逐位复现）是否接受为端点稳定性证据；review-final-closure.md 初版端点证据归属段撤回是否确认；§10 三项方向校准是否接受。
+
+---
+
+## 10. 阶段 A 方向校准与收尾（四轮，任务 `环形成像阶段A最小收尾与方向校准_20260920-122834.md`）
+
+阶段 A 的完成标准是"参考算法与兼容规则足以指导实现"，不是"证明真实成像收益"或"所有边界误差归零"。以下三项为四轮收尾的方向校准，配套端点稳定性补测见 §6 表末行与 [review-final-closure.md](review-final-closure.md) 四轮补测记录；回执见 [stage-A-closeout.md](stage-A-closeout.md)。
+
+### 10.1 反演定位（校准，不改变 §1 结论）
+
+当前候选 `b = 2(p − t·p′)` 是**复用现有 DAS 反投影框架的可关闭光声反演增强**。单环应用与双声速直线分区走时属于**工程近似**：不声称严格二维 FBP（§1.4 维持）、非均匀介质精确反演或已证明实际图像全面改善。测试充分性仅限明确覆盖条件（合成模型 + 明确窗/端点约定）；真实数据质量、性能、UI 与生产回归属于阶段 B/C，未完成。
+
+### 10.2 权重选择依据与阶段 B 最小实现优先级（撤回失效因果）
+
+旧默认固定 q=1 权重与立体角权重均有有效对照（§4.2/§4.3：互有胜负）。**撤回**"只换信号（b 配旧权重）必然严重劣化"与"因此反演必须换新权重"的强因果主张——其初版证据（符号图伪影）已作废（§4.3 撤回项维持），不得再以此支撑生产选择。
+
+作为规划侧的阶段 B **起草优先级**（非生产修改授权）：先评估"保留旧固定 q=1 + accW、仅加入反演信号 b"的最小候选（已有 legacyW 对照数据），立体角权重保留为离线比较依据；本任务不重跑权重实验、不新增可调权重 UI。**该优先级不是在本任务中修改生产公式的授权，也不把 legacyW 称为严格 UBP**：最终生产权重及归一化由阶段 B 任务明确；阶段 A 不再以"证明某权重全面占优"为退出条件。
+
+### 10.3 DBR 组合限制的定位（校准，不改变 §3.3 规则）
+
+C2 拒绝规则按已发布规格保留（§3.3 冻结规则表不变）：filterEnabled=true、E>0、delayCut=false 明确报错。其文案定位为"**本版未支持/未验证的组合**"，**不是**数学禁忌——不排除未来对含置零前缀信号做零相位滤波的可行方案；亦不把"通过配置校验"解读为端点无失真保证（起端 0.311/近尾 0.633 有限窗误差与实机 UNVERIFIED 维持原文）。本次收尾不擅自放开该组合、不扩大拒绝范围。
+
+### 10.4 阶段 B/C 入口（维持既定边界）
+
+阶段 B 最小目标仍是：生产高低通 SOS、反演开关与必要局部适配（q_raw=s+D−1 补偿查询）、参数/UI/defaults、关闭路径回归与真实数据比较入口；双声速不扩展为新物理模型。阶段 C 评价真实质量与实时性能。阶段 A 参考准备**不代替** B/C 结论；真实图像收益未证明、性能未测、生产实现未动。参考准备完成，待最终审查。
