@@ -262,6 +262,16 @@ bool ImagingController::isRunning() const
            && m_svcProcess->state() == QProcess::Running;
 }
 
+// B1 整改 R3：忙 = 运行中或启停过渡中。启动过渡：startSvc 已把 m_running
+// 置 true（sendConfigureAndStart 前的进程启动期）或子进程仍在启动；
+// 停止过渡：m_running 仍 true 但子进程已退出（stopSvc 的异步收尾期）。
+// configureRing 在忙时整体拒绝，杜绝部分生效与自动重启。
+bool ImagingController::isBusy() const
+{
+    if (m_running.load(std::memory_order_relaxed)) return true;
+    return m_svcProcess && m_svcProcess->state() != QProcess::NotRunning;
+}
+
 // =====================================================================
 // 配置（startSvc 之前调用）
 // =====================================================================
@@ -291,9 +301,18 @@ void ImagingController::configure(const GeneralParams &general,
 // =====================================================================
 // 环形扫描并行分支：配置 / 块输入 / 共享内存
 // =====================================================================
-void ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
+bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
                                       const int (*sysDelayCh)[2])
 {
+    // B1 整改 R3：应用边界忙时拒绝。运行中（含启动/停止过渡）不接受新的
+    // 环形配置——旧实现会替换 m_ringConfig 并触发自动重启链路
+    //（ringConfigChangedWhileRunning → stopSvc → svcStopped 自动 startSvc），
+    // 把"停止后才能应用"变成静默自动重启。改为明确拒绝并保持原活动配置、
+    // 滤波缓存、成像轮次完全不变。
+    if (isBusy()) {
+        emit svcError(QStringLiteral("成像服务正在运行/启停中，环形参数未应用——请先停止实时成像再修改参数。"));
+        return false;
+    }
     m_ringConfig = ringCfg;
     if (sysDelayCh) {
         for (int c = 0; c < 8; ++c)
@@ -317,9 +336,7 @@ void ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
                        .arg(m_ringConfig.sampDepth)
                        .arg(m_ringConfig.alinesPerBlock)
                        .arg(nx), 0);
-    // 运行中变更通道数/块尺寸时，共享内存与子进程仍按旧尺寸工作，
-    // 通知主窗口自动重启成像服务，避免提交块大小不匹配导致成像错误。
-    if (m_running) emit ringConfigChangedWhileRunning();
+    return true;
 }
 
 bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,

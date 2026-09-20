@@ -431,15 +431,16 @@ void RingConfigDialog::setAcquisitionParams(double sampleIntervalNs, int acqTime
         m_sampDepth = std::max(1, static_cast<int>(acqTimeNs / sampleIntervalNs));
         m_lblSampDepth->setText(QString::number(m_sampDepth));
     }
-    // 零相位滤波：按当前真实采样率刷新有效范围提示与 UI 上限。
-    // 截止上限动态 = 采样率/2（MHz）；不改变已保存的值（恢复值与采样率
-    // 不匹配时不静默改值——启用/应用前由 applyConfig 校验并提示）。
+    // 零相位滤波（B1 整改 R2）：动态刷新合法频段提示，但不改 spin 上限。
+    // 旧实现 setMaximum(fs/2) 会在采样率降低时静默压缩当前值（如 40MHz
+    // 在 fs=50MHz 时被 QDoubleSpinBox 改成 25MHz），恢复采样率后原值丢失，
+    // 与"不静默改保存值"矛盾。控件保持稳定可编辑范围（0.0001–500 MHz），
+    // 实际合法性（0 < fc < fs/2）由启用/应用时的校验提示（applyConfig +
+    // 服务端），越界值原样保留。
     const double halfMhz = m_daqHz * 0.5 / 1e6;
-    m_lblZpRange->setText(QString("当前采样率 %1 Hz；截止必须 ∈ (0, %2 MHz)，"
-                                  "双开时高通 < 低通")
+    m_lblZpRange->setText(QString("当前采样率 %1 Hz；启用滤波的截止必须 ∈ (0, %2 MHz)，"
+                                  "双开时高通 < 低通；越界值将在应用时被拒绝")
                               .arg(m_daqHz, 0, 'f', 0).arg(halfMhz, 0, 'f', 1));
-    m_spnZpHpMhz->setMaximum(halfMhz);
-    m_spnZpLpMhz->setMaximum(halfMhz);
 }
 
 void RingConfigDialog::restoreDefaults()
@@ -750,11 +751,42 @@ bool RingConfigDialog::applyConfig()
                 }
             }
         }
+        // 短线校验（B1 整改 R1 UI 侧）：与服务端同一规则按启用通道×波长
+        // 尽早提示。有效线长 = delayCut 开 ? sampDepth−D+1 : sampDepth，
+        // 必须严格大于 3×最大启用阶数。
+        {
+            const int need = 3 * std::max(m_chkZpHp->isChecked() ? m_spnZpHpOrder->value() : 0,
+                                          m_chkZpLp->isChecked() ? m_spnZpLpOrder->value() : 0);
+            for (int c = 0; c < 8; ++c) {
+                if (!m_chkCh[c]->isChecked()) continue;
+                for (int w = 0; w < 2; ++w) {
+                    const int D = m_spnSysDelayCh[c][w]->value();
+                    const int outRows = m_chkDelayCut->isChecked()
+                        ? (m_sampDepth - D + 1) : m_sampDepth;
+                    if (outRows <= need) {
+                        QMessageBox::warning(this, "参数错误",
+                            QString("通道%1/波长%2：有效线长 %3 必须大于延拓长度 %4"
+                                    "（3×最大阶数；延时截断起点 D=%5，采样深度 %6）。\n"
+                                    "请调小阶数或该通道延时截断起点。")
+                                .arg(c + 1).arg(w + 1).arg(outRows).arg(need)
+                                .arg(D).arg(m_sampDepth));
+                        return false;
+                    }
+                }
+            }
+        }
     }
 
     int sysDelayCh[8][2] = {{0}};
     sysDelayPerChannel(sysDelayCh);
-    m_controller->configureRing(config(), sysDelayCh);
+    // B1 整改 R3：configureRing 在服务忙（运行/启停过渡）时拒绝应用并
+    // 返回 false——UI 不当作成功，不发出轮次策略变更，不半生效。
+    if (!m_controller->configureRing(config(), sysDelayCh)) {
+        QMessageBox::warning(this, "无法应用",
+            "成像服务正在运行或启动/停止中，环形参数未应用。\n"
+            "请先停止实时成像，再修改并应用参数。");
+        return false;
+    }
     // 应用成功后将物理轮次启动策略同步给当前 NetworkController（MainWindow 转发）
     emit roundPolicyChanged(startupFilterTriggerCount(), disableCountBoundary());
     return true;

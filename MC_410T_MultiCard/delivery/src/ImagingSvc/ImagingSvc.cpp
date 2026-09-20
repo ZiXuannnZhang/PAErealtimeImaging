@@ -170,6 +170,16 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
 // =====================================================================
 void ImagingSvc::processConfigure(const QJsonObject &params)
 {
+    // B1 整改 R3：服务端应用边界忙时拒绝。m_running（"start" 后 "stop" 前）
+    // 期间不接受任何新的 configure——旧实现允许替换活动配置（含滤波缓存与
+    // SHM 尺寸前提），导致正在进行的成像轮次与新配置混用。拒绝后保持
+    // 原活动配置/滤波缓存/轮次完全不变。主进程控制器已在
+    // ImagingController::configureRing 的 isBusy 边界拦截正常 UI 路径；
+    // 此处为独立服务端防线（不信任上游），重复校验。
+    if (m_running) {
+        sendError(QStringLiteral("成像服务运行中，配置未应用：请先停止成像再下发新配置。"), 2014);
+        return;
+    }
     // 环形扫描并行分支：与线性 pa_recon 完全独立
     if (params["imagingMode"].toString() == "ring") {
         processRingConfigure(params["ring"].toObject());
@@ -454,17 +464,20 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     }
     // 每通道双波长延时截断：优先新协议 sysDelayPerChannel[8][2]；
     // 未提供/字段不完整时回退为 cfg.sysDelay（旧全局值）广播到所有通道，保持旧客户端行为不变。
+    // B1 整改 R1：先解析到局部数组，全部校验通过后才提交到 m_ringSysDelayCh——
+    // 校验失败提前 return 时不留下部分更新的通道延时污染原活动配置。
+    int sysDelayCh[8][2];
     for (int c = 0; c < 8; ++c) {
-        m_ringSysDelayCh[c][0] = cfg.sysDelay[0];
-        m_ringSysDelayCh[c][1] = cfg.sysDelay[1];
+        sysDelayCh[c][0] = cfg.sysDelay[0];
+        sysDelayCh[c][1] = cfg.sysDelay[1];
     }
     const QJsonArray sdCh = ring["sysDelayPerChannel"].toArray();
     if (sdCh.size() >= 8 && sdCh[0].isArray()) {
         for (int c = 0; c < 8; ++c) {
             const QJsonArray pair = sdCh[c].toArray();
             if (pair.size() >= 2) {
-                m_ringSysDelayCh[c][0] = pair[0].toInt();
-                m_ringSysDelayCh[c][1] = pair[1].toInt();
+                sysDelayCh[c][0] = pair[0].toInt();
+                sysDelayCh[c][1] = pair[1].toInt();
             }
         }
     }
@@ -550,9 +563,9 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
             for (int c = 0; c < 8 && zpOk; ++c) {
                 if (!cfg.enabledChannels[c]) continue;
                 for (int w = 0; w < 2; ++w) {
-                    const int D = m_ringSysDelayCh[c][w];
+                    const int D = sysDelayCh[c][w];
                     const int extra = (w == 1)
-                        ? m_ringSysDelayCh[c][1] - m_ringSysDelayCh[c][0] : 0;
+                        ? sysDelayCh[c][1] - sysDelayCh[c][0] : 0;
                     const int E = zerophase::actualZeroRows(
                         cfg.dbrSigRemove != 0, cfg.maskLength, extra, cfg.sampDepth);
                     std::string nm = QString("通道%1/波长%2").arg(c + 1).arg(w + 1).toStdString();
@@ -566,15 +579,28 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
                 }
             }
         }
-        // 短线校验：有效输出线长必须大于每个启用滤波器的 3n
+        // 短线校验（B1 整改 R1）：按每个启用通道×波长的实际有效输出线长
+        // 校验——与运行时 preprocessBlock 使用的 outRows 完全一致
+        //（delayCut 开：Nt−D+1；关：Nt），不再只用通道1/波长1 的值代表全部。
         if (zpOk) {
-            const int outRows = (cfg.delayCut != 0)
-                ? (cfg.sampDepth - m_ringSysDelayCh[0][0] + 1) : cfg.sampDepth;
             const int need = 3 * std::max(hpOn ? cfg.n1 : 0, lpOn ? cfg.n2 : 0);
-            if (outRows <= need) {
-                zpErr = QString("有效线长 %1 必须大于延拓长度 %2（3×最大阶数）")
-                            .arg(outRows).arg(need).toStdString();
-                zpOk = false;
+            for (int c = 0; c < 8 && zpOk; ++c) {
+                if (!cfg.enabledChannels[c]) continue;
+                for (int w = 0; w < 2; ++w) {
+                    const int D = sysDelayCh[c][w];
+                    const int outRows = (cfg.delayCut != 0)
+                        ? (cfg.sampDepth - D + 1) : cfg.sampDepth;
+                    if (outRows <= need) {
+                        zpErr = QString("通道%1/波长%2：有效线长 %3 必须大于延拓长度 %4"
+                                        "（3×最大阶数；D=%5，Nt=%6）")
+                                    .arg(c + 1).arg(w + 1)
+                                    .arg(outRows).arg(need)
+                                    .arg(D).arg(cfg.sampDepth)
+                                    .toStdString();
+                        zpOk = false;
+                        break;
+                    }
+                }
             }
         }
         // SOS 设计（一次，缓存于 zpSet）
@@ -593,6 +619,12 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     m_ringZeroPhaseReady = hpOn || lpOn;
     m_ringZeroPhaseError.clear();
 
+    // 全部校验通过：此时才提交逐通道延时与活动配置（校验失败路径在上方
+    // return，不触碰任何运行状态）
+    for (int c = 0; c < 8; ++c) {
+        m_ringSysDelayCh[c][0] = sysDelayCh[c][0];
+        m_ringSysDelayCh[c][1] = sysDelayCh[c][1];
+    }
     m_ringConfig = cfg;
     m_ringMode   = true;
     m_ringChannelCount = cnt;

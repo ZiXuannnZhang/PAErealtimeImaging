@@ -294,7 +294,8 @@ private:
     std::atomic<bool> m_ringInvalidIdentityReported{false};
     uint64_t m_lastRingTimeoutBoundarySession = 0;
     uint64_t m_lastRingTimeoutBoundaryGeneration = 0;
-    bool m_restartRingOnSvcStop = false;   // 运行中修改环形参数后，待停止完成时自动重启
+    // B1 整改 R3：运行中修改环形参数改由 ImagingController::configureRing
+    // 在应用边界忙时拒绝，"停止后自动按新参数重启"链路已移除。
 
     // 独立有界成像旁路。队列持有共享只读触发帧，不复制整卡 A/B 数据。
     std::unique_ptr<ImagingBypass> m_imagingBypass;

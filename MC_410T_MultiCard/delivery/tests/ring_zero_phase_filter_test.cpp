@@ -10,10 +10,11 @@
 //   参数（DAS 查询输入不变——同数据滤波前后 bscan 形状/系统延时一致）；
 //   同一线在不同 nCol 分块方式下逐样本一致。
 //
-// 参考向量来源：CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/
+// 参考向量来源（B1 整改 R4）：CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/
 // evidence/filter_reference_vectors.mat（阶段 A 已验收 91ca68b），由
-// tools/export_zpf_reference.py 转为 stage-b1 参考目录下的紧凑文本
-//（生成脚本与来源 SHA 记录在同目录 README）。
+// tools/prepare_zpf_reference（MAT v5 直读，CMake 自动执行；MATLAB 等价
+// 脚本 stage-B1/matlab/export_zpf_reference.m 保留）导出为紧凑文本。
+// 参考对照必须实际执行：目录/文件缺失、长度错误 → 非零失败（不降级）。
 #include "zero_phase_filter.h"
 #include "ring_recon.h"
 
@@ -233,8 +234,11 @@ int main(int argc, char **argv) {
 
     // ================= D. 与阶段 A 参考向量逐样本对照 =================
     {
-        // 有参考目录时做逐样本对照；目录缺失时降级为内部一致性断言
-        // （CI 无 MATLAB 环境不阻塞，但本机验收必须带参考跑一次）。
+        // B1 整改 R4：参考对照必须实际执行。参考目录缺失/文件缺失/长度
+        // 错误时本区非零失败（不再"目录缺失降级为内部一致性并 PASS"）。
+        // 参考来源：阶段 A 已验收 MATLAB 导出的紧凑文本（见目录 README），
+        // 由 CMake 以 --ref 显式传入（干净 checkout 经 tools/prepare_zpf_reference
+        // 或 MATLAB 脚本生成，流程见 tests/README 语义，不依赖 MATLAB 运行时）。
         struct RefCase { const char *nm; bool hp, lp; };
         const RefCase cases[] = {
             {"dc", true, true}, {"sine_in", true, true}, {"sine_out", true, true},
@@ -243,14 +247,22 @@ int main(int argc, char **argv) {
         };
         const int N = 4000;
         const double fsRef = 250e6;
-        bool refAvailable = fs::exists(refDir);
-        bool allMatch = true, anyChecked = false;
+        if (!fs::exists(refDir)) {
+            std::printf("  reference dir missing: %s\n", refDir.string().c_str());
+            CHECK(false, "D0 reference dir must exist (see tools/prepare_zpf_reference)");
+        } else {
+        int checkedCount = 0;   // 实际对照的参考文件数（必须 = 7 案例 × 2 输出）
+        bool allMatch = true;
         for (const RefCase &c : cases) {
             // 独立生成同参数输入（rng(11) 噪声向量与参考不同源——噪声用参考文件）
             std::vector<double> x;
             if (std::string(c.nm) == "noise") {
                 fs::path p = refDir / ("in_" + std::string(c.nm) + ".txt");
-                if (!loadVec(p, x) || static_cast<int>(x.size()) != N) continue;
+                if (!loadVec(p, x) || static_cast<int>(x.size()) != N) {
+                    std::printf("  missing/corrupt noise input ref %s\n", p.string().c_str());
+                    allMatch = false;
+                    continue;
+                }
             } else {
                 x.resize(N);
                 for (int i = 0; i < N; ++i) {
@@ -281,7 +293,6 @@ int main(int argc, char **argv) {
                 allMatch = false;
                 continue;
             }
-            if (!refAvailable) continue;
             // 对照参考（HP 输出 = 先 HP；LP 输出 = 先 LP？阶段 A 参考是
             // outHP=refZeroPhase(x,sosHP)、outLP=refZeroPhase(x,sosLP)——
             // 各自独立作用在原输入 x 上）
@@ -314,7 +325,7 @@ int main(int argc, char **argv) {
                 std::printf("  %s/%s: maxAll=%.3e maxInt=%.3e scale=%.3g %s\n",
                             c.nm, tag, maxAll, maxInt, scale, okAll ? "ok" : "FAIL");
                 if (!okAll) allMatch = false;
-                anyChecked = true;
+                ++checkedCount;
             };
             cmpRef((std::string("outHP_") + c.nm).c_str(), yHp, 12, "HP");
             cmpRef((std::string("outLP_") + c.nm).c_str(), yLp, 12, "LP");
@@ -330,10 +341,11 @@ int main(int argc, char **argv) {
             }
         }
         CHECK(allMatch, "D1 stage-A reference vectors match (HP/LP per-case)");
-        if (!refAvailable)
-            std::printf("  NOTE: reference dir missing — reference comparison skipped "
-                        "(internal consistency only)\n");
-        (void)anyChecked;
+        // 对照数量守门：7 案例 × (HP+LP) = 14 个参考文件必须全部实际比对
+        CHECK(checkedCount == 14, "D2 reference comparison actually executed (14 files)");
+        if (checkedCount != 14)
+            std::printf("  checked only %d/14 reference files\n", checkedCount);
+        }
     }
 
     // ================= E. 阶数/采样率扫描（内部一致性 + 零相位） =================

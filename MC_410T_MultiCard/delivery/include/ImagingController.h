@@ -50,10 +50,13 @@ public:
 
     // 环形扫描模式配置（与线性 pa_recon 分支并行；调用后 startSvc 走环形链路）
     // sysDelayCh 为每通道双波长延时截断（nullptr=回退为 cfg.sysDelay 广播到所有通道）
-    void configureRing(const RingReconCudaConfig &ringCfg,
+    // 返回 false = 忙时拒绝（服务运行/启停过渡中未应用，见 B1 整改 R3）
+    bool configureRing(const RingReconCudaConfig &ringCfg,
                        const int (*sysDelayCh)[2] = nullptr);
     bool isRingMode() const { return m_ringMode; }
     const RingReconCudaConfig &ringConfig() const { return m_ringConfig; }
+    // 忙 = 运行中或启动/停止过渡中（配置应用边界的拒绝判据）
+    bool isBusy() const;
 
     // 环形扫描：提交一个原始 A-line 块（float32，sampDepth x alinesPerBlock，列主序）
     // sourceRoundComplete 表示该块所属物理轮的最后逻辑触发已被上游观察到
@@ -105,7 +108,6 @@ signals:
     void svcError(const QString &error);
     void svcReady();                   // 子进程就绪（配置已下发）
     void svcStopped();                 // 异步停止完成通知
-    void ringConfigChangedWhileRunning();  // 运行中环形参数变更（需重启子进程生效）
 
 private slots:
     void onSvcStarted();

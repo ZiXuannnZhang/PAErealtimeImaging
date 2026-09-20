@@ -291,9 +291,38 @@ if(WIN32)
     add_test(NAME paimage_trace_bundle_test COMMAND paimage_trace_bundle_test)
 endif()
 
+# 阶段 B1 整改 R4：参考向量准备工具（干净 checkout 可复现，无 MATLAB
+# 运行时依赖）。从阶段 A 已验收 MAT v5 证据直接导出紧凑文本向量。
+# zlib：MAT v7 元素为 miCOMPRESSED（整元素 zlib 压缩），解压复用 MinGW
+# sysroot 自带 libz（记录于 stage-B1 报告 §R4 工具链来源）。
+add_executable(prepare_zpf_reference
+    ../tools/prepare_zpf_reference.cpp)
+target_compile_features(prepare_zpf_reference PRIVATE cxx_std_17)
+if(MSVC)
+    message(WARNING "prepare_zpf_reference expects MinGW sysroot zlib; "
+                    "MSVC build needs vcpkg zlib — use the MinGW preset.")
+else()
+    target_link_libraries(prepare_zpf_reference PRIVATE z)
+endif()
+
+set(ZPF_EVIDENCE_MAT "${CMAKE_CURRENT_SOURCE_DIR}/../../../CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/evidence/filter_reference_vectors.mat")
+set(ZPF_REFERENCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/stage-B1/matlab/reference_vectors")
+if(EXISTS "${ZPF_EVIDENCE_MAT}")
+    # 证据 .mat 在树内：构建时自动生成/刷新参考向量目录
+    add_custom_command(TARGET prepare_zpf_reference POST_BUILD
+        COMMAND $<TARGET_FILE:prepare_zpf_reference>
+                --mat "${ZPF_EVIDENCE_MAT}"
+                --out "${ZPF_REFERENCE_DIR}"
+        COMMENT "Generating stage-B1 reference vectors from stage-A MAT evidence")
+else()
+    message(WARNING "Stage-A MAT evidence missing at ${ZPF_EVIDENCE_MAT}; "
+            "ring_zero_phase_filter_test reference comparison will fail until "
+            "the evidence file is present.")
+endif()
+
 # 阶段 B1：零相位滤波数值/配置/回归测试（纯 CPU，无 Qt/ZMQ 依赖）。
-# 参考向量来自阶段 A 已验收 MATLAB 证据的紧凑文本导出（--ref 显式传入；
-# 找不到时自动降级为内部一致性断言并注明，不静默冒充参考对照通过）。
+# B1 整改 R4：参考对照必须实际执行——参考目录/文件缺失或长度错误时
+# 非零失败，不再"目录缺失降级为内部一致性并 PASS"。
 add_executable(ring_zero_phase_filter_test
     ring_zero_phase_filter_test.cpp
     ../src/RingRecon/zero_phase_filter.cpp
@@ -304,7 +333,7 @@ target_include_directories(ring_zero_phase_filter_test PRIVATE
     ../src/RingRecon)
 target_compile_features(ring_zero_phase_filter_test PRIVATE cxx_std_17)
 add_test(NAME ring_zero_phase_filter_test COMMAND ring_zero_phase_filter_test
-    --ref "${CMAKE_CURRENT_SOURCE_DIR}/../../../CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/stage-B1/matlab/reference_vectors")
+    --ref "${ZPF_REFERENCE_DIR}")
 
 # 阶段 B1：RingConfigDialog 零相位滤波控件逻辑联动（offscreen Qt）。
 add_executable(ring_config_zero_phase_dialog_test
@@ -332,6 +361,34 @@ add_custom_command(TARGET ring_config_zero_phase_dialog_test POST_BUILD
 add_test(NAME ring_config_zero_phase_dialog_test
     COMMAND ring_config_zero_phase_dialog_test)
 set_tests_properties(ring_config_zero_phase_dialog_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# B1 整改 R1/R2/R3：配置安全自动化（短线校验 UI 侧、Nyquist 值保留、
+# 忙时拒绝契约、隔离 settings defaults 六键往返、取消不改变活动配置）。
+add_executable(ring_config_busy_reject_test
+    ring_config_busy_reject_test.cpp
+    ../src/RingConfigDialog.cpp ../include/RingConfigDialog.h
+    ../src/ImagingController.cpp ../include/ImagingController.h)
+target_include_directories(ring_config_busy_reject_test PRIVATE
+    ../include ../src/RingRecon
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/include")
+target_compile_definitions(ring_config_busy_reject_test PRIVATE
+    WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
+if(MSVC)
+    set(ZPF_BUSY_TEST_ZMQ_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq-v141-mt-4_3_5.lib")
+else()
+    set(ZPF_BUSY_TEST_ZMQ_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a")
+endif()
+target_link_libraries(ring_config_busy_reject_test PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets "${ZPF_BUSY_TEST_ZMQ_LIB}" ws2_32)
+add_custom_command(TARGET ring_config_busy_reject_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
+        "$<TARGET_FILE_DIR:ring_config_busy_reject_test>"
+    COMMENT "Deploying zmq runtime for ring_config_busy_reject_test")
+add_test(NAME ring_config_busy_reject_test
+    COMMAND ring_config_busy_reject_test)
+set_tests_properties(ring_config_busy_reject_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 if(Python3_Interpreter_FOUND)

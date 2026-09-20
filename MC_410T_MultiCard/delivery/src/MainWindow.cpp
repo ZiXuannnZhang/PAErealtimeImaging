@@ -717,30 +717,15 @@ MainWindow::MainWindow(QWidget *parent)
         if (m_imagingController && m_imagingController->isRingMode())
             m_imagingTimer->stop();
 
-        if (m_restartRingOnSvcStop) {
-            // 运行中修改了环形参数：停止完成后用新参数自动重启，保持实时成像开启
-            m_restartRingOnSvcStop = false;
-            if (m_imagingController) m_imagingController->startSvc();
-            return;
-        }
+        // B1 整改 R3：运行中修改环形参数已在 ImagingController::configureRing
+        // 应用边界直接拒绝（isBusy），不再走"自动停止后按新参数重启"链路。
+        // m_restartRingOnSvcStop 保留为 false（下方清理），停止即停止。
 
         if (m_chkRealtimeImaging) {
             QSignalBlocker blocker(m_chkRealtimeImaging);
             m_chkRealtimeImaging->setChecked(false);
         }
         setImagingParamControlsEnabled(true);   // 服务已完全停止：恢复成像参数/采集控制
-    });
-    connect(m_imagingController, &ImagingController::ringConfigChangedWhileRunning,
-            this, [this]() {
-        if (!m_imagingController || !m_imagingController->isRingMode()) return;
-        m_restartRingOnSvcStop = true;
-        // 先停馈送线程并清空组包器，避免重启期间继续提交旧尺寸的块
-        stopRingFeedWorker();
-        m_ringAssemblerConfigured = false;
-        { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
-          m_ringPresentation.reset();
-          if (m_ringAssembler) m_ringAssembler->reset(); }
-        m_imagingController->stopSvc();
     });
     connect(m_imagingController, &ImagingController::svcReady, this, [this]() {
         m_imagingServiceReady.store(true, std::memory_order_release);
@@ -2993,10 +2978,22 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
             ensureRingConfigDialog();
             m_ringConfigDialog->setAcquisitionParams(
                 m_sampleIntervalNs, ui->edtDataTime->text().toInt());
-            m_ringConfigDialog->applyConfig();
-            // 请求成像即打开旁路门控；服务连接完成前帧明确记为 ServiceNotReady。
-            configureRingAssembler();
-            startRingFeedWorker();
+            // B1 整改 R3：启动时下发环形配置；若处于忙态（启停过渡/异常
+            // 残留），configureRing 拒绝且 applyConfig 返回 false——此时
+            // 不再拉起馈送链路，等待 stopSvc 完成或直接失败退出。
+            if (m_ringConfigDialog->applyConfig()) {
+                // 请求成像即打开旁路门控；服务连接完成前帧明确记为 ServiceNotReady。
+                configureRingAssembler();
+                startRingFeedWorker();
+            } else {
+                recordDiagnosticAction(QStringLiteral("imaging_start_failed"),
+                    {{"monotonicNs", QString::number(paimage::SocketReceiver::now())},
+                     {"reason", QStringLiteral("ring_config_rejected_busy_or_invalid")}});
+                stopRingFeedWorker();
+                m_chkRealtimeImaging->setEnabled(true);
+                setImagingParamControlsEnabled(true);
+                return;
+            }
         }
         const bool alreadyRunning = m_imagingController->isRunning();
         if (m_imagingController->startSvc()) {
@@ -3050,9 +3047,6 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
         // 停止成像
         m_chkRealtimeImaging->setEnabled(false);
         stopRingFeedWorker();
-        // 取消勾选时清除参数变更的自动重启意图，避免停止过程中服务又自动重启、
-        // 导致控件无法恢复（R2 风险）
-        m_restartRingOnSvcStop = false;
         auto conn = std::make_shared<QMetaObject::Connection>();
         *conn = connect(m_imagingController, &ImagingController::svcStopped,
                         this, [this, conn]() {

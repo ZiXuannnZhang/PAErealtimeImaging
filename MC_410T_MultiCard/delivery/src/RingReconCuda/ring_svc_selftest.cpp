@@ -120,6 +120,7 @@ int main(int argc, char** argv) {
             "[--sos-radii-mm 3] [--sos 1490,1540] "
             "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...] "
             "[--zp 0|1|2|3] [--zp-hp-mhz 0.4] [--zp-lp-mhz 40] [--zp-order 4] "
+            "[--expect-config-reject 1] [--expect-busy-reject 1] "
             "[--identity-jump-at N] [--drop-block N]\n");
         return 2;
     }
@@ -397,6 +398,43 @@ int main(int argc, char** argv) {
 
     sendJson(sock, {{"cmd", "start"}});
     QThread::msleep(200);
+
+    // B1 整改 R3：运行中（start 后）服务端必须拒绝新 configure（error 2014），
+    // 且错误可见。收到即 PASS 退出（不再继续常规成像流）。
+    if (argInt(args, "--expect-busy-reject", 0)) {
+        sendJson(sock, {{"cmd", "configure"}, {"params", params}});
+        const auto deadline = std::chrono::steady_clock::now() +
+            std::chrono::milliseconds(5000);
+        bool gotError = false;
+        std::string errMsg;
+        while (std::chrono::steady_clock::now() < deadline) {
+            zmq::message_t msg;
+            while (sock.recv(msg, zmq::recv_flags::dontwait)) {
+                const QByteArray data(static_cast<const char*>(msg.data()),
+                                      static_cast<int>(msg.size()));
+                const QJsonObject obj = QJsonDocument::fromJson(data).object();
+                if (obj["cmd"].toString() == QStringLiteral("error")) {
+                    gotError = true;
+                    errMsg = obj["msg"].toString().toStdString();
+                    break;
+                }
+            }
+            if (gotError) break;
+            QThread::msleep(10);
+        }
+        if (gotError) {
+            std::printf("[busy-reject] PASS: svc rejected runtime reconfig: %s\n",
+                        errMsg.c_str());
+            sendJson(sock, {{"cmd", "stop"}});
+            if (!noLaunch) {
+                svc.terminate();
+                if (!svc.waitForFinished(3000)) svc.kill();
+            }
+            return 0;
+        }
+        std::fprintf(stderr, "[busy-reject] FAIL: no error for runtime reconfig\n");
+        return 7;
+    }
 
     // 阶段B链路：用 RingBlockAssembler 按“每通道每触发”喂入（模拟真实采集
     // UDP 到达顺序），组满 perChBlock 根后回调提交环形块驱动重建。
