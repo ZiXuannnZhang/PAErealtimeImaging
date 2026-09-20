@@ -1,0 +1,159 @@
+{
+  "Q1": {
+    "cases": [
+      {
+        "combo": "none",
+        "inversion": false,
+        "delayCut": true,
+        "q": [
+          700,
+          703.64,
+          1677.85,
+          1090.6,
+          2400
+        ]
+      },
+      {
+        "combo": "none",
+        "inversion": false,
+        "delayCut": false,
+        "q": [
+          700,
+          703.64,
+          1677.85,
+          1090.6,
+          2400
+        ]
+      },
+      {
+        "combo": "HP",
+        "inversion": false,
+        "delayCut": true,
+        "q": [
+          700,
+          703.64,
+          1677.85,
+          1090.6,
+          2400
+        ]
+      },
+      {
+        "combo": "HP",
+        "inversion": false,
+        "delayCut": false,
+        "q": [
+          700,
+          703.64,
+          1677.85,
+          1090.6,
+          2400
+        ]
+      },
+      {
+        "combo": "LP",
+        "inversion": false,
+        "delayCut": true,
+        "q": [
+          700,
+          703.64,
+          1677.85,
+          1090.6,
+          2400
+        ]
+      },
+      {
+        "combo": "LP",
+        "inversion": false,
+        "delayCut": false,
+        "q": [
+          700,
+          703.64,
+          1677.85,
+          1090.6,
+          2400
+        ]
+      },
+      {
+        "combo": "HP+LP",
+        "inversion": false,
+        "delayCut": true,
+        "q": [
+          700,
+          703.64,
+          1677.85,
+          1090.6,
+          2400
+        ]
+      },
+      {
+        "combo": "HP+LP",
+        "inversion": false,
+        "delayCut": false,
+        "q": [
+          700,
+          703.64,
+          1677.85,
+          1090.6,
+          2400
+        ]
+      }
+    ],
+    "note": "filter toggles (none/HP/LP/HP+LP, inversion off) leave the query coordinate unchanged in both delayCut states - q=s (cut) / q_legacy=s (uncut); filtering changes signal content only, per C3 frozen rule table"
+  },
+  "Q2": {
+    "maxOffsetErr": 1.1368683772161603E-13,
+    "Dlist": [
+      358,
+      371,
+      359
+    ],
+    "sList": [
+      700,
+      703.64,
+      1677.85,
+      1090.6,
+      2400
+    ]
+  },
+  "Q3": {
+    "tauL": 1088.3487318051075,
+    "tauLsame": 1102.3489932885907,
+    "L1mm": 4,
+    "maxErr": 0
+  },
+  "Q4": {
+    "maxIdentityErr": 4.2351647362715017E-22,
+    "wrongUsageGap": 1.4800000000000011E-6,
+    "wrongUsageGapExpected": 1.428E-6,
+    "note": "t = T = s/fs = (q_raw+1-D)/fs = (m-D)/fs; q_raw/fs is NOT the multiplier and differs by exactly (D-1)/fs"
+  },
+  "Q5": {
+    "nCases": 32,
+    "unique": true,
+    "note": "query selection depends only on (inversion, delayCut): inversion+cut -> q_cut=s; inversion+uncut -> q_raw=s+D-1; no-inversion -> q=s / q_legacy=s; DBR parameters never change the query",
+    "c2Precheck": {
+      "accepted": false,
+      "reason": "FILTER_UNCUT_DBR_UNSUPPORTED"
+    }
+  },
+  "Q6": {
+    "maxPosErr": 9.0104006834325785E-39,
+    "maxFracErr": 1.1368683772161603E-13,
+    "note": "independent recomputation of the exp3 T7 identity on the exp3 pulse model (sigma=2 samples, tau=1677.85)"
+  },
+  "pass": {
+    "Q1_filterDoesNotChangeQ": true,
+    "Q2_uncutOffsetExactlyDm1": true,
+    "Q3_layeredThenOffset": true,
+    "Q4_multiplierIdentity": true,
+    "Q5_querySelectionUnique": true,
+    "Q5_c2PrecheckInterlocks": true,
+    "Q6_sameSampleSameFraction": true
+  },
+  "matlabVersion": "9.14.0.2206163 (R2023a)",
+  "ruleTable": {
+    "allOff": "cut: q=s | uncut: q_legacy=s (old behavior both states)",
+    "filterOnly": "cut: q=s | uncut: q_legacy=s (old geometry; C2 precheck first)",
+    "inversionOn": "cut: q_cut=s, m=s+D | uncut: q_raw=s+D-1, m=q_raw+1=s+D (C2 precheck first); multiplier t=T=s/fs always"
+  }
+}

@@ -95,12 +95,89 @@
       "scaleP": 0.489899775164039,
       "scalePP": 1.5664648167336939E+7,
       "scaleB": 100.25374827095638,
-      "convergedPad": 250,
       "convTolRel": 1E-9,
       "window": [
         300,
         1300
-      ]
+      ],
+      "verdict": "PASS",
+      "detail": {
+        "ok": true,
+        "failReason": "",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": [
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "relP": [
+          1.4163905059119074E-17,
+          1.4163905059119074E-17,
+          8.85244066194942E-18,
+          1.4163905059119074E-17,
+          8.85244066194942E-18,
+          0
+        ],
+        "relPP": [
+          5.5737920467475434E-17,
+          5.5737920467475434E-17,
+          2.0437237504740993E-17,
+          5.5737920467475434E-17,
+          2.0437237504740993E-17,
+          0
+        ],
+        "relB": [
+          6.6444778999656977E-17,
+          6.6444778999656977E-17,
+          2.5470498616535175E-17,
+          6.6444778999656977E-17,
+          2.5470498616535175E-17,
+          0
+        ],
+        "candIdx": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "okIdx": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "firstOkPad": 250,
+        "maxOkPad": 4000,
+        "nOk": 5,
+        "pairSource": "actual",
+        "maxPairRel": 6.6444778999656977E-17,
+        "adjPairP": [
+          1.4847465951901232E-22,
+          1.4163905059119074E-17,
+          1.4163905059119074E-17,
+          1.4163905059119074E-17
+        ],
+        "adjPairPP": [
+          1.5946746959917668E-22,
+          5.5737920467475434E-17,
+          5.5737920467475434E-17,
+          5.5737920467475434E-17
+        ],
+        "adjPairB": [
+          2.28120045088544E-22,
+          6.6444778999656977E-17,
+          6.6444778999656977E-17,
+          6.6444778999656977E-17
+        ],
+        "relapse": false,
+        "relapsePad": null
+      }
     },
     "burstEcho": {
       "padList": [
@@ -138,12 +215,85 @@
       "scaleP": 791.1950579354484,
       "scalePP": 1.0896754902221403E+10,
       "scaleB": 27950.910189388378,
-      "convergedPad": 500,
       "convTolRel": 1E-9,
       "window": [
         300,
         1300
-      ]
+      ],
+      "verdict": "PASS",
+      "detail": {
+        "ok": true,
+        "failReason": "",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": [
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "relP": [
+          2.2540873721546393E-9,
+          7.1500647722407888E-10,
+          2.2603015705919829E-11,
+          1.0510925334944028E-13,
+          2.8163244916596437E-14,
+          0
+        ],
+        "relPP": [
+          7.6931389263835084E-10,
+          1.2972522067270929E-10,
+          3.7598210660368642E-12,
+          2.9931536419567215E-14,
+          1.4353134423418195E-14,
+          0
+        ],
+        "relB": [
+          3.0704033588715773E-9,
+          4.8498405202780945E-10,
+          1.6101273991755685E-11,
+          3.6443681407284052E-14,
+          2.0491436041283155E-14,
+          0
+        ],
+        "candIdx": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "okIdx": [
+          2,
+          3,
+          4,
+          5
+        ],
+        "firstOkPad": 500,
+        "maxOkPad": 4000,
+        "nOk": 4,
+        "pairSource": "actual",
+        "maxPairRel": 7.1502591129997155E-10,
+        "adjPairP": [
+          6.99658191272153E-10,
+          2.2633585758756593E-11,
+          9.9720877408764942E-14
+        ],
+        "adjPairPP": [
+          1.3224904897229555E-10,
+          3.7677306058144033E-12,
+          2.9362662189370763E-14
+        ],
+        "adjPairB": [
+          4.9612021201996073E-10,
+          1.6134398695034806E-11,
+          4.340702767617583E-14
+        ],
+        "relapse": false,
+        "relapsePad": null
+      }
     }
   },
   "farFieldAlignment": {
@@ -167,6 +317,512 @@
     "endEchoRelP": 0.63275363030561171,
     "endEchoTau": 3600
   },
+  "criterionNegatives": {
+    "N1_refSelfOnly": {
+      "expected": "FAIL",
+      "actual": "FAIL",
+      "pass": true,
+      "detail": {
+        "ok": false,
+        "failReason": "全部非参考候选超差",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": [
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "relP": [
+          0.001,
+          0.01,
+          0.1,
+          1,
+          10,
+          0
+        ],
+        "relPP": [
+          0.001,
+          0.01,
+          0.1,
+          1,
+          10,
+          0
+        ],
+        "relB": [
+          0.001,
+          0.01,
+          0.1,
+          1,
+          10,
+          0
+        ],
+        "candIdx": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "okIdx": [],
+        "firstOkPad": null,
+        "maxOkPad": null,
+        "nOk": 0,
+        "pairSource": "sumBound",
+        "maxPairRel": null,
+        "adjPairP": null,
+        "adjPairPP": null,
+        "adjPairB": null,
+        "relapse": false,
+        "relapsePad": null
+      }
+    },
+    "N2_singleOk": {
+      "expected": "FAIL",
+      "actual": "FAIL",
+      "pass": true,
+      "detail": {
+        "ok": false,
+        "failReason": "仅 1 个非参考 pad 通过容差（需 >=2）",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": [
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "relP": [
+          1E-12,
+          0.001,
+          0.01,
+          0.1,
+          1,
+          0
+        ],
+        "relPP": [
+          1E-12,
+          0.001,
+          0.01,
+          0.1,
+          1,
+          0
+        ],
+        "relB": [
+          1E-12,
+          0.001,
+          0.01,
+          0.1,
+          1,
+          0
+        ],
+        "candIdx": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "okIdx": 1,
+        "firstOkPad": 250,
+        "maxOkPad": 250,
+        "nOk": 1,
+        "pairSource": "sumBound",
+        "maxPairRel": null,
+        "adjPairP": null,
+        "adjPairPP": null,
+        "adjPairB": null,
+        "relapse": false,
+        "relapsePad": null
+      }
+    },
+    "N3_relapseAfterOk": {
+      "expected": "FAIL",
+      "actual": "FAIL",
+      "pass": true,
+      "detail": {
+        "ok": false,
+        "failReason": "尾段再次超差（pad=2000 后出现超差候选）",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": [
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "relP": [
+          1E-12,
+          1E-12,
+          1E-12,
+          0.05,
+          0.1,
+          0
+        ],
+        "relPP": [
+          1E-12,
+          1E-12,
+          1E-12,
+          0.05,
+          0.1,
+          0
+        ],
+        "relB": [
+          1E-12,
+          1E-12,
+          1E-12,
+          0.05,
+          0.1,
+          0
+        ],
+        "candIdx": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "okIdx": [
+          1,
+          2,
+          3
+        ],
+        "firstOkPad": 250,
+        "maxOkPad": 1000,
+        "nOk": 3,
+        "pairSource": "sumBound",
+        "maxPairRel": 2E-12,
+        "adjPairP": [
+          2E-12,
+          2E-12
+        ],
+        "adjPairPP": [
+          2E-12,
+          2E-12
+        ],
+        "adjPairB": [
+          2E-12,
+          2E-12
+        ],
+        "relapse": true,
+        "relapsePad": 2000
+      }
+    },
+    "N4_nonFinite": {
+      "expected": "FAIL",
+      "actual": "FAIL",
+      "pass": true,
+      "detail": {
+        "ok": false,
+        "failReason": "relP 含 NaN/Inf（非有限误差）",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": [
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "relP": [],
+        "relPP": [],
+        "relB": [],
+        "candIdx": [],
+        "okIdx": [],
+        "firstOkPad": null,
+        "maxOkPad": null,
+        "nOk": 0,
+        "pairSource": "sumBound",
+        "maxPairRel": null,
+        "adjPairP": null,
+        "adjPairPP": null,
+        "adjPairB": null,
+        "relapse": false,
+        "relapsePad": null
+      }
+    },
+    "N5_noCandidates": {
+      "expected": "FAIL",
+      "actual": "FAIL",
+      "pass": true,
+      "detail": {
+        "ok": false,
+        "failReason": "无非参考候选（padList 仅含参考）",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": 8000,
+        "relP": 0,
+        "relPP": 0,
+        "relB": 0,
+        "candIdx": [],
+        "okIdx": [],
+        "firstOkPad": null,
+        "maxOkPad": null,
+        "nOk": 0,
+        "pairSource": "sumBound",
+        "maxPairRel": null,
+        "adjPairP": null,
+        "adjPairPP": null,
+        "adjPairB": null,
+        "relapse": false,
+        "relapsePad": null
+      }
+    },
+    "N5b_shapeMismatch": {
+      "expected": "FAIL",
+      "actual": "FAIL",
+      "pass": true,
+      "detail": {
+        "ok": false,
+        "failReason": "relP 与 padList 长度不一致或非向量",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": [
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "relP": [],
+        "relPP": [],
+        "relB": [],
+        "candIdx": [],
+        "okIdx": [],
+        "firstOkPad": null,
+        "maxOkPad": null,
+        "nOk": 0,
+        "pairSource": "sumBound",
+        "maxPairRel": null,
+        "adjPairP": null,
+        "adjPairPP": null,
+        "adjPairB": null,
+        "relapse": false,
+        "relapsePad": null
+      }
+    },
+    "P1_stableTail": {
+      "expected": "PASS",
+      "actual": "PASS",
+      "pass": true,
+      "detail": {
+        "ok": true,
+        "failReason": "",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": [
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "relP": [
+          1E-12,
+          1E-12,
+          1E-13,
+          1E-13,
+          1E-14,
+          0
+        ],
+        "relPP": [
+          1E-12,
+          1E-12,
+          1E-13,
+          1E-13,
+          1E-14,
+          0
+        ],
+        "relB": [
+          1E-12,
+          1E-12,
+          1E-13,
+          1E-13,
+          1E-14,
+          0
+        ],
+        "candIdx": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "okIdx": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "firstOkPad": 250,
+        "maxOkPad": 4000,
+        "nOk": 5,
+        "pairSource": "sumBound",
+        "maxPairRel": 2E-12,
+        "adjPairP": [
+          2E-12,
+          1.1E-12,
+          2E-13,
+          1.1E-13
+        ],
+        "adjPairPP": [
+          2E-12,
+          1.1E-12,
+          2E-13,
+          1.1E-13
+        ],
+        "adjPairB": [
+          2E-12,
+          1.1E-12,
+          2E-13,
+          1.1E-13
+        ],
+        "relapse": false,
+        "relapsePad": null
+      }
+    },
+    "P2_refRowExcluded": {
+      "expected": "PASS",
+      "actual": "PASS",
+      "pass": true,
+      "detail": {
+        "ok": true,
+        "failReason": "",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": [
+          250,
+          500,
+          1000,
+          2000,
+          4000,
+          8000
+        ],
+        "relP": [
+          1E-12,
+          1E-12,
+          1E-13,
+          1E-13,
+          1E-14,
+          0.5
+        ],
+        "relPP": [
+          1E-12,
+          1E-12,
+          1E-13,
+          1E-13,
+          1E-14,
+          0.5
+        ],
+        "relB": [
+          1E-12,
+          1E-12,
+          1E-13,
+          1E-13,
+          1E-14,
+          0.5
+        ],
+        "candIdx": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "okIdx": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "firstOkPad": 250,
+        "maxOkPad": 4000,
+        "nOk": 5,
+        "pairSource": "sumBound",
+        "maxPairRel": 2E-12,
+        "adjPairP": [
+          2E-12,
+          1.1E-12,
+          2E-13,
+          1.1E-13
+        ],
+        "adjPairPP": [
+          2E-12,
+          1.1E-12,
+          2E-13,
+          1.1E-13
+        ],
+        "adjPairB": [
+          2E-12,
+          1.1E-12,
+          2E-13,
+          1.1E-13
+        ],
+        "relapse": false,
+        "relapsePad": null
+      }
+    },
+    "P3_twoCandidateOk": {
+      "expected": "PASS",
+      "actual": "PASS",
+      "pass": true,
+      "detail": {
+        "ok": true,
+        "failReason": "",
+        "tol": 1E-9,
+        "padRef": 8000,
+        "padList": [
+          2000,
+          4000,
+          8000
+        ],
+        "relP": [
+          1E-12,
+          1E-13,
+          0
+        ],
+        "relPP": [
+          1E-12,
+          1E-13,
+          0
+        ],
+        "relB": [
+          1E-12,
+          1E-13,
+          0
+        ],
+        "candIdx": [
+          1,
+          2
+        ],
+        "okIdx": [
+          1,
+          2
+        ],
+        "firstOkPad": 2000,
+        "maxOkPad": 4000,
+        "nOk": 2,
+        "pairSource": "sumBound",
+        "maxPairRel": 1.1E-12,
+        "adjPairP": 1.1E-12,
+        "adjPairPP": 1.1E-12,
+        "adjPairB": 1.1E-12,
+        "relapse": false,
+        "relapsePad": null
+      }
+    }
+  },
   "pass": {
     "S1_longerByPad": true,
     "S1_containsShortBitwise": true,
@@ -177,7 +833,16 @@
     "S3_padConvergence": true,
     "S4_physicalTimeAligned": true,
     "S5_boundaryEffectsMeasurable": true,
-    "S6_noneComboBitwise": true
+    "S6_noneComboBitwise": true,
+    "S3n_negative1_refSelfOnly": true,
+    "S3n_negative2_singleOk": true,
+    "S3n_negative3_relapse": true,
+    "S3n_negative4_nonFinite": true,
+    "S3n_negative5_noCandidates": true,
+    "S3n_negative5b_shape": true,
+    "S3n_positive1_stableTail": true,
+    "S3n_positive2_refRowExcluded": true,
+    "S3n_positive3_twoCandidates": true
   },
   "matlabVersion": "9.14.0.2206163 (R2023a)"
 }

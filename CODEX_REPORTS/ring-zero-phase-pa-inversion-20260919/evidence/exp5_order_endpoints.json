@@ -292,7 +292,85 @@
           "scaleP": 0.489899775164039,
           "scalePP": 1.5664648167336939E+7,
           "scaleB": 100.25374827095638,
-          "convergedPad": 250
+          "convergedPad": 250,
+          "verdict": "PASS",
+          "detail": {
+            "ok": true,
+            "failReason": "",
+            "tol": 1E-9,
+            "padRef": 8000,
+            "padList": [
+              250,
+              500,
+              1000,
+              2000,
+              4000,
+              8000
+            ],
+            "relP": [
+              1.4163905059119074E-17,
+              1.4163905059119074E-17,
+              8.85244066194942E-18,
+              1.4163905059119074E-17,
+              8.85244066194942E-18,
+              0
+            ],
+            "relPP": [
+              5.5737920467475434E-17,
+              5.5737920467475434E-17,
+              2.0437237504740993E-17,
+              5.5737920467475434E-17,
+              2.0437237504740993E-17,
+              0
+            ],
+            "relB": [
+              6.6444778999656977E-17,
+              6.6444778999656977E-17,
+              2.5470498616535175E-17,
+              6.6444778999656977E-17,
+              2.5470498616535175E-17,
+              0
+            ],
+            "candIdx": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "okIdx": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "firstOkPad": 250,
+            "maxOkPad": 4000,
+            "nOk": 5,
+            "pairSource": "actual",
+            "maxPairRel": 6.6444778999656977E-17,
+            "adjPairP": [
+              1.4847465951901232E-22,
+              1.4163905059119074E-17,
+              1.4163905059119074E-17,
+              1.4163905059119074E-17
+            ],
+            "adjPairPP": [
+              1.5946746959917668E-22,
+              5.5737920467475434E-17,
+              5.5737920467475434E-17,
+              5.5737920467475434E-17
+            ],
+            "adjPairB": [
+              2.28120045088544E-22,
+              6.6444778999656977E-17,
+              6.6444778999656977E-17,
+              6.6444778999656977E-17
+            ],
+            "relapse": false,
+            "relapsePad": null
+          }
         },
         "burstOnly": {
           "padList": [
@@ -330,7 +408,81 @@
           "scaleP": 791.19505793540452,
           "scalePP": 1.0896754902221216E+10,
           "scaleB": 27950.910189390015,
-          "convergedPad": 500
+          "convergedPad": 500,
+          "verdict": "PASS",
+          "detail": {
+            "ok": true,
+            "failReason": "",
+            "tol": 1E-9,
+            "padRef": 8000,
+            "padList": [
+              250,
+              500,
+              1000,
+              2000,
+              4000,
+              8000
+            ],
+            "relP": [
+              2.2540758230689982E-9,
+              7.1500139418948121E-10,
+              2.2602782209630319E-11,
+              4.5406047926760043E-14,
+              8.9087815552503875E-14,
+              0
+            ],
+            "relPP": [
+              7.6931380511925163E-10,
+              1.2972709412871002E-10,
+              3.7602258419314917E-12,
+              3.3913656030942964E-14,
+              2.8356192397485215E-14,
+              0
+            ],
+            "relB": [
+              3.07040316363739E-9,
+              4.8499176377107886E-10,
+              1.6102966019820082E-11,
+              4.249593564099124E-14,
+              4.789740984957052E-14,
+              0
+            ],
+            "candIdx": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "okIdx": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "firstOkPad": 500,
+            "maxOkPad": 4000,
+            "nOk": 4,
+            "pairSource": "actual",
+            "maxPairRel": 7.1502432172910877E-10,
+            "adjPairP": [
+              6.996522371167773E-10,
+              2.2647811071241231E-11,
+              7.4718813044035517E-14
+            ],
+            "adjPairPP": [
+              1.3224986399403149E-10,
+              3.7686276767159318E-12,
+              3.2644628902043165E-14
+            ],
+            "adjPairB": [
+              4.96123742501568E-10,
+              1.61383359141859E-11,
+              5.2192558015428746E-14
+            ],
+            "relapse": false,
+            "relapsePad": null
+          }
         },
         "burstEcho": {
           "padList": [
@@ -368,7 +520,81 @@
           "scaleP": 791.1950579354484,
           "scalePP": 1.0896754902221403E+10,
           "scaleB": 27950.910189388378,
-          "convergedPad": 500
+          "convergedPad": 500,
+          "verdict": "PASS",
+          "detail": {
+            "ok": true,
+            "failReason": "",
+            "tol": 1E-9,
+            "padRef": 8000,
+            "padList": [
+              250,
+              500,
+              1000,
+              2000,
+              4000,
+              8000
+            ],
+            "relP": [
+              2.2540873721546393E-9,
+              7.1500647722407888E-10,
+              2.2603015705919829E-11,
+              1.0510925334944028E-13,
+              2.8163244916596437E-14,
+              0
+            ],
+            "relPP": [
+              7.6931389263835084E-10,
+              1.2972522067270929E-10,
+              3.7598210660368642E-12,
+              2.9931536419567215E-14,
+              1.4353134423418195E-14,
+              0
+            ],
+            "relB": [
+              3.0704033588715773E-9,
+              4.8498405202780945E-10,
+              1.6101273991755685E-11,
+              3.6443681407284052E-14,
+              2.0491436041283155E-14,
+              0
+            ],
+            "candIdx": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ],
+            "okIdx": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "firstOkPad": 500,
+            "maxOkPad": 4000,
+            "nOk": 4,
+            "pairSource": "actual",
+            "maxPairRel": 7.1502591129997155E-10,
+            "adjPairP": [
+              6.99658191272153E-10,
+              2.2633585758756593E-11,
+              9.9720877408764942E-14
+            ],
+            "adjPairPP": [
+              1.3224904897229555E-10,
+              3.7677306058144033E-12,
+              2.9362662189370763E-14
+            ],
+            "adjPairB": [
+              4.9612021201996073E-10,
+              1.6134398695034806E-11,
+              4.340702767617583E-14
+            ],
+            "relapse": false,
+            "relapsePad": null
+          }
         }
       }
     },
@@ -556,10 +782,10 @@
   "policy": {
     "order": "raw -> DBR zero (1..maskLength+extra) -> clip -> delayCut -> HP zero-phase (whole cut line) -> LP zero-phase (whole cut line) -> [deriv p' -> b] (per A-line, refZeroPhase implementation)",
     "endpoints": "refZeroPhase steady-state init + odd extension nfact=3n; error if line length <= 3n or input non-finite",
-    "validQueryRegion": "original-row index m >= max(sysDelay, dbrEnd+1), default margin G=0; when HP or LP zero-phase filtering is enabled (with or without inversion), configs with dbrEnd = maskLength+dbrmaskExtra >= sysDelay are REJECTED with an error (default 313 < 358/371 satisfies; measured B2: a chopped startup burst leaves a zero-phase response tail to ~tau 2737, exceeding dbrEnd+memHP=2327 and depending on the removed signal amplitude/length - no fixed margin can guarantee validity). DBR disabled: dbrEnd interpreted as 0 (no zeroed region, no step; evidence: cut-line output bitwise identical for zeroRows=313 vs 0, gate G3). Inversion-only (no HP/LP): no non-causal filter wrap occurs, so the dbrEnd<sysDelay rejection is not required there; the valid-query rule m >= dbrEnd+1 still excludes the zeroed prefix. delayCut=0 with DBR enabled: the zeroed prefix IS inside the filter input by construction (no crop happens) - the \"step outside the cut line\" rationale does NOT transfer to the uncut line; filtering + delayCut=0 + DBR enabled is treated as unsupported pending an explicit stage-B decision. Short window: line length <= 3n rejected (A5). Out-of-range queries: maskOob zero (production convention). Endpoint derivative: one-sided differences at line ends (timeDerivative.m); the cut-line one-sided vs uncut central-difference difference at the first sample is quantified in exp3 T7 endpointProbe",
-    "headPolicy": "no fixed head-margin discard and no preset quality threshold; boundary-convention error is quantified against a converged INDEPENDENT long-window reference (B6.reference/rows: structural assertions, old self-comparison construction negative-controlled, pad convergence at recorded tolerance 1e-9 relative, p/p'/b waveform errors with absolute+relative scales). Steady-start (pre-trigger-zero model) lines: near-boundary echoOnly differences at ~1e-9 relative or below; burst-contaminated starts and near-tail targets show measurable finite-window effects (B6.sensitivity) - no exact-zero-error claim is made. Startup interference remains a data-dependent quantity reported via burstOnly residue profile and burstEcho INT columns (B1/B6), not a fixed discard",
+    "validQueryRegion": "original-row index m >= max(sysDelay, dbrEnd+1), default margin G=0; when HP or LP zero-phase filtering is enabled (with or without inversion), configs with E >= D are REJECTED with an error, where E = the ACTUAL DBR zeroed length per channel/wavelength: E=0 when DBR is disabled or the effective zeroed length is 0 (a switch being on does not by itself imply a step), E = min(maskLength+dbrmaskExtra, Nt) otherwise (default 313 < 358/371 satisfies; measured B2: a chopped startup burst leaves a zero-phase response tail to ~tau 2737, exceeding dbrEnd+memHP=2327 and depending on the removed signal amplitude/length - no fixed margin can guarantee validity). FROZEN C2 rule table (per enabled channel/wavelength; one violation rejects the whole config group with the channel name and reason - see filterDbrConfigCheck.m / test_filter_dbr_config.m): filterEnabled=false -> no zero-phase-filter-specific rejection; filterEnabled=true & E=0 -> allowed (sampling/cutoff/order/length checks still apply via refZeroPhase); filterEnabled=true & E>0 & delayCut=true -> allowed only if E < D, error if E >= D (\"DBR zeroed end must precede the delay-cut start for this channel/wavelength\"); filterEnabled=true & E>0 & delayCut=false -> REJECTED (\"zero-phase filtering is incompatible with an uncut DBR-zeroed prefix; enable delay-cut or disable DBR zeroing\") - this combination is explicitly UNSUPPORTED by this version, no longer deferred to stage B. DBR disabled: E interpreted as 0 (no zeroed region, no step; evidence: cut-line output bitwise identical for zeroRows=313 vs 0, gate G3). Inversion-only (no HP/LP): no non-causal filter wrap occurs, so the E<D rejection is not required there; the valid-query rule m >= E+1 still excludes the zeroed prefix. Short window: line length <= 3n rejected (A5). Out-of-range queries: maskOob zero (production convention). Endpoint derivative: one-sided differences at line ends (timeDerivative.m); the cut-line one-sided vs uncut central-difference difference at the first sample is quantified in exp3 T7 endpointProbe. NOTE: passing this config check is NOT a boundary-error-free or losslessness guarantee; the quantified start/tail finite-window errors (B6.sensitivity) and real-hardware UNVERIFIED limits remain",
+    "headPolicy": "no fixed head-margin discard and no preset quality threshold; boundary-convention error is quantified against a converged INDEPENDENT long-window reference (B6.reference/rows: structural assertions, old self-comparison construction negative-controlled, pad convergence at recorded tolerance 1e-9 relative via the shared padConvergenceCheck criterion - padRef self-comparison never counts as a passing candidate, at least two distinct non-reference pads must pass, they must be mutually stable at the same reference scale, and no relapse beyond the first passing pad; p/p'/b waveform errors with absolute+relative scales). Steady-start (pre-trigger-zero model) lines: near-boundary echoOnly differences at ~1e-9 relative or below; burst-contaminated starts and near-tail targets show measurable finite-window effects (B6.sensitivity) - no exact-zero-error claim is made. Startup interference remains a data-dependent quantity reported via burstOnly residue profile and burstEcho INT columns (B1/B6), not a fixed discard",
     "derivativeEndpoint": "timeDerivative.m: central difference interior, one-sided ends, per column, applied to the same filtered line",
-    "twoStateQuery": "unified notation (algorithm-stage-A.md section 2.2): D systemDelay (raw one-based acoustic zero), T physical travel time, s=fs*T, m raw one-based coordinate, q stored-array zero-based continuous query coordinate; cut line q_cut=s (m=q_cut+D); uncut calibrated query q_raw=s+D-1 (m=q_raw+1=s+D); inversion time multiplier t=T=s/fs=(q_raw+1-D)/fs; the legacy DAS uncut query q_legacy=s (no compensation, \"sample 1 = acoustic zero\") is a separate historical compatibility behavior, documented separately and never mixed into the proposed inversion table",
+    "twoStateQuery": "unified notation (algorithm-stage-A.md section 2.2): D systemDelay (raw one-based acoustic zero), T physical travel time, s=fs*T, m raw one-based coordinate, q stored-array zero-based continuous query coordinate; cut line q_cut=s (m=q_cut+D); uncut calibrated query q_raw=s+D-1 (m=q_raw+1=s+D); inversion time multiplier t=T=s/fs=(q_raw+1-D)/fs (NOT q_raw/fs). FROZEN C3 rule table (three feature combos x two delayCut states; see test_query_policy.m): all-off -> q=s (cut) / q_legacy=s (uncut, old behavior); filter-only (HP/LP, inversion off) -> q=s (cut) / q_legacy=s (uncut: filtering changes signal content only, never the query geometry; C2 config precheck applies first); inversion on (+/- HP/LP) -> q_cut=s (cut, m=s+D) / q_raw=s+D-1 (uncut, m=q_raw+1=s+D; C2 config precheck applies first). Only inversion triggers the calibrated uncut query - \"compensate whenever inversion OR filtering is enabled\" is withdrawn as ambiguous; no stage-B alternative (e.g. forcing delayCut=true) is offered by this version. The legacy DAS uncut query q_legacy=s (no compensation, \"sample 1 = acoustic zero\") is a separate historical compatibility behavior, documented separately and never mixed into the proposed inversion table; the two-state derivative endpoint convention difference remains reported per exp3 T7 endpointProbe, no bit-exact endpoint equivalence is claimed",
     "rejected": "wholesale discard of samples 848-3639 rejected: that span is the impulse-response width of one specific HP design at one threshold (exp6 F5), not a universal contamination bound. WITHDRAWN this round: the 9ace9e1 claim \"boundary-convention error measured exactly 0 (B6 BC columns)\" - that reference degraded to the same filter input as the device under test (B6_filter_input_identical=1, maxdiff=0). Boundary conclusions now come exclusively from the corrected independent long reference; no exact-zero claim is made"
   },
   "gate": {

@@ -27,10 +27,12 @@
 %   直接作用于存储行、无任何 systemDelay 补偿（ring_recon_cuda.cu 无该引用）
 %   ⟹ 生产 delayCut=0 的"旧行为"把原始样本 1 当作声学零点（q_legacy=s），与
 %   拟议反演的校准查询（q_raw=s+D−1）不等价；T5 量化两者差异。区分：旧路径
-%   兼容行为 ≠ 拟议反演语义。二轮收口建议（待规划审查，algorithm-stage-A.md
-%   §2.3/§7）：保留两态反演并采用补偿查询 tf_eff = tf + sysDelay − 1（即
-%   q_raw = s + D − 1）；若审查改选"反演仅允许 delayCut=1"，必须显式报错而非
-%   自动切换。本阶段不修改生产代码。
+%   兼容行为 ≠ 拟议反演语义。C3 冻结规则（本版确定建议，无替代选项；参考
+%   策略测试 test_query_policy.m / algorithm-stage-A.md §2.3/§2.5）：保留两态
+%   反演，未裁剪线采用补偿查询 tf_eff = tf + sysDelay − 1（即 q_raw = s+D−1）；
+%   "只有反演开启才使用校准的未裁剪查询"——仅 HP/LP 不改变既有 DAS 查询
+%   几何（不触发补偿），全部关闭保持旧行为；本表不再提供"反演强制
+%   delayCut=1"替代选项，未来范围变更需单独审查。本阶段不修改生产代码。
 %
 % 测试内容
 %   T1 索引链：按上式生成 raw（含 sysDelay 偏移的脉冲），经
@@ -416,7 +418,7 @@ out = res;
 out.params = struct('fs', fs, 'c', c, 'sampDepth', sampDepth, 'sysDelay', sysDelay, ...
     'maskLength', maskLength, 'd0', d0, 'sigmaSamp', sigmaSamp, ...
     'tauQlist', tauQlist, 'channels', {fieldnames(res.T5)}, ...
-    'productionDelayCut0', 'no delay compensation in query (src/RingRecon: preprocessBlock srcRow0=0; CUDA kernel tf=d*fs/c on stored line, no systemDelay reference) - legacy behavior differs from proposed inversion semantics, stage B adaptation required');
+    'productionDelayCut0', 'no delay compensation in query (src/RingRecon: preprocessBlock srcRow0=0; CUDA kernel tf=d*fs/c on stored line, no systemDelay reference) - legacy behavior differs from proposed inversion semantics; frozen C3 rule: only inversion-on uses the calibrated uncut query q_raw=s+D-1 (tf_eff=tf+sysDelay-1), filter-only and all-off keep the legacy query geometry, see test_query_policy.m');
 out.matlabVersion = version;
 fid = fopen(fullfile(outdir, 'exp3_time_axis.json'), 'w');
 fwrite(fid, jsonencode(out, 'PrettyPrint', true)); fclose(fid);

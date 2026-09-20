@@ -307,7 +307,7 @@
       "perturbMaxDb",
       "perturbDetectable"
     ],
-    "productionDelayCut0": "no delay compensation in query (src/RingRecon: preprocessBlock srcRow0=0; CUDA kernel tf=d*fs/c on stored line, no systemDelay reference) - legacy behavior differs from proposed inversion semantics, stage B adaptation required"
+    "productionDelayCut0": "no delay compensation in query (src/RingRecon: preprocessBlock srcRow0=0; CUDA kernel tf=d*fs/c on stored line, no systemDelay reference) - legacy behavior differs from proposed inversion semantics; frozen C3 rule: only inversion-on uses the calibrated uncut query q_raw=s+D-1 (tf_eff=tf+sysDelay-1), filter-only and all-off keep the legacy query geometry, see test_query_policy.m"
   },
   "matlabVersion": "9.14.0.2206163 (R2023a)"
 }

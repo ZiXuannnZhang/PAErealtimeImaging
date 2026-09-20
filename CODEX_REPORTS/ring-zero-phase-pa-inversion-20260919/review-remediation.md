@@ -1,6 +1,8 @@
 # 阶段 A 审查整改回执（R1–R5）
 
 > **二轮整改注记（20260920）**：本回执为一轮整改（R1–R5，基线 9493962 → 9ace9e1）的记录。二轮整改（B1–B3：B6 边界参考重写、时间轴规格收口、exp2 JSON 打包修正）的逐项回应见 [review-spec-closure.md](review-spec-closure.md)；本文件中与二轮冲突的内容（R4 节 B6 结论、"两态查询公式"块）已按二轮证据修正并就地标注，原文见 git 历史 9ace9e1。
+>
+> **三轮整改注记（20260920）**：三轮收口（C1 收敛判据自比修复、C2 配置接受/拒绝规则冻结、C3 唯一查询规则，基线 63e088a）的逐项回应见 [review-final-closure.md](review-final-closure.md)；本文件"两态查询公式"块中的替代选项表述已按三轮 C3 撤回标注。
 
 任务：`TASKS/环形成像阶段A审查整改追加_20260919-201935.md`（REQUEST_CHANGES）
 分支：`codex/ring-zero-phase-pa-inversion-20260919-025754`
@@ -161,6 +163,9 @@ delayCut=0（全行）：校准查询 q_raw = s + D − 1                  → t
 旧 DAS 未裁剪查询 q_legacy = s（无补偿，隐含"样本 1 = 声学零点"）= 历史兼容行为，单列 §2.3，不混入拟议反演表格
 生产 delayCut=0 旧行为（无补偿）≠ 拟议语义 → 二轮确定建议：补偿查询 tf_eff = tf + sysDelay − 1；
   若改选"反演仅允许 delayCut=1"必须显式报错而非自动切换（algorithm-stage-A.md §2.3/§2.5/§7）
+【三轮 C3 注记（20260920）：上两行的替代选项表述已撤回——本版唯一规则 = 只有反演开启才使用
+  校准未裁剪查询 q_raw = s+D−1；仅 HP/LP 与全部关闭维持旧查询几何；无"强制 delayCut=1"替代
+  选项。现行结论以 algorithm-stage-A.md §2.5（C3 版）与 review-final-closure.md 为准】
 ```
 
 ## 选定边界策略（拟定默认，待审查）
