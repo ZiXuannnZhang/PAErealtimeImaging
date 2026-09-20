@@ -561,6 +561,10 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_imagingController, &ImagingController::svcError,
             this, &MainWindow::onImagingError);
+    // B1 收口 S1：非致命配置拒绝单独提示。不进入 onImagingError——
+    // 拒绝时活动配置/就绪/使能/进程/轮次/馈送全部保持原状。
+    connect(m_imagingController, &ImagingController::svcConfigRejected,
+            this, &MainWindow::onImagingConfigRejected);
     connect(m_imagingController, &ImagingController::svcStatus,
             this, [this](const QString &status, float fps) {
         if (status == "running") {
@@ -2981,7 +2985,10 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
             // B1 整改 R3：启动时下发环形配置；若处于忙态（启停过渡/异常
             // 残留），configureRing 拒绝且 applyConfig 返回 false——此时
             // 不再拉起馈送链路，等待 stopSvc 完成或直接失败退出。
-            if (m_ringConfigDialog->applyConfig()) {
+            // B1 收口 S1：启动为内部提交，走 applyConfigForRealtimeStart——
+            // 允许采集进行中启动实时成像（既有合法流程），不查采集忙；
+            // 服务端忙态仍由 configureRing/2014 拒绝。
+            if (m_ringConfigDialog->applyConfigForRealtimeStart()) {
                 // 请求成像即打开旁路门控；服务连接完成前帧明确记为 ServiceNotReady。
                 configureRingAssembler();
                 startRingFeedWorker();
@@ -3074,6 +3081,16 @@ void MainWindow::setImagingParamControlsEnabled(bool enable)
     if (ui->edtDataTime)    ui->edtDataTime->setEnabled(enable);
     if (ui->edtADelay)      ui->edtADelay->setEnabled(enable);
     if (ui->edtBDelay)      ui->edtBDelay->setEnabled(enable);
+}
+
+// B1 收口 S1：采集忙判据（用户“编辑并应用新配置”的应用边界之一）。
+// 覆盖 isBusy()（服务/进程生命周期）之外的窗口：采集测量正在进行、
+// 而成像服务未运行（或与成像无关的独立采集）。成像启动路径的内部提交
+// 不经此判据（见 onRealtimeImagingToggled——启动使用此前已确认的配置
+// 快照，且允许“采集进行中启动实时成像”这一既有合法流程）。
+bool MainWindow::isAcquisitionBusy() const
+{
+    return m_isMeasuring || m_isListening;
 }
 
 void MainWindow::onDisplayTypeChanged(int index)
@@ -4381,6 +4398,9 @@ void MainWindow::ensureRingConfigDialog()
 {
     if (m_ringConfigDialog) return;
     m_ringConfigDialog = new RingConfigDialog(m_imagingController, this);
+    // B1 收口 S1：注入真实采集忙谓词（主线程调用时读取，无跨线程）。
+    // 用户“应用/确定”在采集进行中被拒；成像启动内部提交不受影响。
+    m_ringConfigDialog->setAcquisitionBusyPredicate([this]() { return isAcquisitionBusy(); });
     // Session B：RingConfigDialog 应用/确定（含成像启动下发）成功后，把当前
     // 物理轮次启动策略转发给当前 NetworkController 的 Session A production API。
     connect(m_ringConfigDialog, &RingConfigDialog::roundPolicyChanged,
@@ -5098,6 +5118,19 @@ void MainWindow::onImagingError(const QString &error)
             "color: #FF4444; background: transparent; padding: 2px 8px;"
             "font-size: 12px;");
     }
+}
+
+// B1 收口 S1：非致命配置拒绝——仅记录并提示，不改变任何运行状态。
+// （不置 ready=false、不停定时器、不改 m_imagingEnabled、不取消实时成像
+// 勾选、不恢复参数控件锁定。）原活动配置继续服务。
+void MainWindow::onImagingConfigRejected(const QString &reason)
+{
+    recordDiagnosticAction(QStringLiteral("imaging_config_rejected"),
+        {{"monotonicNs", QString::number(paimage::SocketReceiver::now())},
+         {"reason", reason},
+         {"serviceRunning", m_imagingController && m_imagingController->isRunning()},
+         {"imagingEnabled", m_imagingEnabled}});
+    logMessage(QString("[配置未应用] %1（当前成像与数据流不受影响）").arg(reason));
 }
 
 // =====================================================================

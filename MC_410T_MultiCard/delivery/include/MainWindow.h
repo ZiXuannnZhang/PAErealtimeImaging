@@ -77,6 +77,12 @@ public:
     static QString formatCardStatusTooltip(const CardStats::Snapshot& stats,
                                            const CardStatusFormatting::RoundDisplay& round);
 
+    // B1 收口 S1：采集忙 = 测量会话进行中或监听收尾中。用于用户“编辑并应用
+    // 新配置”的拒绝判据（isBusy 之外的第二道应用边界，覆盖采集进行而成像
+    // 服务未运行的窗口）。成像启动的内部提交（已确认快照）不经此判据。
+    // 只读探针（注入 RingConfigDialog::setAcquisitionBusyPredicate）。
+    bool isAcquisitionBusy() const;
+
 protected:
     void closeEvent(QCloseEvent *event) override;
     void showEvent(QShowEvent *event) override;
@@ -107,6 +113,7 @@ private slots:
     void onImagingStopped();
     void onImagingImageReady(const QImage &image, int seq);
     void onImagingError(const QString &error);
+    void onImagingConfigRejected(const QString &reason);   // B1 收口 S1：非致命配置拒绝提示
     void setImagingParamControlsEnabled(bool enable); // 实时成像期间锁定成像参数/采集控制，svcStopped 后恢复
     void onDiagnosticStatusTick();
     void onSystemCaptureStatusTick();

@@ -643,6 +643,34 @@ bool RingConfigDialog::applyConfig()
 {
     if (!m_controller) return false;
 
+    // B1 收口 S1：采集忙时拒绝用户“编辑并应用新配置”。isAcquisitionBusy 由
+    // MainWindow 注入（测量会话/监听进行中 = 忙），覆盖采集进行而成像服务未
+    // 运行的窗口；此时即使控制器 isBusy 为假，也不得把新参数应用到正在采集
+    // 的实例。拒绝为非致命：原活动配置、就绪/使能、轮次与馈送全部保持不变。
+    // 成像启动路径（onRealtimeImagingToggled）走 applyConfigForRealtimeStart，
+    // 不受此边界限制——那是内部提交，用的是此前已确认的配置快照。
+    if (m_acqBusy && m_acqBusy()) {
+        QMessageBox::warning(this, "无法应用",
+            "数据采集正在进行，环形参数未应用。\n"
+            "请先停止监听/测量，再修改并应用参数。");
+        return false;
+    }
+    return validateAndSubmit();
+}
+
+bool RingConfigDialog::applyConfigForRealtimeStart()
+{
+    // B1 收口 S1：成像启动的内部提交。允许“采集进行中启动实时成像”这一既有
+    // 合法流程（用户在采集运行时勾选实时成像）。不查询采集忙；控制器 isBusy
+    // 仍然生效（服务运行/启停过渡中启动仍被拒）。此例外只提交对话框此刻的
+    // 已确认控件值（与用户上次“应用”一致的快照语义），不是偷渡新编辑的通道。
+    if (!m_controller) return false;
+    return validateAndSubmit();
+}
+
+bool RingConfigDialog::validateAndSubmit()
+{
+    if (!m_controller) return false;
     int cnt = 0;
     for (int c = 0; c < 8; ++c)
         if (m_chkCh[c]->isChecked()) ++cnt;

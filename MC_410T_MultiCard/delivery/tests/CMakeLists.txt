@@ -34,6 +34,8 @@ target_link_libraries(data_processor_imaging_isolation_test PRIVATE Qt6::Core)
 add_test(NAME data_processor_imaging_isolation_test COMMAND data_processor_imaging_isolation_test)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Concurrent Widgets)
+# B1 收口 S1 集成测试拉入完整 MainWindow → 需要 qcustomplot 全套 Qt 组件
+find_package(Qt6 REQUIRED COMPONENTS PrintSupport OpenGL OpenGLWidgets Svg)
 
 add_executable(ring_production_blockers_test ring_production_blockers_test.cpp
     ../src/RingBlockAssembler.cpp ../src/RingRoundUiState.cpp ../src/RingRoundPresentation.cpp
@@ -390,6 +392,109 @@ add_test(NAME ring_config_busy_reject_test
     COMMAND ring_config_busy_reject_test)
 set_tests_properties(ring_config_busy_reject_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# B1 收口 S1：非致命配置拒绝端到端集成（真实 MainWindow 生产连接 + 真实
+# RingConfigDialog 注入 + 真实 ImagingController + 真实 ImagingSvc.exe 子进程）。
+# 真实子进程/固定端口 5555/崩溃注入 → 串行；shared-memory 产物不受并行污染。
+add_executable(ring_config_reject_integration_test
+    ring_config_reject_integration_test.cpp
+    ../src/RingConfigDialog.cpp ../include/RingConfigDialog.h
+    ../src/ImagingController.cpp ../include/ImagingController.h
+    ../src/MainWindow.cpp ../include/MainWindow.h
+    ../src/ImagingDisplayWindow.cpp ../src/RingImageWidget.cpp
+    ../src/RingColorBarWidget.cpp ../src/RingBlockAssembler.cpp
+    ../src/RingRoundUiState.cpp ../src/RingRoundPresentation.cpp
+    ../src/ImagingBypass.cpp
+    ../src/DiagnosticRecorder.cpp ../src/MeasurementSession.cpp
+    ../src/NetworkController.cpp ../src/NetworkDiagnostics.cpp
+    ../src/DataProcessor.cpp ../src/FileSaver.cpp ../src/FramePublisher.cpp
+    ../src/MultiPortReceiver.cpp ../src/StartupPolicy.cpp
+    ../src/PaimageAcquisition/CardDiscovery.cpp
+    ../src/DiagnosticExportDialog.cpp
+    ../src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp
+    ../src/PaimageAcquisition/SourceCore.cpp
+    ../src/PaimageAcquisition/ControlState.cpp
+    ../src/PaimageAcquisition/ControlSocket.cpp
+    ../src/PaimageAcquisition/SocketReceiver.cpp
+    ../src/PaimageAcquisition/SocketTimestamp.cpp
+    ../src/PaimageAcquisition/TraceWriter.cpp
+    ../src/PaimageAcquisition/TimingWriter.cpp
+    ../src/PaimageAcquisition/LoopLog.cpp
+    ../src/PaimageAcquisition/OutputQueues.cpp
+    ../src/PaimageAcquisition/OutputWorkers.cpp
+    ../src/PaimageAcquisition/FrameConverter.cpp
+    ../src/PaimageAcquisition/HostOutput.cpp
+    ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
+    ../src/PaimageAcquisition/Backend.cpp
+    ../src/PaimageAcquisition/NetworkControllerPaimage.cpp
+    ../qcustomplot/qcustomplot.cpp)
+# Q_OBJECT 头文件显式列入（AUTOMOC 生成 staticMetaObject/vtable）
+set(REJ_INT_HEADERS
+    ../include/ImagingController.h ../include/MainWindow.h
+    ../include/RingConfigDialog.h ../include/ImagingDisplayWindow.h
+    ../include/RingImageWidget.h ../include/RingColorBarWidget.h
+    ../include/RingBlockAssembler.h ../include/ImagingBypass.h
+    ../include/DiagnosticRecorder.h ../include/MeasurementSession.h
+    ../include/NetworkController.h ../include/NetworkDiagnostics.h
+    ../include/DataProcessor.h ../include/FileSaver.h
+    ../include/FramePublisher.h ../include/MultiPortReceiver.h
+    ../include/DiagnosticExportDialog.h
+    ../include/PaimageAcquisition/AutoSaveRoundCoordinator.h
+    ../qcustomplot/qcustomplot.h)
+target_sources(ring_config_reject_integration_test PRIVATE ${REJ_INT_HEADERS})
+set_target_properties(ring_config_reject_integration_test PROPERTIES
+    AUTOUIC ON AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../ui")
+target_sources(ring_config_reject_integration_test PRIVATE
+    ../ui/MainWindow.ui)
+target_include_directories(ring_config_reject_integration_test PRIVATE
+    ../include ../src/RingRecon ../qcustomplot
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/include")
+target_compile_definitions(ring_config_reject_integration_test PRIVATE
+    WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE
+    IMAGING_CONTROLLER_TEST_SEAM)
+if(MSVC)
+    set(REJ_INT_ZMQ_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq-v141-mt-4_3_5.lib")
+else()
+    set(REJ_INT_ZMQ_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a")
+endif()
+target_link_libraries(ring_config_reject_integration_test PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent
+    Qt6::PrintSupport Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Svg
+    "${REJ_INT_ZMQ_LIB}" ws2_32 iphlpapi
+    "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.lib")
+add_custom_command(TARGET ring_config_reject_integration_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
+        "$<TARGET_FILE_DIR:ring_config_reject_integration_test>"
+    COMMENT "Deploying zmq runtime for ring_config_reject_integration_test")
+# 真实子进程依赖：ImagingController::startSvc 从 applicationDirPath 找
+# ImagingSvc.exe（生产布局 = 主程序与 ImagingSvc 同目录）。测试同目录
+# 复制真实构建产物 + imaging/CUDA 运行时（子进程不继承 Qt/CUDA PATH 时
+# 也可启动；cudart/ring_recon_cuda 来自主工程解析的 CUDA bin，同主构建）。
+set(REJ_INT_CUDA_BIN "${CMAKE_BINARY_DIR}/../ring_recon_cuda/bin")
+if(NOT EXISTS "${REJ_INT_CUDA_BIN}/ring_recon_cuda.dll")
+    set(REJ_INT_CUDA_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin")
+endif()
+add_custom_command(TARGET ring_config_reject_integration_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_BINARY_DIR}/../mingw_debug/bin/ImagingSvc.exe"
+        "$<TARGET_FILE_DIR:ring_config_reject_integration_test>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.dll"
+        "$<TARGET_FILE_DIR:ring_config_reject_integration_test>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/cufft64_12.dll"
+        "$<TARGET_FILE_DIR:ring_config_reject_integration_test>"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${REJ_INT_CUDA_BIN}/ring_recon_cuda.dll"
+        "${REJ_INT_CUDA_BIN}/cudart64_12.dll"
+        "$<TARGET_FILE_DIR:ring_config_reject_integration_test>"
+    COMMENT "Deploying ImagingSvc.exe + imaging/CUDA runtime for integration test")
+add_test(NAME ring_config_reject_integration_test
+    COMMAND ring_config_reject_integration_test)
+set_tests_properties(ring_config_reject_integration_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    RUN_SERIAL TRUE)
 
 if(Python3_Interpreter_FOUND)
     add_test(NAME startup_diagnostics_analyze_test

@@ -50,7 +50,8 @@ public:
 
     // 环形扫描模式配置（与线性 pa_recon 分支并行；调用后 startSvc 走环形链路）
     // sysDelayCh 为每通道双波长延时截断（nullptr=回退为 cfg.sysDelay 广播到所有通道）
-    // 返回 false = 忙时拒绝（服务运行/启停过渡中未应用，见 B1 整改 R3）
+    // 返回 false = 忙时拒绝（服务运行/启停过渡中未应用，见 B1 整改 R3；
+    // B1 收口 S1：拒绝经 svcConfigRejected 非致命提示，不再发 svcError）
     bool configureRing(const RingReconCudaConfig &ringCfg,
                        const int (*sysDelayCh)[2] = nullptr);
     bool isRingMode() const { return m_ringMode; }
@@ -96,6 +97,20 @@ public:
     const float *snapshotBuffer(int index) const;
     void releaseSnapshotBuffer(int index);
 
+#ifdef IMAGING_CONTROLLER_TEST_SEAM
+public:
+    // B1 收口 S1：仅供集成测试把服务端真实格式的 error/2014 JSON 注入生产
+    // processMessage 路由（与 DataProcessor/MultiPortReceiver TEST_SEAM 同型）。
+    // 不暴露运行状态写入；生产信号连接与分流逻辑全部为被测真实代码。
+    void testProcessMessage(const QJsonObject &msg) { processMessage(msg); }
+    // 同上：以真实 CrashExit 状态驱动 onSvcFinished 故障处理（Windows 上
+    // 外部强杀经 QProcess 报 NormalExit，无法稳定合成 CrashExit；真实
+    // 加载器崩溃 0xC0000135→CrashExit 已由缺 DLL 运行记录证明）。
+    void testOnSvcFinished(int exitCode, QProcess::ExitStatus status) {
+        onSvcFinished(exitCode, status);
+    }
+#endif
+
 signals:
     void imageReady(const QImage &image, int seq);
     void ringSnapshotReady(int seq,
@@ -106,6 +121,10 @@ signals:
                            bool roundComplete, int bufferIndex);  // 每块显示快照（UI 线程槽）
     void svcStatus(const QString &status, float fps);
     void svcError(const QString &error);
+    // B1 收口 S1：非致命配置拒绝（忙时拒绝/服务端 2014）。与 svcError 分流：
+    // 拒绝不代表故障——活动配置、就绪/使能状态、轮次与馈送全部保持不变，
+    // UI 只提示，不进入错误处理（不置 ready=false、不停定时器、不取消勾选）。
+    void svcConfigRejected(const QString &reason);
     void svcReady();                   // 子进程就绪（配置已下发）
     void svcStopped();                 // 异步停止完成通知
 

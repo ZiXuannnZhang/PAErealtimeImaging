@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDialog>
+#include <functional>
 #include "Constants.h"
 #include "ring_recon_cuda.h"
 
@@ -30,6 +31,12 @@ public:
     RingReconCudaConfig config() const;   // 当前控件值（含换算后的每通道每波长每圈A线数）
     void sysDelayPerChannel(int out[8][2]) const;   // 每通道双波长延时截断（[通道][波长]）
     bool applyConfig();                   // 校验并下发配置（应用/确定共用）
+    // B1 收口 S1：采集忙注入。MainWindow 在创建对话框时注入真实采集状态谓词
+    // （测量会话/监听进行中）。applyConfig 对“用户编辑并应用”的路径先查询；
+    // 成像启动路径走 applyConfigForRealtimeStart（内部提交，不查采集忙，
+    // 使用此前已确认的配置快照——不借例外偷渡新编辑）。
+    void setAcquisitionBusyPredicate(std::function<bool()> busy) { m_acqBusy = std::move(busy); }
+    bool applyConfigForRealtimeStart();
 
     // 物理轮次启动策略控件当前值（Session B；持久化见 RoundPolicySettings）
     quint64 startupFilterTriggerCount() const;
@@ -48,8 +55,11 @@ private:
     void buildUi();
     void restoreDefaults();               // 恢复默认参数（底部“恢复默认”按钮）
     void saveDefaults();                  // 将当前参数保存为默认（底部“设为默认”按钮）
+    bool validateAndSubmit();             // B1 收口 S1：公共校验+下发实现
 
     ImagingController *m_controller;
+    // 采集忙谓词（MainWindow 注入；空 = 无采集侧边界，仅控制器 isBusy 生效）
+    std::function<bool()> m_acqBusy;
 
     int    m_sampDepth = 4000;   // 采样深度只读值（点/A-line，与线性采集一致）
     double m_daqHz = FPGA_ADC_FREQ_HZ;   // 采样率只读值（Hz，真实采集固定 250 MHz）

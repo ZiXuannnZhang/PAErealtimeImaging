@@ -310,7 +310,12 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
     // 把"停止后才能应用"变成静默自动重启。改为明确拒绝并保持原活动配置、
     // 滤波缓存、成像轮次完全不变。
     if (isBusy()) {
-        emit svcError(QStringLiteral("成像服务正在运行/启停中，环形参数未应用——请先停止实时成像再修改参数。"));
+        // B1 收口 S1：忙时拒绝是非致命配置拒绝，不是运行故障。原实现发
+        // svcError，经 MainWindow::onImagingError 会误把正常成像打入错误态
+        // （ready=false、停定时器、取消勾选）。改发 svcConfigRejected：
+        // 活动配置/就绪/使能/轮次/馈送完全不变，仅提示先停止再修改。
+        emit svcConfigRejected(QStringLiteral(
+            "成像服务正在运行/启停中，环形参数未应用——请先停止实时成像再修改参数。"));
         return false;
     }
     m_ringConfig = ringCfg;
@@ -855,7 +860,16 @@ void ImagingController::processMessage(const QJsonObject &msg)
         emit imageReady(frameDataToImage(frameData, m_scanParams.nx, m_scanParams.ny), seq);
 
     } else if (cmd == "error") {
-        emit svcError(msg["msg"].toString());
+        // B1 收口 S1：服务端 2014（运行中 configure 被拒）是明确的非致命
+        // 配置拒绝语义，与其它真实错误分流到 svcConfigRejected——主窗口
+        // 不进入 onImagingError，原服务继续处理当前配置。其它 code（滤波
+        // 配置校验 2012、CUDA/SHM 环境失败 2006/2007/2010、运行时 1002 等）
+        // 保持原故障路径不变。
+        if (msg["code"].toInt() == 2014) {
+            emit svcConfigRejected(msg["msg"].toString());
+        } else {
+            emit svcError(msg["msg"].toString());
+        }
 
     } else if (cmd == "status") {
         emit svcStatus("running", static_cast<float>(msg["fps"].toDouble()));
