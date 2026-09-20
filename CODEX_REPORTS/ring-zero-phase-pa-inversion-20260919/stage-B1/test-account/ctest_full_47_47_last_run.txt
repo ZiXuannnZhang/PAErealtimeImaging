@@ -1,0 +1,994 @@
+Start testing: Sep 21 01:51 ÷–π˙±Í◊º ±º‰
+----------------------------------------------------------
+1/47 Testing: timeout_presentation_test
+1/47 Test: timeout_presentation_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/timeout_presentation_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"timeout_presentation_test" start time: Sep 21 01:51 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS C10 capture-before-reset/old-directory/lifetime; C12 reset success/failure
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"timeout_presentation_test" end time: Sep 21 01:51 ÷–π˙±Í◊º ±º‰
+"timeout_presentation_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/47 Testing: ring_block_assembler_test
+2/47 Test: ring_block_assembler_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/ring_block_assembler_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"ring_block_assembler_test" start time: Sep 21 01:51 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS T1 normal full-length
+PASS T2 short line zero-padding
+PASS T3 long line truncation
+PASS T4 duplicate first-wins
+PASS T5 out-of-order triggers
+PASS T6 temporal overflow
+PASS T7 numerically smallest current
+PASS T8 sequence wrap overflow
+PASS T9 timeout reset
+PASS T10 external timeout ownership
+PASS T11 normal golden regression
+PASS T12 logical round boundary
+PASS R1 identity residual hard barrier
+PASS R2 CountBoundary final sync retention
+PASS R3 stale round drop
+PASS R4 generation gap/session floor
+PASS R10 measurement session restart
+PASS all RingBlockAssembler tests (T1-T12,R1-R4,R10)
+<end of output>
+Test time =   0.14 sec
+----------------------------------------------------------
+Test Passed.
+"ring_block_assembler_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"ring_block_assembler_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/47 Testing: imaging_bypass_test
+3/47 Test: imaging_bypass_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/imaging_bypass_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"imaging_bypass_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS imaging bypass: bounded admission, explicit drops, session/service isolation, early filters, saving independence
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"imaging_bypass_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"imaging_bypass_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/47 Testing: data_processor_imaging_isolation_test
+4/47 Test: data_processor_imaging_isolation_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/data_processor_imaging_isolation_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"data_processor_imaging_isolation_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS 4000-frame pressure: saveAccepted=4000 while imaging queue saturated and worker delayed
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"data_processor_imaging_isolation_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"data_processor_imaging_isolation_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/47 Testing: ring_production_blockers_test
+5/47 Test: ring_production_blockers_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/ring_production_blockers_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"ring_production_blockers_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+ring_production_blockers_test failures=0
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"ring_production_blockers_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"ring_production_blockers_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/47 Testing: diagnostic_recorder_test
+6/47 Test: diagnostic_recorder_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/diagnostic_recorder_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"diagnostic_recorder_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+Got unexpected locking error 3
+<end of output>
+Test time =   0.95 sec
+----------------------------------------------------------
+Test Passed.
+"diagnostic_recorder_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"diagnostic_recorder_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/47 Testing: ring_shm_observability_test
+7/47 Test: ring_shm_observability_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/ring_shm_observability_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"ring_shm_observability_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+ring_shm_observability_test: PASS (T1-T11,T13)
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"ring_shm_observability_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"ring_shm_observability_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/47 Testing: diagnostic_dialog_test
+8/47 Test: diagnostic_dialog_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/diagnostic_dialog_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"diagnostic_dialog_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+QFontDatabase: Cannot find font directory D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/fonts.
+Note that Qt no longer ships fonts. Deploy some (from https://dejavu-fonts.github.io/ for example) or switch to fontconfig.
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+PASS diagnostic dialog time-window validation/note/path selection
+<end of output>
+Test time =   3.21 sec
+----------------------------------------------------------
+Test Passed.
+"diagnostic_dialog_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"diagnostic_dialog_test" time elapsed: 00:00:03
+----------------------------------------------------------
+
+9/47 Testing: diagnostic_time_window_test
+9/47 Test: diagnostic_time_window_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/diagnostic_time_window_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"diagnostic_time_window_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS diagnostic time-window multi-run/active-boundary/empty-window export
+<end of output>
+Test time =   0.25 sec
+----------------------------------------------------------
+Test Passed.
+"diagnostic_time_window_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"diagnostic_time_window_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+10/47 Testing: process_scheduling_test
+10/47 Test: process_scheduling_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/process_scheduling_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"process_scheduling_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+[IngressProtection] requestedPriority=BELOW_NORMAL priorityApply=ok effectivePriority=BELOW_NORMAL originalProcessMask=0xFFFFFFFF requestedProcessMask=0xFFFFFFFA affinityApply=ok effectiveProcessMask=0xFFFFFFFA reservedLogicalCpus=0,2
+PASS process scheduling tests
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"process_scheduling_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"process_scheduling_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+11/47 Testing: network_ingress_observability_test
+11/47 Test: network_ingress_observability_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/network_ingress_observability_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"network_ingress_observability_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS network ingress observability helpers
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"network_ingress_observability_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"network_ingress_observability_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+12/47 Testing: network_snapshot_test
+12/47 Test: network_snapshot_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/network_snapshot_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"network_snapshot_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS read-only adapter/route snapshot and loopback relation
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"network_snapshot_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"network_snapshot_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+13/47 Testing: network_diagnostics_test
+13/47 Test: network_diagnostics_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/network_diagnostics_test.exe" "--legacy-control-only"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"network_diagnostics_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS 4 targets: all confirmed
+PASS 5 targets: fifth timeout; first four confirmed
+<end of output>
+Test time =   4.48 sec
+----------------------------------------------------------
+Test Passed.
+"network_diagnostics_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"network_diagnostics_test" time elapsed: 00:00:04
+----------------------------------------------------------
+
+14/47 Testing: measurement_session_transaction_test
+14/47 Test: measurement_session_transaction_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/measurement_session_transaction_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"measurement_session_transaction_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS measurement session transaction tests
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"measurement_session_transaction_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"measurement_session_transaction_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+15/47 Testing: session_boundary_test
+15/47 Test: session_boundary_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/session_boundary_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"session_boundary_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS session boundary reset/100-cycle tests
+<end of output>
+Test time =   1.50 sec
+----------------------------------------------------------
+Test Passed.
+"session_boundary_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"session_boundary_test" time elapsed: 00:00:01
+----------------------------------------------------------
+
+16/47 Testing: session_boundary_receiver_test
+16/47 Test: session_boundary_receiver_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/session_boundary_receiver_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"session_boundary_receiver_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS receiver-aware session boundary stress
+<end of output>
+Test time =  11.57 sec
+----------------------------------------------------------
+Test Passed.
+"session_boundary_receiver_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"session_boundary_receiver_test" time elapsed: 00:00:11
+----------------------------------------------------------
+
+17/47 Testing: data_processor_batch_test
+17/47 Test: data_processor_batch_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/data_processor_batch_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"data_processor_batch_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS DataProcessor batch/counter tests
+<end of output>
+Test time =   0.07 sec
+----------------------------------------------------------
+Test Passed.
+"data_processor_batch_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"data_processor_batch_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+18/47 Testing: card_status_formatting_test
+18/47 Test: card_status_formatting_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/card_status_formatting_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"card_status_formatting_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS card status formatting
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"card_status_formatting_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"card_status_formatting_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+19/47 Testing: round_policy_settings_test
+19/47 Test: round_policy_settings_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/round_policy_settings_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"round_policy_settings_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS round policy settings
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"round_policy_settings_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"round_policy_settings_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+20/47 Testing: paimage_network_test
+20/47 Test: paimage_network_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_network_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"paimage_network_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+cpuMs=453.125 wallMs=2289.82 traceEnabled=1 injectedMissing=0
+hostRingReturns=252 maxSenderLateMs=13.4892 stress=0
+PASS actual NetworkController: 4-card UDP, CONFIG ACK then START, 20->50->20, source startup, Ring and retained saving files, async Stop
+<end of output>
+Test time =   2.34 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_network_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_network_test" time elapsed: 00:00:02
+----------------------------------------------------------
+
+21/47 Testing: paimage_production_gap_test
+21/47 Test: paimage_production_gap_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_production_gap_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"paimage_production_gap_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS B-ADD-1 production full gap: T100->T104 missing=3 dropped=3 partial=0
+PASS B-ADD-2 production partial+full gap: partial=1 missing=3 dropped=21
+PASS B-ADD-3 production adjacent: T200->T201 missing=0 dropped=0
+PASS B-ADD-4 production wrap forward: T65534->T1 missing=2 dropped=2
+PASS B-ADD-5 production backstep/stale: missing stays 4, anchor never retreated
+PASS B-ADD-6 production session reset: T100 then T120 after restart, missing=0
+PASS B-ADD-7 production same-session reset: T1000->T10 no gap, T10->T14 missing=3 dropped=3
+PASS B-ADD-8A production threshold 255: T400->T145 backstep, T401 adjacent, missing=0
+PASS B-ADD-8B production threshold 256: T400->T144 reset, T144->T148 missing=3 dropped=3
+PASS paimage production trigger-gap accounting: B-ADD-1..8
+<end of output>
+Test time =   3.40 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_production_gap_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_production_gap_test" time elapsed: 00:00:03
+----------------------------------------------------------
+
+22/47 Testing: paimage_start_race
+22/47 Test: paimage_start_race
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_start_race_test.exe" "--output" "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/start-race-artifacts"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"paimage_start_race" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+sessions=61 hardSocketErrors=0 emulatorSendErrors=0 traceQueueDropped=0 traceIncomplete=false
+PASS deterministic paimage START Fence UDP integration
+<end of output>
+Test time =   0.24 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_start_race" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_start_race" time elapsed: 00:00:00
+----------------------------------------------------------
+
+23/47 Testing: paimage_start_fence_regression
+23/47 Test: paimage_start_fence_regression
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_start_fence_regression_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"paimage_start_fence_regression" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+completeStartFalseReturnedFalse=true sourceRemainedDisabled=true releasedCount=0 cardFrameCount=0 syncFrameCount=0 nextCompatibilityStartPassed=true
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_start_fence_regression" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_start_fence_regression" time elapsed: 00:00:00
+----------------------------------------------------------
+
+24/47 Testing: paimage_start_overflow
+24/47 Test: paimage_start_overflow
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_start_overflow_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"paimage_start_overflow" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+overflowObserved=true completeStartReturnedFalse=true overflowCount=1 failedDiscardCount=9000 releasedCount=0 cardFrameCount=0 syncFrameCount=0 recoveryPassed=true
+<end of output>
+Test time =   0.08 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_start_overflow" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_start_overflow" time elapsed: 00:00:00
+----------------------------------------------------------
+
+25/47 Testing: paimage_host_output_test
+25/47 Test: paimage_host_output_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_host_output_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"paimage_host_output_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS C1-C3/C8/C13 startup=0 disable=0 raw=4 realtime=4/card
+PASS C1-C3/C8/C13 startup=0 disable=1 raw=6 realtime=4/card
+PASS C1-C3/C8/C13 startup=7 disable=0 raw=4 realtime=4/card
+PASS C1-C3/C8/C13 startup=7 disable=1 raw=6 realtime=4/card
+PASS production source/output/host boundary: four cards, 28/70, exact float16 files, display and Ring; normalized 1+N save/Ring identity; queued saving generation retains original directory; physical idle timeout shared by save/Ring; SourceCore assembly timeout isolated
+<end of output>
+Test time =   0.57 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_host_output_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_host_output_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+26/47 Testing: filesaver_round_boundary_test
+26/47 Test: filesaver_round_boundary_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/filesaver_round_boundary_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"filesaver_round_boundary_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+filesaver_round_boundary_test: ALL PASS
+<end of output>
+Test time =   0.47 sec
+----------------------------------------------------------
+Test Passed.
+"filesaver_round_boundary_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"filesaver_round_boundary_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+27/47 Testing: ring_round_ui_state_test
+27/47 Test: ring_round_ui_state_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/ring_round_ui_state_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"ring_round_ui_state_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+ring_round_ui_state_test: ALL PASS
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"ring_round_ui_state_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"ring_round_ui_state_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+28/47 Testing: ring_round_identity_test
+28/47 Test: ring_round_identity_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/ring_round_identity_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"ring_round_identity_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+ring_round_identity_test: ALL PASS (R5-R10,R14)
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"ring_round_identity_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"ring_round_identity_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+29/47 Testing: auto_save_round_coordinator_test
+29/47 Test: auto_save_round_coordinator_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/auto_save_round_coordinator_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"auto_save_round_coordinator_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+auto_save_round_coordinator_test: ALL PASS
+<end of output>
+Test time =   0.07 sec
+----------------------------------------------------------
+Test Passed.
+"auto_save_round_coordinator_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"auto_save_round_coordinator_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+30/47 Testing: count_boundary_save_binding_test
+30/47 Test: count_boundary_save_binding_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/count_boundary_save_binding_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"count_boundary_save_binding_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+count_boundary_save_binding_test: C1-C10 ALL PASS
+<end of output>
+Test time =   0.35 sec
+----------------------------------------------------------
+Test Passed.
+"count_boundary_save_binding_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"count_boundary_save_binding_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+31/47 Testing: paimage_trace_bundle_test
+31/47 Test: paimage_trace_bundle_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_trace_bundle_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"paimage_trace_bundle_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS active writer flush, fixed sequence cut, excluded post-click record with old timestamp, ZIP manifest
+<end of output>
+Test time =   0.27 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_trace_bundle_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_trace_bundle_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+32/47 Testing: ring_zero_phase_filter_test
+32/47 Test: ring_zero_phase_filter_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/ring_zero_phase_filter_test.exe" "--ref" "X:/MC_410T_MultiCard/delivery/tests/../../../CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/stage-B1/matlab/reference_vectors"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"ring_zero_phase_filter_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+reference dir: X:/MC_410T_MultiCard/delivery/tests/../../../CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/stage-B1/matlab/reference_vectors (exists=1)
+PASS A1 butter(2,0.5) LP design ok
+PASS A2 butter(2,0.5) coefficients exact
+PASS A3 fc single-pass -3dB (all designs)
+PASS A4 passband gain=1 for orders 1..8
+PASS B1 n=0 rejected
+PASS B2 n=9 rejected
+PASS B3 fc=0 rejected
+PASS B4 fc=fs/2 rejected
+PASS B5 fc>fs/2 rejected
+PASS B6 fs=0 rejected
+PASS B7 HP>LP rejected
+PASS B8 HP==LP rejected
+PASS B9 Nx=3n rejected
+PASS B10 Nx=3n+1 accepted
+PASS B11 NaN input rejected
+PASS B12 Inf input rejected
+PASS C1 C2 rule matrix (D‚àà{358,371} √ó E √ó delayCut √ó filter)
+PASS C2 E includes extra
+PASS C3 E clamped to Nt (whole-line zero)
+PASS C4 zero mask ‚Üí E=0
+  dc/HP: maxAll=0.000e+00 maxInt=0.000e+00 scale=0 ok
+  dc/LP: maxAll=2.776e-16 maxInt=2.776e-16 scale=0.5 ok
+  sine_in/HP: maxAll=2.519e-13 maxInt=2.519e-13 scale=1.42 ok
+  sine_in/LP: maxAll=9.992e-16 maxInt=9.992e-16 scale=0.998 ok
+  sine_out/HP: maxAll=9.258e-14 maxInt=9.258e-14 scale=0.0694 ok
+  sine_out/LP: maxAll=8.882e-16 maxInt=8.882e-16 scale=1 ok
+  multitone/HP: maxAll=3.290e-13 maxInt=3.290e-13 scale=1.82 ok
+  multitone/LP: maxAll=1.554e-15 maxInt=1.554e-15 scale=1.58 ok
+  pulse/HP: maxAll=1.149e-14 maxInt=1.149e-14 scale=0.997 ok
+  pulse/LP: maxAll=1.665e-16 maxInt=1.665e-16 scale=0.324 ok
+  burst/HP: maxAll=1.274e-10 maxInt=1.274e-10 scale=2.13e+03 ok
+  burst/LP: maxAll=1.137e-12 maxInt=1.137e-12 scale=1.84e+03 ok
+  noise/HP: maxAll=5.210e-14 maxInt=5.210e-14 scale=0.391 ok
+  noise/LP: maxAll=1.943e-16 maxInt=1.943e-16 scale=0.191 ok
+PASS D1 stage-A reference vectors match (HP/LP per-case)
+PASS D2 reference comparison actually executed (14 files)
+PASS E1 zero-phase across fs {250,200}MHz, orders {1,3,4,5,7,8}
+PASS F1a all-off output shape (delayCut rows)
+PASS F1b all-off == legacy path sample-exact
+PASS F1c all-off ignores invalid stored cutoffs (no new rejection)
+PASS F2 filtered == pre-cut line then filter (float-equal)
+PASS F3 per-column == block processing (chunk independence)
+PASS F4 delayCut=false keeps full-line rows with filters on
+PASS F5 E=0 (DBR off) + filters on: allowed
+PASS G1 per-line filter is stateless (rerun identical)
+PASS G2 double-processing is detectably different (once-only is meaningful)
+
+32 passed, 0 failed
+<end of output>
+Test time =   0.19 sec
+----------------------------------------------------------
+Test Passed.
+"ring_zero_phase_filter_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"ring_zero_phase_filter_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+33/47 Testing: ring_config_zero_phase_dialog_test
+33/47 Test: ring_config_zero_phase_dialog_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/ring_config_zero_phase_dialog_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"ring_config_zero_phase_dialog_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+QFontDatabase: Cannot find font directory D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/fonts.
+Note that Qt no longer ships fonts. Deploy some (from https://dejavu-fonts.github.io/ for example) or switch to fontconfig.
+This plugin does not support propagateSizeHints()
+This plugin does not support propagateSizeHints()
+PASS D1 factory defaults: both filters off
+PASS D2 HP default 0.4 MHz, order 4
+PASS D3 LP default 40 MHz, order 4
+PASS D4 filter checkboxes exist
+PASS D5 MHz spinboxes exist
+PASS D6 HP row enabled when checked
+PASS D7 HP row disabled when unchecked
+PASS D8 HP value preserved while disabled
+PASS D9 LP row enabled when checked
+PASS D10 LP row disabled when unchecked
+PASS D11 config() maps checkboxes to filterLow/filterHigh
+PASS D12 config() converts MHz to Hz once
+PASS D13 invalid HP cutoff rejected by applyConfig
+PASS D14 rejected config not sent to controller
+PASS D15 C2 uncut-DBR combination rejected in UI
+PASS D16 C2-rejected config not sent
+PASS D17 valid config applied
+PASS D18 controller entered ring mode
+PASS D19 controller received filter flags
+PASS D20 controller received Hz cutoffs
+ALL PASS
+<end of output>
+Test time =   0.49 sec
+----------------------------------------------------------
+Test Passed.
+"ring_config_zero_phase_dialog_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"ring_config_zero_phase_dialog_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+34/47 Testing: ring_config_busy_reject_test
+34/47 Test: ring_config_busy_reject_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/ring_config_busy_reject_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"ring_config_busy_reject_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+QFontDatabase: Cannot find font directory D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/fonts.
+Note that Qt no longer ships fonts. Deploy some (from https://dejavu-fonts.github.io/ for example) or switch to fontconfig.
+This plugin does not support propagateSizeHints()
+[MessageBox] È´òÈÄöÊà™Ê≠¢ 60.0000 MHz Ë∂ÖÂá∫ÊúâÊïàËåÉÂõ¥ (0, 50.0 MHz)„ÄÇ
+Êà™Ê≠¢‰∏∫ÂçïÁ®ã ‚àí3dB ÁÇπÔºõÂΩìÂâçÈááÊ†∑Áéá 100000000 Hz„ÄÇ
+This plugin does not support propagateSizeHints()
+[MessageBox] ÈÄöÈÅì1/Ê≥¢Èïø2ÔºöÊúâÊïàÁ∫øÈïø 12 ÂøÖÈ°ªÂ§ß‰∫éÂª∂ÊãìÈïøÂ∫¶ 12Ôºà3√óÊúÄÂ§ßÈò∂Êï∞ÔºõÂª∂Êó∂Êà™Êñ≠Ëµ∑ÁÇπ D=3989ÔºåÈááÊ†∑Ê∑±Â∫¶ 4000Ôºâ„ÄÇ
+ËØ∑Ë∞ÉÂ∞èÈò∂Êï∞ÊàñËØ•ÈÄöÈÅìÂª∂Êó∂Êà™Êñ≠Ëµ∑ÁÇπ„ÄÇ
+This plugin does not support propagateSizeHints()
+[MessageBox] ÈÄöÈÅì2/Ê≥¢Èïø1ÔºöÊúâÊïàÁ∫øÈïø 11 ÂøÖÈ°ªÂ§ß‰∫éÂª∂ÊãìÈïøÂ∫¶ 12Ôºà3√óÊúÄÂ§ßÈò∂Êï∞ÔºõÂª∂Êó∂Êà™Êñ≠Ëµ∑ÁÇπ D=3990ÔºåÈááÊ†∑Ê∑±Â∫¶ 4000Ôºâ„ÄÇ
+ËØ∑Ë∞ÉÂ∞èÈò∂Êï∞ÊàñËØ•ÈÄöÈÅìÂª∂Êó∂Êà™Êñ≠Ëµ∑ÁÇπ„ÄÇ
+[MessageBox] ÈÄöÈÅì2/Ê≥¢Èïø1ÔºöÊúâÊïàÁ∫øÈïø 11 ÂøÖÈ°ªÂ§ß‰∫éÂª∂ÊãìÈïøÂ∫¶ 12Ôºà3√óÊúÄÂ§ßÈò∂Êï∞ÔºõÂª∂Êó∂Êà™Êñ≠Ëµ∑ÁÇπ D=3990ÔºåÈááÊ†∑Ê∑±Â∫¶ 4000Ôºâ„ÄÇ
+ËØ∑Ë∞ÉÂ∞èÈò∂Êï∞ÊàñËØ•ÈÄöÈÅìÂª∂Êó∂Êà™Êñ≠Ëµ∑ÁÇπ„ÄÇ
+This plugin does not support propagateSizeHints()
+PASS Z0 zero-phase widgets exist
+PASS R2a fs 250->125MHz: 40MHz HP value preserved
+PASS R2b spinbox maximum not clamped below stored value
+PASS R2c fs restored: original 40MHz value still present
+PASS R2d fs=100MHz: out-of-range 60MHz value preserved (not silently clamped)
+PASS R2e out-of-range cutoff rejected at apply time
+PASS R2e2 40MHz at fs=250MHz applies normally
+PASS R2g disabled filter keeps value for later re-enable
+PASS R1z sysDelay/channel widgets exist
+PASS R1a wl2 short line rejected (D=3989, outRows=12<=12)
+PASS R1b outRows=3n+1 accepted (D=3988)
+PASS R1c valid per-channel config applied
+PASS R1d disabled channel invalid config not blocking
+PASS R1e enabled ch2 short line rejected
+PASS R1f max-order rule: outRows=3*8 rejected
+PASS R1g outRows=3*8+1 accepted
+PASS R1h filters off: no filter-specific short-line rejection
+PASS R3a stopped state: same params apply normally
+PASS R3b controller holds applied config
+PASS R2h saveDefaults button exists
+PASS R2i second dialog widgets exist
+PASS R2j defaults roundtrip: HP on/1.25MHz/order6 restored
+PASS R2k defaults roundtrip: LP on/30.5MHz/order2 restored
+PASS R2l cancel button exists
+PASS R3d cancel does not mutate active controller config
+ALL PASS
+[MessageBox] ÈÄöÈÅì1/Ê≥¢Èïø1ÔºöÊúâÊïàÁ∫øÈïø 24 ÂøÖÈ°ªÂ§ß‰∫éÂª∂ÊãìÈïøÂ∫¶ 24Ôºà3√óÊúÄÂ§ßÈò∂Êï∞ÔºõÂª∂Êó∂Êà™Êñ≠Ëµ∑ÁÇπ D=3977ÔºåÈááÊ†∑Ê∑±Â∫¶ 4000Ôºâ„ÄÇ
+ËØ∑Ë∞ÉÂ∞èÈò∂Êï∞ÊàñËØ•ÈÄöÈÅìÂª∂Êó∂Êà™Êñ≠Ëµ∑ÁÇπ„ÄÇ
+<end of output>
+Test time =   0.70 sec
+----------------------------------------------------------
+Test Passed.
+"ring_config_busy_reject_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"ring_config_busy_reject_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+35/47 Testing: ring_config_reject_integration_test
+35/47 Test: ring_config_reject_integration_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/ring_config_reject_integration_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug
+"ring_config_reject_integration_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+QFontDatabase: Cannot find font directory D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/fonts.
+Note that Qt no longer ships fonts. Deploy some (from https://dejavu-fonts.github.io/ for example) or switch to fontconfig.
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+void QCustomPlot::setOpenGl(bool, int) QCustomPlot can't use OpenGL because QCUSTOMPLOT_USE_OPENGL was not defined during compilation (add 'DEFINES += QCUSTOMPLOT_USE_OPENGL' to your qmake .pro file)
+QString::arg: Argument missing: ≤…ºØø® ˝¡ø: 4
+  ◊¢≤·±Ìº¸: HKCU\Software\MC410T\MC410T_Receiver\AcquisitionParams\NCards
+øÿ÷∆∞¸±æµÿ∞Û∂®IP: Œ¥…Ë÷√£®INADDR_ANY£©°™ À´ø⁄Õ¯ø®«Î±ÿ–Î…Ë÷√!
+  ◊¢≤·±Ìº¸: ...\NetworkParams\LocalBindIP
+  À´ø⁄Õ¯ø®÷ªΩ”“ªø⁄ ±±ÿ–ÎÃÓ“—¡¨Ω”ø⁄µƒ±æµÿIP£®»Á 192.168.0.100£©
+  ∑Ò‘Úøÿ÷∆∞¸ø…ƒ‹¥”¥ÌŒÛÕ¯ø⁄∑¢≥ˆ£¨≤…ºØø® ’≤ªµΩ÷∏¡Ó
+Ω” ’¬∑œﬂ: WinSock, ¬∑œﬂA WinSock
+This plugin does not support propagateSizeHints()
+[svcError] ImagingSvc crashed (exit code -1073741515)
+This plugin does not support propagateSizeHints()
+[IngressProtection] requestedPriority=BELOW_NORMAL priorityApply=ok effectivePriority=BELOW_NORMAL originalProcessMask=0xFFFFFFFF requestedProcessMask=0xFFFFFFFA affinityApply=ok effectiveProcessMask=0xFFFFFFFA reservedLogicalCpus=0,2
+ImagingSvc: linear shared memory not present (ring mode?)
+[MessageBox] Êï∞ÊçÆÈááÈõÜÊ≠£Âú®ËøõË°åÔºåÁéØÂΩ¢ÂèÇÊï∞Êú™Â∫îÁî®„ÄÇ
+ËØ∑ÂÖàÂÅúÊ≠¢ÁõëÂê¨/ÊµãÈáèÔºåÂÜç‰øÆÊîπÂπ∂Â∫îÁî®ÂèÇÊï∞„ÄÇ
+[svcStatus] ÂêØÂä® ImagingSvc: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/ImagingSvc.exe
+[svcStatus] ImagingSvc ËøõÁ®ãÂ∑≤ÂêØÂä®, PID=43332
+[state] running=1 ready=1 errors=0 lastErr=
+This plugin does not support propagateSizeHints()
+ImagingSvc ring mode: channels= 8 perChannelBlock= 200 blockSize= 6400000 frameSize= 12960000 nx= 3600
+[RingSHMObs] {"avg_copy_lock_us":12315,"avg_process_us":0,"avg_queue_delay_us":18962,"cmd":"ring_shm_observation","component":"consumer","consumed":1,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":12315,"last_notify_seq":1,"last_process_us":0,"last_queue_delay_us":18962,"last_shm_seq":1,"last_submit_index":1,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":1,"notify_shm_mismatch":0,"old_generation":"0","old_session":"0","ready_zero_before_copy":0,"round_generation":"1","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"0"}
+[RingSHMObs] {"avg_copy_lock_us":12315,"avg_process_us":856366,"avg_queue_delay_us":18962,"cmd":"ring_shm_observation","component":"consumer","consumed":1,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"final","last_copy_lock_us":12315,"last_notify_seq":1,"last_process_us":856366,"last_queue_delay_us":18962,"last_shm_seq":1,"last_submit_index":1,"last_submit_interval_us":0,"last_submitted_seq":0,"notifications":1,"notify_shm_mismatch":0,"ready_zero_before_copy":0,"session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"submitted":0}
+PASS I0 production ImagingController exists in MainWindow
+PASS I0 zero-phase widgets exist in test dialog
+PASS T5a controller idle before fault test
+PASS T5c real svc crash still emits svcError (fault path preserved)
+PASS T5c2 running flag cleared by crash handler
+PASS T4a stopped state: same params apply normally
+PASS T4b controller holds applied config (HP 0.4MHz)
+PASS T3z busy-dialog widgets exist
+PASS T3a acquisition-busy: user apply rejected
+PASS T3b controller config unchanged (2MHz NOT applied to acquisition instance)
+PASS T3b2 controller-side busy not triggered (acquisition boundary is dialog-level)
+PASS T3c internal submit (realtime start) not blocked by acquisition busy
+PASS T3d internal submit applied confirmed snapshot value
+PASS T3e production isAcquisitionBusy false when idle
+PASS T2a startSvc with real ImagingSvc.exe
+PASS T2b svcReady received
+PASS T2c controller running
+PASS T2b2 no svcError during normal startup
+PASS T1a running state: user apply of new filter rejected
+PASS T1a2 svcConfigRejected emitted (controller busy path)
+PASS T1a3 NOT routed through svcError (non-fatal separation)
+PASS T1b active config unchanged after busy reject
+PASS T1c process still running after reject
+PASS T1d ready state maintained
+PASS T2d server 2014 routed to svcConfigRejected via real processMessage
+PASS T2e server 2014 did NOT trigger svcError
+PASS T2f service still running after 2014
+PASS T2g non-2014 server error still routed to svcError
+PASS T2h block submitted after 2014
+PASS T2i snapshot still produced after 2014 (processing continues)
+PASS T4c startSvc idempotent returns true while running
+PASS T4c2 still running after idempotent start
+PASS T4c3 no duplicate svcReady (no reconfigure)
+PASS T4d normal stop works
+PASS T4e after stop: same params apply again
+PASS T4f new value in controller after stop
+ALL PASS
+[MessageBox] ÊàêÂÉèÊúçÂä°Ê≠£Âú®ËøêË°åÊàñÂêØÂä®/ÂÅúÊ≠¢‰∏≠ÔºåÁéØÂΩ¢ÂèÇÊï∞Êú™Â∫îÁî®„ÄÇ
+ËØ∑ÂÖàÂÅúÊ≠¢ÂÆûÊó∂ÊàêÂÉèÔºåÂÜç‰øÆÊîπÂπ∂Â∫îÁî®ÂèÇÊï∞„ÄÇ
+[svcError] Èõ∂Áõ∏‰ΩçÊª§Ê≥¢ËøêË°åÊó∂Â§±Ë¥•ÔºàÂùó 0Ôºâ
+<end of output>
+Test time =   4.08 sec
+----------------------------------------------------------
+Test Passed.
+"ring_config_reject_integration_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"ring_config_reject_integration_test" time elapsed: 00:00:04
+----------------------------------------------------------
+
+36/47 Testing: paimage_discovery_checks
+36/47 Test: paimage_discovery_checks
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_discovery_checks.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_discovery_checks" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS discovery policy: local exclusion, 60-byte-only admission, slow retries, ordering, cancel, stale sessions
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_discovery_checks" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_discovery_checks" time elapsed: 00:00:00
+----------------------------------------------------------
+
+37/47 Testing: paimage_discovery_socket_checks
+37/47 Test: paimage_discovery_socket_checks
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_discovery_socket_checks.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_discovery_socket_checks" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS discovery socket: CONFIG on 8080, ACK on 8000, per-round resend, rebind, occupied failure
+<end of output>
+Test time =   3.15 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_discovery_socket_checks" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_discovery_socket_checks" time elapsed: 00:00:03
+----------------------------------------------------------
+
+38/47 Testing: paimage_core_checks
+38/47 Test: paimage_core_checks
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_core_checks.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_core_checks" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS: source recovery component checks (not product integration or EXE differential testing)
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_core_checks" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_core_checks" time elapsed: 00:00:00
+----------------------------------------------------------
+
+39/47 Testing: paimage_output_checks
+39/47 Test: paimage_output_checks
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_output_checks.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_output_checks" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS output queue policy (not worker/GUI integration)
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_output_checks" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_output_checks" time elapsed: 00:00:00
+----------------------------------------------------------
+
+40/47 Testing: physical_round_normalizer_test
+40/47 Test: physical_round_normalizer_test
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/physical_round_normalizer_test.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"physical_round_normalizer_test" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+<end of output>
+Test time =   0.24 sec
+----------------------------------------------------------
+Test Passed.
+"physical_round_normalizer_test" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"physical_round_normalizer_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+41/47 Testing: paimage_control_checks
+41/47 Test: paimage_control_checks
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_control_checks.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_control_checks" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS control policy: separate ACKs, selective four rounds, deadlines, failure order
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_control_checks" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_control_checks" time elapsed: 00:00:00
+----------------------------------------------------------
+
+42/47 Testing: paimage_socket_short
+42/47 Test: paimage_socket_short
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_socket_replay.exe" "--seconds" "2" "--samples" "5000" "--out" "replay-short"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_socket_short" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS sent=8960 ingress=8960 cards=320 sync=80 partial=0
+<end of output>
+Test time =   2.32 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_socket_short" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_socket_short" time elapsed: 00:00:02
+----------------------------------------------------------
+
+43/47 Testing: paimage_trace_checks
+43/47 Test: paimage_trace_checks
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_trace_checks.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_trace_checks" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS trace queue saturation, budget exhaustion, write failure and rotation
+<end of output>
+Test time =   0.08 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_trace_checks" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_trace_checks" time elapsed: 00:00:00
+----------------------------------------------------------
+
+44/47 Testing: paimage_worker_checks
+44/47 Test: paimage_worker_checks
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_worker_checks.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_worker_checks" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS worker boundaries: per-card saturation, measurement restart preservation, startup priority, whole-block eviction
+<end of output>
+Test time =   0.12 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_worker_checks" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_worker_checks" time elapsed: 00:00:00
+----------------------------------------------------------
+
+45/47 Testing: paimage_protocol_checks
+45/47 Test: paimage_protocol_checks
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_protocol_checks.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_protocol_checks" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS real UDP protocol emulator: CONFIG/18/60/START/data-on-feedback/STOP
+<end of output>
+Test time =   0.09 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_protocol_checks" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_protocol_checks" time elapsed: 00:00:00
+----------------------------------------------------------
+
+46/47 Testing: paimage_conversion_checks
+46/47 Test: paimage_conversion_checks
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_conversion_checks.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_conversion_checks" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS concurrent shared conversion, 28/70 packet sample counts, raw B/A contract and round-terminal metadata
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_conversion_checks" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_conversion_checks" time elapsed: 00:00:00
+----------------------------------------------------------
+
+47/47 Testing: paimage_looplog_checks
+47/47 Test: paimage_looplog_checks
+Command: "D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core/paimage_looplog_checks.exe"
+Directory: D:/ZcodeWorkSpace/PAEImaging/PAErealtimeImaging-impl/MC_410T_MultiCard/delivery/build/tests_all_mingw_debug/paimage_core
+"paimage_looplog_checks" start time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+Output:
+----------------------------------------------------------
+PASS: startup policy and bounded loop log checks
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"paimage_looplog_checks" end time: Sep 21 01:52 ÷–π˙±Í◊º ±º‰
+"paimage_looplog_checks" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Sep 21 01:52 ÷–π˙±Í◊º ±º‰

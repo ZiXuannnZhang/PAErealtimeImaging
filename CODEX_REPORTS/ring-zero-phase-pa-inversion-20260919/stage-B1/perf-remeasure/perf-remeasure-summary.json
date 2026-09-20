@@ -1,0 +1,72 @@
+{
+  "generatedAt": "2026-09-20T17:27:53.081Z",
+  "gitSha": "d8dd3daf2f1bce3afdc01e0452e7ae487f3a1697",
+  "trackedDirty": false,
+  "buildType": "mingw-debug (-g, unoptimized)",
+  "dataFile": "D:/ChatGPT/PAERealtimeImaging/testdata/14.dat",
+  "dataSha256": "fbcbc105343d8caf8d1b231a93cf00cdbf4710f94a19b93b9f1a86f812e9e056",
+  "timingBoundary": "ImagingSvc::processRingPulse entry→recordProcessDuration (SHM copy + per-line preprocessing incl. zero-phase filter + CUDA recon submit + display snapshot writeback + ZMQ notify)",
+  "sampDepth": 4000,
+  "fsHz": 250000000,
+  "channelsEnabled": 8,
+  "warmupsPerCase": 1,
+  "formalRunsPerCase": 3,
+  "cases": {
+    "block40_off": {
+      "block": 40,
+      "zpMode": 0,
+      "gridMm": 0.4,
+      "formalRuns": 3,
+      "medianMs": 9.09,
+      "maxMs": 9.12
+    },
+    "block40_hp": {
+      "block": 40,
+      "zpMode": 1,
+      "gridMm": 0.4,
+      "formalRuns": 3,
+      "medianMs": 59.13,
+      "maxMs": 60
+    },
+    "block40_lp": {
+      "block": 40,
+      "zpMode": 2,
+      "gridMm": 0.4,
+      "formalRuns": 3,
+      "medianMs": 59.74,
+      "maxMs": 61.03
+    },
+    "block40_hplp": {
+      "block": 40,
+      "zpMode": 3,
+      "gridMm": 0.4,
+      "formalRuns": 3,
+      "medianMs": 105.24,
+      "maxMs": 106.68
+    },
+    "block100_hplp": {
+      "block": 100,
+      "zpMode": 3,
+      "gridMm": 0.4,
+      "formalRuns": 3,
+      "medianMs": 263.31,
+      "maxMs": 263.91
+    },
+    "deploy_grid_hplp": {
+      "block": 40,
+      "zpMode": 3,
+      "gridMm": 0.01,
+      "formalRuns": 3,
+      "medianMs": 197.31,
+      "maxMs": 197.43
+    },
+    "deploy_grid_off": {
+      "block": 40,
+      "zpMode": 0,
+      "gridMm": 0.01,
+      "formalRuns": 3,
+      "medianMs": 97.99,
+      "maxMs": 102.38
+    }
+  }
+}
