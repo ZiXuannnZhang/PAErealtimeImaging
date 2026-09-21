@@ -83,7 +83,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     // and Ring metadata.
     {
         QTemporaryDir root(QDir::currentPath()+"/normalized-output-XXXXXX");require(root.isValid());
-        DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=64;config.displayPoints=16;
+        DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=64;
         std::mutex ringMutex;std::vector<std::uint16_t> ringTriggers;std::vector<std::int64_t> ringIndices;
         std::vector<bool> ringBoundaries;
         std::vector<PhysicalRoundEvent> roundEvents;
@@ -152,7 +152,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     // can be admitted to either output path.
     {
         QTemporaryDir root(QDir::currentPath()+"/normalized-timeout-XXXXXX");require(root.isValid());
-        DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=64;config.displayPoints=16;
+        DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=64;
         std::mutex ringMutex;std::vector<std::uint16_t> ringTriggers;std::vector<std::int64_t> ringIndices;
         std::atomic<int> ringCount{0};
         std::vector<bool> ringBoundaries;std::vector<PhysicalRoundEvent> roundEvents;
@@ -289,7 +289,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     // configured cap never limits raw bytes and is shared across both cards.
     for (int startup : {0,7}) for (bool disable : {false,true}) {
         QTemporaryDir root; require(root.isValid());
-        AcqConfig config; config.acqTimeNs=64; config.displayPoints=16;
+        AcqConfig config; config.acqTimeNs=64; 
         DisplayBuffer d0,d1; FileSaver s0(0),s1(1);
         std::mutex mutex; std::vector<std::int64_t> indices;
         std::vector<std::uint64_t> generations; int finals=0,counts=0,timeouts=0;
@@ -367,6 +367,28 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
                     snapshot.currentPhysicalDistinctCount == 0 &&
                     snapshot.lastCompletedPhysicalDistinctCount == 0,
                 "HostOutput Session A policy seam");
+    }
+    // Display preparation must preserve every acquired sample.
+    {
+        DisplayBuffer display;
+        AcqConfig config;
+        DataProcessor processor(0, nullptr, &display, nullptr, config);
+        auto group = std::make_shared<TriggerGroup>();
+        group->sampleCount = 2048;
+        group->freqA.resize(2048);
+        group->freqB.resize(2048);
+        for (int i = 0; i < 2048; ++i) {
+            group->freqA[i] = static_cast<float>(i);
+            group->freqB[i] = static_cast<float>(-i);
+        }
+        const auto result = processor.deliverAssembled(group, false, true);
+        require(result.displayAccepted);
+        DisplayBuffer::Snapshot snap;
+        require(display.tryRead(snap));
+        require(snap.sampleCount == 2048);
+        require(snap.freqA.size() == 2048 && snap.freqB.size() == 2048);
+        require(snap.phaseA.size() == 2048 && snap.phaseB.size() == 2048);
+        require(snap.freqA.front() == 0.0 && snap.freqA.back() == 2047.0);
     }
     std::cout<<"PASS production source/output/host boundary: four cards, 28/70, exact float16 files, display and Ring; normalized 1+N save/Ring identity; queued saving generation retains original directory; physical idle timeout shared by save/Ring; SourceCore assembly timeout isolated\n";
 }

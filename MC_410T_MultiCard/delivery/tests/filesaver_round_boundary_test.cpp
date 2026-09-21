@@ -168,7 +168,6 @@ struct RoundFixture {
         });
         AcqConfig config;
         config.acqTimeNs = kSamples * 4;
-        config.displayPoints = 16;
         std::uint64_t genValue = sessionGen;
         DataProcessor processor(0, nullptr, &display, nullptr, config, {});
         processor.setSessionGenReader([&] { return genValue; });

@@ -79,7 +79,7 @@ public:
         group.triggerSeq   = m_triggerSeq;
         group.timestamp_ms = m_firstArrivalMs;
         group.isComplete   = (m_receivedCount >= expected);
-        group.allocate(samplesPerTrig, config.displayPoints);
+        group.allocate(samplesPerTrig);
 
         int sampleIdx = 0;
         int pairsPerPkt = UDP_PAYLOAD_BYTES / bytesPerPair;

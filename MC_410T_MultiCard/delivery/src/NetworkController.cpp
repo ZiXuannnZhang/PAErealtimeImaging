@@ -673,12 +673,6 @@ void NetworkController::requestCloseSavers() {
     for (auto& s : m_savers) s->requestClose();
 }
 
-void NetworkController::setDisplayPoints(int displayPoints) {
-    if (displayPoints <= 0) return;
-    m_config.displayPoints = displayPoints;
-    for (auto& p : m_processors) p->setDisplayPoints(displayPoints);
-}
-
 void NetworkController::setLogicalTriggersPerRound(std::uint64_t count) {
     if (count == 0 || count > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
         return;
@@ -719,8 +713,6 @@ paimage::PhysicalRoundNormalizer::Snapshot NetworkController::physicalRoundSnaps
 
 void NetworkController::reconfigure(const AcqConfig& config) {
     if(m_paimage){
-        m_config.displayPoints=config.displayPoints;
-        setDisplayPoints(config.displayPoints);
         if (config.logicalTriggersPerRound > 0)
             setLogicalTriggersPerRound(static_cast<std::uint64_t>(config.logicalTriggersPerRound));
         return;

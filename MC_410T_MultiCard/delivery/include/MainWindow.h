@@ -243,7 +243,6 @@ private:
 
     // 显示控制
     bool m_displayEnabled;
-    bool m_enableDownsampling;
     bool m_autoRescaleAxes;
     bool m_autoRescalePlot[CARDS_PER_DISPLAY_GROUP][2]; // 逐图自适应坐标轴标志（默认true）
     bool m_autoRescaleSpectrum[CARDS_PER_DISPLAY_GROUP][2]; // 频域图逐图自适应坐标轴标志（默认true）

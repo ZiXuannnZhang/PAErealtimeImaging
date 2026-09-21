@@ -16,7 +16,7 @@
 // ============================================================
 class DisplayBuffer {
 public:
-    // 传递给 UI 的快照（已完成 float32 → double 转换，降采样显示数据）
+    // 传递给 UI 的快照（已完成 float32 → double 转换，全分辨率显示数据）
     struct Snapshot {
         bool     valid        = false;
         uint16_t triggerSeq   = 0;

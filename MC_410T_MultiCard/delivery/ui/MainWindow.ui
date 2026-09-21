@@ -305,8 +305,8 @@
           <item row="3" column="0">
            <widget class="QLabel" name="label_6">
             <property name="toolTip">
-             <string>统计峰峰值的真实采样点范围（与X轴显示一致）
-例如：0-50000表示统计全部采样点</string>
+             <string>时域显示、峰峰值统计与频域FFT共同使用的真实采样点范围
+例如：0-50000表示使用前50000个采样点</string>
             </property>
             <property name="text">
              <string>峰峰值统计范围:</string>
@@ -370,32 +370,6 @@
              </widget>
             </item>
            </layout>
-          </item>
-          <item row="4" column="0">
-           <widget class="QLabel" name="label_8">
-            <property name="text">
-             <string>显示最大点数:</string>
-            </property>
-           </widget>
-          </item>
-          <item row="4" column="1">
-           <widget class="QSpinBox" name="spnDownsampleRatio">
-            <property name="toolTip">
-             <string>绘图显示的最大数据点数（原始数据超过此值时自动降采样，默认1000点）</string>
-            </property>
-            <property name="minimum">
-             <number>1000</number>
-            </property>
-            <property name="maximum">
-             <number>500000</number>
-            </property>
-            <property name="singleStep">
-             <number>1000</number>
-            </property>
-            <property name="value">
-             <number>1000</number>
-            </property>
-           </widget>
           </item>
          </layout>
         </widget>

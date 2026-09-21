@@ -15,7 +15,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
  ImagingBypass bypass(8);std::array<bool,8> channels{};channels[0]=channels[1]=true;bypass.setEnabledChannels(channels);bypass.setEnabled(true);bypass.setServiceReady(true);bypass.start();
  std::mutex mutex;std::condition_variable cv;bool release=false;std::atomic<int> entered{0},saved{0};
  bypass.setConsumer([&](const TriggerGroupConstPtr&,const std::array<bool,8>&){++entered;std::unique_lock<std::mutex> lock(mutex);cv.wait(lock,[&]{return release;});return true;});
- AcqConfig config;config.displayPoints=1;DataProcessor processor(0,nullptr,nullptr,nullptr,config,[&](const TriggerGroupConstPtr& f){return bypass.tryPush(f);});
+ AcqConfig config;DataProcessor processor(0,nullptr,nullptr,nullptr,config,[&](const TriggerGroupConstPtr& f){return bypass.tryPush(f);});
  processor.setDirectSaveSink([&](const TriggerGroupPtr&){++saved;return true;});
  int imagingAccepted=0,queueRejected=0;for(int i=0;i<4000;++i){auto f=std::make_shared<TriggerGroup>();f->cardId=0;f->triggerSeq=std::uint16_t(i);f->measurementSession=1;f->isComplete=true;f->sampleCount=32;f->freqA.assign(32,1);f->freqB.assign(32,-1);auto r=processor.deliverAssembled(f,true,true);require(r.saveAccepted&&r.save==DataProcessor::DeliveryResult::Consumed,"save acceptance");imagingAccepted+=r.imagingAccepted;queueRejected+=r.imagingDropReason==ImagingSubmitResult::QueueFull||r.imagingDropReason==ImagingSubmitResult::QueueBusy;}
  DataProcessor throwing(0,nullptr,nullptr,nullptr,config,[](const TriggerGroupConstPtr&)->ImagingSubmitResult{throw std::runtime_error("imaging");});

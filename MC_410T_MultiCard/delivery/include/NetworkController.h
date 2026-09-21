@@ -130,8 +130,6 @@ public:
                                   uint64_t roundGeneration) const;
     // 方案A：请求全部保存器在队列排空后刷盘关闭当前会话文件（会话边界主动落盘）
     void     requestCloseSavers();
-    // 实时更新显示降采样点数（不重建线程，直接修改各 DataProcessor 的配置）
-    void setDisplayPoints(int displayPoints);
     // 更新生产输出边界使用的逻辑轮次计数（环形模式由 Ring 配置覆盖）。
     void setLogicalTriggersPerRound(std::uint64_t count);
     // Canonical physical-round idle timeout. Ring mode supplies

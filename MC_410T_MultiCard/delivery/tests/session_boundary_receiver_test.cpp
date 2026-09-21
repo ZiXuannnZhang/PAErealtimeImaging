@@ -29,7 +29,6 @@ AcqConfig testConfig()
     config.acqTimeNs = 4000; // six 32-bit A+B packets per trigger
     config.sampleIntervalNs = 4.0;
     config.bitsPerChannel = 32;
-    config.displayPoints = 16;
     return config;
 }
 

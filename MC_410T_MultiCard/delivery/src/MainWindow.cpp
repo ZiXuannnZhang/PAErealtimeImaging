@@ -132,9 +132,9 @@ static int nextPow2Ceil(int n) {
 // 避免每帧 rescaleAxes 触发全量重排与重绘（信号抖动时尤甚）
 constexpr int kAutoRescaleEveryTick = 3;
 
-// 峰峰值统计范围（显示采样点，与 X 轴显示一致）→ 显示裁切区间 [start,end)。
-// 无效输入（end<=start 等）返回全文区间，不裁切。仅作用于显示层，
-// 不影响实时成像与保存的原始数据（两者均使用全分辨率 freqA/freqB）。
+// 前端显示裁切范围（真实全分辨率采样点）→ [start,end)。
+// 该裁切位于 presentation 数据进入时域显示/FFT 之前；时域、峰峰值统计和
+// 频域 FFT 必须消费同一段数据。无效输入（end<=start 等）回退为全文。
 static void computePkRange(int nPts, int pkStartInput, int pkEndInput,
                            int *start, int *end)
 {
@@ -196,18 +196,11 @@ static QVector<double> computeMagnitudeSpectrum(const QVector<double> &x) {
     return mag;
 }
 
-static QVector<double> makeSpectrumBins(int halfN, int origSamples,
-                                        int dispSamples) {
+static QVector<double> makeSpectrumBins(int halfN) {
     QVector<double> bins(halfN);
-    // 采样率固定为真实采集 250 MHz（采样间隔 4 ns）。
-    // 显示段经均匀抽取后，有效采样率 = 250 MHz × 显示点数 / 原始点数。
-    const double fsOrigHz = FPGA_ADC_FREQ_HZ;
-    const double decim = (origSamples > 0 && dispSamples > 0)
-        ? static_cast<double>(origSamples) / dispSamples : 1.0;
-    const double fsEffHz = fsOrigHz / decim;
     const double nfft = static_cast<double>(halfN) * 2.0;
     for (int k = 0; k < halfN; ++k)
-        bins[k] = static_cast<double>(k) * fsEffHz / nfft / 1e6;  // MHz
+        bins[k] = static_cast<double>(k) * FPGA_ADC_FREQ_HZ / nfft / 1e6;
     return bins;
 }
 
@@ -226,7 +219,6 @@ MainWindow::MainWindow(QWidget *parent)
         , m_pendingAutoSave(false)
     , m_saveWarnCooldown(0)
     , m_displayEnabled(true)
-    , m_enableDownsampling(false)
     , m_autoRescaleAxes(true)
     , m_autoRescalePlot{}
     , m_displayInterval(10)
@@ -315,7 +307,6 @@ MainWindow::MainWindow(QWidget *parent)
     ui->chkTileView->setAccessibleName("平铺显示");
     ui->cmbDisplayType->setAccessibleName("显示类型");
     ui->spnRefreshRate->setAccessibleName("刷新间隔");
-    ui->spnDownsampleRatio->setAccessibleName("显示最大点数");
     ui->edtPkStart->setAccessibleName("峰峰值统计起点");
     ui->edtPkEnd->setAccessibleName("峰峰值统计终点");
     // 数据保存组
@@ -972,7 +963,6 @@ void MainWindow::setupUI()
     }
 
     ui->spnRefreshRate->setAlignment(Qt::AlignLeft);
-    ui->spnDownsampleRatio->setAlignment(Qt::AlignLeft);
 
     // GroupTabBar 占位（rebuildDynamicUI 会重建 tab 数量）
     m_groupTabBar = new QTabBar();
@@ -1759,12 +1749,6 @@ void MainWindow::createConnections()
             this, [this](int value) {
                 onRefreshRateChanged(value);
                 saveSettings();
-            });
-    connect(ui->spnDownsampleRatio, static_cast<void(QSpinBox::*)(int)>(&QSpinBox::valueChanged),
-            this, [this](int value) {
-                saveSettings();
-                logMessage(QString("显示最大点数已设置为 %1 点").arg(value));
-                if (m_netController) m_netController->setDisplayPoints(value);
             });
     connect(m_groupTabBar, &QTabBar::currentChanged, this, &MainWindow::onGroupTabChanged);
 }
@@ -2553,7 +2537,6 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     cfg.acqTimeNs     = ui->edtDataTime->text().toInt();
     cfg.delayA        = ui->edtADelay->text().toInt();
     cfg.delayB        = ui->edtBDelay->text().toInt();
-    cfg.displayPoints = ui->spnDownsampleRatio->value();
     // 数据格式参数：与线性实例相同来源（注册表，默认 250 MSa/s 满速率 32bit Q16.16）
     cfg.bitsPerChannel = m_bitsPerChannel;
     cfg.sampleIntervalNs = m_sampleIntervalNs;
@@ -2653,7 +2636,6 @@ void MainWindow::onConfigParamsClicked(bool fromStartMeasure)
             cfg.acqTimeNs = dataTime;
             cfg.delayA    = aDelay;
             cfg.delayB    = bDelay;
-            cfg.displayPoints = ui->spnDownsampleRatio->value();
             cfg.sampleIntervalNs = m_sampleIntervalNs;
             m_netController->reconfigure(cfg);
             logMessage("配置命令发送成功");
@@ -3143,24 +3125,19 @@ void MainWindow::onRefreshRateChanged(int value)
 void MainWindow::onDisplayRefresh()
 {
     if (!m_displayEnabled || !m_netController) return;
-
     ++m_refreshCounter;
     if (!m_forceRefreshOnce && (m_refreshCounter % m_displayInterval != 0)) return;
     m_forceRefreshOnce = false;
-    ++m_displayTickCount;   // 实际显示刷新计数（rescaleAxes 节流用）
+    ++m_displayTickCount;
 
     const int displayMode = ui->cmbDisplayType->currentIndex();
-    // 环形扫描在主窗口按瞬时频率监视通道信号（重建图像在控制台显示）
     const bool ringMode = (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1);
     const int effMode = ringMode ? DM_FREQ : displayMode;
-
-    // 相位 / 频率 / 环形监视模式
     const bool isTileView = m_isTileView;
 
-    // Tab 模式：预先确定要刷新的槽位和通道（不对其他卡调用 tryRead，保留 m_hasNew）
     int tabSlot = -1, tabCh = -1;
     if (!isTileView) {
-        int tabIdx = ui->tabWidget->currentIndex();
+        const int tabIdx = ui->tabWidget->currentIndex();
         tabSlot = tabIdx / 2;
         tabCh   = tabIdx % 2;
     }
@@ -3171,13 +3148,13 @@ void MainWindow::onDisplayRefresh()
         return r;
     };
 
+    const int pkStartInput = ui->edtPkStart->text().toInt();
+    const int pkEndInput   = ui->edtPkEnd->text().toInt();
     bool anyUpdated = false;
 
     for (int slotIdx = 0; slotIdx < CARDS_PER_DISPLAY_GROUP; ++slotIdx) {
-        int globalCard = m_currentGroup * CARDS_PER_DISPLAY_GROUP + slotIdx;
+        const int globalCard = m_currentGroup * CARDS_PER_DISPLAY_GROUP + slotIdx;
         if (globalCard >= m_nCards) break;
-
-        // Tab 模式：只处理当前显示的卡，跳过其他卡（不消耗其 m_hasNew 标志）
         if (!isTileView && slotIdx != tabSlot) continue;
 
         DisplayBuffer *db = m_netController->displayBuffer(globalCard);
@@ -3185,7 +3162,6 @@ void MainWindow::onDisplayRefresh()
         DisplayBuffer::Snapshot snap;
         if (!db->tryRead(snap) || !snap.valid) continue;
 
-        // 诊断：打印首次读到数据的信息
         if (slotIdx == 0) {
             static int diagCount = 0;
             if (++diagCount <= 5) {
@@ -3196,58 +3172,55 @@ void MainWindow::onDisplayRefresh()
             }
         }
 
-        QVector<double> freqA  = toQVec(snap.freqA);
-        QVector<double> freqB  = toQVec(snap.freqB);
-        QVector<double> phaseA = toQVec(snap.phaseA);
-        QVector<double> phaseB = toQVec(snap.phaseB);
+        const QVector<double> freqA  = toQVec(snap.freqA);
+        const QVector<double> freqB  = toQVec(snap.freqB);
+        const QVector<double> phaseA = toQVec(snap.phaseA);
+        const QVector<double> phaseB = toQVec(snap.phaseB);
 
-        // x 轴以频率数组长度为准（phaseA/freqA 在 downsample 中同步 resize，通常相同）
-        const int nPts = freqA.size();
-        QVector<double> xAxis(nPts);
-        for (int k = 0; k < nPts; ++k) xAxis[k] = k;
+        // 唯一裁切节点：presentation（后续接入零相位滤波）→ crop → 时域/P-P/FFT。
+        const int nPts = qMin(qMin(freqA.size(), freqB.size()),
+                              qMin(phaseA.size(), phaseB.size()));
+        if (nPts <= 0) continue;
+        int pkStart = 0, pkEnd = nPts;
+        computePkRange(nPts, pkStartInput, pkEndInput, &pkStart, &pkEnd);
+        const int len = pkEnd - pkStart;
+        if (len <= 0) continue;
+
+        const QVector<double> freqAView  = freqA.mid(pkStart, len);
+        const QVector<double> freqBView  = freqB.mid(pkStart, len);
+        const QVector<double> phaseAView = phaseA.mid(pkStart, len);
+        const QVector<double> phaseBView = phaseB.mid(pkStart, len);
+        QVector<double> xAxis(len);
+        for (int k = 0; k < len; ++k) xAxis[k] = pkStart + k;
 
         if (!isTileView) {
-            // Tab 单通道模式
             if (tabCh == 0)
-                updatePlot(slotIdx, 0, effMode == DM_PHASE ? phaseA : freqA, freqA, xAxis);
+                updatePlot(slotIdx, 0, effMode == DM_PHASE ? phaseAView : freqAView,
+                           freqAView, xAxis);
             else
-                updatePlot(slotIdx, 1, effMode == DM_PHASE ? phaseB : freqB, freqB, xAxis);
-            // 瞬时频率模式：仅当前台可见的通道计算/显示频域幅值谱（资源优化）
+                updatePlot(slotIdx, 1, effMode == DM_PHASE ? phaseBView : freqBView,
+                           freqBView, xAxis);
+
             QCustomPlot *specPlot = m_plotsSpectrum[slotIdx][tabCh];
             if (effMode == DM_FREQ && specPlot && specPlot->isVisible()) {
-                const QVector<double> &trace = (tabCh == 0) ? freqA : freqB;
-                // 与 updatePlot 相同的显示裁切：频域幅值谱仅对应时域显示段
-                const int pkStartInput = ui->edtPkStart->text().toInt();
-                const int pkEndInput   = ui->edtPkEnd->text().toInt();
-                int pkStart = 0, pkEnd = trace.size();
-                computePkRange(trace.size(), pkStartInput, pkEndInput, &pkStart, &pkEnd);
-                const int len = pkEnd - pkStart;
-                QVector<double> seg(len);
-                for (int i = 0; i < len; ++i) seg[i] = trace[pkStart + i];
-                QVector<double> mag = computeMagnitudeSpectrum(seg);
-                if (!mag.isEmpty()) {
-                    // 原始采样点数按显示段比例换算，保持有效采样率与频点计算正确
-                    const int origSeg = (len > 0 && nPts > 0)
-                        ? static_cast<int>(static_cast<long long>(snap.sampleCount) * len / nPts)
-                        : 0;
-                    QVector<double> bins =
-                        makeSpectrumBins(mag.size(), origSeg, len);
-                    updateSpectrumPlot(slotIdx, tabCh, bins, mag);
-                }
+                const QVector<double> &trace = (tabCh == 0) ? freqAView : freqBView;
+                const QVector<double> mag = computeMagnitudeSpectrum(trace);
+                if (!mag.isEmpty())
+                    updateSpectrumPlot(slotIdx, tabCh, makeSpectrumBins(mag.size()), mag);
             }
             anyUpdated = true;
         } else {
-            // 平铺模式：写数据，延迟 replot（统一批量）
-            updatePlot(slotIdx, 0, effMode == DM_PHASE ? phaseA : freqA, freqA, xAxis, false);
-            updatePlot(slotIdx, 1, effMode == DM_PHASE ? phaseB : freqB, freqB, xAxis, false);
+            updatePlot(slotIdx, 0, effMode == DM_PHASE ? phaseAView : freqAView,
+                       freqAView, xAxis, false);
+            updatePlot(slotIdx, 1, effMode == DM_PHASE ? phaseBView : freqBView,
+                       freqBView, xAxis, false);
             anyUpdated = true;
         }
     }
 
-    // 平铺模式：统一触发全部图表重绘（无可见性过滤，确保隐藏态下数据也就绪）
     if (isTileView && anyUpdated) {
         for (int s = 0; s < CARDS_PER_DISPLAY_GROUP; ++s) {
-            int gc = m_currentGroup * CARDS_PER_DISPLAY_GROUP + s;
+            const int gc = m_currentGroup * CARDS_PER_DISPLAY_GROUP + s;
             if (gc >= m_nCards) break;
             QCustomPlot *plt0 = (effMode == DM_PHASE) ? m_plotsPhase[s][0] : m_plotsFrequency[s][0];
             QCustomPlot *plt1 = (effMode == DM_PHASE) ? m_plotsPhase[s][1] : m_plotsFrequency[s][1];
@@ -3269,23 +3242,18 @@ void MainWindow::updatePlot(int cardId, int channel,
     if (cardId < 0 || cardId >= CARDS_PER_DISPLAY_GROUP || channel < 0 || channel >= 2) return;
     if (data.isEmpty()) return;
 
-    // 确保视口与控件尺寸同步；通道图统一软件渲染，避免 OpenGL 缓冲覆盖相邻图窗
+    // 范围裁切已在 onDisplayRefresh() 完成；这里不得再次裁切。
     auto syncViewport = [](QCustomPlot *plot) {
-        if (!plot) return;
-        // 通道图统一软件渲染：OpenGL 缓冲可能超出控件区域并覆盖相邻
-        // 频域窗口（时域窗口下半不可见问题），因此不再启用 OpenGL；
-        // 软件渲染下视口由 QCustomPlot::resizeEvent 自动维护，无需手动同步
-        if (plot->openGl()) plot->setOpenGl(false);
+        if (plot && plot->openGl()) plot->setOpenGl(false);
     };
 
     try {
         int displayMode = ui->cmbDisplayType->currentIndex();
         if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1)
-            displayMode = DM_FREQ;  // 环形模式按瞬时频率监视
-        QVector<double> x;
-        if (!xAxis.isEmpty()) {
-            x = xAxis;
-        } else {
+            displayMode = DM_FREQ;
+
+        QVector<double> x = xAxis;
+        if (x.isEmpty()) {
             x.resize(data.size());
             for (int i = 0; i < data.size(); ++i) x[i] = i;
         }
@@ -3293,61 +3261,43 @@ void MainWindow::updatePlot(int cardId, int channel,
         if (displayMode == DM_PHASE) {
             QCustomPlot *plotPhase = m_plotsPhase[cardId][channel];
             if (!plotPhase || plotPhase->graphCount() == 0) return;
-            
             syncViewport(plotPhase);
-
-            // 峰峰值统计范围 → 显示裁切（仅显示层裁切 Aline 段，不动成像/保存数据）
-            const int pkStartInput = ui->edtPkStart->text().toInt();
-            const int pkEndInput   = ui->edtPkEnd->text().toInt();
-            int pkStart = 0, pkEnd = x.size();
-            computePkRange(x.size(), pkStartInput, pkEndInput, &pkStart, &pkEnd);
-            const int len = pkEnd - pkStart;
-
-            plotPhase->graph(0)->setData(x.mid(pkStart, len), data.mid(pkStart, len));
-            if (m_firstPlot[cardId][channel]) { plotPhase->rescaleAxes(); m_firstPlot[cardId][channel] = false; }
-            else if (m_autoRescalePlot[cardId][channel] && (m_displayTickCount % kAutoRescaleEveryTick == 0))
+            plotPhase->graph(0)->setData(x, data);
+            if (m_firstPlot[cardId][channel]) {
+                plotPhase->rescaleAxes(); m_firstPlot[cardId][channel] = false;
+            } else if (m_autoRescalePlot[cardId][channel] &&
+                       (m_displayTickCount % kAutoRescaleEveryTick == 0)) {
                 plotPhase->rescaleAxes();
-
-            // 相位图也显示峰峰值（与显示裁切段一致）
+            }
             if (m_pkpkLabels[cardId][channel]) {
-                double mn = data[pkStart], mx = data[pkStart];
-                for (int i = pkStart + 1; i < pkEnd; ++i) {
+                double mn = data[0], mx = data[0];
+                for (int i = 1; i < data.size(); ++i) {
                     if (data[i] < mn) mn = data[i];
                     if (data[i] > mx) mx = data[i];
                 }
                 m_pkpkLabels[cardId][channel]->setText(
                     QString("峰峰值: %1 rad").arg(mx - mn, 0, 'f', 3));
             }
-
             if (doReplot) plotPhase->replot(QCustomPlot::rpQueuedReplot);
-        }
-        else if (displayMode == DM_FREQ) {
+        } else if (displayMode == DM_FREQ) {
             QCustomPlot *plotFreq = m_plotsFrequency[cardId][channel];
-            if (!plotFreq || plotFreq->graphCount() == 0) return;
-            if (frequency.isEmpty()) return;
-            
+            if (!plotFreq || plotFreq->graphCount() == 0 || frequency.isEmpty()) return;
             syncViewport(plotFreq);
-
-            // 峰峰值统计范围 → 显示裁切：时域信号按范围裁切，
-            // 频域（下方幅值谱）在 onDisplayRefresh 中使用同一范围计算
-            const int pkStartInput = ui->edtPkStart->text().toInt();
-            const int pkEndInput   = ui->edtPkEnd->text().toInt();
-            int pkStart = 0, pkEnd = frequency.size();
-            computePkRange(frequency.size(), pkStartInput, pkEndInput, &pkStart, &pkEnd);
-            const int len = pkEnd - pkStart;
-
-            double minFreq = frequency[pkStart], maxFreq = frequency[pkStart];
-            for (int i = pkStart + 1; i < pkEnd; ++i) {
-                if (frequency[i] < minFreq) minFreq = frequency[i];
-                if (frequency[i] > maxFreq) maxFreq = frequency[i];
+            double mn = frequency[0], mx = frequency[0];
+            for (int i = 1; i < frequency.size(); ++i) {
+                if (frequency[i] < mn) mn = frequency[i];
+                if (frequency[i] > mx) mx = frequency[i];
             }
-            m_pkpkLabels[cardId][channel]->setText(
-                QString("峰峰值: %1 kHz").arg(maxFreq - minFreq, 0, 'f', 2));
-
-            plotFreq->graph(0)->setData(x.mid(pkStart, len), frequency.mid(pkStart, len));
-            if (m_firstPlot[cardId][channel]) { plotFreq->rescaleAxes(); m_firstPlot[cardId][channel] = false; }
-            else if (m_autoRescalePlot[cardId][channel] && (m_displayTickCount % kAutoRescaleEveryTick == 0))
+            if (m_pkpkLabels[cardId][channel])
+                m_pkpkLabels[cardId][channel]->setText(
+                    QString("峰峰值: %1 kHz").arg(mx - mn, 0, 'f', 2));
+            plotFreq->graph(0)->setData(x, frequency);
+            if (m_firstPlot[cardId][channel]) {
+                plotFreq->rescaleAxes(); m_firstPlot[cardId][channel] = false;
+            } else if (m_autoRescalePlot[cardId][channel] &&
+                       (m_displayTickCount % kAutoRescaleEveryTick == 0)) {
                 plotFreq->rescaleAxes();
+            }
             if (doReplot) plotFreq->replot(QCustomPlot::rpQueuedReplot);
         }
     } catch (...) {}
@@ -3591,7 +3541,7 @@ QJsonObject MainWindow::diagnosticAcquisitionSnapshot(
         {QStringLiteral("dataTimeNs"), ui->edtDataTime->text().toInt()},
         {QStringLiteral("delayA"), ui->edtADelay->text().toInt()},
         {QStringLiteral("delayB"), ui->edtBDelay->text().toInt()},
-        {QStringLiteral("displayPoints"), ui->spnDownsampleRatio->value()},
+        {QStringLiteral("displayFullResolution"), true},
         {QStringLiteral("bitsPerChannel"), m_bitsPerChannel},
         {QStringLiteral("sampleIntervalNs"), m_sampleIntervalNs},
         {QStringLiteral("sampleRateHz"), static_cast<double>(FPGA_ADC_FREQ_HZ)},
@@ -3702,7 +3652,6 @@ void MainWindow::loadSettings()
 
     // 阻塞信号，防止 setValue 触发 saveSettings 覆写未加载的参数
     ui->spnRefreshRate->blockSignals(true);
-    ui->spnDownsampleRatio->blockSignals(true);
     ui->cmbDisplayType->blockSignals(true);
     ui->cmbImagingMode->blockSignals(true);
 
@@ -3752,11 +3701,9 @@ void MainWindow::loadSettings()
     ui->edtFileSuffix->setText(settings.value("SaveParams/FileSuffix", "").toString());
     ui->chkEnableDisplay->setChecked(settings.value("DisplayParams/Enabled", true).toBool());
     // ═══ 所有 DisplayParams 必须在 onDisplayTypeChanged 前读取 ═══
-    ui->spnDownsampleRatio->setValue(settings.value("DisplayParams/DownsampleRatio", 1000).toInt());
     ui->spnRefreshRate->setValue(settings.value("DisplayParams/RefreshRate", 10).toInt());
     ui->edtPkStart->setText(settings.value("DisplayParams/PkStart", "0").toString());
     ui->edtPkEnd->setText(settings.value("DisplayParams/PkEnd", "10000").toString());
-    m_enableDownsampling = settings.value("DisplayParams/EnableDownsampling", false).toBool();
     m_autoRescaleAxes    = settings.value("DisplayParams/AutoRescaleAxes", true).toBool();
     int displayType = settings.value("DisplayParams/Type", 1).toInt();
     if (displayType != DM_PHASE) displayType = DM_FREQ;   // 显示类型仅保留差分相位/瞬时频率
@@ -3766,7 +3713,6 @@ void MainWindow::loadSettings()
     ui->cmbImagingMode->setCurrentIndex(imagingMode);
     // 解除信号阻塞
     ui->spnRefreshRate->blockSignals(false);
-    ui->spnDownsampleRatio->blockSignals(false);
     ui->cmbDisplayType->blockSignals(false);
     ui->cmbImagingMode->blockSignals(false);
 
@@ -3873,8 +3819,6 @@ void MainWindow::saveSettings()
     settings.setValue("DisplayParams/RefreshRate",  ui->spnRefreshRate->value());
     settings.setValue("DisplayParams/PkStart",      ui->edtPkStart->text());
     settings.setValue("DisplayParams/PkEnd",        ui->edtPkEnd->text());
-    settings.setValue("DisplayParams/DownsampleRatio", ui->spnDownsampleRatio->value());
-    settings.setValue("DisplayParams/EnableDownsampling", m_enableDownsampling);
     settings.setValue("DisplayParams/AutoRescaleAxes",    m_autoRescaleAxes);
     // 数据格式参数
     settings.setValue("AcquisitionParams/BitsPerChannel",   m_bitsPerChannel);

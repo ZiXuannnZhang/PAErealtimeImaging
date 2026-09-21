@@ -69,17 +69,19 @@ struct TriggerGroup {
     std::vector<float> freqA;         // A 通道瞬时频率（kHz）
     std::vector<float> freqB;         // B 通道瞬时频率（kHz）
 
-    //  显示用降采样数据（float32，displayPoints 个点）
+    //  显示用全分辨率数据（float32，sampleCount 个点；不做显示抽点）
     std::vector<float> phaseA_display;
     std::vector<float> phaseB_display;
     std::vector<float> freqA_display;
     std::vector<float> freqB_display;
 
-    void allocate(int n, int displayPts) {
+    void allocate(int n) {
         freqA.resize(n);       freqB.resize(n);
-        phaseA_display.resize(displayPts); phaseB_display.resize(displayPts);
-        freqA_display.resize(displayPts);  freqB_display.resize(displayPts);
+        phaseA_display.resize(n); phaseB_display.resize(n);
+        freqA_display.resize(n);  freqB_display.resize(n);
     }
+    // 兼容旧测试/辅助代码的两参数调用；第二参数不再控制显示抽点。
+    void allocate(int n, int /*legacyDisplayPts*/) { allocate(n); }
 
     void reset() {
         cardId = -1; triggerSeq = 0; sampleCount = 0;

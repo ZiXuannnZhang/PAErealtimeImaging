@@ -24,7 +24,7 @@ class FramePublisher;
 //   1. 消费 MultiPortReceiver 入队的 DataPacket
 //   2. 用 PacketAssemblyBuffer 重组完整触发
 //   3. computeFrequency：int16 Q0.15 差分相位  float32 kHz
-//   4. downsample：sampleCount  displayPoints
+//   4. prepareDisplayData：生成全分辨率显示数据与相位
 //   5. 三路分发：FileSaver / FramePublisher / DisplayBuffer
 // ============================================================
 class DataProcessor : public QThread {
@@ -103,11 +103,6 @@ public:
     void updateConfig(const AcqConfig& config) {
         m_config = config;
         m_expectedPackets = config.packetsPerTrig();
-        m_displayPoints.store(config.displayPoints, std::memory_order_relaxed);
-    }
-    // 实时更新显示点数（主线程安全，atomic写入）
-    void setDisplayPoints(int points) {
-        if (points > 0) m_displayPoints.store(points, std::memory_order_relaxed);
     }
 
     //  统计查询（主线程调用，线程安全）
@@ -144,8 +139,8 @@ private:
     // 同时计算相位（累积积分，rad 单位，填入 group 的 phaseA/B_display 前）
     void computeFrequency(TriggerGroup& group);
 
-    // sampleCount  displayPoints 均匀降采样（填写 *_display 字段）
-    void downsample(TriggerGroup& group, int displayPoints);
+    // 生成全分辨率 *_display 字段；不做抽点，仅计算显示相位。
+    void prepareDisplayData(TriggerGroup& group);
 
     // 将 assemblyBuf 当前内容 export → compute → 分发（供正常完成和强制 flush 共用）
     void flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf);
@@ -183,7 +178,6 @@ private:
     std::atomic<uint64_t> m_ingressSessionToken{0};
     std::atomic<uint64_t> m_activeSessionToken{0};
     // 原始：使用静态 MAX_SAVE_QUEUE 常量在 cpp 中控制
-    std::atomic<int> m_displayPoints{1000};  // 显示降采样点数（主线程可实时修改）
 
     moodycamel::ConcurrentQueue<DataPacket>       m_inputQueue;
     moodycamel::ConcurrentQueue<TriggerGroupPtr>* m_saveQueue     = nullptr;

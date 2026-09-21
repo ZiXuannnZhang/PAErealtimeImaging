@@ -32,7 +32,6 @@ DataProcessor::DataProcessor(
     , m_cardId(cardId)
     , m_config(config)
     , m_saveQueue(saveQueue)
-        , m_displayPoints(config.displayPoints)
     , m_displayBuffer(displayBuf)
     , m_framePublisher(publisher)
     , m_ringFeedSink(ringFeedSink)
@@ -402,64 +401,33 @@ void DataProcessor::computeFrequency(TriggerGroup& group) {
 }
 
 // 
-// downsample
-// 均匀步进降采样：每 ratio 个点取一个（step-wise，非滤波）
-// 填写 *_display 字段（displayPoints 个点）
+// prepareDisplayData
+// 前端显示使用完整采样点：频率数据直接复制，相位按完整 A-line 积分生成。
+// 不做任何 step-wise 抽点，避免显示/FFT 与真实 250 MHz 采样率脱节。
 // 
-void DataProcessor::downsample(TriggerGroup& group, int displayPoints) {
-    const int n = group.sampleCount;
-    if (n <= 0 || displayPoints <= 0) return;
-
-    displayPoints = std::min(displayPoints, n);  // 不超过实际采样点数
-
-    group.freqA_display.resize(displayPoints);
-    group.freqB_display.resize(displayPoints);
-    group.phaseA_display.resize(displayPoints);
-    group.phaseB_display.resize(displayPoints);
-
-    // 由频率积分重建显示相位（与 bitsPerChannel 无关，系数恒等）
-    constexpr float phasePerKhz = static_cast<float>(2.0 * M_PI * M_PI * 1000.0 / FPGA_ADC_FREQ_HZ);
-
-    if (displayPoints == n) {
-        // 不需要降采样，直接赋值
-        group.freqA_display = group.freqA;
-        group.freqB_display = group.freqB;
-
-        float phaseA = 0.0f;
-        float phaseB = 0.0f;
-        for (int i = 0; i < n; ++i) {
-            phaseA += group.freqA[i] * phasePerKhz;
-            phaseB += group.freqB[i] * phasePerKhz;
-            group.phaseA_display[i] = phaseA;
-            group.phaseB_display[i] = phaseB;
-        }
+void DataProcessor::prepareDisplayData(TriggerGroup& group) {
+    const int n = std::min(group.sampleCount,
+        std::min(static_cast<int>(group.freqA.size()),
+                 static_cast<int>(group.freqB.size())));
+    if (n <= 0) {
+        group.freqA_display.clear();
+        group.freqB_display.clear();
+        group.phaseA_display.clear();
+        group.phaseB_display.clear();
         return;
     }
-
-    double step = static_cast<double>(n) / displayPoints;
-    std::vector<int> sampleIndex(displayPoints);
-    for (int i = 0; i < displayPoints; ++i) {
-        int srcIdx = static_cast<int>(i * step);
-        if (srcIdx >= n) srcIdx = n - 1;
-        sampleIndex[i] = srcIdx;
-    }
-
-    int out = 0;
-    int nextSample = sampleIndex[0];
-    float phaseA = 0.0f;
-    float phaseB = 0.0f;
-    for (int i = 0; i < n && out < displayPoints; ++i) {
+    group.freqA_display.assign(group.freqA.begin(), group.freqA.begin() + n);
+    group.freqB_display.assign(group.freqB.begin(), group.freqB.begin() + n);
+    group.phaseA_display.resize(n);
+    group.phaseB_display.resize(n);
+    constexpr float phasePerKhz =
+        static_cast<float>(2.0 * M_PI * M_PI * 1000.0 / FPGA_ADC_FREQ_HZ);
+    float phaseA = 0.0f, phaseB = 0.0f;
+    for (int i = 0; i < n; ++i) {
         phaseA += group.freqA[i] * phasePerKhz;
         phaseB += group.freqB[i] * phasePerKhz;
-
-        if (i == nextSample) {
-            group.freqA_display[out] = group.freqA[i];
-            group.freqB_display[out] = group.freqB[i];
-            group.phaseA_display[out] = phaseA;
-            group.phaseB_display[out] = phaseB;
-            ++out;
-            if (out < displayPoints) nextSample = sampleIndex[out];
-        }
+        group.phaseA_display[i] = phaseA;
+        group.phaseB_display[i] = phaseB;
     }
 }
 
@@ -542,8 +510,8 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
             result.publisherAccepted = true;
         }
 
-        //  降采样 + DisplayBuffer 更新
-        downsample(*group, m_displayPoints.load(std::memory_order_relaxed));
+        //  全分辨率显示数据 + DisplayBuffer 更新（不做显示抽点）
+        prepareDisplayData(*group);
         if (m_displayBuffer) {
             m_displayBuffer->update(group);
             m_displayBuffer->updateFullRes(group);  // 存储全分辨率频率供成像

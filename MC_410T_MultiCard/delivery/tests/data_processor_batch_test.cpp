@@ -27,7 +27,6 @@ AcqConfig testConfig()
     config.acqTimeNs = 8;
     config.bitsPerChannel = 16;
     config.sampleIntervalNs = 4.0;
-    config.displayPoints = 1;
     return config;
 }
 

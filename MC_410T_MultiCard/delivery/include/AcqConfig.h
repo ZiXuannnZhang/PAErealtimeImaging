@@ -29,7 +29,6 @@ struct AcqConfig {
     int  triggerHz       = 200;      // 触发频率上限（Hz）
     int  delayA          = 1000;     // A 通道延时（ns）
     int  delayB          = 1000;     // B 通道延时（ns）
-    int  displayPoints   = 1000;     // UI 显示点数（降采样后）
     // Startup admission policy in milliseconds: 0 = bypass (diagnostic
     // default, no startup cache/idle filter), 1000 = legacy regression.
     // Single source of truth for both Backend Settings and diagnostic logs.
