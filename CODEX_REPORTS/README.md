@@ -10,6 +10,7 @@
 | `acquisition-startup-history-20260907-13/` | PAimage 迁移、启动段诊断、START admission、system capture、ImagingBypass 隔离 |
 | `round-identity-history-20260907-16/` | RingBlockAssembler/SHM、PhysicalRound、RoundIdentity 修复与验证 |
 | `session-abcd-closeout-20260918/` | Session A–D 最终执行 receipts / handoff / checklist |
+| `hardware-env-20260914/` | Realtek USB 10GbE 网卡高级属性快照(只读) |
 
 ## 适合放入本目录
 
