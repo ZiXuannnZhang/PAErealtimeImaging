@@ -1,0 +1,30 @@
+BUILD_SOURCE_SHA=c31fd09aa7e1c0707faf121448be49bad9d6dfce
+TEST_TREE=D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\tests_frontend_display_fullres_20260922
+CTEST=D:\Qt\Qt6.8.0\Tools\CMake_64\bin\ctest.exe (3.30.5)
+
+The application build tree was checked first as requested:
+  ctest -N in build/mingw_debug -> Total Tests: 0
+  ctest --output-on-failure -j 4 in build/mingw_debug -> No tests were found, exit 0
+
+The independent delivery/tests project was then configured and built in the
+fresh TEST_TREE using the repository's existing test-tree procedure:
+  configure exit 0
+  build exit 0 (290/290 steps)
+
+Initial test-tree launch without deployed runtime DLLs produced loader-only
+0xc0000135 results. No test logic ran in that attempt. The test output tree was
+then deployed with the Qt 6.8.0 Qt6 DLLs, MinGW runtime DLLs, and qoffscreen
+plugin. No tracked input changed.
+
+Final command:
+  ctest --output-on-failure -j 1 -R "^(paimage_host_output_test|data_processor_batch_test|data_processor_imaging_isolation_test|session_boundary_test|session_boundary_receiver_test|filesaver_round_boundary_test)$"
+
+FINAL_TARGETED_RESULTS:
+  paimage_host_output_test                PASS
+  data_processor_batch_test               PASS
+  data_processor_imaging_isolation_test   PASS
+  session_boundary_test                   PASS
+  session_boundary_receiver_test          PASS
+  filesaver_round_boundary_test           PASS
+
+TARGETED_SUMMARY=6/6 PASS, 15.25 seconds, exit 0

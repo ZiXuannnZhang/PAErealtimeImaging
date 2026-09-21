@@ -1,0 +1,9 @@
+repository=ZiXuannnZhang/PAErealtimeImaging
+branch=codex/frontend-display-fullres-20260922
+BUILD_SOURCE_SHA=c31fd09aa7e1c0707faf121448be49bad9d6dfce
+starting_remote_head=c31fd09aa7e1c0707faf121448be49bad9d6dfce
+tracked_tree_clean_before_receipt=true
+source_or_test_fix=none
+receipt_scope=CODEX_REPORTS/frontend-display-fullres-20260922/validation-c31fd09a/
+REPORT_HEAD=reported_out_of_band_after_receipt_commit
+remote_push_method=git credential manager via git push origin HEAD:refs/heads/codex/frontend-display-fullres-20260922

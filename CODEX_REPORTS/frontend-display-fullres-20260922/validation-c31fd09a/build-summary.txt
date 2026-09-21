@@ -1,0 +1,30 @@
+BUILD_SOURCE_SHA=c31fd09aa7e1c0707faf121448be49bad9d6dfce
+BRANCH=codex/frontend-display-fullres-20260922
+TRACKED_TREE_CLEAN_BEFORE_RECEIPT=true
+WORKDIR=D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery
+BUILD_COMMAND=cmd /c build_mingw_debug.cmd
+BUILD_EXIT_CODE=0
+CONFIGURE_PRESET=mingw-debug
+BUILD_PRESET=mingw-debug-build
+CMAKE=3.30.5 (D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe)
+COMPILER=GNU 13.1.0 (D:\Qt\Qt6.8.0\Tools\mingw1310_64\bin\g++.exe)
+NINJA=1.12.1 (D:\Qt\Qt6.8.0\Tools\Ninja\ninja.exe)
+QT=D:\Qt\Qt6.8.0\6.8.0\mingw_64
+NATIVE_BIN=D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin
+
+BUILD_IDENTITY:
+PAIMAGE_GIT_SHA=c31fd09aa7e1c0707faf121448be49bad9d6dfce
+PAIMAGE_TRACKED_DIRTY=false
+PAIMAGE_BUILD_TYPE=Debug
+PAIMAGE_COMPILER=GNU 13.1.0
+PAIMAGE_PRODUCT_BASELINE=e66a29bfbbaa6534911a23d48e8624fb8d552bec
+PAIMAGE_SOURCE_SHA256=2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec
+
+CORE_BINARIES:
+PAimageReceiverDiagnostics.exe PRESENT 65270118 bytes
+ImagingSvc.exe PRESENT 3336915 bytes
+ring_svc_selftest.exe PRESENT 1941308 bytes
+ring_udp_replay.exe PRESENT 333035 bytes
+
+BUILD_RESULT=PASS
+DELIVERY_STAGING=NOT_CREATED (validation-only task)

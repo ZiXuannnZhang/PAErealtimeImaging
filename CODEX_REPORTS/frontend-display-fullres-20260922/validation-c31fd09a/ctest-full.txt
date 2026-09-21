@@ -1,0 +1,31 @@
+BUILD_SOURCE_SHA=c31fd09aa7e1c0707faf121448be49bad9d6dfce
+TEST_TREE=D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\tests_frontend_display_fullres_20260922
+
+Command 1:
+  ctest -N
+Result:
+  Total Tests: 43
+  exit 0
+
+First full invocation before GUI runtime deployment:
+  ctest --output-on-failure -j 4
+Result:
+  41 PASS, 2 loader failures (0xc0000135):
+    diagnostic_dialog_test
+    count_boundary_save_binding_test
+This was an incomplete runtime deployment result, not a test assertion result.
+
+Final full invocation after Qt/MinGW runtime and qoffscreen deployment:
+  ctest --output-on-failure -j 4
+Result:
+  42 PASS, 1 FAIL, 0 SKIP/NOT_RUN, exit 8
+  failed test: physical_round_normalizer_test (SegFault)
+  total time: 24.59 seconds
+
+Permitted one-time diagnostic rerun:
+  ctest --output-on-failure -j 1 -R "^physical_round_normalizer_test$"
+Result:
+  1/1 PASS, exit 0, 0.20 seconds
+
+The required parallel full result remains 42/43. The failure was not repaired
+or hidden by reruns; no source/test/build-input modification was made.
