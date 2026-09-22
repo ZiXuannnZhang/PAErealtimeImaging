@@ -17,6 +17,14 @@ public:
         std::function<std::uint64_t(std::uint64_t measurementSession,
                                     std::uint64_t roundGeneration)>;
     using MeasurementSessionBinder = std::function<std::uint64_t(std::uint64_t)>;
+    // Frontend Preprocessing Stage stale-barrier feed.  Both callbacks reuse the
+    // existing measurement session and PhysicalRoundNormalizer boundary facts
+    // classified here; no independent round inference is introduced.
+    // measurementSession == 0 means "measurement stopped / disarmed".
+    using FrontendSessionSink = std::function<void(std::uint64_t measurementSession)>;
+    using FrontendBarrierSink =
+        std::function<void(std::uint64_t measurementSession,
+                           std::uint64_t roundGeneration)>;
 
     // logicalTriggersPerRound is required by the production Backend.  Zero
     // keeps the historical adapter-only tests in pass-through mode.
@@ -37,6 +45,24 @@ public:
             measurementSessionBinder_(s);
         if(normalizer_)normalizer_->beginSession(s);
         workers_.beginSession(s);
+        // Frames queued or in flight for the previous measurement session must
+        // not reach Display/Ring after the session advanced.
+        if(frontendSessionSink_)frontendSessionSink_(s);
+    }
+    // Measurement stop/disarm: pending frontend work is invalidated so no old
+    // frame is dispatched after the measurement stopped.
+    void endSession(){
+        std::lock_guard<std::mutex> lock(normalizationMutex_);
+        if(frontendSessionSink_)frontendSessionSink_(0);
+    }
+    void setFrontendSessionSink(FrontendSessionSink sink){
+        frontendSessionSink_=std::move(sink);
+    }
+    // Advanced from PhysicalRound TimeoutBoundary only.  CountBoundary must not
+    // advance it: the just-completed final logical trigger still has to be
+    // dispatched exactly once.
+    void setFrontendBarrierSink(FrontendBarrierSink sink){
+        frontendBarrierSink_=std::move(sink);
     }
     // Installed before the Backend starts.  The resolver is authoritative for
     // normalized LogicalScan save stamps; the old DataProcessor reader stays
@@ -88,6 +114,8 @@ private:
     std::uint64_t timeoutSession_ = 0, timeoutGeneration_ = 0;
     SaveSessionResolver saveSessionResolver_;
     MeasurementSessionBinder measurementSessionBinder_;
+    FrontendSessionSink frontendSessionSink_;
+    FrontendBarrierSink frontendBarrierSink_;
     std::atomic<bool> configurationRestart_{false};
 };
 }

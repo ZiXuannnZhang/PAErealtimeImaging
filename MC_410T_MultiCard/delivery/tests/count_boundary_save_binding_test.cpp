@@ -146,7 +146,7 @@ int main(int argc, char** argv)
                 return coordinator.directoryFor(generation);
             });
             processors.push_back(std::make_unique<DataProcessor>(
-                card, nullptr, displays.back().get(), nullptr, AcqConfig{}));
+                card, nullptr, nullptr, AcqConfig{}));
             processorPtrs.push_back(processors.back().get());
             saverPtrs.push_back(savers.back().get());
         }
@@ -265,7 +265,7 @@ int main(int argc, char** argv)
         });
         AcqConfig config;
         config.acqTimeNs = 64;
-        DataProcessor processor(0, nullptr, &display, nullptr, config);
+        DataProcessor processor(0, nullptr, nullptr, config);
         HostOutput output(32, 50, {&processor}, {&saver}, nullptr, nullptr, 1,
                            [&](const PhysicalRoundEvent& event) {
                                if (event.kind == PhysicalRoundEvent::Kind::CountBoundary)
@@ -328,7 +328,7 @@ int main(int argc, char** argv)
                 return coordinator.directoryFor(generation);
             });
             processors.push_back(std::make_unique<DataProcessor>(
-                card, nullptr, displays.back().get(), nullptr, config));
+                card, nullptr, nullptr, config));
             processorPtrs.push_back(processors.back().get());
             saverPtrs.push_back(savers.back().get());
         }
@@ -480,7 +480,7 @@ int main(int argc, char** argv)
         });
         AcqConfig config;
         config.acqTimeNs = 64;
-        DataProcessor processor(0, nullptr, &display, nullptr, config);
+        DataProcessor processor(0, nullptr, nullptr, config);
         HostOutput output(32, 50, {&processor}, {&saver}, nullptr, nullptr, 3,
                            [&](const PhysicalRoundEvent& event) {
                                if (event.kind == PhysicalRoundEvent::Kind::TimeoutBoundary)
@@ -540,7 +540,7 @@ int main(int argc, char** argv)
         });
         AcqConfig config;
         config.acqTimeNs = 64;
-        DataProcessor processor(0, nullptr, &display, nullptr, config);
+        DataProcessor processor(0, nullptr, nullptr, config);
         HostOutput output(32, 50, {&processor}, {&saver}, nullptr, nullptr, 1,
                            [&](const PhysicalRoundEvent&) {});
         output.setMeasurementSessionBinder([&](std::uint64_t session) {

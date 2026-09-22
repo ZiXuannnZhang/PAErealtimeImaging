@@ -169,7 +169,7 @@ struct RoundFixture {
         AcqConfig config;
         config.acqTimeNs = kSamples * 4;
         std::uint64_t genValue = sessionGen;
-        DataProcessor processor(0, nullptr, &display, nullptr, config, {});
+        DataProcessor processor(0, nullptr, nullptr, config, {});
         processor.setSessionGenReader([&] { return genValue; });
         HostOutput output(32, 50, {&processor}, {&saver}, nullptr, nullptr,
                           logicalPerRound,

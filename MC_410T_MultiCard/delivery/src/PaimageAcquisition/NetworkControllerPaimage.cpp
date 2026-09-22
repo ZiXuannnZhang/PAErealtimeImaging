@@ -161,6 +161,22 @@ bool NetworkController::createPaimageBackend(QString& error){
             [this](std::uint64_t measurementSession, std::uint64_t roundGeneration) {
                 return resolveAutoSaveRound(measurementSession, roundGeneration);
             });
+        // Frontend Preprocessing Stage 的 session / timeout stale barrier 直接
+        // 复用 measurement session 与 PhysicalRoundNormalizer 的 boundary 事实，
+        // 不另造独立轮次推断。CountBoundary 不推进 barrier（见 HostOutput）。
+        m_paimage->output().setFrontendSessionSink(
+            [this](std::uint64_t measurementSession) {
+                if (measurementSession == 0) {
+                    invalidateFrontendStages();
+                    return;
+                }
+                for (auto& stage : m_frontendStages) stage->beginSession(measurementSession);
+            });
+        m_paimage->output().setFrontendBarrierSink(
+            [this](std::uint64_t measurementSession, std::uint64_t roundGeneration) {
+                for (auto& stage : m_frontendStages)
+                    stage->advanceRoundBarrier(measurementSession, roundGeneration);
+            });
         m_paimageRunId=id;
         const int expected=m_config.packetsPerTrig();
         m_paimage->receiver().ingressSink=[this](int card,const paimage::TraceRecord& r){
@@ -243,25 +259,39 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
     m_lastPktsReceived.assign(config.nCards,0);m_lastPktsDropped.assign(config.nCards,0);m_lastTrigsComplete.assign(config.nCards,0);
     m_measurementSessionToken=0;m_measurementRunning=false;m_paimageStartPending=false;
     m_measurementState=MeasurementState::Disarmed;m_configPhase=ConfigPhase::Idle;
-    m_processors.clear();m_savers.clear();m_displayBuffers.clear();
+    m_processors.clear();m_savers.clear();m_displayBuffers.clear();m_frontendStages.clear();
     m_publisher=std::make_unique<FramePublisher>(this);m_publisher->configure(config.enablePublisher,config.nCards,config.samplesPerTrig());
     if(config.enablePublisher)m_publisher->start();
     for(int c=0;c<config.nCards;++c){
         auto display=std::make_unique<DisplayBuffer>();auto saver=std::make_unique<FileSaver>(c);
         saver->setSessionDirResolver([this](auto gen){return sessionDir(gen);});
-        auto processor=std::make_unique<DataProcessor>(c,nullptr,display.get(),config.enablePublisher?m_publisher.get():nullptr,config,m_ringFeedSink);
+        // Frontend Preprocessing Stage：每卡一个异步 worker。stage 必须在任何
+        // 可能提交 frontend frame 的路径之前启动（Task 3.7）。
+        auto frontend=std::make_unique<FrontendPreprocessor>(c);
+        DisplayBuffer* displayPtr=display.get();
+        frontend->setDisplayBuffer(displayPtr);
+        frontend->setRingSink(m_ringFeedSink);
+        frontend->start();
+        // DataProcessor 热路径只做 frontend enqueue；deep copy / display
+        // preparation / Ring 分发全部在 stage worker 内完成。
+        auto processor=std::make_unique<DataProcessor>(c,nullptr,config.enablePublisher?m_publisher.get():nullptr,config,
+            [stage=frontend.get()](const TriggerGroupPtr& group){return stage->submit(group);});
         processor->setSessionGenReader([this]{return autoSessionGen();});
         connect(saver.get(),&FileSaver::errorOccurred,this,&NetworkController::errorOccurred);
         connect(saver.get(),&FileSaver::statusMessage,this,&NetworkController::statusMessage);
         connect(saver.get(),&FileSaver::fileRolled,this,&NetworkController::fileSaverRollover);
+        m_frontendStages.push_back(std::move(frontend));
         m_displayBuffers.push_back(std::move(display));m_savers.push_back(std::move(saver));m_processors.push_back(std::move(processor));
     }
     QString error;if(!createPaimageBackend(error)){
         if(m_publisher){m_publisher->requestInterruption();m_publisher->wait();m_publisher.reset();}
+        // 上游提交失败回滚：先停止/清空 stage，再销毁 DisplayBuffer 依赖。
+        stopFrontendStages();
         if(m_paimageTrace)m_paimageTrace->stop();
         if(m_paimageTiming)m_paimageTiming->stop();
         if(m_paimageLoopLog)m_paimageLoopLog->stop();
         m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();m_paimageTracePath.clear();
+        m_processors.clear();m_savers.clear();m_displayBuffers.clear();
         emit errorOccurred("PAimage-derived 监听失败："+error);if(onFailed)onFailed();return false;
     }
     m_running=true;m_lastStatsMs=QDateTime::currentMSecsSinceEpoch();m_lastRuntimeSnapshotMs=0;m_lastIngressSnapshotMs=0;
@@ -438,7 +468,12 @@ void NetworkController::stopPaimage(){
         if(m_paimageLoopLog)m_paimageLoopLog->stop();
         QMetaObject::invokeMethod(this,[this]{
             if(m_stopThread.joinable())m_stopThread.join();
-            m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();m_processors.clear();m_savers.clear();m_displayBuffers.clear();m_publisher.reset();
+            // Backend 析构合流上游提交线程；随后 stop/clear frontend stage 并
+            // 确定性 join，最后才能销毁 DisplayBuffer / Ring sink 依赖。
+            m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();
+            m_processors.clear();
+            stopFrontendStages();
+            m_savers.clear();m_displayBuffers.clear();m_publisher.reset();
             m_measurementRunning=false;m_paimageSavingRequested=false;emit stopped();
         },Qt::QueuedConnection);
     });

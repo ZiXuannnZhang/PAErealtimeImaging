@@ -444,6 +444,9 @@ void NetworkController::rollbackStart()
     if (m_publisher) { if (!m_publisher->wait(1000)) { m_publisher->terminate(); m_publisher->wait(); } }
     m_receivers.clear();
     m_processors.clear();
+    // 上游提交已停止：先 stop/clear frontend stage（确定性 join），
+    // 然后才能销毁 DisplayBuffer / Ring sink 依赖。
+    stopFrontendStages();
     m_savers.clear();
     m_displayBuffers.clear();
     m_publisher.reset();
@@ -506,6 +509,10 @@ void NetworkController::stop() {
     for (auto& p : m_processors) p->requestStop();
     for (auto& s : m_savers) s->requestStop();
     if (m_publisher) m_publisher->requestInterruption();
+
+    // 上游提交已停止：先 stop/clear frontend stage（确定性 join），
+    // 然后才能把 DisplayBuffer 所有权移交给后台销毁线程。
+    stopFrontendStages();
 
     // 把容器所有权移入后台线程，避免主线程析构时阻塞
     using RecvVec  = std::vector<std::unique_ptr<MultiPortReceiver>>;
@@ -753,6 +760,32 @@ DisplayBuffer* NetworkController::displayBuffer(int cardIdx) const {
     if (cardIdx < 0 || cardIdx >= static_cast<int>(m_displayBuffers.size()))
         return nullptr;
     return m_displayBuffers[cardIdx].get();
+}
+
+// ─
+// Frontend Preprocessing Stage 生命周期（NetworkController 为 owner）
+// ─
+std::optional<FrontendPreprocessor::Snapshot>
+NetworkController::frontendSnapshot(int cardIdx) const {
+    if (cardIdx < 0 || cardIdx >= static_cast<int>(m_frontendStages.size()))
+        return std::nullopt;
+    return m_frontendStages[cardIdx]->snapshot();
+}
+
+void NetworkController::stopFrontendStages() {
+    // FrontendPreprocessor::stop() 只做 request/join/clear，不使用 terminate。
+    for (auto& stage : m_frontendStages) {
+        if (stage) stage->stop();
+    }
+    m_frontendStages.clear();
+}
+
+void NetworkController::invalidateFrontendStages() {
+    // measurement stop/disarm：pending frontend work 被清理并失效，
+    // 保证 stop 后不会再分发旧 frame。
+    for (auto& stage : m_frontendStages) {
+        if (stage) stage->endSession();
+    }
 }
 
 // 
@@ -1841,6 +1874,9 @@ QString NetworkController::newMeasurementSessionId()
 MeasurementSessionTransaction::TeardownResult
 NetworkController::resetProcessorsAfterSession(bool hardwareStopSucceeded)
 {
+    // measurement stop/disarm 边界：先让 pending frontend work 失效，
+    // 保证停止后不会继续分发旧 frame。
+    invalidateFrontendStages();
     return MeasurementSessionTransaction::teardown(
         static_cast<int>(m_receivers.size()),
         static_cast<int>(m_processors.size()),

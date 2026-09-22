@@ -39,6 +39,7 @@ set(SOURCES
     src/MeasurementSession.cpp
     src/NetworkDiagnostics.cpp
     src/DataProcessor.cpp
+    src/FrontendPreprocessor.cpp
     src/FileSaver.cpp
     src/FramePublisher.cpp
     src/MultiPortReceiver.cpp
@@ -70,6 +71,7 @@ set(HEADERS
     include/PacketAssemblyBuffer.h
     include/DisplayBuffer.h
     include/DataProcessor.h
+    include/FrontendPreprocessor.h
     include/MultiPortReceiver.h
     include/ReceiverBase.h
     include/FileSaver.h

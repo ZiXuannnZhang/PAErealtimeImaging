@@ -41,7 +41,7 @@ DataPacket packet(uint16_t seq)
 
 bool testBatchBoundary513()
 {
-    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());
+    DataProcessor processor(0, nullptr, nullptr, testConfig());
     for (uint16_t i = 0; i < 513; ++i)
         processor.enqueuePacket(packet(i));
 
@@ -66,7 +66,7 @@ bool testBatchBoundary513()
 
 bool testExactBatch()
 {
-    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());
+    DataProcessor processor(0, nullptr, nullptr, testConfig());
     for (uint16_t i = 0; i < 512; ++i)
         processor.enqueuePacket(packet(i));
     const int drained = processor.drainBatchForTest();
@@ -79,7 +79,7 @@ bool testExactBatch()
 
 bool testBelowBatch()
 {
-    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());
+    DataProcessor processor(0, nullptr, nullptr, testConfig());
     for (uint16_t i = 0; i < 511; ++i)
         processor.enqueuePacket(packet(i));
     const int drained = processor.drainBatchForTest();
@@ -92,7 +92,7 @@ bool testBelowBatch()
 
 bool testMultiBatchConservation()
 {
-    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());
+    DataProcessor processor(0, nullptr, nullptr, testConfig());
     for (uint16_t i = 0; i < 1025; ++i)
         processor.enqueuePacket(packet(i));
 
@@ -167,7 +167,7 @@ bool testAssemblyRejectionClassification()
 {
     AcqConfig config = testConfig();
     config.acqTimeNs = 8000;
-    DataProcessor processor(0, nullptr, nullptr, nullptr, config);
+    DataProcessor processor(0, nullptr, nullptr, config);
     processor.setMeasureEnabled(true);
 
     DataPacket accepted;
@@ -231,7 +231,7 @@ bool testMissingTriggerSwitchPath()
     const int expectedPackets = config.packetsPerTrig();
     if (!check(expectedPackets == 6, QStringLiteral("B1 expected 6 packets/trigger")))
         return false;
-    DataProcessor processor(0, nullptr, nullptr, nullptr, config);
+    DataProcessor processor(0, nullptr, nullptr, config);
     processor.setMeasureEnabled(true);
 
     for (uint16_t p = 0; p < 3; ++p)
@@ -251,7 +251,7 @@ bool testMissingTriggerSwitchPath()
 bool testMissingTriggerPartialOnly()
 {
     AcqConfig config = sixPacketConfig();
-    DataProcessor processor(0, nullptr, nullptr, nullptr, config);
+    DataProcessor processor(0, nullptr, nullptr, config);
     processor.setMeasureEnabled(true);
 
     for (uint16_t p = 0; p < 4; ++p)
@@ -269,7 +269,7 @@ bool testMissingTriggerPartialOnly()
 //   T100(完成) -> T104 -> T108：每条路径按 trigger 数累计且不双计
 bool testMissingTriggerEmptyBufferGapPath()
 {
-    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());  // 1 包/触发
+    DataProcessor processor(0, nullptr, nullptr, testConfig());  // 1 包/触发
     processor.setMeasureEnabled(true);
 
     processor.enqueuePacket(triggerPacket(100, 0));   // 完成并 flush
@@ -287,7 +287,7 @@ bool testMissingTriggerEmptyBufferGapPath()
 // B4 uint16 wrap / backstep / reset recovery
 bool testMissingTriggerWrapForward()
 {
-    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());  // 1 包/触发
+    DataProcessor processor(0, nullptr, nullptr, testConfig());  // 1 包/触发
     processor.setMeasureEnabled(true);
 
     processor.enqueuePacket(triggerPacket(65534, 0));  // 完成并 flush
@@ -304,7 +304,7 @@ bool testMissingTriggerWrapForward()
 
 bool testMissingTriggerResetRecovery()
 {
-    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());  // 1 包/触发
+    DataProcessor processor(0, nullptr, nullptr, testConfig());  // 1 包/触发
     processor.setMeasureEnabled(true);
 
     processor.enqueuePacket(triggerPacket(1000, 0));  // 完成并 flush
@@ -325,7 +325,7 @@ bool testMissingTriggerResetRecovery()
 #ifdef _WIN32
 bool testSocketCounterBoundary()
 {
-    DataProcessor processor(0, nullptr, nullptr, nullptr, testConfig());
+    DataProcessor processor(0, nullptr, nullptr, testConfig());
     std::vector<int> cardIndices{0};
     std::vector<DataProcessor*> processors{&processor};
     MultiPortReceiver receiver(cardIndices, processors, -1);

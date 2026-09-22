@@ -8,9 +8,8 @@
 #include <memory>
 #include "DataTypes.h"
 #include "AcqConfig.h"
-#include "DisplayBuffer.h"
+#include "FrontendPreprocessor.h"
 #include "PacketAssemblyBuffer.h"
-#include "ImagingBypass.h"
 #include "third_party/concurrentqueue.h"
 
 // 前向声明
@@ -24,23 +23,26 @@ class FramePublisher;
 //   1. 消费 MultiPortReceiver 入队的 DataPacket
 //   2. 用 PacketAssemblyBuffer 重组完整触发
 //   3. computeFrequency：int16 Q0.15 差分相位  float32 kHz
-//   4. prepareDisplayData：生成全分辨率显示数据与相位
-//   5. 三路分发：FileSaver / FramePublisher / DisplayBuffer
+//   4. 三路分发：FileSaver（raw）/ FramePublisher（raw）/ FrontendPreprocessor
+//
+// 全分辨率显示准备、DisplayBuffer 与 Ring 的 frontend 分发全部属于
+// FrontendPreprocessor（每卡一个异步 stage）。DataProcessor 不再直接持有或
+// 调用 DisplayBuffer / RingFeedSink，也不再修改 shared raw group 的 *_display。
 // ============================================================
 class DataProcessor : public QThread {
     Q_OBJECT
 
 public:
-    // 环形实时馈送回调：每完成一个触发由 DataProcessor 线程调用（高速率链路）
-    using RingFeedSink = std::function<ImagingSubmitResult(const TriggerGroupConstPtr&)>;
+    // Frontend enqueue sink: HostOutput/DataProcessor 热路径只做 enqueue。
+    // 返回值只描述 frontend queue 的准入结果，不代表异步 Ring 最终结果。
+    using FrontendSubmitSink = std::function<FrontendSubmitResult(const TriggerGroupPtr&)>;
 
     explicit DataProcessor(
         int cardId,
         moodycamel::ConcurrentQueue<TriggerGroupPtr>* saveQueue,  // FileSaver 队列指针（可为 nullptr）
-        DisplayBuffer* displayBuf,
         FramePublisher* publisher,        // 可为 nullptr
         const AcqConfig& config,
-        const RingFeedSink& ringFeedSink = {},   // 环形实时馈送（可为空）
+        const FrontendSubmitSink& frontendSubmitSink = {},  // 可为空
         QObject* parent = nullptr);
 
     ~DataProcessor() override;
@@ -54,14 +56,22 @@ public:
 
     // Already assembled PAimage output. This entry never touches packet queues,
     // PacketAssemblyBuffer, StartFence, or numerical conversion. The source
-    // saving worker uses save=true; its sync worker uses displayAndRing=true.
+    // saving worker uses save=true; its sync worker uses frontend=true.
+    //
+    // save 与 frontend submit 严格隔离：raw save 使用原始 group，frontend 只做
+    // enqueue（deep copy 在 FrontendPreprocessor worker 内完成）。任一侧失败都
+    // 不改写另一侧的结果，也不会计入 UDP 丢包 / missingTriggerCount /
+    // saveQueueDiscards。
     struct DeliveryResult {
         enum Save { NotRequested, Disabled, Queued, QueueFull, QueueFailure, Consumed, ConsumerFailure } save=NotRequested;
-        bool saveAccepted=false, displayAccepted=false, imagingAccepted=false;
+        bool saveAccepted=false;
+        // Frontend queue admission only.  The asynchronous Ring outcome is
+        // owned by ImagingBypass/Ring statistics and is never reported here.
+        bool frontendAccepted=false;
+        FrontendSubmitResult frontendSubmit=FrontendSubmitResult::Stopping;
         bool publisherAccepted=false, exception=false;
-        ImagingSubmitResult imagingDropReason=ImagingSubmitResult::Disabled;
     };
-    DeliveryResult deliverAssembled(const TriggerGroupPtr&,bool save,bool displayAndRing);
+    DeliveryResult deliverAssembled(const TriggerGroupPtr&,bool save,bool frontend);
     // Set before starting source workers. No second saving queue in this path.
     void setDirectSaveSink(std::function<bool(const TriggerGroupPtr&)> sink) { m_directSaveSink=std::move(sink); }
     std::uint64_t captureSaveSessionGen()const{return m_sessionGenReader?m_sessionGenReader():0;}
@@ -136,11 +146,9 @@ protected:
 
 private:
     // int16 Q0.15 差分相位序列  float32 kHz（差分法，O(N)，禁止用 FFT）
-    // 同时计算相位（累积积分，rad 单位，填入 group 的 phaseA/B_display 前）
+    // 显示相位积分与全分辨率 *_display 生成属于 FrontendPreprocessor 的
+    // full-resolution display preparation，本类不再触碰 *_display 字段。
     void computeFrequency(TriggerGroup& group);
-
-    // 生成全分辨率 *_display 字段；不做抽点，仅计算显示相位。
-    void prepareDisplayData(TriggerGroup& group);
 
     // 将 assemblyBuf 当前内容 export → compute → 分发（供正常完成和强制 flush 共用）
     void flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf);
@@ -181,9 +189,10 @@ private:
 
     moodycamel::ConcurrentQueue<DataPacket>       m_inputQueue;
     moodycamel::ConcurrentQueue<TriggerGroupPtr>* m_saveQueue     = nullptr;
-    DisplayBuffer*                                m_displayBuffer  = nullptr;
     FramePublisher*                               m_framePublisher = nullptr;
-    RingFeedSink                                  m_ringFeedSink;   // 环形实时馈送回调
+    // Frontend enqueue only.  DisplayBuffer and RingFeedSink are owned and
+    // driven by FrontendPreprocessor; production wires exactly one owner.
+    FrontendSubmitSink                            m_frontendSubmitSink;
     std::function<uint64_t()>                     m_sessionGenReader;   // 自动保存会话代读取器
 
     // 条件变量唤醒（接收线程写数据后通知处理线程）

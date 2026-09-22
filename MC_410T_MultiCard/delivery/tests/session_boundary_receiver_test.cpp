@@ -105,7 +105,7 @@ public:
     {
         for (int card = 0; card < cardCount; ++card) {
             m_owned.push_back(std::make_unique<DataProcessor>(
-                card, nullptr, nullptr, nullptr, config));
+                card, nullptr, nullptr, config));
             m_processors.push_back(m_owned.back().get());
             m_cards.push_back(card);
         }
@@ -492,7 +492,7 @@ bool runLoopbackExactWindowStress() { return true; }
 bool runBoundaryStress()
 {
     const AcqConfig config = testConfig();
-    DataProcessor processor(0, nullptr, nullptr, nullptr, config);
+    DataProcessor processor(0, nullptr, nullptr, config);
     MultiPortReceiver receiver({0}, {&processor}, -1, nullptr, true);
     processor.start();
     receiver.start();
@@ -603,7 +603,7 @@ bool runPerCardFenceOrdering()
     std::vector<std::unique_ptr<DataProcessor>> owned;
     std::vector<DataProcessor*> processors;
     for (int card = 0; card < 4; ++card) {
-        owned.push_back(std::make_unique<DataProcessor>(card, nullptr, nullptr, nullptr, config));
+        owned.push_back(std::make_unique<DataProcessor>(card, nullptr, nullptr, config));
         processors.push_back(owned.back().get());
     }
     MultiPortReceiver receiver({0, 1, 2, 3}, processors, -1, nullptr, true);
@@ -667,7 +667,7 @@ bool runPartialFenceRollback()
     std::vector<std::unique_ptr<DataProcessor>> owned;
     std::vector<DataProcessor*> processors;
     for (int card = 0; card < 4; ++card) {
-        owned.push_back(std::make_unique<DataProcessor>(card, nullptr, nullptr, nullptr, config));
+        owned.push_back(std::make_unique<DataProcessor>(card, nullptr, nullptr, config));
         processors.push_back(owned.back().get());
     }
     MultiPortReceiver receiver({0, 1, 2, 3}, processors, -1, nullptr, true);

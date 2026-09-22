@@ -33,6 +33,12 @@ HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors
                 if(event.kind==PhysicalRoundEvent::Kind::TimeoutBoundary){
                     timeoutSession_=event.measurementSession;
                     timeoutGeneration_=event.roundGeneration;
+                    // Physical-round TimeoutBoundary advances the frontend
+                    // stale barrier from the normalizer's own boundary facts.
+                    // CountBoundary deliberately does not: its final logical
+                    // trigger must still be dispatched exactly once.
+                    if(frontendBarrierSink_)
+                        frontendBarrierSink_(event.measurementSession,event.roundGeneration);
                 }
                 if(observer)observer(event);
             });
@@ -112,8 +118,11 @@ void HostOutput::consumeCard(Frame f){
     const auto begin=SocketReceiver::now();
     auto group=converter_.convert(f);
     auto result=processors_.at(f->card)->deliverAssembled(group,true,false);
-    // stage 7: 0 save consumer result, 1 display accepted, 2 imaging result,
-    // 3 publisher returned, 4 exception, 5 session stale after conversion.
+    // stage 7: 0 save consumer result, 1 frontend enqueue accepted,
+    // 2 frontend submit result (FrontendSubmitResult), 3 publisher returned,
+    // 4 exception, 5 session stale after conversion.
+    // The card worker owns raw save only; reason 1/2 describe frontend queue
+    // admission and never masquerade as the asynchronous Ring outcome.
     observe(f,7,0,std::uint32_t(result.save));
     if(result.exception)observe(f,7,4);
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=f->measurementSession;r.correlation=f->firstIngressId;r.threadId=GetCurrentThreadId();r.card=f->card;r.kind=std::uint16_t(TimingKind::CardWorker);r.value0=std::uint32_t(result.save);timing_->observe(r,end-begin>=500000);}
@@ -126,7 +135,11 @@ void HostOutput::consumeSync(const SyncFrame& sync){
     if(!workers_.isCurrentSession(sync.session)){for(auto f:sync.cards)observe(f,7,5);return;}
     for(std::size_t i=0;i<groups.size();++i){auto f=sync.cards[i];
         auto result=processors_.at(f->card)->deliverAssembled(groups[i],false,true);
-        observe(f,7,1,result.displayAccepted);observe(f,7,2,std::uint32_t(result.imagingDropReason));observe(f,7,3,result.publisherAccepted);
+        // reason 1/2 record the frontend enqueue outcome only.  The final Ring
+        // Accepted/QueueFull/Busy/Disabled outcome stays with ImagingBypass/Ring.
+        observe(f,7,1,result.frontendAccepted);
+        observe(f,7,2,std::uint32_t(result.frontendSubmit));
+        observe(f,7,3,result.publisherAccepted);
         if(result.exception)observe(f,7,4);
     }
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=sync.session;r.threadId=GetCurrentThreadId();r.card=-1;r.kind=std::uint16_t(TimingKind::SyncWorker);r.value0=std::uint32_t(sync.cards.size());timing_->observe(r,end-begin>=500000);}

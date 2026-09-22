@@ -52,6 +52,10 @@ bool Backend::startMeasurement(std::uint64_t session){
     return sent&&fenceOk;
 }
 bool Backend::stopMeasurement(){
-    return control_.stop([&]{receiver_.prepareStop();},[&](bool ok){receiver_.completeStop(ok);});
+    const bool sent=control_.stop([&]{receiver_.prepareStop();},[&](bool ok){receiver_.completeStop(ok);});
+    // measurement stop/disarm：让 pending frontend work 清理/失效，
+    // 保证停止后不会继续把旧 frame 分发到 Display/Ring。
+    output_.endSession();
+    return sent;
 }
 }

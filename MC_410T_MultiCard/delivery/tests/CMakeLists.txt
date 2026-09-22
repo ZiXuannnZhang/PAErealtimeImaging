@@ -26,12 +26,26 @@ add_test(NAME imaging_bypass_test COMMAND imaging_bypass_test)
 add_executable(data_processor_imaging_isolation_test
     data_processor_imaging_isolation_test.cpp
     ../src/ImagingBypass.cpp
+    ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
     ../src/DataProcessor.cpp ../include/DataProcessor.h
     ../src/FramePublisher.cpp ../include/FramePublisher.h)
 target_include_directories(data_processor_imaging_isolation_test PRIVATE ../include)
 target_compile_definitions(data_processor_imaging_isolation_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(data_processor_imaging_isolation_test PRIVATE Qt6::Core)
 add_test(NAME data_processor_imaging_isolation_test COMMAND data_processor_imaging_isolation_test)
+
+# Frontend Preprocessing Stage (Task 1 identity processing) contract tests.
+add_executable(frontend_preprocessor_test
+    frontend_preprocessor_test.cpp
+    ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
+    ../src/ImagingBypass.cpp
+    ../src/DataProcessor.cpp ../include/DataProcessor.h
+    ../src/FramePublisher.cpp ../include/FramePublisher.h)
+target_include_directories(frontend_preprocessor_test PRIVATE ../include)
+target_compile_definitions(frontend_preprocessor_test PRIVATE
+    FRONTEND_PREPROCESSOR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(frontend_preprocessor_test PRIVATE Qt6::Core)
+add_test(NAME frontend_preprocessor_test COMMAND frontend_preprocessor_test)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Concurrent Widgets)
 
@@ -111,6 +125,7 @@ if(WIN32)
         ../src/NetworkDiagnostics.cpp ../src/DiagnosticRecorder.cpp
         ../src/StartupPolicy.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
+        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
         ../src/FileSaver.cpp ../include/FileSaver.h
         ../src/MultiPortReceiver.cpp ../include/MultiPortReceiver.h
         ../src/FramePublisher.cpp ../include/FramePublisher.h)
@@ -232,6 +247,7 @@ if(WIN32)
         ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
         ../src/PaimageAcquisition/Backend.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
+        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
         ../src/FileSaver.cpp ../include/FileSaver.h
         ../src/FramePublisher.cpp ../include/FramePublisher.h)
     target_include_directories(paimage_host_output_test PRIVATE ../include)
@@ -243,6 +259,7 @@ if(WIN32)
         ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
         ../src/PaimageAcquisition/Backend.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
+        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
         ../src/FileSaver.cpp ../include/FileSaver.h
         ../src/FramePublisher.cpp ../include/FramePublisher.h)
     target_include_directories(filesaver_round_boundary_test PRIVATE ../include)
@@ -277,6 +294,7 @@ if(WIN32)
         ../src/PaimageAcquisition/HostOutput.cpp
         ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
+        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
         ../src/FileSaver.cpp ../include/FileSaver.h
         ../src/FramePublisher.cpp ../include/FramePublisher.h)
     target_include_directories(count_boundary_save_binding_test PRIVATE ../include)

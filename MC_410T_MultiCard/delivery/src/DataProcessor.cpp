@@ -23,18 +23,16 @@ static uint64_t currentTimeMs() {
 DataProcessor::DataProcessor(
     int cardId,
     moodycamel::ConcurrentQueue<TriggerGroupPtr>* saveQueue,
-    DisplayBuffer* displayBuf,
     FramePublisher* publisher,
     const AcqConfig& config,
-    const RingFeedSink& ringFeedSink,
+    const FrontendSubmitSink& frontendSubmitSink,
     QObject* parent)
     : QThread(parent)
     , m_cardId(cardId)
     , m_config(config)
     , m_saveQueue(saveQueue)
-    , m_displayBuffer(displayBuf)
     , m_framePublisher(publisher)
-    , m_ringFeedSink(ringFeedSink)
+    , m_frontendSubmitSink(frontendSubmitSink)
     , m_expectedPackets(config.packetsPerTrig())
 {
     m_stats.cardId = cardId;
@@ -390,52 +388,22 @@ DataProcessor::SessionStateSnapshot DataProcessor::sessionStateForTest() const {
 }
 #endif
 
-// 
+//
 // computeFrequency
 // 解调（电压→声波时域信号）已在采集卡 FPGA 完成；UDP 载荷即为已解调时域信号，
 // 监听程序只做一次精度转换（int16/int32 → float32），此处保持透传，不再做
 // 差分相位→频率的二次换算（历史模拟回放路径已移除）。
-// 
+// 全分辨率显示准备（*_display）由 FrontendPreprocessor 在 frontend clone 上完成。
+//
 void DataProcessor::computeFrequency(TriggerGroup& group) {
     (void)group;
 }
 
-// 
-// prepareDisplayData
-// 前端显示使用完整采样点：频率数据直接复制，相位按完整 A-line 积分生成。
-// 不做任何 step-wise 抽点，避免显示/FFT 与真实 250 MHz 采样率脱节。
-// 
-void DataProcessor::prepareDisplayData(TriggerGroup& group) {
-    const int n = std::min(group.sampleCount,
-        std::min(static_cast<int>(group.freqA.size()),
-                 static_cast<int>(group.freqB.size())));
-    if (n <= 0) {
-        group.freqA_display.clear();
-        group.freqB_display.clear();
-        group.phaseA_display.clear();
-        group.phaseB_display.clear();
-        return;
-    }
-    group.freqA_display.assign(group.freqA.begin(), group.freqA.begin() + n);
-    group.freqB_display.assign(group.freqB.begin(), group.freqB.begin() + n);
-    group.phaseA_display.resize(n);
-    group.phaseB_display.resize(n);
-    constexpr float phasePerKhz =
-        static_cast<float>(2.0 * M_PI * M_PI * 1000.0 / FPGA_ADC_FREQ_HZ);
-    float phaseA = 0.0f, phaseB = 0.0f;
-    for (int i = 0; i < n; ++i) {
-        phaseA += group.freqA[i] * phasePerKhz;
-        phaseB += group.freqB[i] * phasePerKhz;
-        group.phaseA_display[i] = phaseA;
-        group.phaseB_display[i] = phaseB;
-    }
-}
-
-// ─
+//
 // flushAssemblyBuf
-// 将 assemblyBuf 当前内容 export → compute → 三路分发
+// 将 assemblyBuf 当前内容 export → compute → 分发
 // 供正常完成（isComplete）和触发切换强制 flush 两种路径共用
-// ─
+//
 void DataProcessor::flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf) {
     TriggerGroupPtr group;
     try {
@@ -457,6 +425,7 @@ void DataProcessor::flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf) {
         //  频率计算：int16 Q0.15 差分相位  float32 kHz，O(N)
         computeFrequency(*group);
 
+        // legacy 同次路径：raw save 与 frontend submit 严格隔离（Task 3.4）
         deliverAssembled(group, true, true);
     } catch (...) {
         m_stats.triggersDiscarded.fetch_add(1, std::memory_order_relaxed);
@@ -464,7 +433,7 @@ void DataProcessor::flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf) {
 }
 
 DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
-        const TriggerGroupPtr& group, bool save, bool displayAndRing) {
+        const TriggerGroupPtr& group, bool save, bool frontend) {
     DeliveryResult result;
     if (!group) { result.exception = true; return result; }
     try {
@@ -502,31 +471,29 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
             }
         }
 
-        if (!displayAndRing) return result;
+        if (!frontend) return result;
 
-        //  FramePublisher（可选扩展）
+        //  FramePublisher 仍在 frontend submit 之前消费 raw group
         if (m_framePublisher) {
             m_framePublisher->submit(group);
             result.publisherAccepted = true;
         }
 
-        //  全分辨率显示数据 + DisplayBuffer 更新（不做显示抽点）
-        prepareDisplayData(*group);
-        if (m_displayBuffer) {
-            m_displayBuffer->update(group);
-            m_displayBuffer->updateFullRes(group);  // 存储全分辨率频率供成像
-            result.displayAccepted = true;
-        }
-        // 环形实时馈送：每触发直接入队（独立工作线程消费），
-        // 避免 DisplayBuffer latest-only + 主线程轮询在高触发率下丢触发
-        if (m_ringFeedSink) {
+        //  Frontend Preprocessing Stage：热路径只做 enqueue。
+        //  deep copy、processFrontendSignal、全分辨率显示准备、DisplayBuffer 与
+        //  Ring 分发全部发生在 FrontendPreprocessor worker。frontend queue 的
+        //  拒绝不计入 UDP 丢包 / missingTriggerCount / saveQueueDiscards。
+        if (m_frontendSubmitSink) {
             try {
-                result.imagingDropReason = m_ringFeedSink(group);
-                result.imagingAccepted = result.imagingDropReason == ImagingSubmitResult::Accepted;
+                result.frontendSubmit = m_frontendSubmitSink(group);
+                result.frontendAccepted = result.frontendSubmit == FrontendSubmitResult::Accepted;
             } catch (...) {
-                result.imagingDropReason = ImagingSubmitResult::CallbackFailed;
+                result.frontendSubmit = FrontendSubmitResult::Stopping;
+                result.frontendAccepted = false;
                 result.exception = true;
             }
+        } else {
+            result.frontendSubmit = FrontendSubmitResult::Stopping;
         }
     } catch (const std::bad_alloc&) {
         // 显示/存储热路径仍可能因瞬时内存压力分配失败，丢弃本帧但保持线程存活。

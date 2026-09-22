@@ -15,6 +15,7 @@
 #include "DataTypes.h"
 #include "AcqConfig.h"
 #include "DataProcessor.h"
+#include "FrontendPreprocessor.h"
 #include "FileSaver.h"
 #include "MeasurementSession.h"
 #include "FramePublisher.h"
@@ -48,8 +49,9 @@ public:
     explicit NetworkController(QObject* parent = nullptr);
     ~NetworkController() override;
 
-    //  环形实时馈送回调（必须在 start() 之前设置，转发给每张卡 DataProcessor）
-    void setRingFeedSink(const DataProcessor::RingFeedSink& sink) { m_ringFeedSink = sink; }
+    //  环形实时馈送回调（必须在 start() 之前设置，转发给每张卡 FrontendPreprocessor）
+    //  该回调在 FrontendPreprocessor worker 内被调用，接收 frontend-owned clone。
+    void setRingFeedSink(const FrontendPreprocessor::RingSink& sink) { m_ringFeedSink = sink; }
 
     // Physical-round boundary notifications are rare control/timeout events.
     // The callback is installed before start and may be invoked by the source
@@ -180,6 +182,11 @@ public:
 
     // DisplayBuffer 访问（MainWindow pull 模式）
     DisplayBuffer* displayBuffer(int cardIdx) const;
+
+    // Frontend Preprocessing Stage per-card snapshot（主线程安全，最小查询接口）。
+    // 本任务不新增 UI 展示；仅供测试与后续性能任务使用。
+    std::optional<FrontendPreprocessor::Snapshot> frontendSnapshot(int cardIdx) const;
+    int frontendStageCount() const { return static_cast<int>(m_frontendStages.size()); }
 
     // 统计更新（MainWindow::onStatsRefresh() 调用或由内部 QTimer 驱动）
     void updateAllStats();
@@ -371,9 +378,20 @@ private:
     std::thread m_stopThread;          // 后台等待线程（stop() 在此线程里做 wait/terminate）
 
     std::vector<std::unique_ptr<DataProcessor>>    m_processors;
-    DataProcessor::RingFeedSink                   m_ringFeedSink;   // 环形实时馈送回调
+    // 每卡一个异步 Frontend Preprocessing Stage；生命周期由本类管理。
+    // DisplayBuffer / RingFeedSink 的 frontend 分发职责属于 stage，不属于
+    // DataProcessor。stage 必须先于任何 submit 启动，并在 DisplayBuffer /
+    // Ring sink 依赖销毁之前被 stop/clear。
+    std::vector<std::unique_ptr<FrontendPreprocessor>> m_frontendStages;
+    FrontendPreprocessor::RingSink                 m_ringFeedSink;   // 环形实时馈送回调
     std::vector<std::unique_ptr<DisplayBuffer>>    m_displayBuffers;
     std::vector<std::unique_ptr<FileSaver>>        m_savers;
+
+    // 上游提交已停止后调用：stop/clear 全部 frontend stage 并确定性 join。
+    // 必须在 m_displayBuffers / Ring sink 依赖销毁之前完成。
+    void stopFrontendStages();
+    // measurement stop/disarm：清空并失效 pending frontend work。
+    void invalidateFrontendStages();
 
     // ══ 自动保存会话代（物理边界协调器）══════════════════════════
     paimage::AutoSaveRoundCoordinator m_autoSaveCoordinator;

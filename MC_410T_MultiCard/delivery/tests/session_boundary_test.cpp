@@ -44,7 +44,7 @@ bool waitForComplete(DataProcessor &processor, uint64_t expected, int timeoutMs)
 bool testResetAndFirstTrigger()
 {
     const AcqConfig config = testConfig();
-    DataProcessor processor(0, nullptr, nullptr, nullptr, config);
+    DataProcessor processor(0, nullptr, nullptr, config);
     processor.start();
     processor.setMeasureEnabled(true); // create a pre-session partial assembly
     processor.enqueuePacket(packet(100, 0));
@@ -82,7 +82,7 @@ bool testResetAndFirstTrigger()
 bool testRepeatedBoundaries()
 {
     const AcqConfig config = testConfig();
-    DataProcessor processor(0, nullptr, nullptr, nullptr, config);
+    DataProcessor processor(0, nullptr, nullptr, config);
     processor.start();
     const int expectedPackets = config.packetsPerTrig();
     constexpr int cycles = 100;

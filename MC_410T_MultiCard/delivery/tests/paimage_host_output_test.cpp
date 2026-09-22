@@ -1,9 +1,11 @@
 #include "PaimageAcquisition/HostOutput.h"
+#include "FrontendPreprocessor.h"
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <QDir>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <vector>
@@ -13,10 +15,35 @@ void require(bool b,const char* message="host delivery contract"){
     if(!b)throw std::runtime_error(message);
 }
 template<class F> bool until(F f){auto end=std::chrono::steady_clock::now()+3s;while(!f()&&std::chrono::steady_clock::now()<end)std::this_thread::sleep_for(1ms);return f();}
+// Production shape for the per-card Frontend Preprocessing Stage: DisplayBuffer
+// and the Ring sink consume the frontend-owned clone on the stage worker.  The
+// HostOutput assertions below therefore observe the real delivery path.
+std::unique_ptr<FrontendPreprocessor> makeFrontend(int card,DisplayBuffer* display,
+        FrontendPreprocessor::RingSink ring){
+    auto stage=std::make_unique<FrontendPreprocessor>(card);
+    stage->setDisplayBuffer(display);
+    stage->setRingSink(std::move(ring));
+    stage->start();
+    return stage;
+}
+// Wire the HostOutput session / TimeoutBoundary facts into the stages exactly as
+// NetworkController does in production.
+void wireFrontends(HostOutput& output,std::vector<std::unique_ptr<FrontendPreprocessor>>& frontends){
+    output.setFrontendSessionSink([&frontends](std::uint64_t session){
+        for(auto& stage:frontends){if(session==0)stage->endSession();else stage->beginSession(session);}
+    });
+    output.setFrontendBarrierSink([&frontends](std::uint64_t session,std::uint64_t generation){
+        for(auto& stage:frontends)stage->advanceRoundBarrier(session,generation);
+    });
+}
+void stopFrontends(std::vector<std::unique_ptr<FrontendPreprocessor>>& frontends){
+    for(auto& stage:frontends)stage->stop();
+}
 int main(int argc,char** argv){QCoreApplication app(argc,argv);
     for(int samples:{5000,12500}){
         QTemporaryDir dir(QDir::currentPath()+"/host-output-XXXXXX");require(dir.isValid());
         std::vector<std::unique_ptr<DisplayBuffer>> displays;
+        std::vector<std::unique_ptr<FrontendPreprocessor>> frontends;
         std::vector<std::unique_ptr<FileSaver>> savers;
         std::vector<std::unique_ptr<DataProcessor>> processors;
         std::vector<DataProcessor*> pp;std::vector<FileSaver*> ss;
@@ -24,14 +51,17 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         AcqConfig cfg;cfg.acqTimeNs=samples*4;
         for(int card=0;card<4;++card){
             displays.push_back(std::make_unique<DisplayBuffer>());savers.push_back(std::make_unique<FileSaver>(card));
-            processors.push_back(std::make_unique<DataProcessor>(card,nullptr,displays.back().get(),nullptr,cfg,
+            frontends.push_back(makeFrontend(card,displays.back().get(),
                 [&](const TriggerGroupConstPtr& frame){
                     if(!frame||frame->triggerSeq!=9||frame->freqA.size()!=std::size_t(samples)||frame->freqB.size()!=frame->freqA.size())values=false;
                     for(std::size_t i=0;i<frame->freqA.size();++i)if(frame->freqA[i]!=frame->cardId+1||frame->freqB[i]!=-frame->cardId-1)values=false;
                     ++rings;return ImagingSubmitResult::Accepted;
-                }));pp.push_back(processors.back().get());ss.push_back(savers.back().get());
+                }));
+            processors.push_back(std::make_unique<DataProcessor>(card,nullptr,nullptr,cfg,
+                [stage=frontends.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);}));
+            pp.push_back(processors.back().get());ss.push_back(savers.back().get());
         }
-        HostOutput output(32,50,pp,ss,nullptr);output.beginSession(1);output.start();
+        HostOutput output(32,50,pp,ss,nullptr);wireFrontends(output,frontends);output.beginSession(1);output.start();
         auto save=output.startSaving(dir.path(),100,"golden");require(until([&]{return output.savingApplied(save);}));
         SourceCore source({4,samples,32,0},[&](Frame f){output.card(f);},
             [&](auto t,const auto& f,bool s){output.sync(t,f,s);});
@@ -42,8 +72,11 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             p[0]=seq;p[2]=9;for(int i=0;i<n;i+=8){int a=card+1,b=-a;std::memcpy(p.data()+4+i,&b,4);std::memcpy(p.data()+8+i,&a,4);}
             source.ingest(card,p.data(),p.size(),1000000+seq,card*100+seq+1,0x0100007f);
         }
-        require(until([&]{return rings==4 && savers[0]->savedCount()==1&&savers[1]->savedCount()==1&&savers[2]->savedCount()==1&&savers[3]->savedCount()==1;}));
+        require(until([&]{return rings==4 && savers[0]->savedCount()==1&&savers[1]->savedCount()==1&&savers[2]->savedCount()==1&&savers[3]->savedCount()==1
+            &&frontends[0]->snapshot().displayUpdates==1&&frontends[1]->snapshot().displayUpdates==1
+            &&frontends[2]->snapshot().displayUpdates==1&&frontends[3]->snapshot().displayUpdates==1;}));
         auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));output.stop();require(values);
+        stopFrontends(frontends);
         const std::uint16_t half[]={0x3c00,0x4000,0x4200,0x4400};
         for(int c=0;c<4;++c){require(!processors[c]->isRunning()&&!savers[c]->isRunning()&&savers[c]->queueDepth()==0);
             DisplayBuffer::Snapshot snap;require(displays[c]->tryRead(snap)&&snap.triggerSeq==9&&snap.sampleCount==samples);
@@ -58,7 +91,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         QTemporaryDir root(QDir::currentPath()+"/save-generation-XXXXXX");require(root.isValid());
         std::atomic<std::uint64_t> generation{1};std::atomic<bool> entered{false},release{false};
         DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=20000;
-        DataProcessor processor(0,nullptr,&display,nullptr,config,{});
+        DataProcessor processor(0,nullptr,nullptr,config,{});
         processor.setSessionGenReader([&]{return generation.load();});
         saver.setSessionDirResolver([&](std::uint64_t g){
             if(g==1){entered=true;auto deadline=std::chrono::steady_clock::now()+3s;
@@ -87,16 +120,20 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         std::mutex ringMutex;std::vector<std::uint16_t> ringTriggers;std::vector<std::int64_t> ringIndices;
         std::vector<bool> ringBoundaries;
         std::vector<PhysicalRoundEvent> roundEvents;
-        DataProcessor processor(0,nullptr,&display,nullptr,config,
+        std::vector<std::unique_ptr<FrontendPreprocessor>> frontends;
+        frontends.push_back(makeFrontend(0,&display,
             [&](const TriggerGroupConstPtr& frame){
                 std::lock_guard<std::mutex> lock(ringMutex);
                 ringTriggers.push_back(frame->triggerSeq);
                 ringIndices.push_back(frame->logicalTriggerIndex);
                 ringBoundaries.push_back(frame->roundComplete);
                 return ImagingSubmitResult::Accepted;
-            });
+            }));
+        DataProcessor processor(0,nullptr,nullptr,config,
+            [stage=frontends.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
         HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,3,
             [&](const PhysicalRoundEvent& event){roundEvents.push_back(event);});
+        wireFrontends(output,frontends);
         output.beginSession(77);output.start();
         const auto save=output.startSaving(root.path(),100,"normalized");
         require(until([&]{return output.savingApplied(save);}));
@@ -117,7 +154,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         require(until([&]{std::lock_guard<std::mutex> lock(ringMutex);
             return saver.savedCount()==3&&ringTriggers.size()==3;}));
         const auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));
-        output.stop();
+        output.stop();stopFrontends(frontends);
         {
             std::lock_guard<std::mutex> lock(ringMutex);
             require((ringTriggers==std::vector<std::uint16_t>{101,102,103})&&
@@ -156,7 +193,8 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         std::mutex ringMutex;std::vector<std::uint16_t> ringTriggers;std::vector<std::int64_t> ringIndices;
         std::atomic<int> ringCount{0};
         std::vector<bool> ringBoundaries;std::vector<PhysicalRoundEvent> roundEvents;
-        DataProcessor processor(0,nullptr,&display,nullptr,config,
+        std::vector<std::unique_ptr<FrontendPreprocessor>> frontends;
+        frontends.push_back(makeFrontend(0,&display,
             [&](const TriggerGroupConstPtr& frame){
                 std::lock_guard<std::mutex> lock(ringMutex);
                 ringTriggers.push_back(frame->triggerSeq);
@@ -164,9 +202,12 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
                 ringBoundaries.push_back(frame->roundComplete);
                 ++ringCount;
                 return ImagingSubmitResult::Accepted;
-            });
+            }));
+        DataProcessor processor(0,nullptr,nullptr,config,
+            [stage=frontends.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
         HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,3,
             [&](const PhysicalRoundEvent& event){roundEvents.push_back(event);},1.0e-6);
+        wireFrontends(output,frontends);
         output.beginSession(79);output.start();
         const auto save=output.startSaving(root.path(),100,"timeout");
         require(until([&]{return output.savingApplied(save);}),
@@ -186,11 +227,17 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             output.sync(trigger,{frame},false);
         };
         deliver(100,1000);deliver(101,1500);deliver(102,1800);
+        // The truncated round's frames reach Ring before the idle gap is
+        // observed: that is the delivery contract this test documents.  A frame
+        // still queued when the TimeoutBoundary fires is stale-dropped by the
+        // frontend barrier instead (see frontend_preprocessor_test T9).
+        require(until([&]{return ringCount.load()==2;}),
+                "timeout T1 partial round dispatched before the boundary");
         deliver(200,20000);deliver(201,20500);deliver(202,20800);deliver(203,20900);
         require(until([&]{return saver.savedCount()==5&&ringCount.load()==5;}),
                 "timeout T1/T7 save and Ring delivery");
         const auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));
-        output.stop();
+        output.stop();stopFrontends(frontends);
         {
             std::lock_guard<std::mutex> lock(ringMutex);
             require((ringTriggers==std::vector<std::uint16_t>{101,102,201,202,203})&&
@@ -234,14 +281,18 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=400*4;
         std::atomic<int> ringCount{0};std::atomic<int> timedOutRings{0};
         std::vector<PhysicalRoundEvent> roundEvents;
-        DataProcessor processor(0,nullptr,&display,nullptr,config,
+        std::vector<std::unique_ptr<FrontendPreprocessor>> frontends;
+        frontends.push_back(makeFrontend(0,&display,
             [&](const TriggerGroupConstPtr& frame){
                 if (frame->sourceTimedOut) ++timedOutRings;
                 ++ringCount;
                 return ImagingSubmitResult::Accepted;
-            });
+            }));
+        DataProcessor processor(0,nullptr,nullptr,config,
+            [stage=frontends.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
         HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,4,
             [&](const PhysicalRoundEvent& event){roundEvents.push_back(event);},5.0);
+        wireFrontends(output,frontends);
         output.beginSession(80);output.start();
         std::atomic<bool> sawAssemblyTimeout{false};
         SourceCore source({1,400,32,0},[&](Frame frame){output.card(frame);},
@@ -283,7 +334,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
                     timedOutRings.load()==0 && roundEvents.size()==1 &&
                     roundEvents.front().kind==PhysicalRoundEvent::Kind::ControlFiltered,
                 "timeout T3 assembly timeout isolation");
-        output.stop();
+        output.stop();stopFrontends(frontends);
     }
     // C1-C3/C8/C13: real card FileSaver and sync/display/Ring paths; the
     // configured cap never limits raw bytes and is shared across both cards.
@@ -292,19 +343,28 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         AcqConfig config; config.acqTimeNs=64; 
         DisplayBuffer d0,d1; FileSaver s0(0),s1(1);
         std::mutex mutex; std::vector<std::int64_t> indices;
-        std::vector<std::uint64_t> generations; int finals=0,counts=0,timeouts=0;
+        std::vector<std::uint64_t> generations; std::vector<int> cards;
+        int finals=0,counts=0,timeouts=0;
         auto ring=[&](const TriggerGroupConstPtr& group) {
             std::lock_guard<std::mutex> lock(mutex);
             indices.push_back(group->logicalTriggerIndex); generations.push_back(group->roundGeneration);
+            cards.push_back(group->cardId);
             if(group->roundComplete)++finals;
             return ImagingSubmitResult::Accepted;
         };
-        DataProcessor p0(0,nullptr,&d0,nullptr,config,ring),p1(1,nullptr,&d1,nullptr,config,ring);
+        std::vector<std::unique_ptr<FrontendPreprocessor>> frontends;
+        frontends.push_back(makeFrontend(0,&d0,ring));
+        frontends.push_back(makeFrontend(1,&d1,ring));
+        DataProcessor p0(0,nullptr,nullptr,config,
+            [stage=frontends[0].get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
+        DataProcessor p1(1,nullptr,nullptr,config,
+            [stage=frontends[1].get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
         HostOutput output(32,50,{&p0,&p1},{&s0,&s1},nullptr,nullptr,4,
             [&](const auto& e){
                 if(e.kind==PhysicalRoundEvent::Kind::CountBoundary)++counts;
                 if(e.kind==PhysicalRoundEvent::Kind::TimeoutBoundary)++timeouts;
             },1.0,startup,disable);
+        wireFrontends(output,frontends);
         output.beginSession(900); output.start();
         auto saved=output.startSaving(root.path(),100,"cap");
         require(until([&]{return output.savingApplied(saved);}));
@@ -324,7 +384,20 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             return s0.savedCount()==logical&&s1.savedCount()==logical&&indices.size()==8;}),
             "C2 raw >=N saved, only four logical indices per card reach Ring");
         {std::lock_guard<std::mutex> lock(mutex);
-            for(int i=0;i<8;++i)require(indices[i]==i/2 && generations[i]==0,"C3 multicard shared index");
+            // One FrontendPreprocessor worker per card preserves that card's
+            // trigger order; the two card workers interleave freely.  The shared
+            // logical index is therefore asserted per card, not as one global
+            // interleaved sequence (Task 3.2: bounded per-card FIFO).
+            std::vector<std::int64_t> perCard[2];
+            for(std::size_t i=0;i<indices.size();++i){
+                require(cards[i]>=0&&cards[i]<2,"C3 card attribution");
+                require(generations[i]==0,"C3 multicard shared index");
+                perCard[cards[i]].push_back(indices[i]);
+            }
+            for(int c=0;c<2;++c){
+                require(perCard[c].size()==4,"C3 four logical indices per card");
+                for(int i=0;i<4;++i)require(perCard[c][std::size_t(i)]==i,"C3 per-card shared index order");
+            }
             // roundComplete is the frozen one-shot boundary marker: for a
             // multi-card shared trigger exactly one group -- the frame first
             // classified as newDistinct -- carries it. The other card is
@@ -346,6 +419,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
                     "C7/C8 old late sync suppressed; new index zero, no synthetic final");
         }
         auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));output.stop();
+        stopFrontends(frontends);
         for(int card=1;card<=2;++card) {
             QFile file(root.filePath(QString("Card%1_ChA_cap_000.dat").arg(card)));
             require(file.open(QIODevice::ReadOnly)&&file.size()==logical*16*2,"C2 actual raw bytes beyond cap");
@@ -356,7 +430,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     // without requiring callers to reach into PhysicalRoundNormalizer.
     {
         DisplayBuffer display;FileSaver saver(0);AcqConfig config;config.acqTimeNs=64;
-        DataProcessor processor(0,nullptr,&display,nullptr,config,{});
+        DataProcessor processor(0,nullptr,nullptr,config,{});
         HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,4);
         output.setStartupFilterTriggerCount(7);
         output.setDisableCountBoundary(true);
@@ -368,27 +442,33 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
                     snapshot.lastCompletedPhysicalDistinctCount == 0,
                 "HostOutput Session A policy seam");
     }
-    // Display preparation must preserve every acquired sample.
+    // Full-resolution display preparation now lives in the Frontend Preprocessing
+    // Stage and must preserve every acquired sample.
     {
         DisplayBuffer display;
-        AcqConfig config;
-        DataProcessor processor(0, nullptr, &display, nullptr, config);
+        std::atomic<int> rings{0};
+        auto frontend = makeFrontend(0, &display,
+            [&](const TriggerGroupConstPtr&) { ++rings; return ImagingSubmitResult::Accepted; });
         auto group = std::make_shared<TriggerGroup>();
         group->sampleCount = 2048;
+        group->measurementSession = 1;
         group->freqA.resize(2048);
         group->freqB.resize(2048);
         for (int i = 0; i < 2048; ++i) {
             group->freqA[i] = static_cast<float>(i);
             group->freqB[i] = static_cast<float>(-i);
         }
-        const auto result = processor.deliverAssembled(group, false, true);
-        require(result.displayAccepted);
+        frontend->beginSession(1);
+        require(frontend->submit(group) == FrontendSubmitResult::Accepted,
+                "frontend submit accepted");
+        require(until([&] { return rings.load() == 1; }), "frontend display and Ring dispatch");
         DisplayBuffer::Snapshot snap;
         require(display.tryRead(snap));
         require(snap.sampleCount == 2048);
         require(snap.freqA.size() == 2048 && snap.freqB.size() == 2048);
         require(snap.phaseA.size() == 2048 && snap.phaseB.size() == 2048);
         require(snap.freqA.front() == 0.0 && snap.freqA.back() == 2047.0);
+        frontend->stop();
     }
     std::cout<<"PASS production source/output/host boundary: four cards, 28/70, exact float16 files, display and Ring; normalized 1+N save/Ring identity; queued saving generation retains original directory; physical idle timeout shared by save/Ring; SourceCore assembly timeout isolated\n";
 }
