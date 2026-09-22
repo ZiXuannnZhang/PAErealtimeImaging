@@ -1,0 +1,100 @@
+前端高/低通零相位滤波落地与遗留口径清理 — Git 追溯回执
+========================================================
+
+repository        = ZiXuannnZhang/PAErealtimeImaging
+remote            = https://github.com/ZiXuannnZhang/PAErealtimeImaging.git
+branch            = codex/frontend-filter-stage-20260923
+
+TASK_EXACT_START   = 25804b4c2ab0de5c9bda6d91e8954970c7235bec
+START_MATCH_AT_ENTRY = YES
+  (entry check per task section 2:
+     `git rev-parse HEAD`                       = 25804b4c... YES
+     `git status --porcelain --untracked-files=no`            empty YES
+   The branch was then created at that exact SHA with
+     `git switch -c codex/frontend-filter-stage-20260923 25804b4c2ab0de5c9bda6d91e8954970c7235bec`)
+
+IMPLEMENTATION_SOURCE_SHA = 093f8cc8c3e1d8a5b75e8574d85520ec2b90e54d
+REPORT_HEAD               = <this receipt commit; see RECEIPT_NOTE below>
+
+ANCESTRY PROOF (no main / other branch merged in):
+  git merge-base 25804b4c2ab0de5c9bda6d91e8954970c7235bec HEAD
+    = 25804b4c2ab0de5c9bda6d91e8954970c7235bec
+  commits 25804b4c..HEAD = 1
+  => IMPLEMENTATION_SOURCE_SHA is a strict descendant of the exact starting SHA
+     and merge-base equals the start, i.e. no merge / rebase / cherry-pick of
+     main or any other branch entered this task.  The starting SHA is the tip of
+     `codex/frontend-preprocessor-stage-20260922`, not origin/main, exactly as
+     task section 2 specifies.
+
+FORCE / REWRITE OPERATIONS: NONE
+  No force push, reset, rebase or amend was performed at any point.
+
+COMMITS ON THIS TASK BRANCH SINCE THE EXACT START:
+  093f8cc feat: land per-A-line zero-phase high/low-pass frontend filtering
+
+CHANGED PRODUCTION / TEST / BUILD-INPUT FILES
+(start..IMPLEMENTATION_SOURCE_SHA, 18 files, +1556 / -63):
+  MC_410T_MultiCard/delivery/CMakeLists.txt                                    |   2 +
+  MC_410T_MultiCard/delivery/include/Constants.h                               |   7 +-
+  MC_410T_MultiCard/delivery/include/FrontendFilter.h                          | 151 +++   (new)
+  MC_410T_MultiCard/delivery/include/FrontendPreprocessor.h                    |  53 +-
+  MC_410T_MultiCard/delivery/include/MainWindow.h                              |   1 -
+  MC_410T_MultiCard/delivery/include/NetworkController.h                       |  11 +
+  MC_410T_MultiCard/delivery/include/RingConfigDialog.h                        |  25 +
+  MC_410T_MultiCard/delivery/src/FrontendFilter.cpp                            | 287 +++   (new)
+  MC_410T_MultiCard/delivery/src/FrontendPreprocessor.cpp                      |  85 +-
+  MC_410T_MultiCard/delivery/src/MainWindow.cpp                                |  55 +-
+  MC_410T_MultiCard/delivery/src/NetworkController.cpp                         |  13 +
+  MC_410T_MultiCard/delivery/src/PaimageAcquisition/NetworkControllerPaimage.cpp |   3 +
+  MC_410T_MultiCard/delivery/src/RingConfigDialog.cpp                          | 139 ++
+  MC_410T_MultiCard/delivery/tests/CMakeLists.txt                              |  12 +-
+  MC_410T_MultiCard/delivery/tests/data_processor_imaging_isolation_test.cpp   |  31 +-
+  MC_410T_MultiCard/delivery/tests/frontend_preprocessor_test.cpp              | 725 +++-
+  MC_410T_MultiCard/delivery/tests/paimage_host_output_test.cpp                |  10 +
+  MC_410T_MultiCard/delivery/tests/paimage_network_test.cpp                    |   9 +
+
+PROHIBITED-SOURCE CHECK (task section 6), verified on the working tree:
+  ring_recon_cuda / RingReconCudaConfig / CUDA ABI / DLL interfaces  UNCHANGED
+  ImagingSvc, ImagingParams, linear-imaging filterType code          UNCHANGED
+  FileSaver, FramePublisher, FrameConverter, HostOutput              UNCHANGED
+  DataProcessor, ImagingBypass, RingBlockAssembler                   UNCHANGED
+  PhysicalRoundNormalizer, RoundIdentity, stale barrier,
+    CountBoundary / TimeoutBoundary semantics                        UNCHANGED
+  decodeRaw / computeFrequency                                       UNCHANGED
+  phase*_display derivation in prepareDisplayData                    UNCHANGED
+  filter parameters in RingReconCudaConfig / ImagingSvc / ring JSON   ABSENT
+  second filter insertion point outside processFrontendSignal         ABSENT
+  display downsampling / decimation                                  NOT reintroduced
+  third-party numeric library or new external dependency             NOT introduced
+  MATLAB reference parameter / threshold / sample-skip rule          NOT introduced
+
+UNTRACKED LOCAL ARTIFACTS (intentionally NOT committed):
+  TASKS/   the task document, already published on codex/task-docs
+  build/   git-ignored build trees and runtime deployment
+
+BUILD IDENTITY RECORDED FOR IMPLEMENTATION_SOURCE_SHA:
+  PAIMAGE_GIT_SHA=093f8cc8c3e1d8a5b75e8574d85520ec2b90e54d
+  PAIMAGE_TRACKED_DIRTY=false
+
+TRACKED TREE CLEAN AT BUILD AND TEST TIME:
+  git status --porcelain --untracked-files=no = empty  (before this receipt commit)
+
+REPORT-ONLY DIFF CONTRACT:
+  REPORT_HEAD diff against IMPLEMENTATION_SOURCE_SHA is restricted to
+  CODEX_REPORTS/frontend-filter-stage-20260923/ (text only: validation-receipt.md,
+  build-summary.txt, ctest-targeted.txt, ctest-full.txt, git-receipt.txt).
+  No build tree, executable, DLL, archive or other binary is committed.
+
+PUSH VERIFICATION (task section 10): recorded in the final task report
+  git rev-parse HEAD
+  git rev-parse origin/codex/frontend-filter-stage-20260923
+  git ls-remote origin refs/heads/codex/frontend-filter-stage-20260923
+  All three must be equal; no force push is used.
+
+RECEIPT_NOTE:
+  This file is committed together with validation-receipt.md, build-summary.txt,
+  ctest-targeted.txt and ctest-full.txt in a single evidence-only commit.
+  REPORT_HEAD is that commit's SHA and is reported in the final task report.
+  Because the SHA cannot be embedded in its own commit, the equality
+  `REPORT_HEAD == <commit containing this file>` is verified after the commit by
+  `git rev-parse HEAD` and `git diff --name-only IMPLEMENTATION_SOURCE_SHA..HEAD`.

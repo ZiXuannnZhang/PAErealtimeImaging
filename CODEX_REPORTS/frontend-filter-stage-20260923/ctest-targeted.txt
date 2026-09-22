@@ -1,0 +1,113 @@
+前端高/低通零相位滤波落地 — targeted 回归结果
+================================================
+
+BUILD_SOURCE_SHA=093f8cc8c3e1d8a5b75e8574d85520ec2b90e54d
+BRANCH=codex/frontend-filter-stage-20260923
+TEST_TREE=D:\Claudecode\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\tests_frontend_filter_stage_20260923
+CTEST=D:\Qt\Qt6.8.0\Tools\CMake_64\bin\ctest.exe (3.30.5)
+
+TEST_TREE_SOURCE_NOTE:
+The test tree is a separate CMake project over MC_410T_MultiCard/delivery/tests.
+It was rebuilt immediately before this run and ninja reported "no work to do",
+i.e. the binaries under test were compiled from exactly the source tree of
+IMPLEMENTATION_SOURCE_SHA (tracked-clean at the time).
+
+TEST_TREE_RUNTIME_NOTE:
+The test output tree was deployed with Qt 6.8.0 Qt6 DLLs (Core/Gui/Widgets/
+Test/Concurrent), MinGW runtime DLLs (libgcc_s_seh-1 / libstdc++-6 /
+libwinpthread-1) and the qoffscreen/qwindows platform plugins before ctest was
+invoked.  Without them the executables fail at the loader (0xc0000135) and no
+test logic runs.  No tracked input was modified for this deployment.
+
+COMMAND:
+ctest --output-on-failure -j 4 -R "^(frontend_preprocessor_test|data_processor_imaging_isolation_test|data_processor_batch_test|imaging_bypass_test|ring_block_assembler_test|ring_round_identity_test|paimage_host_output_test|session_boundary_test|session_boundary_receiver_test|filesaver_round_boundary_test|count_boundary_save_binding_test|timeout_presentation_test)$"
+
+RESULT: 12/12 PASS, 0 FAIL, 0 SKIP, 0 NOT_RUN, exit 0, 12.23 seconds
+
+REQUIRED TARGETED RESULTS (each result):
+  frontend_preprocessor_test              PASS  (12 architecture contracts + 13 filter contracts)
+  data_processor_imaging_isolation_test   PASS
+  data_processor_batch_test               PASS
+  imaging_bypass_test                     PASS
+  ring_block_assembler_test               PASS
+  ring_round_identity_test                PASS
+  paimage_host_output_test                PASS
+  session_boundary_test                   PASS
+  session_boundary_receiver_test          PASS
+  filesaver_round_boundary_test           PASS
+  count_boundary_save_binding_test        PASS
+  timeout_presentation_test               PASS
+
+DIAGNOSTIC HISTORY (one necessary diagnosis per failure class, no rerun loops):
+  pass 1 of this targeted set: 10/12 PASS, 2 FAIL
+    - data_processor_imaging_isolation_test: a new assertion of mine counted
+      4001 raw-save snapshots; only 4000 come through the capturing sink (the
+      later "throwing" DataProcessor uses a separate counting-only sink).  Fixed
+      by asserting 4000 and checking every captured payload.
+    - paimage_host_output_test: "host delivery contract".  Root cause: the
+      frontend filter is now active by default and rewrites the per-card constant
+      A/B amplitude this test uses as a payload-routing fingerprint.
+  pass 2 (after the two updates above): 12/12 PASS -- this run.
+  A third test with the same root cause, paimage_network_test ("Ring raw values"),
+  was caught by the full run and fixed the same way before this receipt; it is
+  outside the targeted set above.  No unrelated module was touched in any fix.
+
+RAW CTEST OUTPUT FOLLOWS
+
+Test project D:/Claudecode/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/tests_frontend_filter_stage_20260923
+      Start 17: session_boundary_receiver_test
+      Start 16: session_boundary_test
+      Start 26: paimage_host_output_test
+      Start 27: filesaver_round_boundary_test
+ 1/12 Test #27: filesaver_round_boundary_test ...........   Passed    0.47 sec
+      Start 31: count_boundary_save_binding_test
+ 2/12 Test #26: paimage_host_output_test ................   Passed    0.70 sec
+      Start  4: data_processor_imaging_isolation_test
+ 3/12 Test  #4: data_processor_imaging_isolation_test ...   Passed    0.08 sec
+      Start  5: frontend_preprocessor_test
+ 4/12 Test  #5: frontend_preprocessor_test ..............   Passed    0.06 sec
+      Start  2: ring_block_assembler_test
+ 5/12 Test #31: count_boundary_save_binding_test ........   Passed    0.38 sec
+      Start  3: imaging_bypass_test
+ 6/12 Test  #3: imaging_bypass_test .....................   Passed    0.05 sec
+      Start 29: ring_round_identity_test
+ 7/12 Test #29: ring_round_identity_test ................   Passed    0.05 sec
+      Start  1: timeout_presentation_test
+ 8/12 Test  #2: ring_block_assembler_test ...............   Passed    0.15 sec
+ 9/12 Test  #1: timeout_presentation_test ...............   Passed    0.04 sec
+10/12 Test #16: session_boundary_test ...................   Passed    1.68 sec
+11/12 Test #17: session_boundary_receiver_test ..........   Passed   12.16 sec
+      Start 18: data_processor_batch_test
+12/12 Test #18: data_processor_batch_test ...............   Passed    0.06 sec
+
+100% tests passed, 0 tests failed out of 12
+
+Total Test time (real) =  12.23 sec
+
+=== frontend_preprocessor_test contract output (run standalone) ===
+PASS  T1 identity deep-copy: distinct pointer, full metadata/freqA/freqB, raw untouched
+PASS  T2 full-resolution: 2048-point input fully preserved by display and frontend output
+PASS  T3 one result / two consumers: single clone feeds DisplayBuffer and RingFeedSink
+PASS  T4 FIFO ordering: 64 triggers dispatched in submit order
+PASS  T5 non-blocking submit: submit/deliverAssembled return while the worker is parked
+PASS  T6 bounded overflow: capacity-2 FIFO rejects deterministically as FrontendSubmitResult::QueueFull
+PASS  T7 save isolation: 12/12 raw saves consumed while the frontend queue rejected 10 frames
+PASS  T8 session stale: old queued/in-flight frames dropped across beginSession
+PASS  T9 timeout stale: barrier drop of queued/in-flight old-round frames
+PASS  T10 CountBoundary final: final logical trigger survives the barrier exactly once
+PASS  T11 stop lifecycle: clear + join with no post-stop dispatch
+PASS  T12 exception containment: processing/downstream faults contained, acquisition and save unaffected
+PASS  F1 both paths disabled: output equals input point by point
+PASS  F2 highpass only / lowpass only / both: all three paths execute, lengths preserved
+PASS  F3 zero-phase: filtfilt asymmetry 2.334e-07 vs forward-only 0.011551
+PASS  F4 per-A-line independence: no state carry-over, joined buffer matches isolated runs, merged-call deviation 0.654035
+PASS  F5 edge extension: L = 3 x order, odd reflection verified point by point
+PASS  F6 short-sequence guard: n < 2 and n <= L are deterministic, finite, length preserved
+PASS  F7 save isolation: raw pointwise unchanged, filter only rewrote the clone
+PASS  F8 shared clone dispatch: one filtered clone feeds DisplayBuffer and RingFeedSink
+PASS  F9 effective moment: in-flight frame keeps its coefficients, next frame switches
+PASS  F10 design counters: one design per configuration change, none per frame
+PASS  F11 concurrent config update: 3 x 150 frames with a racing updater, no torn state
+PASS  F12 parameter validation: 3 rejection classes leave the config untouched
+PASS  F13 exception containment: filter fault stayed on the worker and later frames kept flowing
+PASS  frontend_preprocessor_test: 12/12 architecture contracts + 13/13 filter contracts

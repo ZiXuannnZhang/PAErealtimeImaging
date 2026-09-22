@@ -1,0 +1,126 @@
+前端高/低通零相位滤波落地与遗留口径清理 — Windows 构建摘要
+=============================================================
+
+TASK=前端高低通零相位滤波落地与遗留口径清理_20260923-010500
+TASK_DOC=origin/codex/task-docs:TASKS/前端高低通零相位滤波落地与遗留口径清理_20260923-010500.md
+TASK_DOC_LOCAL_MATCH=YES (byte-identical to the untracked local copy)
+
+BUILD_TARGET_BRANCH=codex/frontend-filter-stage-20260923
+STARTING_SHA=25804b4c2ab0de5c9bda6d91e8954970c7235bec
+IMPLEMENTATION_SOURCE_SHA=093f8cc8c3e1d8a5b75e8574d85520ec2b90e54d
+TRACKED_TREE_CLEAN_BEFORE_BUILD=true
+WORKDIR=D:\Claudecode\PAERealtimeImaging\MC_410T_MultiCard\delivery
+BUILD_COMMAND=cmd /c ".\build_mingw_debug.cmd"
+BUILD_EXIT_CODE=0
+BUILD_ERRORS=0
+BUILD_UTC=2026-09-22T18:38:00Z
+BUILD_LOCAL=2026-09-23 02:38:00 (UTC+8)
+MACHINE=Windows 11 Home China 10.0.26200
+
+CONFIGURE_PRESET=mingw-debug
+BUILD_PRESET=mingw-debug-build
+BUILD_TYPE=Debug
+USE_ZEROMQ=ON
+CXX_STANDARD=C++17
+GENERATOR=Ninja
+
+TOOLCHAIN (preflight: all four canonical paths present before configure):
+CMAKE=3.30.5 (D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe)
+COMPILER=GNU 13.1.0 (D:\Qt\Qt6.8.0\Tools\mingw1310_64\bin\g++.exe)
+NINJA=1.12.1 (D:\Qt\Qt6.8.0\Tools\Ninja\ninja.exe)
+QT=Qt 6.8.0 (D:\Qt\Qt6.8.0\6.8.0\mingw_64)
+
+BUILD_CACHE_NOTE:
+No cache clearing was required this time.  The pre-existing build/mingw_debug
+cache belonged to the same workspace root (D:\Claudecode\PAERealtimeImaging) and
+was re-configured cleanly by build_mingw_debug.cmd on the final commit
+(Configuring done / Generating done).  Per BUILD_STANDARD section 2.3 the final
+delivery build re-configured on IMPLEMENTATION_SOURCE_SHA rather than reusing a
+pre-commit product.  build/ring_recon_cuda was kept untouched.
+
+CONFIGURE/BUILD LOG SUMMARY:
+  -- Configuring done (0.7s)
+  -- Generating done (0.6s)
+  -- Build files have been written to: .../build/mingw_debug
+  windeployqt executed (Qt runtime + plugins deployed next to the exe)
+  3 warnings, all non-fatal windeployqt notices (missing Qt translations
+  catalogs.json, missing dxcompiler/dxil, runtime DLLs resolved from PATH).
+  0 compiler errors.
+
+BUILD_IDENTITY (build/mingw_debug/generated/PaimageAcquisition/BuildIdentity.h):
+PAIMAGE_GIT_SHA=093f8cc8c3e1d8a5b75e8574d85520ec2b90e54d
+PAIMAGE_TRACKED_DIRTY=false
+PAIMAGE_BUILD_TYPE=Debug
+PAIMAGE_COMPILER=GNU 13.1.0
+PAIMAGE_PRODUCT_BASELINE=e66a29bfbbaa6534911a23d48e8624fb8d552bec
+PAIMAGE_SOURCE_SHA256=2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec
+BuildIdentity PAIMAGE_GIT_SHA equals IMPLEMENTATION_SOURCE_SHA: YES
+BuildIdentity PAIMAGE_TRACKED_DIRTY = false: YES
+
+NOTE ON BuildIdentity FIELDS:
+Only PAIMAGE_GIT_SHA and PAIMAGE_TRACKED_DIRTY are derived at configure time
+(from `git rev-parse HEAD` / `git status --porcelain --untracked-files=no`, see
+CMakeLists.txt).  PAIMAGE_PRODUCT_BASELINE and PAIMAGE_SOURCE_SHA256 are fixed
+literals in include/PaimageAcquisition/BuildIdentity.h.in and therefore do not
+change with the commit; they are recorded above for completeness only.
+
+CORE BINARIES (build/mingw_debug/bin):
+PAimageReceiverDiagnostics.exe PRESENT 66546188 bytes
+ImagingSvc.exe                 PRESENT  3336915 bytes
+ring_svc_selftest.exe          PRESENT  1941308 bytes
+ring_udp_replay.exe            PRESENT   332955 bytes
+All four BUILD_STANDARD section 5 required executables present: YES
+
+RUNTIME DEPENDENCY PROVENANCE:
+Ring CUDA source = local build (MC_410T_MultiCard/delivery/build/ring_recon_cuda)
+  _migration_pack/prebuilt_cuda fallback was NOT used
+ZeroMQ source    = repository third_party/zeromq (v4.3.5)
+Linear imaging   = repository libs/imaging (tracked pa_recon_core.dll)
+CUDA runtime     = cudart64_12.dll alongside ring_recon_cuda (CUDA 12)
+This task changed no CUDA core, no imaging core and no dependency layout; the
+five dependency hashes below are unchanged from the previous delivery receipt.
+
+DEPENDENCY SHA256:
+c1a37e73147c1b8250f96ccdc1fcfc08ca28cecbf1cb3c046d4ab426f2ea0893  libs/imaging/pa_recon_core.dll
+2480d8ab849d7e9a375275f6c0278b8764c14ac0c1a3bdacaf256ae4a93c5590  libs/imaging/cufft64_12.dll
+bf40472d5a46363a35dd1084a01a8c15f13ef203f3ed5b4bb5edf767eeec14b5  build/ring_recon_cuda/bin/ring_recon_cuda.dll
+c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344  build/ring_recon_cuda/bin/cudart64_12.dll
+37610023d91951bc4177db1f96b54b28911976ac70b221a852887709a02a9ad3  third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll
+
+QT RUNTIME DEPLOYMENT:
+windeployqt executed successfully by build_mingw_debug.cmd.  Qt6Core/Gui/Network/
+OpenGL/PrintSupport/Svg/Widgets DLLs plus platforms, imageformats, iconengines,
+styles, tls, networkinformation and generic plugins were deployed next to
+PAimageReceiverDiagnostics.exe.  A bare exe was NOT delivered.
+
+TEST BUILD (separate CMake project over delivery/tests):
+TEST_TREE=MC_410T_MultiCard/delivery/build/tests_frontend_filter_stage_20260923
+SOURCE_DIR=MC_410T_MultiCard/delivery/tests
+CONFIGURE=cmake -S tests -B build/tests_frontend_filter_stage_20260923 -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_PREFIX_PATH=D:/Qt/Qt6.8.0/6.8.0/mingw_64
+          -DCMAKE_C_COMPILER=D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gcc.exe
+          -DCMAKE_CXX_COMPILER=D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe
+          -DCMAKE_MAKE_PROGRAM=D:/Qt/Qt6.8.0/Tools/Ninja/ninja.exe
+          -DQt6_DIR=D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/cmake/Qt6
+BUILD=cmake --build build/tests_frontend_filter_stage_20260923 -j 8
+BUILD_EXIT_CODE=0
+NOTE: -DCMAKE_PREFIX_PATH is needed so find_package(Qt6 COMPONENTS Widgets)
+inside tests/CMakeLists.txt resolves; with only Qt6_DIR it reports
+"Failed to find required Qt component Widgets".
+TEST_TREE_REBUILD_BEFORE_FINAL_RUN=ninja: no work to do
+  (i.e. the tested binaries were built from exactly the final source tree)
+
+TESTS EXECUTED: see ctest-targeted.txt (12 targeted) and ctest-full.txt (44 total)
+TESTS RESULT  : targeted 12/12 PASS; full 44/44 PASS (0 FAIL / 0 SKIP / 0 NOT_RUN)
+
+KNOWN LIMITATIONS / NOT VERIFIED:
+- All results above are source/code correctness plus automated build and test
+  evidence only.  No real hardware validation and no hardware root-cause
+  attribution is claimed by this task.
+- Filter numerics were verified against the task's own design definition
+  (Butterworth magnitude, unit gain at DC/Nyquist, -3 dB at fc, SOS cascade,
+  filtfilt zero phase).  They were not compared against MATLAB reference
+  scripts; importing MATLAB parameters was explicitly prohibited by the task.
+- The concurrency contract is covered by a repeatable stress case plus an
+  immutable-Bank/atomic-swap design; it was not run under ThreadSanitizer.
