@@ -94,6 +94,18 @@ bool parseSoundSpeedModel(const QString &radiiText, const QString &speedsText,
 
 }  // namespace
 
+// 前端滤波持久化键：与 RingConfigDialog/Defaults group 内既有键同名风格（camelCase），
+// 与既有键走同一套读写路径（paimageSettingsPath()+IniFormat 的同一 group）。
+// 三处共用同一组字面量，避免 restoreDefaults / saveDefaults / 启动读取失步。
+namespace {
+const QString kKeyFeHpEnable   = QStringLiteral("feHpEnable");
+const QString kKeyFeHpCutoff   = QStringLiteral("feHpCutoffMhz");
+const QString kKeyFeHpOrder    = QStringLiteral("feHpOrder");
+const QString kKeyFeLpEnable   = QStringLiteral("feLpEnable");
+const QString kKeyFeLpCutoff   = QStringLiteral("feLpCutoffMhz");
+const QString kKeyFeLpOrder    = QStringLiteral("feLpOrder");
+}  // namespace
+
 RingConfigDialog::RingConfigDialog(ImagingController *controller, QWidget *parent)
     : QDialog(parent), m_controller(controller)
 {
@@ -317,6 +329,58 @@ void RingConfigDialog::buildUi()
     fSos->addRow("各层声速(m/s)", m_edtSosSpeeds);
     reconLayout->addWidget(grpSos);
 
+    // ══ 前端滤波（逐 A-line 零相位）══
+    // 只作用于两条前端显示路径（时域/频域信号显示、实时成像）消费的 frontend
+    // clone；保存与发布路径的数据不参与滤波。与「预处理」（重建侧）完全独立：
+    // 本组参数走 MainWindow -> NetworkController 下发到 Frontend Preprocessing
+    // 配置，不写入 RingReconCudaConfig / ImagingSvc / ring_recon。
+    auto *grpFeFilter = new QGroupBox("前端滤波（逐 A-line 零相位）");
+    auto *fFeFilter = new QFormLayout(grpFeFilter);
+    // QDoubleSpinBox 只能表达闭区间；用 3 位小数下 (0, 125) 的可实现开区间
+    // [0.001, 124.999] 表达「(0, 125) MHz，开区间」。frontend_filter::validate
+    // 仍是权威校验（必须 > 0 且 < 125），任何绕过控件的下发都会被拒绝。
+    auto makeCutoff = []() {
+        auto *spn = new QDoubleSpinBox;
+        spn->setRange(0.001, 124.999);
+        spn->setDecimals(3);
+        spn->setSuffix(" MHz");
+        return spn;
+    };
+    auto makeOrder = []() {
+        auto *spn = new QSpinBox;
+        spn->setRange(frontend_filter::kMinOrder, frontend_filter::kMaxOrder);
+        return spn;
+    };
+    m_chkFeHpEnable = new QCheckBox("启用高通");
+    m_chkFeHpEnable->setChecked(true);
+    m_spnFeHpCutoffMhz = makeCutoff();
+    m_spnFeHpCutoffMhz->setValue(0.4);
+    m_spnFeHpOrder = makeOrder();
+    m_spnFeHpOrder->setValue(2);
+    m_chkFeLpEnable = new QCheckBox("启用低通");
+    m_chkFeLpEnable->setChecked(true);
+    m_spnFeLpCutoffMhz = makeCutoff();
+    m_spnFeLpCutoffMhz->setValue(60.0);
+    m_spnFeLpOrder = makeOrder();
+    m_spnFeLpOrder->setValue(2);
+    m_spnFeHpCutoffMhz->setToolTip("高通截止频率（开区间 (0, 125) MHz）。");
+    m_spnFeHpOrder->setToolTip("高通 Butterworth 阶数（1 ~ 8）。");
+    m_spnFeLpCutoffMhz->setToolTip("低通截止频率（开区间 (0, 125) MHz）。");
+    m_spnFeLpOrder->setToolTip("低通 Butterworth 阶数（1 ~ 8）。");
+    fFeFilter->addRow("", m_chkFeHpEnable);
+    fFeFilter->addRow("高通截止(MHz)", m_spnFeHpCutoffMhz);
+    fFeFilter->addRow("高通阶数", m_spnFeHpOrder);
+    fFeFilter->addRow("", m_chkFeLpEnable);
+    fFeFilter->addRow("低通截止(MHz)", m_spnFeLpCutoffMhz);
+    fFeFilter->addRow("低通阶数", m_spnFeLpOrder);
+    // 开关未勾选时该路的截止与阶数控件置为 disabled，数值保留不清空。
+    connect(m_chkFeHpEnable, &QCheckBox::toggled, this,
+            [this](bool) { syncFrontendFilterControls(); });
+    connect(m_chkFeLpEnable, &QCheckBox::toggled, this,
+            [this](bool) { syncFrontendFilterControls(); });
+    syncFrontendFilterControls();
+    reconLayout->addWidget(grpFeFilter);
+
     auto *grpPre = new QGroupBox("预处理");
     auto *fPre = new QFormLayout(grpPre);
     m_spnMaskLen = new QSpinBox; m_spnMaskLen->setRange(0, 100000); m_spnMaskLen->setValue(300);
@@ -431,7 +495,18 @@ void RingConfigDialog::restoreDefaults()
     m_chkImpair->setChecked(val("impair", false).toBool());
     m_spnImValue1->setValue(val("imValue1", 2000).toDouble());
     m_spnImValue2->setValue(val("imValue2", 400).toDouble());
+    // 前端滤波：与上面的既有键同一 Defaults group、同一读写路径（同一 val()
+    // 取值）；无历史键时回退出厂默认 true/0.4/2 + true/60.0/2。停用路的数值
+    // 一并保留，不清空。
+    m_chkFeHpEnable->setChecked(val(kKeyFeHpEnable, true).toBool());
+    m_spnFeHpCutoffMhz->setValue(val(kKeyFeHpCutoff, 0.4).toDouble());
+    m_spnFeHpOrder->setValue(val(kKeyFeHpOrder, 2).toInt());
+    m_chkFeLpEnable->setChecked(val(kKeyFeLpEnable, true).toBool());
+    m_spnFeLpCutoffMhz->setValue(val(kKeyFeLpCutoff, 60.0).toDouble());
+    m_spnFeLpOrder->setValue(val(kKeyFeLpOrder, 2).toInt());
     s.endGroup();
+    // 开关与截止/阶数控件的 disabled 联动随取值一并恢复
+    syncFrontendFilterControls();
 }
 
 void RingConfigDialog::saveDefaults()
@@ -470,6 +545,14 @@ void RingConfigDialog::saveDefaults()
     s.setValue("impair", m_chkImpair->isChecked());
     s.setValue("imValue1", m_spnImValue1->value());
     s.setValue("imValue2", m_spnImValue2->value());
+    // 前端滤波 6 个键与其他默认参数同一次“设为默认”落盘（同一 Defaults group）
+    const frontend_filter::Config feFilter = frontendFilterConfig();
+    s.setValue(kKeyFeHpEnable, feFilter.hpEnable);
+    s.setValue(kKeyFeHpCutoff, feFilter.hpCutoffMhz);
+    s.setValue(kKeyFeHpOrder, feFilter.hpOrder);
+    s.setValue(kKeyFeLpEnable, feFilter.lpEnable);
+    s.setValue(kKeyFeLpCutoff, feFilter.lpCutoffMhz);
+    s.setValue(kKeyFeLpOrder, feFilter.lpOrder);
     s.endGroup();
     // 物理轮次启动策略与其他默认参数同一次“设为默认”落盘（同一 Defaults group，
     // 独立 key；helper 内部自行 sync）
@@ -597,11 +680,27 @@ bool RingConfigDialog::applyConfig()
         return false;
     }
 
+    // 前端滤波参数校验（任务 3.4）。任一不满足则拒绝本次下发：配置保持原值不变，
+    // 本次整体不下发（含重建配置），并在界面提示原因。
+    {
+        const frontend_filter::Config feFilter = frontendFilterConfig();
+        const frontend_filter::Validation feResult = frontend_filter::validate(feFilter);
+        if (feResult != frontend_filter::Validation::Ok) {
+            QMessageBox::warning(this, "参数错误",
+                                 QString::fromUtf8(
+                                     frontend_filter::validationMessage(feResult)));
+            return false;
+        }
+    }
+
     int sysDelayCh[8][2] = {{0}};
     sysDelayPerChannel(sysDelayCh);
     m_controller->configureRing(config(), sysDelayCh);
     // 应用成功后将物理轮次启动策略同步给当前 NetworkController（MainWindow 转发）
     emit roundPolicyChanged(startupFilterTriggerCount(), disableCountBoundary());
+    // 前端滤波参数经独立接线下发到 Frontend Preprocessing 配置（MainWindow 转发），
+    // 与重建配置的下发相互独立。
+    emit frontendFilterChanged(frontendFilterConfig());
     return true;
 }
 
@@ -613,6 +712,46 @@ quint64 RingConfigDialog::startupFilterTriggerCount() const
 bool RingConfigDialog::disableCountBoundary() const
 {
     return m_chkDisableCountBoundary->isChecked();
+}
+
+frontend_filter::Config RingConfigDialog::frontendFilterConfig() const
+{
+    frontend_filter::Config cfg;
+    cfg.hpEnable    = m_chkFeHpEnable->isChecked();
+    cfg.hpCutoffMhz = m_spnFeHpCutoffMhz->value();
+    cfg.hpOrder     = m_spnFeHpOrder->value();
+    cfg.lpEnable    = m_chkFeLpEnable->isChecked();
+    cfg.lpCutoffMhz = m_spnFeLpCutoffMhz->value();
+    cfg.lpOrder     = m_spnFeLpOrder->value();
+    return cfg;
+}
+
+void RingConfigDialog::syncFrontendFilterControls()
+{
+    const bool hp = m_chkFeHpEnable->isChecked();
+    m_spnFeHpCutoffMhz->setEnabled(hp);
+    m_spnFeHpOrder->setEnabled(hp);
+    const bool lp = m_chkFeLpEnable->isChecked();
+    m_spnFeLpCutoffMhz->setEnabled(lp);
+    m_spnFeLpOrder->setEnabled(lp);
+}
+
+frontend_filter::Config RingConfigDialog::loadFrontendFilterDefaults()
+{
+    frontend_filter::Config cfg;   // 出厂默认：true/0.4/2 + true/60.0/2
+    QSettings s(paimageSettingsPath(), QSettings::IniFormat);
+    s.beginGroup(QStringLiteral("RingConfigDialog/Defaults"));
+    auto val = [&s](const QString &k, const QVariant &dflt) {
+        return s.contains(k) ? s.value(k) : dflt;
+    };
+    cfg.hpEnable    = val(kKeyFeHpEnable, true).toBool();
+    cfg.hpCutoffMhz = val(kKeyFeHpCutoff, 0.4).toDouble();
+    cfg.hpOrder     = val(kKeyFeHpOrder, 2).toInt();
+    cfg.lpEnable    = val(kKeyFeLpEnable, true).toBool();
+    cfg.lpCutoffMhz = val(kKeyFeLpCutoff, 60.0).toDouble();
+    cfg.lpOrder     = val(kKeyFeLpOrder, 2).toInt();
+    s.endGroup();
+    return cfg;
 }
 
 void RingConfigDialog::showEvent(QShowEvent *event)

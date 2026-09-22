@@ -15,6 +15,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 #include "DataProcessor.h"
 #include "FrontendPreprocessor.h"
@@ -56,6 +57,11 @@ int main(int argc, char** argv) {
     // Frontend Preprocessing Stage.  The queue is sized so no frontend admission
     // is refused: the pressure under test is the downstream imaging queue.
     FrontendPreprocessor stage(0, 8192);
+    // Frontend 高/低通零相位滤波默认启用并只改写 frontend clone。本例显式按默认
+    // 滤波配置下发一次，使 raw 保存隔离的断言在滤波开启的前提下仍然成立：滤波
+    // 不得触碰 raw（保存/发布仍消费 raw）。数值契约见 frontend_preprocessor_test
+    // 的 F1..F13。
+    stage.setFilterConfig(frontend_filter::Config{});
     stage.setRingSink([&](const TriggerGroupConstPtr& frame) { return bypass.tryPush(frame); });
     stage.start();
     stage.beginSession(1);
@@ -63,7 +69,16 @@ int main(int argc, char** argv) {
     AcqConfig config;
     DataProcessor processor(0, nullptr, nullptr, config,
         [&stage](const TriggerGroupPtr& frame) { return stage.submit(frame); });
-    processor.setDirectSaveSink([&](const TriggerGroupPtr&) { ++saved; return true; });
+    std::mutex savedMutex;
+    std::vector<std::vector<float>> savedFreqA;
+    processor.setDirectSaveSink([&](const TriggerGroupPtr& frame) {
+        {
+            std::lock_guard<std::mutex> lock(savedMutex);
+            savedFreqA.push_back(frame->freqA);
+        }
+        ++saved;
+        return true;
+    });
 
     int frontendAccepted = 0, frontendRejected = 0;
     for (int i = 0; i < 4000; ++i) {
@@ -78,6 +93,10 @@ int main(int argc, char** argv) {
         auto r = processor.deliverAssembled(f, true, true);
         require(r.saveAccepted && r.save == DataProcessor::DeliveryResult::Consumed,
                 "save acceptance");
+        // 滤波只作用于 frontend clone：raw 的 freqA 在保存前必须保持逐点不变。
+        require(f->freqA == std::vector<float>(32, 1.0f) &&
+                    f->freqB == std::vector<float>(32, -1.0f),
+                "filter never rewrites the raw TriggerGroup");
         frontendAccepted += r.frontendAccepted ? 1 : 0;
         frontendRejected += r.frontendSubmit == FrontendSubmitResult::QueueFull ||
                             r.frontendSubmit == FrontendSubmitResult::QueueBusy;
@@ -116,6 +135,16 @@ int main(int argc, char** argv) {
             "4000-frame save/imaging isolation");
     require(frontendAccepted == 4000 && frontendRejected == 0,
             "frontend admission never leaked into save acceptance");
+    // 保存路径看到的 raw 快照也不含滤波改写（滤波只改写 frontend clone）。
+    // 4000 是本循环的保存数；随后那个 throwing DataProcessor 用的是另一只计数
+    // sink，不写入 savedFreqA。
+    {
+        std::lock_guard<std::mutex> lock(savedMutex);
+        require(savedFreqA.size() == 4000, "every loop raw save captured a snapshot");
+        for (const auto& payload : savedFreqA)
+            require(payload == std::vector<float>(32, 1.0f),
+                    "raw save payload is never filter-rewritten");
+    }
     std::cout << "PASS 4000-frame pressure: saveAccepted=4000 while the downstream imaging queue "
                  "saturated and its worker was delayed\n";
     return 0;

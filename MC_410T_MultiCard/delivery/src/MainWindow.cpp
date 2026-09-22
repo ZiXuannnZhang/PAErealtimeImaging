@@ -2285,6 +2285,13 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
         m_netController->setStartupFilterTriggerCount(roundPolicy.startupFilterTriggerCount);
         m_netController->setDisableCountBoundary(roundPolicy.disableCountBoundary);
     }
+    // 前端滤波（逐 A-line 零相位）：读取“设为默认”保存值。即使本次启动后用户
+    // 尚未打开 RingConfigDialog，保存的滤波参数也在 frontend stage 创建前经
+    // controller 成员生效（新建 stage 时写入其独立系数缓存）；无保存历史时回退
+    // 出厂 true/0.4/2 + true/60.0/2。本接线只覆盖 Frontend Preprocessing 配置，
+    // 与重建配置的下发相互独立。
+    m_netController->setFrontendFilterConfig(
+        RingConfigDialog::loadFrontendFilterDefaults());
     // Preserve the ring dialog's canonical timeout even if the ImagingSvc
     // is currently stopped. The PAimage normalizer is created with this
     // value when the listener starts.
@@ -3177,7 +3184,10 @@ void MainWindow::onDisplayRefresh()
         const QVector<double> phaseA = toQVec(snap.phaseA);
         const QVector<double> phaseB = toQVec(snap.phaseB);
 
-        // 唯一裁切节点：presentation（后续接入零相位滤波）→ crop → 时域/P-P/FFT。
+        // 滤波已在 FrontendPreprocessing 的唯一滤波插入点
+        // FrontendPreprocessor::processFrontendSignal() 完成（逐 A-line 独立的
+        // 高/低通零相位滤波，只作用于 frontend clone 的 freqA/freqB）。
+        // UI 侧只做视窗裁切与渲染：crop → 时域/P-P/FFT，不再接入任何滤波。
         const int nPts = qMin(qMin(freqA.size(), freqB.size()),
                               qMin(phaseA.size(), phaseB.size()));
         if (nPts <= 0) continue;
@@ -3726,9 +3736,15 @@ void MainWindow::loadSettings()
     // rebuildDynamicUI 内部也会调用 onDisplayTypeChanged，此时必须仍持有标志
     m_loadingSettings = false;
 
-    QString fmtDesc = (m_bitsPerChannel == 32)
-        ? QString("250MSa/s Q16.16（满速率 %1ns/点）").arg(m_sampleIntervalNs, 0, 'f', 1)
-        : QString("125MSa/s Q0.15（2抽1 %1ns/点）").arg(m_sampleIntervalNs, 0, 'f', 1);
+    // 数据格式文案：采样率与采样间隔都按链路唯一采样率来源 m_sampleIntervalNs
+    // 计算并显示实际值，不再写死 250/125MSa/s 或「2抽1」；位宽只区分 Q16.16 /
+    // Q0.15 标注。
+    const double fmtRateMsas = (m_sampleIntervalNs > 0.0)
+        ? 1000.0 / m_sampleIntervalNs : 0.0;   // MSa/s = 1e9/ns/1e6
+    QString fmtDesc = QString("%1MSa/s %2（%3ns/点）")
+        .arg(fmtRateMsas, 0, 'f', 1)
+        .arg(m_bitsPerChannel == 32 ? QStringLiteral("Q16.16") : QStringLiteral("Q0.15"))
+        .arg(m_sampleIntervalNs, 0, 'f', 1);
 
     // ══ 测试模式开关 ════════════════════════════════════════════
     m_useTestImagingData = settings.value("TestMode/Enabled", false).toBool();
@@ -4168,31 +4184,6 @@ void MainWindow::attachAxisEdit(QCustomPlot *plot, int card, int ch, bool isSpec
 }
 
 // =====================================================================
-// calculateFrequency（兼容备用）
-// =====================================================================
-QVector<double> MainWindow::calculateFrequency(const QVector<double> &phaseData)
-{
-    if (phaseData.size() < 2) return {};
-    const int size = phaseData.size();
-    QVector<double> frequency(size - 1);
-    const double twoPi = 2.0 * M_PI;
-    const double freqScale = DIFF_SAMPLE_RATE_HZ / twoPi;
-    double cumulative = 0.0, prevPhaseUnwrapped = phaseData[0];
-    for (int i = 1; i < size; ++i) {
-        double dp = phaseData[i] - phaseData[i - 1];
-        double dpMod = std::fmod(dp + M_PI, twoPi);
-        if (dpMod < 0) dpMod += twoPi;
-        double dpCorr = dpMod - M_PI;
-        if (dpCorr == -M_PI && dp > 0) dpCorr = M_PI;
-        cumulative += (dpCorr - dp);
-        double curr = phaseData[i] + cumulative;
-        frequency[i - 1] = (curr - prevPhaseUnwrapped) * freqScale;
-        prevPhaseUnwrapped = curr;
-    }
-    return frequency;
-}
-
-// =====================================================================
 // updateNetworkInfoLabels — 根据 m_nCards 更新网络控制面板标签
 // =====================================================================
 void MainWindow::updateNetworkInfoLabels()
@@ -4338,6 +4329,12 @@ void MainWindow::ensureRingConfigDialog()
         if (!m_netController) return;
         m_netController->setStartupFilterTriggerCount(startupFilterCount);
         m_netController->setDisableCountBoundary(disableCountBoundary);
+    });
+    // 前端滤波参数：与重建配置的下发相互独立，只进 Frontend Preprocessing 配置。
+    connect(m_ringConfigDialog, &RingConfigDialog::frontendFilterChanged,
+            this, [this](const frontend_filter::Config& config) {
+        if (!m_netController) return;
+        m_netController->setFrontendFilterConfig(config);
     });
 }
 

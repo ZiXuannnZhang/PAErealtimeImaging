@@ -24,11 +24,12 @@ constexpr int    MAX_PORT             = BASE_PORT + MAX_CARDS - 1;
 //  对象池大小
 constexpr int    PACKET_POOL_SIZE     = 65536;
 
-//  采样与时钟 
+//  采样与时钟
+//  全链路唯一采样率来源是采集侧采样间隔（MainWindow::m_sampleIntervalNs）与
+//  固定的 FPGA ADC 时钟。历史的 SAMPLE_FREQ_HZ / SAMPLE_INTERVAL_NS（125 MHz /
+//  8 ns「2抽1」口径）已确认全仓无引用，于 2026-09-23 删除。
 constexpr double FPGA_ADC_FREQ_HZ     = 250e6;
-constexpr double SAMPLE_FREQ_HZ       = 125e6;
 constexpr double FPGA_ADC_INTERVAL_NS = 4.0;
-constexpr double SAMPLE_INTERVAL_NS   = 8.0;
 
 //  差分相位/频率转换系数
 // freq_kHz = delta_phi_int16 / 32768 * (250e6 / 2pi) / 1000 = delta_phi * 1.21468

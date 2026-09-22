@@ -2,6 +2,7 @@
 
 #include <QDialog>
 #include "Constants.h"
+#include "FrontendFilter.h"
 #include "ring_recon_cuda.h"
 
 class ImagingController;
@@ -35,10 +36,22 @@ public:
     quint64 startupFilterTriggerCount() const;
     bool    disableCountBoundary() const;
 
+    // 前端滤波（逐 A-line 零相位）控件当前值。与重建配置完全独立：只经
+    // MainWindow -> NetworkController 下发到 Frontend Preprocessing 配置，
+    // 不写入 RingReconCudaConfig / ImagingSvc / ring_recon 的任何配置或 JSON。
+    frontend_filter::Config frontendFilterConfig() const;
+    // 同一组 QSettings（paimageSettingsPath()+IniFormat）的 RingConfigDialog/Defaults
+    // group 中读取已保存的前端滤波默认值。MainWindow 在弹窗尚未 lazy-create 时
+    // 也经由此处取得同一份持久化值；无历史键时回退出厂默认。
+    static frontend_filter::Config loadFrontendFilterDefaults();
+
 signals:
     // applyConfig 成功（应用/确定/成像启动下发）后发出，由 MainWindow 转发给
     // NetworkController::setStartupFilterTriggerCount / setDisableCountBoundary。
     void roundPolicyChanged(quint64 startupFilterTriggerCount, bool disableCountBoundary);
+    // applyConfig 成功后发出，由 MainWindow 转发给
+    // NetworkController::setFrontendFilterConfig（与重建配置下发相互独立）。
+    void frontendFilterChanged(const frontend_filter::Config& config);
 
 protected:
     void showEvent(QShowEvent *event) override;   // 每次显示时套用记忆的大小
@@ -48,6 +61,8 @@ private:
     void buildUi();
     void restoreDefaults();               // 恢复默认参数（底部“恢复默认”按钮）
     void saveDefaults();                  // 将当前参数保存为默认（底部“设为默认”按钮）
+    // 前端滤波：启停开关与该路截止/阶数控件的 disabled 联动（数值保留不清空）。
+    void syncFrontendFilterControls();
 
     ImagingController *m_controller;
 
@@ -72,6 +87,16 @@ private:
     // 经 RoundPolicySettings 读写； Apply/OK 成功后经 roundPolicyChanged 下发
     QSpinBox        *m_spnStartupFilterTriggers;  // 启动过滤触发数（distinct physical trigger，0=不过滤）
     QCheckBox       *m_chkDisableCountBoundary;   // 禁用计数重置（勾选后仅超时为轮次边界）
+    // 前端滤波（逐 A-line 零相位）：持久化于 RingConfigDialog/Defaults（键
+    // feHpEnable / feHpCutoffMhz / feHpOrder / feLpEnable / feLpCutoffMhz /
+    // feLpOrder），Apply/OK 成功后经 frontendFilterChanged 下发。
+    QCheckBox       *m_chkFeHpEnable;      // 启用高通
+    QDoubleSpinBox  *m_spnFeHpCutoffMhz;   // 高通截止(MHz)
+    QSpinBox        *m_spnFeHpOrder;       // 高通阶数
+    QCheckBox       *m_chkFeLpEnable;      // 启用低通
+    QDoubleSpinBox  *m_spnFeLpCutoffMhz;   // 低通截止(MHz)
+    QSpinBox        *m_spnFeLpOrder;       // 低通阶数
+
     // 重建参数
     QDoubleSpinBox  *m_spnFovMm;
     QDoubleSpinBox  *m_spnGridMm;

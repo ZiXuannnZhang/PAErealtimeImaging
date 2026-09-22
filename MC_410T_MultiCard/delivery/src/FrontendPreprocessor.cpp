@@ -29,7 +29,12 @@ const char* frontendSubmitResultName(FrontendSubmitResult result) noexcept {
 }
 
 FrontendPreprocessor::FrontendPreprocessor(int cardId, std::size_t queueCapacity)
-    : cardId_(cardId), capacity_(std::max<std::size_t>(1, queueCapacity)) {}
+    : cardId_(cardId), capacity_(std::max<std::size_t>(1, queueCapacity)) {
+    // 出厂配置（任务 3.4 默认值）在构造时设计一次并缓存。这不是一次"重新设计"，
+    // 因此 filterDesigns / filterConfigVersion 从 0 起算（见 setFilterConfig）。
+    filterConfig_ = frontend_filter::Config{};
+    filterBank_ = std::make_shared<const frontend_filter::Bank>(filterConfig_);
+}
 
 FrontendPreprocessor::~FrontendPreprocessor() {
     stop();
@@ -45,6 +50,32 @@ void FrontendPreprocessor::setDispatchObserver(DispatchObserver observer) {
     dispatchObserver_ = std::move(observer);
 }
 
+bool FrontendPreprocessor::setFilterConfig(const frontend_filter::Config& config) {
+    if (frontend_filter::validate(config) != frontend_filter::Validation::Ok)
+        return false;
+    // 先在锁外把新系数完整设计好：SOS 只在参数变更时设计一次并缓存，绝不在每帧
+    // 处理时重新设计。设计失败（数值异常）时保持原配置与原系数不变。
+    std::shared_ptr<const frontend_filter::Bank> designed;
+    try {
+        designed = std::make_shared<const frontend_filter::Bank>(config);
+    } catch (...) {
+        return false;
+    }
+    std::lock_guard<std::mutex> lock(filterMutex_);
+    // 同一份参数重复下发不算一次配置变更，不重复设计也不递增版本号。
+    if (filterBank_ && filterConfig_ == config) return true;
+    filterBank_ = std::move(designed);
+    filterConfig_ = config;
+    filterDesigns_.fetch_add(1, std::memory_order_relaxed);
+    filterConfigVersion_.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
+frontend_filter::Config FrontendPreprocessor::filterConfig() const {
+    std::lock_guard<std::mutex> lock(filterMutex_);
+    return filterConfig_;
+}
+
 #ifdef FRONTEND_PREPROCESSOR_TEST_SEAM
 void FrontendPreprocessor::setWorkerSeamForTest(std::function<void()> seam) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -55,6 +86,12 @@ void FrontendPreprocessor::setProcessFaultForTest(
     std::function<void(TriggerGroup&)> fault) {
     std::lock_guard<std::mutex> lock(mutex_);
     processFault_ = std::move(fault);
+}
+
+void FrontendPreprocessor::setFilterFaultForTest(
+    std::function<void(TriggerGroup&)> fault) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    filterFault_ = std::move(fault);
 }
 #endif
 
@@ -208,10 +245,27 @@ FrontendSubmitResult FrontendPreprocessor::submit(const TriggerGroupPtr& raw) no
     return FrontendSubmitResult::Accepted;
 }
 
-void FrontendPreprocessor::processFrontendSignal(TriggerGroup& frontend) noexcept {
-    // Task 1: identity.  Future high/low-pass filtering is applied exactly once
-    // at this single insertion point and nowhere else in the pipeline.
-    (void)frontend;
+// 载荷语义核实（2026-09-23）：freqA/freqB 是时域幅度波形，不是瞬时频率（kHz）。
+// 因此滤波按"时域幅度的 A-line"设计，逐 A-line 独立作用于 frontend clone 的
+// freqA / freqB，不改写 raw（保存与发布仍消费 raw）。
+//
+// 唯一滤波插入点：本函数是全仓唯一执行滤波的位置。顺序固定为
+// 滤波 -> 显示派生（prepareDisplayData）-> 分发，见 workerLoop。
+void FrontendPreprocessor::processFrontendSignal(
+    TriggerGroup& frontend, const frontend_filter::Bank& bank) {
+    bool didFilter = false;
+    // 逐 A-line 独立：一次滤波的输入是一条通道在一个 TriggerGroup 内的完整采样
+    // 序列；Bank 不携带任何跨 A-line / 跨触发 / 跨卡的滤波状态。
+    if (!frontend.freqA.empty() && bank.apply(frontend.freqA.data(),
+                                              frontend.freqA.size()))
+        didFilter = true;
+    if (!frontend.freqB.empty() && bank.apply(frontend.freqB.data(),
+                                              frontend.freqB.size()))
+        didFilter = true;
+    if (didFilter) filteredFrames_.fetch_add(1, std::memory_order_relaxed);
+#ifdef FRONTEND_PREPROCESSOR_TEST_SEAM
+    if (filterFault_) filterFault_(frontend);
+#endif
 }
 
 // 载荷语义核实（2026-09-23）：freqA/freqB 是时域幅度波形，不是瞬时频率（kHz）。
@@ -288,6 +342,11 @@ void FrontendPreprocessor::dispatch(TriggerGroupPtr& frontend) {
 void FrontendPreprocessor::workerLoop() noexcept {
     for (;;) {
         Item item;
+        // Per-frame frozen coefficients.  Captured at dequeue so a frame already
+        // taken by the worker completes on the coefficients it started with,
+        // while every frame dequeued after a configuration update uses the new
+        // ones (任务 3.6 生效时机).
+        std::shared_ptr<const frontend_filter::Bank> frameBank;
 #ifdef FRONTEND_PREPROCESSOR_TEST_SEAM
         std::function<void()> seam;
 #endif
@@ -305,11 +364,16 @@ void FrontendPreprocessor::workerLoop() noexcept {
             seam = workerSeam_;
 #endif
         }
+        {
+            std::lock_guard<std::mutex> lock(filterMutex_);
+            frameBank = filterBank_;
+        }
         if (!item.raw) continue;
 
         // Frozen per-frame order (Task 3.3):
-        //   dequeue raw const -> stale check -> deep copy -> processFrontendSignal
-        //   -> full-resolution display preparation -> stale check again
+        //   dequeue raw const -> freeze coefficients -> stale check -> deep copy
+        //   -> processFrontendSignal -> full-resolution display preparation
+        //   -> stale check again
         //   -> DisplayBuffer update / updateFullRes -> RingFeedSink
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -333,12 +397,14 @@ void FrontendPreprocessor::workerLoop() noexcept {
         }
         deepCopies_.fetch_add(1, std::memory_order_relaxed);
         try {
-            processFrontendSignal(*frontend);
+            if (frameBank) processFrontendSignal(*frontend, *frameBank);
 #ifdef FRONTEND_PREPROCESSOR_TEST_SEAM
             if (processFault_) processFault_(*frontend);
 #endif
             prepareDisplayData(*frontend);
         } catch (...) {
+            // 滤波实现抛出的异常不逃逸出 worker 线程：计入既有 exceptionDropped
+            // 并继续处理后续帧。
             exceptionDropped_.fetch_add(1, std::memory_order_relaxed);
             continue;
         }
@@ -378,6 +444,9 @@ FrontendPreprocessor::Snapshot FrontendPreprocessor::snapshot() const noexcept {
     s.downstreamRingExceptions = downstreamRingExceptions_.load(std::memory_order_relaxed);
     s.displayUpdates = displayUpdates_.load(std::memory_order_relaxed);
     s.deepCopies = deepCopies_.load(std::memory_order_relaxed);
+    s.filteredFrames = filteredFrames_.load(std::memory_order_relaxed);
+    s.filterDesigns = filterDesigns_.load(std::memory_order_relaxed);
+    s.filterConfigVersion = filterConfigVersion_.load(std::memory_order_relaxed);
     s.queueCapacity = capacity_;
     {
         std::lock_guard<std::mutex> lock(mutex_);

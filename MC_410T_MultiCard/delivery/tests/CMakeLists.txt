@@ -26,7 +26,7 @@ add_test(NAME imaging_bypass_test COMMAND imaging_bypass_test)
 add_executable(data_processor_imaging_isolation_test
     data_processor_imaging_isolation_test.cpp
     ../src/ImagingBypass.cpp
-    ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
+    ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h ../src/FrontendFilter.cpp ../include/FrontendFilter.h
     ../src/DataProcessor.cpp ../include/DataProcessor.h
     ../src/FramePublisher.cpp ../include/FramePublisher.h)
 target_include_directories(data_processor_imaging_isolation_test PRIVATE ../include)
@@ -37,7 +37,7 @@ add_test(NAME data_processor_imaging_isolation_test COMMAND data_processor_imagi
 # Frontend Preprocessing Stage (Task 1 identity processing) contract tests.
 add_executable(frontend_preprocessor_test
     frontend_preprocessor_test.cpp
-    ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
+    ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h ../src/FrontendFilter.cpp ../include/FrontendFilter.h
     ../src/ImagingBypass.cpp
     ../src/DataProcessor.cpp ../include/DataProcessor.h
     ../src/FramePublisher.cpp ../include/FramePublisher.h)
@@ -125,7 +125,7 @@ if(WIN32)
         ../src/NetworkDiagnostics.cpp ../src/DiagnosticRecorder.cpp
         ../src/StartupPolicy.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
-        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
+        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h ../src/FrontendFilter.cpp ../include/FrontendFilter.h
         ../src/FileSaver.cpp ../include/FileSaver.h
         ../src/MultiPortReceiver.cpp ../include/MultiPortReceiver.h
         ../src/FramePublisher.cpp ../include/FramePublisher.h)
@@ -247,7 +247,7 @@ if(WIN32)
         ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
         ../src/PaimageAcquisition/Backend.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
-        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
+        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h ../src/FrontendFilter.cpp ../include/FrontendFilter.h
         ../src/FileSaver.cpp ../include/FileSaver.h
         ../src/FramePublisher.cpp ../include/FramePublisher.h)
     target_include_directories(paimage_host_output_test PRIVATE ../include)
@@ -259,7 +259,7 @@ if(WIN32)
         ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
         ../src/PaimageAcquisition/Backend.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
-        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
+        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h ../src/FrontendFilter.cpp ../include/FrontendFilter.h
         ../src/FileSaver.cpp ../include/FileSaver.h
         ../src/FramePublisher.cpp ../include/FramePublisher.h)
     target_include_directories(filesaver_round_boundary_test PRIVATE ../include)
@@ -294,7 +294,7 @@ if(WIN32)
         ../src/PaimageAcquisition/HostOutput.cpp
         ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp
         ../src/DataProcessor.cpp ../include/DataProcessor.h
-        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h
+        ../src/FrontendPreprocessor.cpp ../include/FrontendPreprocessor.h ../src/FrontendFilter.cpp ../include/FrontendFilter.h
         ../src/FileSaver.cpp ../include/FileSaver.h
         ../src/FramePublisher.cpp ../include/FramePublisher.h)
     target_include_directories(count_boundary_save_binding_test PRIVATE ../include)

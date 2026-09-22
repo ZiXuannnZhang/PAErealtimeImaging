@@ -5,24 +5,26 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <thread>
 
 #include "DataTypes.h"
 #include "DisplayBuffer.h"
+#include "FrontendFilter.h"
 #include "ImagingBypass.h"
 
 // ============================================================
 // Frontend Preprocessing Stage  卡级异步前端预处理
 //
-// 目标数据链（Task 1 = identity processing）：
+// 目标数据链：
 //   raw TriggerGroup
 //   ├─ FileSaver / raw save      -> raw，不经过本 stage
 //   ├─ FramePublisher            -> raw，不经过本 stage
 //   └─ FrontendPreprocessor::submit(raw const)
 //         ↓ bounded FIFO / worker
 //         ↓ deep-copy frontend-owned TriggerGroup
-//         ↓ processFrontendSignal()          <- 唯一滤波插入点（本任务 identity）
+//         ↓ processFrontendSignal()          <- 唯一滤波插入点（逐 A-line 零相位）
 //         ↓ full-resolution display preparation
 //         ├─ DisplayBuffer::update / updateFullRes
 //         └─ RingFeedSink / ImagingBypass
@@ -30,6 +32,10 @@
 // Display 与 Ring 消费同一次 preprocessing 产生的同一个 frontend-owned clone。
 // 热路径（HostOutput / DataProcessor）只做 enqueue：不做 deep copy、不做 display
 // preparation、不调用 Ring consumer。
+//
+// 高/低通零相位滤波只在 processFrontendSignal() 作用一次，且只改写 frontend
+// clone 的 freqA / freqB：传入 submit() 的 raw TriggerGroup 原样交给 FileSaver 与
+// FramePublisher。全仓不得出现第二处滤波或滤波副本。
 // ============================================================
 
 // Frontend queue admission result.  This deliberately does NOT reuse
@@ -76,6 +82,15 @@ public:
         // Display dispatch count (same clone as the Ring consumer).
         std::uint64_t displayUpdates = 0;
         std::uint64_t deepCopies = 0;
+        // Frontend filter observability.  Isolated exactly like the fields above:
+        // these are never folded into UDP packet loss, missingTriggerCount,
+        // saveQueueDiscards or any imaging discard statistic.
+        // 实际执行过滤波的帧数（两路都停用、或序列 n < 2 时原样返回的帧不计）。
+        std::uint64_t filteredFrames = 0;
+        // SOS 系数重新设计次数（仅在生效配置真正变更时递增）。
+        std::uint64_t filterDesigns = 0;
+        // 当前生效配置版本号，配置变更时递增；0 = 构造时的出厂配置。
+        std::uint64_t filterConfigVersion = 0;
         std::uint64_t activeSession = 0;
         std::uint64_t minDispatchableRoundGeneration = 0;
         std::uint64_t queueCapacity = 0;
@@ -100,6 +115,16 @@ public:
     }
     void setRingSink(RingSink sink);
     void setDispatchObserver(DispatchObserver observer);
+
+    // Frontend filter configuration (任务 3.6).  Validated, then the SOS
+    // coefficients are designed exactly once and cached as an immutable Bank.
+    // Returns false (leaving the previous configuration and coefficients fully
+    // intact) when the configuration is rejected.  Effective from the next
+    // frame dequeued after the update returns: no round boundary, no
+    // measurement-session boundary and no service restart is involved, and the
+    // UI thread never waits for the worker.
+    bool setFilterConfig(const frontend_filter::Config& config);
+    frontend_filter::Config filterConfig() const;
 
     // The stage must be running before any producer can submit (Task 3.7).
     void start();
@@ -129,6 +154,9 @@ public:
     // Deterministic test seams.  Not compiled into the production target.
     void setWorkerSeamForTest(std::function<void()> seam);
     void setProcessFaultForTest(std::function<void(TriggerGroup&)> fault);
+    // Throws from inside the filter path itself, so exception containment can be
+    // asserted against the filter rather than against a downstream callback.
+    void setFilterFaultForTest(std::function<void(TriggerGroup&)> fault);
 #endif
 
 private:
@@ -146,9 +174,12 @@ private:
     // loop can record it as exceptionDropped and keep serving later frames.
     void dispatch(TriggerGroupPtr& frontend);
 
-    // The single insertion point for future high/low-pass filtering.  Task 1
-    // implementation is identity; filtering must act exactly once, here.
-    static void processFrontendSignal(TriggerGroup& frontend) noexcept;
+    // The single insertion point for high/low-pass filtering.  Filtering acts
+    // exactly once, here, and only on the frontend clone.  `bank` is the
+    // immutable coefficient set frozen for this frame when it was dequeued, so
+    // an in-flight frame always completes on the coefficients it started with.
+    void processFrontendSignal(TriggerGroup& frontend,
+                               const frontend_filter::Bank& bank);
     // Full-resolution display preparation: every acquired sample is kept.
     // No display downsampling is reintroduced.
     static void prepareDisplayData(TriggerGroup& frontend);
@@ -163,6 +194,14 @@ private:
     RingSink ringSink_;
     DispatchObserver dispatchObserver_;
     DisplayBuffer* displayBuffer_ = nullptr;
+
+    // Immutable filter coefficients.  The worker copies the shared_ptr under
+    // filterMutex_ once per dequeued frame; the UI thread only swaps it in there
+    // after the replacement Bank has been fully designed.  Neither thread holds
+    // the lock across filtering, so an update never waits on the worker.
+    mutable std::mutex filterMutex_;
+    std::shared_ptr<const frontend_filter::Bank> filterBank_;
+    frontend_filter::Config filterConfig_;
 
     std::atomic<bool> running_{false};
     std::atomic<bool> stopping_{true};
@@ -179,9 +218,13 @@ private:
     std::atomic<std::uint64_t> downstreamRingAccepted_{0};
     std::atomic<std::uint64_t> downstreamRingRejected_{0};
     std::atomic<std::uint64_t> downstreamRingExceptions_{0};
+    std::atomic<std::uint64_t> filteredFrames_{0};
+    std::atomic<std::uint64_t> filterDesigns_{0};
+    std::atomic<std::uint64_t> filterConfigVersion_{0};
 
 #ifdef FRONTEND_PREPROCESSOR_TEST_SEAM
     std::function<void()> workerSeam_;
     std::function<void(TriggerGroup&)> processFault_;
+    std::function<void(TriggerGroup&)> filterFault_;
 #endif
 };

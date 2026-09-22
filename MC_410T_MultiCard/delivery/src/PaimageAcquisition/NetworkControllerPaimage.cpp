@@ -271,6 +271,9 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
         DisplayBuffer* displayPtr=display.get();
         frontend->setDisplayBuffer(displayPtr);
         frontend->setRingSink(m_ringFeedSink);
+        // Frontend 滤波配置在监听启动前已可下发；新建 stage 同步继承该配置副本，
+        // 使启动时即与 UI/持久化一致。
+        frontend->setFilterConfig(m_frontendFilterConfig);
         frontend->start();
         // DataProcessor 热路径只做 frontend enqueue；deep copy / display
         // preparation / Ring 分发全部在 stage worker 内完成。

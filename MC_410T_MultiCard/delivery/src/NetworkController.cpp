@@ -708,6 +708,19 @@ void NetworkController::setDisableCountBoundary(bool disable) {
         m_paimage->output().setDisableCountBoundary(disable);
 }
 
+bool NetworkController::setFrontendFilterConfig(const frontend_filter::Config& config) {
+    if (frontend_filter::validate(config) != frontend_filter::Validation::Ok)
+        return false;
+    m_frontendFilterConfig = config;
+    // 每卡一个 FrontendPreprocessor 实例，各自持有独立的系数缓存与配置副本：
+    // 由各 stage 自行设计并缓存 SOS，本处只做参数分发，不在热路径上重设计。
+    // stage 尚未创建时（监听启动前）只更新副本，创建时写入新 stage。
+    for (auto& stage : m_frontendStages) {
+        if (stage) stage->setFilterConfig(config);
+    }
+    return true;
+}
+
 paimage::PhysicalRoundNormalizer::Snapshot NetworkController::physicalRoundSnapshot() const {
     if (m_paimage)
         return m_paimage->output().normalizerSnapshot();

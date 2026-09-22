@@ -49,6 +49,15 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
         ++rings;return ImagingSubmitResult::Accepted;});
     QObject::connect(&controller,&NetworkController::measurementStarted,[&]{++started;});
     QObject::connect(&controller,&NetworkController::stopped,[&]{stopped=true;});
+    // 前端高/低通零相位滤波默认启用，并且只改写 frontend clone。下面的
+    // "Ring raw values" 断言是逐卡恒定幅度的路由指纹（用来发现跨卡串扰），因此
+    // 在此显式停用两路滤波，让该指纹保持可判别。滤波数值、生效时机与保存隔离
+    // 由 frontend_preprocessor_test F1..F13 覆盖。
+    {
+        frontend_filter::Config noFilter;
+        noFilter.hpEnable=false;noFilter.lpEnable=false;
+        require(controller.setFrontendFilterConfig(noFilter),"frontend filter paths disabled");
+    }
     require(controller.start(config),"production listen");
     require(!controller.sendStartMeasure(),"unconfigured START must fail and remain recoverable");
     QTemporaryDir dir(QDir::currentPath()+"/network-save-XXXXXX");require(dir.isValid(),"save directory");

@@ -18,9 +18,19 @@ template<class F> bool until(F f){auto end=std::chrono::steady_clock::now()+3s;w
 // Production shape for the per-card Frontend Preprocessing Stage: DisplayBuffer
 // and the Ring sink consume the frontend-owned clone on the stage worker.  The
 // HostOutput assertions below therefore observe the real delivery path.
+//
+// The frontend high/low-pass filter is explicitly switched off here: the golden
+// assertions below are a payload-routing contract (each card's constant A/B
+// amplitude must reach the Ring sink intact, which is what detects a cross-card
+// mix-up).  Filter numerics, effective-moment and save isolation are covered by
+// frontend_preprocessor_test F1..F13; keeping the filter on here would only
+// restate those and would blur the routing fingerprint this test relies on.
 std::unique_ptr<FrontendPreprocessor> makeFrontend(int card,DisplayBuffer* display,
         FrontendPreprocessor::RingSink ring){
     auto stage=std::make_unique<FrontendPreprocessor>(card);
+    frontend_filter::Config noFilter;
+    noFilter.hpEnable=false;noFilter.lpEnable=false;
+    require(stage->setFilterConfig(noFilter),"frontend filter paths disabled");
     stage->setDisplayBuffer(display);
     stage->setRingSink(std::move(ring));
     stage->start();

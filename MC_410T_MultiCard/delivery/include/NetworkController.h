@@ -142,6 +142,14 @@ public:
     // settings and are forwarded to the shared HostOutput normalizer.
     void setStartupFilterTriggerCount(std::uint64_t count);
     void setDisableCountBoundary(bool disable);
+    // Frontend Preprocessing 配置（高/低通零相位滤波）。与重建配置的下发相互
+    // 独立：只经 MainWindow -> NetworkController 这条接线，不写入
+    // RingReconCudaConfig / ImagingSvc / ring_recon 的任何配置或 JSON 协议。
+    // 返回 false 表示参数被校验拒绝，全部 stage 的既有配置保持原值不变。
+    // 成功时立即生效于各 stage 下一个出队帧，不等待轮次/会话边界，也不需要重启
+    // 采集或重建服务。每卡一个实例，各自持有独立的系数缓存与配置副本。
+    bool setFrontendFilterConfig(const frontend_filter::Config& config);
+    frontend_filter::Config frontendFilterConfig() const { return m_frontendFilterConfig; }
     paimage::PhysicalRoundNormalizer::Snapshot physicalRoundSnapshot() const;
     // 重新配置（采集时间改变时传入，无需重建线程）
     void reconfigure(const AcqConfig& config);
@@ -384,6 +392,9 @@ private:
     // Ring sink 依赖销毁之前被 stop/clear。
     std::vector<std::unique_ptr<FrontendPreprocessor>> m_frontendStages;
     FrontendPreprocessor::RingSink                 m_ringFeedSink;   // 环形实时馈送回调
+    // Frontend 滤波配置副本：stage 创建前即有效，创建时写入新 stage，
+    // 之后的变更逐卡下发（见 setFrontendFilterConfig）。
+    frontend_filter::Config                        m_frontendFilterConfig;
     std::vector<std::unique_ptr<DisplayBuffer>>    m_displayBuffers;
     std::vector<std::unique_ptr<FileSaver>>        m_savers;
 

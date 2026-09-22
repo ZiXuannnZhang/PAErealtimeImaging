@@ -144,7 +144,6 @@ private:
     // 坐标轴数字直接编辑（双击轴刻度数字 → 行内编辑 → 等同右键“设置坐标范围”）。
     // isSpectrum：频域幅值谱图使用独立的自适应/保存范围标志组。
     void attachAxisEdit(QCustomPlot *plot, int card, int ch, bool isSpectrum);
-    QVector<double> calculateFrequency(const QVector<double> &phaseData);
     void updateNetworkInfoLabels(); // 根据 m_nCards 刷新网络控制面板标签
     void updateNetworkInfoIndicator(); // 把只读网络信息汇总到感叹号悬停提示
     void saveReconImage(const QImage &image, const QString &tag); // 实时重建图像 PNG 保存
