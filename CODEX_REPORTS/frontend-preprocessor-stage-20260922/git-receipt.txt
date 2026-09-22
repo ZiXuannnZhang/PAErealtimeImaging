@@ -1,0 +1,67 @@
+独立 Frontend Preprocessing Stage — Git 追溯回执
+================================================
+
+repository        = ZiXuannnZhang/PAErealtimeImaging
+remote            = https://github.com/ZiXuannnZhang/PAErealtimeImaging.git
+branch            = codex/frontend-preprocessor-stage-20260922
+
+TASK_EXACT_START   = 9938269220fcaf8e81216820f6bb46549ca59888
+START_MATCH_AT_ENTRY = YES
+  (entry check: HEAD == TASK_EXACT_START and
+   `git status --porcelain --untracked-files=no` empty)
+
+IMPLEMENTATION_SOURCE_SHA = 5af8c39021b62ba046512f6d19480794b4a27b00
+REPORT_HEAD               = <this receipt commit; see RECEIPT_NOTE below>
+
+ANCESTRY PROOF (no main / other branch merged in):
+  git merge-base 9938269220fcaf8e81216820f6bb46549ca59888 HEAD
+    = 9938269220fcaf8e81216820f6bb46549ca59888
+  => IMPLEMENTATION_SOURCE_SHA is a strict descendant of the exact starting SHA
+     and merge-base equals the start, i.e. no merge/rebase/cherry-pick of main or
+     any other branch entered this task.
+
+COMMITS ON THIS TASK BRANCH SINCE THE EXACT START:
+  5af8c39 feat: land independent async Frontend Preprocessing Stage (Task 1 identity)
+
+CHANGED PRODUCTION / TEST / BUILD-INPUT FILES
+(start..IMPLEMENTATION_SOURCE_SHA, 20 files, +1771 / -148):
+  MC_410T_MultiCard/delivery/CMakeLists.txt                          |   2 +
+  MC_410T_MultiCard/delivery/include/DataProcessor.h                 |  45 +-
+  MC_410T_MultiCard/delivery/include/FrontendPreprocessor.h          | 187 +++++   (new)
+  MC_410T_MultiCard/delivery/include/NetworkController.h             |  24 +-
+  MC_410T_MultiCard/delivery/include/PaimageAcquisition/HostOutput.h |  28 +
+  MC_410T_MultiCard/delivery/src/DataProcessor.cpp                   |  79 +-
+  MC_410T_MultiCard/delivery/src/FrontendPreprocessor.cpp            | 380 ++++++   (new)
+  MC_410T_MultiCard/delivery/src/NetworkController.cpp               |  36 +
+  MC_410T_MultiCard/delivery/src/PaimageAcquisition/Backend.cpp      |   6 +-
+  MC_410T_MultiCard/delivery/src/PaimageAcquisition/HostOutput.cpp   |  19 +-
+  MC_410T_MultiCard/delivery/src/PaimageAcquisition/NetworkControllerPaimage.cpp | 41 +-
+  MC_410T_MultiCard/delivery/tests/CMakeLists.txt                    |  18 +
+  MC_410T_MultiCard/delivery/tests/count_boundary_save_binding_test.cpp | 10 +-
+  MC_410T_MultiCard/delivery/tests/data_processor_batch_test.cpp     |  22 +-
+  MC_410T_MultiCard/delivery/tests/data_processor_imaging_isolation_test.cpp | 131 +++-
+  MC_410T_MultiCard/delivery/tests/filesaver_round_boundary_test.cpp |   2 +-
+  MC_410T_MultiCard/delivery/tests/frontend_preprocessor_test.cpp    | 751 ++++++   (new)
+  MC_410T_MultiCard/delivery/tests/paimage_host_output_test.cpp      | 126 +++-
+  MC_410T_MultiCard/delivery/tests/session_boundary_receiver_test.cpp |   8 +-
+  MC_410T_MultiCard/delivery/tests/session_boundary_test.cpp         |   4 +-
+
+BUILD IDENTITY RECORDED FOR IMPLEMENTATION_SOURCE_SHA:
+  PAIMAGE_GIT_SHA=5af8c39021b62ba046512f6d19480794b4a27b00
+  PAIMAGE_TRACKED_DIRTY=false
+
+TRACKED TREE CLEAN AT BUILD AND TEST TIME:
+  git status --porcelain --untracked-files=no = empty  (before this receipt commit)
+
+REPORT-ONLY DIFF CONTRACT:
+  REPORT_HEAD diff against IMPLEMENTATION_SOURCE_SHA is restricted to
+  CODEX_REPORTS/frontend-preprocessor-stage-20260922/ (text only).
+  No build tree, executable, DLL, archive or other binary is committed.
+
+RECEIPT_NOTE:
+  This file is committed together with validation-receipt.md, build-summary.txt,
+  ctest-targeted.txt and ctest-full.txt in a single evidence-only commit.
+  REPORT_HEAD is that commit's SHA and is reported in the final task report.
+  Because the SHA cannot be embedded in its own commit, the equality
+  `REPORT_HEAD == <commit containing this file>` is verified after the commit by
+  `git rev-parse HEAD` and `git diff --name-only IMPLEMENTATION_SOURCE_SHA..HEAD`.

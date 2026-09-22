@@ -1,0 +1,81 @@
+独立 Frontend Preprocessing Stage — targeted 回归结果
+=====================================================
+
+BUILD_SOURCE_SHA=5af8c39021b62ba046512f6d19480794b4a27b00
+BRANCH=codex/frontend-preprocessor-stage-20260922
+TEST_TREE=D:\Claudecode\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\tests_frontend_preprocessor_stage_20260922
+CTEST=D:\Qt\Qt6.8.0\Tools\CMake_64\bin\ctest.exe (3.30.5)
+
+TEST_TREE_RUNTIME_NOTE:
+The test output tree was deployed with Qt 6.8.0 Qt6 DLLs, MinGW runtime DLLs and
+the qoffscreen/qwindows platform plugins before ctest was invoked.  Without them
+the executables fail at the loader (0xc0000135) and no test logic runs.  No
+tracked input was modified for this deployment.
+
+COMMAND:
+ctest --output-on-failure -j 4 -R "^(frontend_preprocessor_test|paimage_host_output_test|data_processor_imaging_isolation_test|data_processor_batch_test|imaging_bypass_test|ring_block_assembler_test|ring_round_identity_test|session_boundary_test|session_boundary_receiver_test|filesaver_round_boundary_test|count_boundary_save_binding_test|timeout_presentation_test)$"
+
+RESULT: 12/12 PASS, 0 FAIL, 0 SKIP, 0 NOT_RUN, exit 0, 10.78 seconds
+
+REQUIRED TARGETED RESULTS (each result):
+  frontend_preprocessor_test              PASS   (new Frontend Preprocessing Stage test, 12/12 contracts)
+  paimage_host_output_test                PASS
+  data_processor_imaging_isolation_test   PASS
+  data_processor_batch_test               PASS
+  imaging_bypass_test                     PASS
+  ring_block_assembler_test               PASS
+  ring_round_identity_test                PASS
+  session_boundary_test                   PASS
+  session_boundary_receiver_test          PASS
+  filesaver_round_boundary_test           PASS
+  count_boundary_save_binding_test        PASS
+  timeout_presentation_test               PASS
+
+frontend_preprocessor_test CONTRACT RESULTS (task section 7 cases 1-12):
+  1  identity deep-copy                   PASS  output pointer != input pointer, metadata/freqA/freqB identical, raw object untouched, 1 deep copy
+  2  full-resolution                      PASS  2048-point (>1000) input fully preserved by display and frontend output
+  3  one result / two consumers           PASS  DisplayBuffer and RingFeedSink observe the same frontend-owned clone, 1 preprocessing result
+  4  FIFO ordering                        PASS  64 triggers dispatched in per-card submit order (bounded FIFO, not latest-only)
+  5  non-blocking submit                  PASS  submit and deliverAssembled return <50 ms while the worker is parked in a test seam
+  6  bounded overflow                     PASS  capacity-2 queue rejects deterministically as FrontendSubmitResult::QueueFull; type is not ImagingSubmitResult
+  7  save isolation                       PASS  12/12 raw saves consumed while the frontend queue rejected 10; raw payload not rewritten; CardStats untouched
+  8  session stale                        PASS  beginSession drops queued and in-flight frames of the previous measurementSession
+  9  timeout stale                        PASS  round barrier drop of queued/in-flight old-roundGeneration frames; new round passes
+ 10  CountBoundary final                  PASS  just-completed final logical trigger survives the boundary barrier and dispatches exactly once
+ 11  stop lifecycle                       PASS  clear + deterministic join, no post-stop dispatch, restart safe
+ 12  exception containment                PASS  frontend processing and downstream Ring faults contained; acquisition/save unaffected
+
+NOT_RUN: none
+SKIP: none
+
+RAW CTEST OUTPUT FOLLOWS
+
+Test project D:/Claudecode/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/tests_frontend_preprocessor_stage_20260922
+      Start  1: timeout_presentation_test
+      Start  2: ring_block_assembler_test
+      Start  3: imaging_bypass_test
+      Start  4: data_processor_imaging_isolation_test
+ 1/12 Test  #1: timeout_presentation_test ...............   Passed    0.63 sec
+ 2/12 Test  #2: ring_block_assembler_test ...............   Passed    0.51 sec
+      Start  5: frontend_preprocessor_test
+      Start 16: session_boundary_test
+ 3/12 Test  #3: imaging_bypass_test .....................   Passed    1.04 sec
+      Start 17: session_boundary_receiver_test
+ 4/12 Test  #4: data_processor_imaging_isolation_test ...   Passed    1.31 sec
+ 5/12 Test  #5: frontend_preprocessor_test ..............   Passed    1.01 sec
+      Start 26: paimage_host_output_test
+      Start 27: filesaver_round_boundary_test
+ 6/12 Test #16: session_boundary_test ...................   Passed    2.38 sec
+      Start 29: ring_round_identity_test
+ 7/12 Test #26: paimage_host_output_test ................   Passed    1.83 sec
+      Start 31: count_boundary_save_binding_test
+ 8/12 Test #29: ring_round_identity_test ................   Passed    0.66 sec
+ 9/12 Test #27: filesaver_round_boundary_test ...........   Passed    1.52 sec
+10/12 Test #31: count_boundary_save_binding_test ........   Passed    0.88 sec
+11/12 Test #17: session_boundary_receiver_test ..........   Passed    9.13 sec
+      Start 18: data_processor_batch_test
+12/12 Test #18: data_processor_batch_test ...............   Passed    0.38 sec
+
+100% tests passed, 0 tests failed out of 12
+
+Total Test time (real) =  10.78 sec

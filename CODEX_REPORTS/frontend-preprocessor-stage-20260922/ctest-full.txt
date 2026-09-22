@@ -1,0 +1,125 @@
+独立 Frontend Preprocessing Stage — 完整 ctest 结果
+===================================================
+
+BUILD_SOURCE_SHA=5af8c39021b62ba046512f6d19480794b4a27b00
+BRANCH=codex/frontend-preprocessor-stage-20260922
+TEST_TREE=D:\Claudecode\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\tests_frontend_preprocessor_stage_20260922
+CTEST=D:\Qt\Qt6.8.0\Tools\CMake_64\bin\ctest.exe (3.30.5)
+
+Command 1:
+  ctest -N
+Result:
+  Total Tests: 44
+  exit 0
+
+Command 2:
+  ctest --output-on-failure -j 4
+Result:
+  44 PASS, 0 FAIL, 0 SKIP, 0 NOT_RUN, exit 0
+  total time 23.28 seconds
+
+FULL SUMMARY:
+  total   = 44
+  PASS    = 44
+  FAIL    = 0
+  SKIP    = 0
+  NOT_RUN = 0
+
+No one-time diagnostic rerun was needed: the parallel full run was green on its
+first invocation.
+
+RAW CTEST OUTPUT FOLLOWS
+
+Test project D:/Claudecode/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/tests_frontend_preprocessor_stage_20260922
+      Start 17: session_boundary_receiver_test
+      Start 16: session_boundary_test
+      Start 26: paimage_host_output_test
+      Start 27: filesaver_round_boundary_test
+ 1/44 Test #27: filesaver_round_boundary_test ...........   Passed    0.34 sec
+      Start  4: data_processor_imaging_isolation_test
+ 2/44 Test  #4: data_processor_imaging_isolation_test ...   Passed    0.04 sec
+      Start  3: imaging_bypass_test
+ 3/44 Test  #3: imaging_bypass_test .....................   Passed    0.05 sec
+      Start  5: frontend_preprocessor_test
+ 4/44 Test  #5: frontend_preprocessor_test ..............   Passed    0.02 sec
+      Start 31: count_boundary_save_binding_test
+ 5/44 Test #26: paimage_host_output_test ................   Passed    0.60 sec
+      Start 29: ring_round_identity_test
+ 6/44 Test #29: ring_round_identity_test ................   Passed    0.02 sec
+      Start  1: timeout_presentation_test
+ 7/44 Test  #1: timeout_presentation_test ...............   Passed    0.02 sec
+      Start  2: ring_block_assembler_test
+ 8/44 Test  #2: ring_block_assembler_test ...............   Passed    0.14 sec
+      Start  6: ring_production_blockers_test
+ 9/44 Test #31: count_boundary_save_binding_test ........   Passed    0.53 sec
+      Start  7: diagnostic_recorder_test
+10/44 Test  #6: ring_production_blockers_test ...........   Passed    0.65 sec
+      Start  8: ring_shm_observability_test
+11/44 Test #16: session_boundary_test ...................   Passed    1.53 sec
+      Start  9: diagnostic_dialog_test
+12/44 Test  #8: ring_shm_observability_test .............   Passed    0.56 sec
+      Start 10: diagnostic_time_window_test
+13/44 Test  #7: diagnostic_recorder_test ................   Passed    1.41 sec
+      Start 11: process_scheduling_test
+14/44 Test #11: process_scheduling_test .................   Passed    0.12 sec
+      Start 12: network_ingress_observability_test
+15/44 Test #10: diagnostic_time_window_test .............   Passed    0.72 sec
+      Start 13: network_snapshot_test
+16/44 Test #12: network_ingress_observability_test ......   Passed    0.31 sec
+      Start 14: network_diagnostics_test
+17/44 Test #13: network_snapshot_test ...................   Passed    0.22 sec
+      Start 15: measurement_session_transaction_test
+18/44 Test #15: measurement_session_transaction_test ....   Passed    0.16 sec
+      Start 19: card_status_formatting_test
+19/44 Test #19: card_status_formatting_test .............   Passed    0.11 sec
+      Start 20: round_policy_settings_test
+20/44 Test #20: round_policy_settings_test ..............   Passed    0.14 sec
+      Start 28: ring_round_ui_state_test
+21/44 Test #28: ring_round_ui_state_test ................   Passed    0.07 sec
+      Start 30: auto_save_round_coordinator_test
+22/44 Test #30: auto_save_round_coordinator_test ........   Passed    0.25 sec
+      Start 32: paimage_trace_bundle_test
+23/44 Test #32: paimage_trace_bundle_test ...............   Passed    0.73 sec
+      Start 35: paimage_core_checks
+24/44 Test #35: paimage_core_checks .....................   Passed    0.17 sec
+      Start 36: paimage_output_checks
+25/44 Test #36: paimage_output_checks ...................   Passed    0.09 sec
+      Start 37: physical_round_normalizer_test
+26/44 Test #37: physical_round_normalizer_test ..........   Passed    0.32 sec
+      Start 38: paimage_control_checks
+27/44 Test #38: paimage_control_checks ..................   Passed    0.10 sec
+      Start 40: paimage_trace_checks
+28/44 Test  #9: diagnostic_dialog_test ..................   Passed    3.69 sec
+      Start 41: paimage_worker_checks
+29/44 Test #40: paimage_trace_checks ....................   Passed    0.26 sec
+      Start 43: paimage_conversion_checks
+30/44 Test #41: paimage_worker_checks ...................   Passed    0.31 sec
+      Start 44: paimage_looplog_checks
+31/44 Test #43: paimage_conversion_checks ...............   Passed    0.30 sec
+32/44 Test #44: paimage_looplog_checks ..................   Passed    0.18 sec
+33/44 Test #14: network_diagnostics_test ................   Passed    4.53 sec
+34/44 Test #17: session_boundary_receiver_test ..........   Passed    8.83 sec
+      Start 18: data_processor_batch_test
+35/44 Test #18: data_processor_batch_test ...............   Passed    0.05 sec
+      Start 21: paimage_network_test
+36/44 Test #21: paimage_network_test ....................   Passed    2.31 sec
+      Start 22: paimage_production_gap_test
+37/44 Test #22: paimage_production_gap_test .............   Passed    3.41 sec
+      Start 23: paimage_start_race
+38/44 Test #23: paimage_start_race ......................   Passed    0.60 sec
+      Start 24: paimage_start_fence_regression
+39/44 Test #24: paimage_start_fence_regression ..........   Passed    0.37 sec
+      Start 25: paimage_start_overflow
+40/44 Test #25: paimage_start_overflow ..................   Passed    0.42 sec
+      Start 33: paimage_discovery_checks
+41/44 Test #33: paimage_discovery_checks ................   Passed    0.58 sec
+      Start 34: paimage_discovery_socket_checks
+42/44 Test #34: paimage_discovery_socket_checks .........   Passed    3.61 sec
+      Start 39: paimage_socket_short
+43/44 Test #39: paimage_socket_short ....................   Passed    2.68 sec
+      Start 42: paimage_protocol_checks
+44/44 Test #42: paimage_protocol_checks .................   Passed    0.41 sec
+
+100% tests passed, 0 tests failed out of 44
+
+Total Test time (real) =  23.28 sec

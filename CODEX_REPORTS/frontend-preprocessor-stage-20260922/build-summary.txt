@@ -1,0 +1,84 @@
+独立 Frontend Preprocessing Stage 架构落地 — Windows 构建摘要
+==============================================================
+
+TASK=独立FrontendPreprocessingStage架构落地_20260922-031200
+TASK_DOC=origin/codex/task-docs:TASKS/独立FrontendPreprocessingStage架构落地_20260922-031200.md
+
+BUILD_TARGET_BRANCH=codex/frontend-preprocessor-stage-20260922
+STARTING_SHA=9938269220fcaf8e81216820f6bb46549ca59888
+IMPLEMENTATION_SOURCE_SHA=5af8c39021b62ba046512f6d19480794b4a27b00
+TRACKED_TREE_CLEAN_BEFORE_BUILD=true
+WORKDIR=D:\Claudecode\PAERealtimeImaging\MC_410T_MultiCard\delivery
+BUILD_COMMAND=cmd /c ".\build_mingw_debug.cmd"
+BUILD_EXIT_CODE=0
+BUILD_ERRORS=0
+BUILD_UTC=2026-09-22T14:26:54Z
+BUILD_LOCAL=2026-09-22 22:26:54 (UTC+8)
+MACHINE=Windows 11 Home China 10.0.26200
+
+CONFIGURE_PRESET=mingw-debug
+BUILD_PRESET=mingw-debug-build
+BUILD_TYPE=Debug
+USE_ZEROMQ=ON
+CXX_STANDARD=C++17
+GENERATOR=Ninja
+
+TOOLCHAIN:
+CMAKE=3.30.5 (D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe)
+COMPILER=GNU 13.1.0 (D:\Qt\Qt6.8.0\Tools\mingw1310_64\bin\g++.exe)
+NINJA=1.12.1 (D:\Qt\Qt6.8.0\Tools\Ninja\ninja.exe)
+QT=Qt 6.8.0 (D:\Qt\Qt6.8.0\6.8.0\mingw_64)
+
+BUILD_CACHE_NOTE:
+The pre-existing build/mingw_debug CMakeCache was created under the historical
+workspace root d:/ChatGPT/PAERealtimeImaging and rejected the current root
+D:/Claudecode/PAERealtimeImaging.  Per BUILD_STANDARD section 6 only the
+git-ignored build subdirectories were removed and re-configured:
+  removed: build/mingw_debug
+           build/tests_all_mingw_debug
+           build/tests_frontend_display_fullres_20260922
+  kept:    build/ring_recon_cuda (prebuilt Ring CUDA import/runtime source)
+No tracked source, reset, rebase or force operation was used to clear the cache.
+
+BUILD_IDENTITY (build/mingw_debug/generated/PaimageAcquisition/BuildIdentity.h):
+PAIMAGE_GIT_SHA=5af8c39021b62ba046512f6d19480794b4a27b00
+PAIMAGE_TRACKED_DIRTY=false
+PAIMAGE_BUILD_TYPE=Debug
+PAIMAGE_COMPILER=GNU 13.1.0
+PAIMAGE_PRODUCT_BASELINE=e66a29bfbbaa6534911a23d48e8624fb8d552bec
+PAIMAGE_SOURCE_SHA256=2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec
+BuildIdentity PAIMAGE_GIT_SHA equals IMPLEMENTATION_SOURCE_SHA: YES
+
+CORE_BINARIES (build/mingw_debug/bin):
+PAimageReceiverDiagnostics.exe PRESENT 66057450 bytes
+ImagingSvc.exe                 PRESENT  3336915 bytes
+ring_svc_selftest.exe          PRESENT  1941308 bytes
+ring_udp_replay.exe            PRESENT   333035 bytes
+
+RUNTIME DEPENDENCY PROVENANCE:
+Ring CUDA source = local build (MC_410T_MultiCard/delivery/build/ring_recon_cuda)
+  _migration_pack/prebuilt_cuda fallback was NOT used
+ZeroMQ source    = repository third_party/zeromq (v4.3.5)
+Linear imaging   = repository libs/imaging (tracked pa_recon_core.dll)
+
+DEPENDENCY SHA256:
+c1a37e73147c1b8250f96ccdc1fcfc08ca28cecbf1cb3c046d4ab426f2ea0893  libs/imaging/pa_recon_core.dll
+2480d8ab849d7e9a375275f6c0278b8764c14ac0c1a3bdacaf256ae4a93c5590  libs/imaging/cufft64_12.dll
+bf40472d5a46363a35dd1084a01a8c15f13ef203f3ed5b4bb5edf767eeec14b5  build/ring_recon_cuda/bin/ring_recon_cuda.dll
+c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344  build/ring_recon_cuda/bin/cudart64_12.dll
+37610023d91951bc4177db1f96b54b28911976ac70b221a852887709a02a9ad3  third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll
+
+TEST PROJECT BUILD (independent delivery/tests CMake project):
+TEST_TREE=D:\Claudecode\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\tests_frontend_preprocessor_stage_20260922
+TEST_TREE_STATE=fresh (previous tree deleted before configure)
+CONFIGURE_EXIT=0
+BUILD_EXIT=0
+BUILD_STEPS=305/305
+RUNTIME_DEPLOYED_FOR_TEST_TREE=Qt6Core/Qt6Gui/Qt6Widgets/Qt6Concurrent/Qt6Test,
+  libgcc_s_seh-1/libstdc++-6/libwinpthread-1, platforms/qoffscreen.dll+qwindows.dll
+  (loader-only 0xc0000135 results would otherwise occur; no tracked input changed)
+
+BUILD_RESULT=PASS
+DELIVERY_STAGING=NOT_CREATED (architecture/implementation task, no field delivery package requested)
+BUILD_TREE_COMMITTED=NO
+BINARIES_COMMITTED=NO
