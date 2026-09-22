@@ -214,6 +214,14 @@ void FrontendPreprocessor::processFrontendSignal(TriggerGroup& frontend) noexcep
     (void)frontend;
 }
 
+// 载荷语义核实（2026-09-23）：freqA/freqB 是时域幅度波形，不是瞬时频率（kHz）。
+// 完整证据见 include/DataTypes.h 的核实记录（落盘样本零均值双向振荡 + MATLAB
+// 参照 preprocessBlock 的 butter/filtfilt + DAS 用法）。
+// 因此下面的 phasePerKhz 是 ogprog「kHz→rad」契约的遗留系数：它原本与
+// computeFrequency 的 scale 精确配对（scale × phasePerKhz = π/maxIntVal），
+// 而 computeFrequency 现为 identity，配对已断，故 phase*_display 目前既非
+// 差分相位也非累积相位。该修复本轮搁置，不影响滤波插入点。
+// 高/低通零相位滤波仍只在 processFrontendSignal() 作用一次，逐 A-line 独立。
 void FrontendPreprocessor::prepareDisplayData(TriggerGroup& group) {
     const int n = std::min(group.sampleCount,
         std::min(static_cast<int>(group.freqA.size()),

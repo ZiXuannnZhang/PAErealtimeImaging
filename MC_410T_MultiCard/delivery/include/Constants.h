@@ -33,6 +33,11 @@ constexpr double SAMPLE_INTERVAL_NS   = 8.0;
 //  差分相位/频率转换系数
 // freq_kHz = delta_phi_int16 / 32768 * (250e6 / 2pi) / 1000 = delta_phi * 1.21468
 constexpr double FREQ_SCALE_KHZ       = 1.21468;
+// 载荷语义核实（2026-09-23）：上述 Δφ→kHz 契约【已不适用于当前数据】。
+// 落盘/显示/成像的 freqA/freqB 实测为零均值双向振荡的时域幅度波形（整数、
+// 无缩放透传），既非 Δφ 也非 kHz。完整证据见 include/DataTypes.h 的核实记录。
+// 新代码不要用本系数做换算；此处保留仅为历史追溯。
+// （Phase 显示积分系数失去 scale 配对的问题已知，本轮搁置。）
 
 //  线程模型参数 
 constexpr int    PROC_BATCH_SIZE      = 512;
