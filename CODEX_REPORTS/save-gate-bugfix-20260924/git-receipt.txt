@@ -1,0 +1,41 @@
+GIT RECEIPT — save-gate-bugfix-20260924
+CAPTURED=2026-09-23T18:39:31Z
+
+=== branch ===
+codex/save-gate-bugfix-20260924
+
+=== git rev-parse HEAD ===
+466074030a9e82aac0fa6569b8a1fdc5d8e29a82
+
+=== git status --porcelain --untracked-files=no ===
+(empty above = tracked tree clean)
+
+=== git log --oneline -5 ===
+4660740 fix: never rewrite saved data; drive the frontend gate from 单圈总A-line数
+40102ea docs: record frontend filter stage build and regression receipt
+093f8cc feat: land per-A-line zero-phase high/low-pass frontend filtering
+25804b4 docs: record frontend payload semantics verification
+4a11917 docs: record frontend preprocessor stage build and regression receipt
+
+=== git diff --stat 40102ea..HEAD ===
+ MC_410T_MultiCard/delivery/include/AcqConfig.h     |  32 +++++-
+ MC_410T_MultiCard/delivery/include/FileSaver.h     |  20 +++-
+ .../PaimageAcquisition/AutoSaveRoundCoordinator.h  |   6 +
+ .../delivery/include/RingConfigDialog.h            |   5 +
+ MC_410T_MultiCard/delivery/src/FileSaver.cpp       |  84 +++++++++++---
+ MC_410T_MultiCard/delivery/src/MainWindow.cpp      |  54 ++++++---
+ .../AutoSaveRoundCoordinator.cpp                   | 125 +++++++++++++++------
+ .../delivery/src/RingConfigDialog.cpp              |  10 +-
+ .../tests/auto_save_round_coordinator_test.cpp     |  40 +++++++
+ .../tests/filesaver_round_boundary_test.cpp        | 110 ++++++++++++++++--
+ .../delivery/tests/paimage_host_output_test.cpp    |  72 ++++++++++++
+ 11 files changed, 479 insertions(+), 79 deletions(-)
+
+=== local HEAD ===
+466074030a9e82aac0fa6569b8a1fdc5d8e29a82
+=== origin/codex/save-gate-bugfix-20260924 ===
+fatal: ambiguous argument 'origin/codex/save-gate-bugfix-20260924': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+origin/codex/save-gate-bugfix-20260924
+=== ls-remote ===

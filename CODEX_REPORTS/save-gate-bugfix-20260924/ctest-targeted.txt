@@ -1,0 +1,37 @@
+TARGETED CTEST — save-gate-bugfix-20260924
+IMPLEMENTATION_SOURCE_SHA=466074030a9e82aac0fa6569b8a1fdc5d8e29a82
+TEST_TREE=D:\Claudecode\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\tests_save_gate_bugfix_20260924
+TEST_TREE_REBUILD_BEFORE_RUN=ninja: no work to do.
+COMMAND=ctest -R "filesaver_round_boundary_test|auto_save_round_coordinator_test|paimage_host_output_test|count_boundary_save_binding_test|session_boundary_test|session_boundary_receiver_test|data_processor_imaging_isolation_test|frontend_preprocessor_test|timeout_presentation_test|ring_block_assembler_test|ring_round_identity_test|data_processor_batch_test|imaging_bypass_test" --output-on-failure
+=== BEGIN CTEST OUTPUT ===
+Test project D:/Claudecode/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/tests_save_gate_bugfix_20260924
+      Start  1: timeout_presentation_test
+ 1/13 Test  #1: timeout_presentation_test ...............   Passed    0.02 sec
+      Start  2: ring_block_assembler_test
+ 2/13 Test  #2: ring_block_assembler_test ...............   Passed    0.14 sec
+      Start  3: imaging_bypass_test
+ 3/13 Test  #3: imaging_bypass_test .....................   Passed    0.04 sec
+      Start  4: data_processor_imaging_isolation_test
+ 4/13 Test  #4: data_processor_imaging_isolation_test ...   Passed    0.06 sec
+      Start  5: frontend_preprocessor_test
+ 5/13 Test  #5: frontend_preprocessor_test ..............   Passed    0.04 sec
+      Start 16: session_boundary_test
+ 6/13 Test #16: session_boundary_test ...................   Passed    1.62 sec
+      Start 17: session_boundary_receiver_test
+ 7/13 Test #17: session_boundary_receiver_test ..........   Passed   12.05 sec
+      Start 18: data_processor_batch_test
+ 8/13 Test #18: data_processor_batch_test ...............   Passed    0.06 sec
+      Start 26: paimage_host_output_test
+ 9/13 Test #26: paimage_host_output_test ................   Passed    0.61 sec
+      Start 27: filesaver_round_boundary_test
+10/13 Test #27: filesaver_round_boundary_test ...........   Passed    0.48 sec
+      Start 29: ring_round_identity_test
+11/13 Test #29: ring_round_identity_test ................   Passed    0.03 sec
+      Start 30: auto_save_round_coordinator_test
+12/13 Test #30: auto_save_round_coordinator_test ........   Passed    0.08 sec
+      Start 31: count_boundary_save_binding_test
+13/13 Test #31: count_boundary_save_binding_test ........   Passed    0.41 sec
+
+100% tests passed, 0 tests failed out of 13
+
+Total Test time (real) =  15.66 sec

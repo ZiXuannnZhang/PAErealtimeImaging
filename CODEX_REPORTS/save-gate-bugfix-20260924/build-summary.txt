@@ -1,0 +1,117 @@
+bug1 前端刷新闸门 4000 写死 + bug2 自动保存数据被截断覆盖 — Windows 构建摘要
+================================================================================
+
+TASK=实机验收发现的两个历史 bug 修复（零相位滤波验收附带发现）
+TASK_TYPE=BUGFIX（无独立任务文档；根因/范围由用户在本轮逐项拍板）
+WORKDIR=D:\Claudecode\PAERealtimeImaging\MC_410T_MultiCard\delivery
+
+BUILD_TARGET_BRANCH=codex/save-gate-bugfix-20260924
+STARTING_SHA=40102eae6f78f61c4d5ad4e4a32e7ce4c82f90d6
+  (= codex/frontend-filter-stage-20260923 tip。理由：零相位滤波尚未进 main，而本次
+   要改的 MainWindow.cpp / NetworkController.cpp / RingConfigDialog 与滤波分支共享；
+   从 origin/main 开会把两批改动错开。未 merge / rebase / cherry-pick 任何分支。)
+IMPLEMENTATION_SOURCE_SHA=466074030a9e82aac0fa6569b8a1fdc5d8e29a82
+TRACKED_TREE_CLEAN_BEFORE_BUILD=true
+
+PRODUCTION BUILD
+----------------
+BUILD_COMMAND=cmd /c ".\build_mingw_debug.cmd"
+BUILD_EXIT_CODE=0
+BUILD_ERRORS=0
+BUILD_LOCAL=2026-09-24 (UTC+8)
+
+CONFIGURE_PRESET=mingw-debug
+BUILD_PRESET=mingw-debug-build
+BUILD_TYPE=Debug
+USE_ZEROMQ=ON
+CXX_STANDARD=C++17
+GENERATOR=Ninja
+
+TOOLCHAIN (preflight: all four canonical paths present before configure):
+CMAKE=3.30.5 (D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe)
+COMPILER=GNU 13.1.0 (D:\Qt\Qt6.8.0\Tools\mingw1310_64\bin\g++.exe)
+NINJA=1.12.1 (D:\Qt\Qt6.8.0\Tools\Ninja\ninja.exe)
+QT=Qt 6.8.0 (D:\Qt\Qt6.8.0\6.8.0\mingw_64)
+
+BUILD_CACHE_NOTE:
+build/mingw_debug 的既有 cache 属于同一工作区根（D:\Claudecode\PAERealtimeImaging），
+build_mingw_debug.cmd 在 IMPLEMENTATION_SOURCE_SHA 上重新 configure 成功
+（Configuring done / Generating done），无需清 build 子目录。build/ring_recon_cuda
+未触碰。
+
+CONFIGURE/BUILD LOG SUMMARY:
+  -- Configuring done / -- Generating done
+  -- Build files have been written to: .../build/mingw_debug
+  windeployqt executed (Qt runtime + plugins deployed next to the exe)
+  3 warnings, all non-fatal windeployqt notices (missing Qt translations
+  catalogs.json, missing dxcompiler/dxil, runtime DLLs resolved from PATH).
+  0 compiler errors.
+
+BUILD_IDENTITY (build/mingw_debug/generated/PaimageAcquisition/BuildIdentity.h):
+PAIMAGE_GIT_SHA=466074030a9e82aac0fa6569b8a1fdc5d8e29a82
+PAIMAGE_TRACKED_DIRTY=false
+PAIMAGE_BUILD_TYPE=Debug
+PAIMAGE_COMPILER=GNU 13.1.0
+PAIMAGE_PRODUCT_BASELINE=e66a29bfbbaa6534911a23d48e8624fb8d552bec
+PAIMAGE_SOURCE_SHA256=2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec
+=> PAIMAGE_GIT_SHA == IMPLEMENTATION_SOURCE_SHA，TRACKED_DIRTY=false ✓
+
+TEST BUILD (separate CMake project over delivery/tests):
+TEST_TREE=MC_410T_MultiCard/delivery/build/tests_save_gate_bugfix_20260924
+SOURCE_DIR=MC_410T_MultiCard/delivery/tests
+CONFIGURE=cmake -S tests -B build/tests_save_gate_bugfix_20260924 -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_PREFIX_PATH=D:/Qt/Qt6.8.0/6.8.0/mingw_64
+          -DCMAKE_C_COMPILER=D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gcc.exe
+          -DCMAKE_CXX_COMPILER=D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe
+          -DCMAKE_MAKE_PROGRAM=D:/Qt/Qt6.8.0/Tools/Ninja/ninja.exe
+          -DQt6_DIR=D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/cmake/Qt6
+CONFIGURE_EXIT_CODE=0
+BUILD=cmake --build build/tests_save_gate_bugfix_20260924 -j 8
+BUILD_EXIT_CODE=0
+  （313 个编译/链接目标，0 compiler errors）
+NOTE: -DCMAKE_PREFIX_PATH 是必需的，否则 tests/CMakeLists.txt 里
+find_package(Qt6 COMPONENTS Widgets) 会报 "Failed to find required Qt
+component Widgets"。
+CMAKE_C_COMPILER 未使用告警：tests/CMakeLists.txt 只启用 CXX，属预期。
+
+TEST_TREE_REBUILD_BEFORE_FINAL_RUN=ninja: no work to do
+  （被测二进制确实由最终源码树构建，而非提交前的旧产物）
+
+TESTS EXECUTED: see ctest-targeted.txt (13 targeted) and ctest-full.txt (44 total)
+TESTS RESULT  : targeted 13/13 PASS; full 44/44 PASS (0 FAIL / 0 SKIP / 0 NOT_RUN)
+                测试总数与上一轮 44 一致：本轮只新增/改写既有用例内部断言，
+                未新增也未删除 add_test 注册项。
+
+COUNTER-PROOF (判别力反证，取证后已还原):
+把 FileSaver.cpp 整体换回修复前版本并重建 filesaver_round_boundary_test 后运行：
+  14 FAILURE(S)，全部落在覆盖类断言上——
+    T10 first measurement file is never rewritten by the second
+    T10 second measurement lands on the next free sequence
+    T10 third measurement leaves file 000 intact
+    T10 pre-suspend file holds the third measurement's first round
+    T10 post-resume file holds the adopted round
+    T10 final rollover file holds the new round
+    T11 committed bytes survive a late same-generation frame
+    T11 the B channel of the sealed file is intact too
+    T11 the late frame lands on a fresh sequence
+    T12 previous round file survives a source change
+    T12 the physical-round advance is not cancelled by the source change
+    T13 same-directory generation change keeps 000 intact
+    T13 same-directory generation change continues the sequence
+    T13 same-directory generation change keeps B 000 intact
+  与覆盖无关的断言（轮次轮转计数、轮转元数据、T13 新目录从空闲序号起、
+  T11 封存前内容）仍然通过——证明这批断言确实只对"覆盖"这件事有判别力。
+反证后已把 FileSaver.cpp 还原为修复版（含 QIODevice::NewOnly），并重跑
+build + 全量 ctest = 44/44 PASS。
+
+KNOWN LIMITATIONS / NOT VERIFIED:
+- 以上全部为 source/code correctness + automated build/test 证据。不含任何实机
+  验证结论，也不含硬件根因归因。
+- bug1 的阈值"接线"（RingConfigDialog 信号 → NetworkController、监听启动注入
+  AcqConfig）位于 MainWindow/UI 层，没有可用的单元测试宿主；本轮以纯函数
+  ringLogicalTriggersPerRound() 的 G3 断言 + 闸门行为的 G1/G2 断言 + 代码路径
+  复核覆盖，接线正确性需由实机复核清单确认。
+- FileSaver 的成员状态（m_fileChannel* / m_writeAccum* / m_fileSequence /
+  m_currentGen）自身无同步，安全性依赖"所有调用方串在同一 saving worker 上"
+  这一不变量；本轮未加断言、未做 ThreadSanitizer 验证。
