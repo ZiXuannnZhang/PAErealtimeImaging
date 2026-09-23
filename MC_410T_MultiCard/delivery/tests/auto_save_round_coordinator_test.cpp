@@ -213,6 +213,46 @@ int main(int argc, char** argv)
               "A6 empty base directory disables configuration");
     }
 
+    // A7/A8: 自动保存文件夹编号不得与磁盘上已有的会话文件夹撞号。
+    // directoryPreparer_ 的默认实现是 mkpath，对已存在目录同样返回 true，只靠
+    // prepared 判定会把新会话写进旧文件夹——FileSaver 随后在其中开新序号，旧
+    // 轮次的命名空间从此被两个会话共用，成为"后写数据落进过往文件夹"的入口。
+    {
+        QTemporaryDir root;
+        check(root.isValid(), "A7 temporary root");
+        check(QDir().mkpath(QDir(root.path()).filePath("001")), "A7 seed 001");
+        check(QDir().mkpath(QDir(root.path()).filePath("002")), "A7 seed 002");
+        // 1000 号段：历史 scanMaxAutoFolder 只认恰好 3 字符的名字，会直接漏掉它，
+        // 于是下次启动把编号退回去复用旧文件夹。
+        check(QDir().mkpath(QDir(root.path()).filePath("1000")), "A7 seed 1000");
+        check(QDir().mkpath(QDir(root.path()).filePath("notes")), "A7 seed non-numeric");
+
+        check(AutoSaveRoundCoordinator::scanMaxDirectoryNumber(root.path()) == 1000,
+              "A8 scanMaxDirectoryNumber sees the 1000 block");
+        QTemporaryDir emptyRoot;
+        check(AutoSaveRoundCoordinator::scanMaxDirectoryNumber(emptyRoot.path()) == 0,
+              "A8 scanMaxDirectoryNumber on an empty base returns 0");
+
+        AutoSaveRoundCoordinator coordinator;
+        coordinator.configure(
+            root.path(),
+            static_cast<std::uint64_t>(
+                AutoSaveRoundCoordinator::scanMaxDirectoryNumber(root.path())));
+        const auto first = coordinator.beginSession(71);
+        check(first.committed && first.newSessionGen == 1001 &&
+                  first.directory == QDir(root.path()).filePath("1001"),
+              "A7 allocation continues above the on-disk maximum");
+
+        // 即便 lastDirectoryNumber 被低估（历史扫描漏掉 1000 号段的故障模式），
+        // commitBoundary 也必须跳过已存在的目录，而不是把新会话塞进去。
+        AutoSaveRoundCoordinator reckless;
+        reckless.configure(root.path(), 0);
+        const auto second = reckless.beginSession(72);
+        check(second.committed && second.newSessionGen == 3 &&
+                  second.directory == QDir(root.path()).filePath("003"),
+              "A7 an underestimated scan still skips directories that already exist");
+    }
+
     if (g_failures == 0) {
         std::cout << "auto_save_round_coordinator_test: ALL PASS\n";
         return 0;

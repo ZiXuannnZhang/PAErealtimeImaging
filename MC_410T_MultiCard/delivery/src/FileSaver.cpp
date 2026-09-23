@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 
 // F16C 快速路径：/arch:AVX2 时 MSVC 定义 __AVX__，启用 F16C 指令集
 // _mm256_cvtps_ph: 8×float32 → 8×float16，一条指令，约为标量实现速度的8倍
@@ -122,6 +123,8 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
     m_currentFileTriggers = 0;
     m_currentSourceIPv4 = 0;
     resetPhysicalRoundState();
+    // 不保证从 000 开始，只保证不覆盖：复用一个已有数据的目录时让号到空闲序号。
+    resolveFreeSequence();
     m_saving.store(true, std::memory_order_release);
     emit statusMessage(QString("Card%1: 开始保存到 %2").arg(m_cardId + 1).arg(directory));
 }
@@ -166,42 +169,85 @@ void FileSaver::recordRollover(const FileRolloverInfo& info) {
                     info.oldFileTriggerCount, info.manualMode);
 }
 
-// 
+//
 // 文件名生成
-// 
-QString FileSaver::generateFileName(const QString& channel) const {
+//
+QString FileSaver::fileNameFor(const QString& channel, int sequence) const {
     QString n = m_fileSuffix.isEmpty()
         ? QString("Card%1_Ch%2_%3.dat")
               .arg(m_cardId + 1)
               .arg(channel)
-              .arg(m_fileSequence, 3, 10, QChar('0'))
+              .arg(sequence, 3, 10, QChar('0'))
         : QString("Card%1_Ch%2_%3_%4.dat")
               .arg(m_cardId + 1)
               .arg(channel)
               .arg(m_fileSuffix)
-              .arg(m_fileSequence, 3, 10, QChar('0'));
+              .arg(sequence, 3, 10, QChar('0'));
     return QDir(m_saveDirectory).filePath(n);
 }
 
-// 
+QString FileSaver::generateFileName(const QString& channel) const {
+    return fileNameFor(channel, m_fileSequence);
+}
+
+// 落盘不变量第一道防线：任何一次开文件之前，先把序号让到一个 A/B 两侧都
+// 不存在的名字上。截断式重开（同 sessionGen 残留帧、sourceIPv4 变化、
+// startSaving 复用目录）因此不可能命中已有文件。探测从 m_fileSequence 起
+// 向后进行，正常情况下 0 次跳过，只在真正撞名时代价才出现。
+int FileSaver::resolveFreeSequence() {
+    const int start = m_fileSequence < 0 ? 0 : m_fileSequence;
+    // 有界探测：穷尽后保持原序号，交由 NewOnly 打开失败处理（绝不截断）。
+    constexpr long long kMaxProbe = 1000000;
+    long long candidate = start;
+    for (long long probe = 0; probe < kMaxProbe; ++probe, ++candidate) {
+        if (candidate > static_cast<long long>((std::numeric_limits<int>::max)()))
+            break;
+        const int seq = static_cast<int>(candidate);
+        if (QFile::exists(fileNameFor(QStringLiteral("A"), seq)) ||
+            QFile::exists(fileNameFor(QStringLiteral("B"), seq)))
+            continue;
+        if (seq != start) {
+            FileRolloverInfo info;
+            info.happened = true;
+            info.reason = QStringLiteral("sequence_collision");
+            info.oldRoundGeneration = m_currentPhysicalRoundGeneration;
+            info.newRoundGeneration = m_currentPhysicalRoundGeneration;
+            info.oldFileSequence = start;
+            info.oldFileTriggerCount = m_currentFileTriggers;
+            info.newFileSequence = seq;
+            info.manualMode = (m_currentGen == 0);
+            recordRollover(info);
+        }
+        m_fileSequence = seq;
+        return seq;
+    }
+    m_fileSequence = start;
+    return start;
+}
+
+//
 // 文件操作
-// 
+//
 void FileSaver::openNewFiles(uint32_t sourceIPv4) {
     closeFiles();
     m_currentSourceIPv4 = sourceIPv4;
 
     QDir().mkpath(m_saveDirectory);
 
+    // 先让号，再独占创建。两道防线缺一不可：前者给出不撞名的序号，
+    // 后者保证即使并发下撞名也以失败告警，而不是静默截断已有数据。
+    resolveFreeSequence();
+
     m_fileChannelA = new QFile(generateFileName("A"));
     m_fileChannelB = new QFile(generateFileName("B"));
 
-    if (!m_fileChannelA->open(QIODevice::WriteOnly)) {
+    if (!m_fileChannelA->open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
         emit errorOccurred(QString("Card%1: 无法打开文件 %2: %3")
             .arg(m_cardId + 1).arg(m_fileChannelA->fileName())
             .arg(m_fileChannelA->errorString()));
         delete m_fileChannelA; m_fileChannelA = nullptr;
     }
-    if (!m_fileChannelB->open(QIODevice::WriteOnly)) {
+    if (!m_fileChannelB->open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
         emit errorOccurred(QString("Card%1: 无法打开文件 %2: %3")
             .arg(m_cardId + 1).arg(m_fileChannelB->fileName())
             .arg(m_fileChannelB->errorString()));
@@ -282,15 +328,19 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         flushWriteBuffers();
         closeFiles();
         m_currentGen = gen;
-        m_fileSequence = 0;
         m_currentFileTriggers = 0;
         m_dropGen = 0;
         // A new auto-save session is a new measurement: physical round file
         // state must not inherit from the previous session.
         resetPhysicalRoundState();
+        // 序号只在目录真的变化时归零。gen=0（手动）或解析不到新目录时会沿用
+        // 当前目录，此时归零等于让新一轮从头占用旧序号：即便 resolveFreeSequence()
+        // 能兜住不致覆盖，同一目录内的编号也会失去单调性。
+        bool directoryChanged = false;
         if (m_dirResolver && gen != 0) {
             const QString d = m_dirResolver(gen);
             if (!d.isEmpty()) {
+                directoryChanged = (d != m_saveDirectory);
                 m_saveDirectory = d;
             } else {
                 // 方案C：目录未注册（正常流程不应发生）——告警并丢弃本会话数据，
@@ -300,6 +350,8 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
                 m_dropGen = gen;
             }
         }
+        if (directoryChanged)
+            m_fileSequence = 0;
     }
     // 方案C：目录缺失的会话代数据直接丢弃
     if (m_dropGen != 0 && gen == m_dropGen)
@@ -334,11 +386,12 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         }
     }
 
-    // 打开文件（首次 或 IP 来源变化时）
+    // 打开文件（首次 或 IP 来源变化时）。
+    // IP 来源变化不再重置序号：归零既会把上一来源的 _000 顶掉，还会就地抵消
+    // 物理轮次轮转刚做的 ++m_fileSequence「安全推进」。新来源改落到下一个空闲
+    // 序号，旧文件保持不动（见 FileSaver.h 的落盘不变量）。
     if (!m_fileChannelA || !m_fileChannelB ||
         group->sourceIPv4 != m_currentSourceIPv4) {
-        if (group->sourceIPv4 != m_currentSourceIPv4)
-            m_fileSequence = 0;  // 新 IP 来源，文件序号重置
         openNewFiles(group->sourceIPv4);
     }
 
@@ -414,8 +467,9 @@ void FileSaver::suspendForSourceRestart() {
     const bool hadData=m_currentFileTriggers>0;
     stopSaving();
     // The immutable source listener is rebuilt when sample count changes.
-    // Continue the host file sequence rather than reopening/truncating the
-    // file containing the preceding sample layout. Format and names unchanged.
+    // .dat 无文件头，同一文件里混入不同 sampleCount 的记录会让离线解析失去
+    // 记录边界，所以换布局必须换文件（而不是为了防覆盖——防覆盖已由
+    // resolveFreeSequence() + NewOnly 负责）。Format and names unchanged.
     if(hadData)++m_fileSequence;
 }
 

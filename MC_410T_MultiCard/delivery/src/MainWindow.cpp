@@ -18,6 +18,7 @@
 #include "StartupPolicy.h"
 #include "SystemCaptureStatus.h"
 #include "PaimageAcquisition/CardDiscovery.h"
+#include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QSaveFile>
@@ -2547,7 +2548,26 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     // 数据格式参数：与线性实例相同来源（注册表，默认 250 MSa/s 满速率 32bit Q16.16）
     cfg.bitsPerChannel = m_bitsPerChannel;
     cfg.sampleIntervalNs = m_sampleIntervalNs;
+    // 每圈设计触发数：环形模式下由「单圈总A-line数 / 启用通道数」推导。
+    // 必须在这里写进 AcqConfig——startPaimage 用 m_config = config 整体覆盖，
+    // 若仍带上注册表默认4000，任何先前下发的环形推导值都会被抹掉，前端刷新
+    // 闸门（logicalTriggerIndex >= 阈值即不再推前端）就停在写死的 4000，
+    // 表现为触发数过 4000 后时域/频域显示与实时成像不再刷新而保存照常。
     cfg.logicalTriggersPerRound = m_logicalTriggersPerRound;
+    if (m_imagingController && m_imagingController->isRingMode()) {
+        const RingReconCudaConfig &ringCfg = m_imagingController->ringConfig();
+        const int derived = ringLogicalTriggersPerRound(ringCfg.alinesPerFrame,
+                                                        ringCfg.enabledChannelCount);
+        if (derived > 0) {
+            cfg.logicalTriggersPerRound = derived;
+        } else {
+            logMessage(QStringLiteral("⚠️ 环形几何无法推导每圈设计触发数"
+                                      "（单圈总A-line数=%1 通道数=%2），闸门回退到默认 %3")
+                       .arg(ringCfg.alinesPerFrame)
+                       .arg(ringCfg.enabledChannelCount)
+                       .arg(m_logicalTriggersPerRound));
+        }
+    }
     {
         QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
         cfg.diagnosticLevel = qBound(0, settings.value("Diagnostics/Level", 1).toInt(), 2);
@@ -2758,25 +2778,13 @@ void MainWindow::onToggleSaveClicked()
 // =====================================================================
 // 自动保存（环形模式，物理轮次协调器精确分界）：
 //   基线目录 = 保存目录输入路径忽略最后一层（如 D:\zzx\data\run\01 → D:\zzx\data\run）
-//   勾选时扫描基线目录下三位数命名文件夹的最大编号，从最大编号+1 起分配。
+//   勾选时扫描基线目录下纯数字命名文件夹的最大编号，从最大编号+1 起分配
+//   （扫描见 AutoSaveRoundCoordinator::scanMaxDirectoryNumber）。
 //   目录准备与 generation 发布由 AutoSaveRoundCoordinator 完成；TimeoutBoundary
 //   与 CountBoundary 都在源线程同步提交，最终旧帧只负责应用已准备的展示目标。
 //   DataProcessor 在数据入队前按 measurementSession+roundGeneration 解析，
 //   FileSaver 按已解析 generation 路由目录。
 // =====================================================================
-static int scanMaxAutoFolder(const QString &base)
-{
-    int mx = 0;
-    QDir d(base);
-    const QFileInfoList list = d.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
-    for (const QFileInfo &fi : list) {
-        if (fi.fileName().size() != 3) continue;
-        bool ok = false;
-        const int v = fi.fileName().toInt(&ok);
-        if (ok && v >= 0) mx = qMax(mx, v);
-    }
-    return mx;
-}
 
 void MainWindow::applyAutoSaveCommitToUi(const AutoSaveCommit& commit)
 {
@@ -2880,6 +2888,8 @@ void MainWindow::queueAutoSaveFailure(const AutoSaveCommit& commit)
 
 // 方案B：在当前控制器上（重）建自动保存（勾选时与监听重启恢复共用）。
 // 重扫基线目录最大编号防止覆盖，分配下一目录并持续开启保存器。
+// 编号扫描在 AutoSaveRoundCoordinator::scanMaxDirectoryNumber：任意长度的纯
+// 数字文件夹名都计入，否则 1000 号段会失踪、下次启动把编号退回去复用旧文件夹。
 void MainWindow::initAutoSaveSavers()
 {
     if (!m_netController || !m_autoSaveEnabled) return;
@@ -2891,8 +2901,9 @@ void MainWindow::initAutoSaveSavers()
     const QFileInfo fi(ui->edtSaveDir->text().trimmed());
     const QString base = fi.absolutePath();
     if (base.isEmpty()) return;
-    m_netController->configureAutoSave(base,
-                                       static_cast<std::uint64_t>(scanMaxAutoFolder(base)));
+    m_netController->configureAutoSave(
+        base, static_cast<std::uint64_t>(
+                  paimage::AutoSaveRoundCoordinator::scanMaxDirectoryNumber(base)));
     const auto first = m_netController->beginAutoSaveSession(
         0, QStringLiteral("ui_session_start"));
     if (!first.failed) {
@@ -4336,6 +4347,14 @@ void MainWindow::ensureRingConfigDialog()
         if (!m_netController) return;
         m_netController->setFrontendFilterConfig(config);
     });
+    // 每圈设计触发数（= 单圈总A-line数 / 启用通道数）：前端刷新闸门阈值的唯一
+    // 来源。改参数即下发，不等实时成像开启、不等 svcReady——否则阈值会长期停在
+    // 注册表默认 4000。
+    connect(m_ringConfigDialog, &RingConfigDialog::ringRoundTriggersChanged,
+            this, [this](quint64 logicalTriggersPerRound) {
+        if (!m_netController) return;
+        m_netController->setLogicalTriggersPerRound(logicalTriggersPerRound);
+    });
 }
 
 void MainWindow::onImagingConfigClicked()
@@ -5328,7 +5347,8 @@ void MainWindow::configureRingAssembler()
         logMessage(QStringLiteral("[环形采集] 轮次配置不一致，拒绝初始化组包器"));
         return;
     }
-    const int logicalTriggersPerRound = cfg.alinesPerFrame / cfg.enabledChannelCount;
+    const int logicalTriggersPerRound =
+        ringLogicalTriggersPerRound(cfg.alinesPerFrame, cfg.enabledChannelCount);
     if (m_netController) {
         m_netController->setLogicalTriggersPerRound(
             static_cast<std::uint64_t>(logicalTriggersPerRound));

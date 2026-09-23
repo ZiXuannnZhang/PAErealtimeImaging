@@ -97,6 +97,12 @@ public:
                    std::uint64_t lastDirectoryNumber);
     void disable();
 
+    // 扫描基线目录下已有的纯数字文件夹名并返回最大编号（无则 0），供
+    // configure() 的 lastDirectoryNumber 使用。任意长度的纯数字名都计入：
+    // 只认"恰好 3 字符"会让 1000 号段（以及任何被改名的文件夹）失踪，
+    // 于是下次启动把编号退回去复用旧文件夹。非数字名不参与编号。
+    static int scanMaxDirectoryNumber(const QString& baseDirectory);
+
     void setDirectoryPreparer(DirectoryPreparer preparer);
     void setEventSink(EventSink sink);
 

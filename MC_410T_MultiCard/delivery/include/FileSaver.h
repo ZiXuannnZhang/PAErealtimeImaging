@@ -9,9 +9,11 @@
 // Low-frequency observability for file rollovers. Distinguishes capacity
 // rollovers (triggersPerFile) from physical-round rollovers
 // (TriggerGroup::roundGeneration) as required by the round-boundary contract.
+// "sequence_collision" records that the next free sequence had to be found by
+// skipping names that already exist on disk (see the no-overwrite invariant).
 struct FileRolloverInfo {
     bool happened = false;
-    QString reason;                 // "capacity" | "physical_round"
+    QString reason;                 // "capacity" | "physical_round" | "sequence_collision"
     uint64_t oldRoundGeneration = 0;
     uint64_t newRoundGeneration = 0;
     int oldFileSequence = 0;
@@ -30,6 +32,16 @@ struct FileRolloverInfo {
 // 文件命名：Card{N}_Ch{A|B}_{suffix}_{seq:03d}.dat
 //   N = cardId + 1（1-based）
 //   seq 从 000 开始，每满 triggersPerFile 后递增
+//
+// ── 落盘不变量：已写入磁盘的数据永不被改写 ──────────────────────
+//   打开文件一律独占创建（QIODevice::NewOnly），并在开之前由
+//   resolveFreeSequence() 自 m_fileSequence 起向后落到第一个 A/B 两侧都
+//   不存在的序号。因此任何一次重开（会话代边界 requestClose 之后的同代
+//   残留帧、sourceIPv4 变化、startSaving 复用目录、物理轮次轮转）都只会
+//   追加到新文件，绝不会截断重写同名已有文件。
+//   序号不主动作废、不归零：编号保持连号，避让只在真正撞名时发生（并以
+//   FileRolloverInfo::reason == "sequence_collision" 留痕）。
+// ────────────────────────────────────────────────────────────────
 // ============================================================
 class FileSaver : public QThread {
     Q_OBJECT
@@ -101,7 +113,13 @@ protected:
 private:
     void openNewFiles(uint32_t sourceIPv4);
     void closeFiles();
+    // 指定序号下的完整路径（generateFileName 即 fileNameFor(channel, m_fileSequence)）。
+    QString fileNameFor(const QString& channel, int sequence) const;
     QString generateFileName(const QString& channel) const;
+    // 落盘不变量的第一道防线：自 m_fileSequence 起向后找第一个 A/B 两侧都
+    // 不存在的序号并落位。撞名被跳过时记一条 "sequence_collision" 轮转。
+    // 探测有界，穷尽后保持原序号，交由 NewOnly 打开失败处理（绝不截断）。
+    int resolveFreeSequence();
     // Physical-round file state lifecycle: cleared on start/stop/suspend/resume
     // and on auto-save session-gen change so an old measurement can never
     // pollute a new measurement's round boundaries.

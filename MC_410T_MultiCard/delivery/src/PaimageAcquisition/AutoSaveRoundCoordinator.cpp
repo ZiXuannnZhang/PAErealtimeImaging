@@ -1,6 +1,7 @@
 #include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 
 #include <QDir>
+#include <QFileInfo>
 
 #include <limits>
 #include <utility>
@@ -59,6 +60,36 @@ void AutoSaveRoundCoordinator::disable()
     } else {
         currentGeneration_.store(0, std::memory_order_release);
     }
+}
+
+int AutoSaveRoundCoordinator::scanMaxDirectoryNumber(const QString& baseDirectory)
+{
+    int mx = 0;
+    const QFileInfoList list =
+        QDir(baseDirectory).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QFileInfo& fi : list) {
+        const QString name = fi.fileName();
+        if (name.isEmpty())
+            continue;
+        bool allDigits = true;
+        for (const QChar ch : name) {
+            if (ch < QLatin1Char('0') || ch > QLatin1Char('9')) {
+                allDigits = false;
+                break;
+            }
+        }
+        if (!allDigits)
+            continue;
+        bool ok = false;
+        const qint64 v = name.toLongLong(&ok);
+        if (!ok || v < 0)
+            continue;
+        const int capped = v > static_cast<qint64>((std::numeric_limits<int>::max)())
+                               ? (std::numeric_limits<int>::max)()
+                               : static_cast<int>(v);
+        mx = qMax(mx, capped);
+    }
+    return mx;
 }
 
 void AutoSaveRoundCoordinator::setDirectoryPreparer(DirectoryPreparer preparer)
@@ -272,43 +303,67 @@ AutoSaveRoundCoordinator::CommitResult AutoSaveRoundCoordinator::commitBoundary(
                        (std::numeric_limits<std::uint64_t>::max)() - 1u) {
                 fail(QStringLiteral("自动保存目录编号耗尽"));
             } else {
-                const std::uint64_t candidate = ++nextDirectoryNumber_;
-                const QString folder = QStringLiteral("%1")
-                    .arg(QString::number(candidate), 3, QChar('0'));
-                const QString directory = QDir(baseDirectory_).filePath(folder);
-                result.newSessionGen = candidate;
-                result.directory = directory;
-                reservedEvent = eventFromResult(Event::Kind::Reserved, result);
-                hasReservedEvent = true;
-
-                bool prepared = false;
-                try {
-                    prepared = directoryPreparer_ && directoryPreparer_(directory);
-                } catch (...) {
-                    prepared = false;
+                // 撞上磁盘上已有的自动保存文件夹时继续向上让号。directoryPreparer_
+                // 的默认实现是 mkpath，对已存在目录同样返回 true，只靠 prepared
+                // 判定会把新会话写进旧文件夹——FileSaver 随后在其中开新序号，旧
+                // 轮次的命名空间从此被两个会话共用。分配阶段就避开。
+                std::uint64_t candidate = 0;
+                QString directory;
+                constexpr int kMaxDirectoryProbe = 100000;
+                for (int probe = 0; probe < kMaxDirectoryProbe; ++probe) {
+                    if (nextDirectoryNumber_ >=
+                        (std::numeric_limits<std::uint64_t>::max)() - 1u) {
+                        fail(QStringLiteral("自动保存目录编号耗尽"));
+                        break;
+                    }
+                    const std::uint64_t attempt = ++nextDirectoryNumber_;
+                    const QString folder = QStringLiteral("%1")
+                        .arg(QString::number(attempt), 3, QChar('0'));
+                    const QString attemptDirectory = QDir(baseDirectory_).filePath(folder);
+                    if (QDir(attemptDirectory).exists())
+                        continue;
+                    candidate = attempt;
+                    directory = attemptDirectory;
+                    break;
                 }
-                if (!prepared) {
-                    // Do not insert a mapping or publish the candidate.  The
-                    // fault sentinel makes subsequent groups fail closed.
-                    --nextDirectoryNumber_;
-                    fail(QStringLiteral("无法创建/注册自动保存目录：%1").arg(directory));
+                if (candidate == 0) {
+                    if (!result.failed)
+                        fail(QStringLiteral("自动保存目录编号未找到空闲位置"));
                 } else {
-                    directories_.insert(candidate, directory);
-                    boundaryBindings_.insert(result.boundaryKey, candidate);
-                    roundBindings_.insert(roundKey, candidate);
-                    lookupFailureKeys_.remove(roundKey);
-                    hasLastBoundary_ = true;
-                    lastMeasurementSession_ = measurementSession;
-                    lastRoundGeneration_ = roundGeneration;
-                    lastBoundaryKind_ = boundaryKind;
-                    result.committed = true;
-                    result.enabled = true;
-                    result.publishedSessionGen = candidate;
-                    // The release store is the publication point.  The
-                    // mapping is already visible under mutex before this
-                    // store, so producers cannot observe an unregistered gen.
-                    currentGeneration_.store(candidate, std::memory_order_release);
-                    finalEvent = eventFromResult(Event::Kind::Committed, result);
+                    result.newSessionGen = candidate;
+                    result.directory = directory;
+                    reservedEvent = eventFromResult(Event::Kind::Reserved, result);
+                    hasReservedEvent = true;
+
+                    bool prepared = false;
+                    try {
+                        prepared = directoryPreparer_ && directoryPreparer_(directory);
+                    } catch (...) {
+                        prepared = false;
+                    }
+                    if (!prepared) {
+                        // Do not insert a mapping or publish the candidate.  The
+                        // fault sentinel makes subsequent groups fail closed.
+                        --nextDirectoryNumber_;
+                        fail(QStringLiteral("无法创建/注册自动保存目录：%1").arg(directory));
+                    } else {
+                        directories_.insert(candidate, directory);
+                        boundaryBindings_.insert(result.boundaryKey, candidate);
+                        roundBindings_.insert(roundKey, candidate);
+                        lookupFailureKeys_.remove(roundKey);
+                        hasLastBoundary_ = true;
+                        lastMeasurementSession_ = measurementSession;
+                        lastRoundGeneration_ = roundGeneration;
+                        lastBoundaryKind_ = boundaryKind;
+                        result.committed = true;
+                        result.enabled = true;
+                        result.publishedSessionGen = candidate;
+                        // The release store is the publication point.  The
+                        // mapping is already visible under mutex before this
+                        // store, so producers cannot observe an unregistered gen.
+                        currentGeneration_.store(candidate, std::memory_order_release);
+                        finalEvent = eventFromResult(Event::Kind::Committed, result);
+                    }
                 }
             }
         }

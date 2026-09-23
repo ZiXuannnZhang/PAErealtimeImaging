@@ -14,6 +14,9 @@
 //       boundary within one auto session
 //   T9  count-complete round followed by idle: no extra empty rollover file
 //   T10 saving lifecycle: restart/suspend/resume never inherit old round state
+//   T11 落盘不变量主契约：同 sessionGen 晚到帧不得截断已封存文件（bug2 回归）
+//   T12 sourceIPv4 变化不得归零序号、不得抵消物理轮次的安全推进
+//   T13 sessionGen 变化只有在目录真的变化时才重起编号
 
 #include "PaimageAcquisition/HostOutput.h"
 #include "FileSaver.h"
@@ -230,15 +233,17 @@ struct RoundFixture {
     }
 };
 
-TriggerGroupPtr makeGroup(std::uint16_t trig, std::uint64_t roundGen, int value)
+TriggerGroupPtr makeGroup(std::uint16_t trig, std::uint64_t roundGen, int value,
+                          std::uint64_t sessionGen = 0,
+                          std::uint32_t sourceIPv4 = 0x0100007f)
 {
     auto g = std::make_shared<TriggerGroup>();
     g->cardId = 0;
     g->triggerSeq = trig;
     g->sampleCount = kSamples;
     g->isComplete = true;
-    g->sourceIPv4 = 0x0100007f;
-    g->sessionGen = 0;
+    g->sourceIPv4 = sourceIPv4;
+    g->sessionGen = sessionGen;
     g->normalizationApplied = true;
     g->physicalDecision = PhysicalTriggerDecision::LogicalScan;
     g->roundGeneration = roundGen;
@@ -569,10 +574,16 @@ int main(int argc, char** argv)
         saver.stopSaving();
         check(saver.physicalRoundRolloverCount() == 0,
               "T10 restart with same generation never rolls over");
-        check(verifyFile(dir.path() + "/Card1_ChA_t10_000.dat", halvesOf({21, 22})),
-              "T10 second measurement owns file 000 fresh");
+        // 同一目录复用时落盘不变量生效：新测量落到下一个空闲序号，旧文件一个
+        // 字节都不动（历史实现在此截断重写 _000，等于抹掉测量 1 的数据）。
+        check(verifyFile(dir.path() + "/Card1_ChA_t10_000.dat", halvesOf({11, 12})),
+              "T10 first measurement file is never rewritten by the second");
+        check(verifyFile(dir.path() + "/Card1_ChA_t10_001.dat", halvesOf({21, 22})),
+              "T10 second measurement lands on the next free sequence");
         // Source restart path: suspend/resume resets round state too.
         saver.startSaving(dir.path(), 100, "t10");
+        check(verifyFile(dir.path() + "/Card1_ChA_t10_000.dat", halvesOf({11, 12})),
+              "T10 third measurement leaves file 000 intact");
         saver.consumeTriggerGroup(makeGroup(31, 0, 31));
         saver.suspendForSourceRestart();
         saver.resumeAfterSourceRestart();
@@ -585,12 +596,97 @@ int main(int argc, char** argv)
         check(info.oldRoundGeneration == 1 && info.newRoundGeneration == 2 &&
               info.oldFileTriggerCount == 1 && info.manualMode,
               "T10 rollover metadata captured (old=1,new=2,1 trigger sealed)");
-        check(verifyFile(dir.path() + "/Card1_ChA_t10_001.dat", halvesOf({41})),
+        check(verifyFile(dir.path() + "/Card1_ChA_t10_002.dat", halvesOf({31})),
+              "T10 pre-suspend file holds the third measurement's first round");
+        check(verifyFile(dir.path() + "/Card1_ChA_t10_003.dat", halvesOf({41})),
               "T10 post-resume file holds the adopted round");
-        check(verifyFile(dir.path() + "/Card1_ChA_t10_002.dat", halvesOf({42})),
+        check(verifyFile(dir.path() + "/Card1_ChA_t10_004.dat", halvesOf({42})),
               "T10 final rollover file holds the new round");
+        check(!QFile::exists(dir.path() + "/Card1_ChA_t10_005.dat"),
+              "T10 no extra empty file after the final rollover");
     } catch (const std::exception& e) {
         check(false, (QString("T10 exception: ") + e.what()).toUtf8().constData());
+    }
+
+    // ── T11: 落盘不变量主契约 —— 同代残留帧不得截断已封存文件 ──────────
+    // 自动保存边界提交成功后 NetworkController 会 requestCloseSavers() →
+    // FileSaver::serviceCloseRequest() 刷盘关文件，但并不推进 m_fileSequence。
+    // 十几分钟后任何仍带同一 sessionGen 的帧到达，就会走"句柄为空 → 重开"
+    // 这条路：历史实现用 QIODevice::WriteOnly 重开同名文件 = 打开即截断，
+    // 把该轮已落盘的数据换成那一小块晚到数据。这就是现场"002 里最后写的 .dat
+    // 被十几分钟后写入的未知来源数据截断重写"的机制。
+    try {
+        QTemporaryDir dir(QDir::currentPath() + "/round-t11-XXXXXX");
+        require(dir.isValid(), "T11 temp dir");
+        FileSaver saver(0);
+        const QString base = dir.path();
+        saver.setSessionDirResolver([&base](std::uint64_t) { return base; });
+        saver.startSaving(dir.path(), 100, "t11");
+        saver.consumeTriggerGroup(makeGroup(1, 0, 101, 7));
+        saver.consumeTriggerGroup(makeGroup(2, 0, 102, 7));
+        saver.requestClose();
+        saver.serviceCloseRequest();               // 边界后的落盘关闭
+        check(verifyFile(dir.path() + "/Card1_ChA_t11_000.dat", halvesOf({101, 102})),
+              "T11 sealed file holds the round before the late frame");
+        saver.consumeTriggerGroup(makeGroup(3, 0, 201, 7));   // 同 sessionGen 晚到帧
+        saver.stopSaving();
+        check(verifyFile(dir.path() + "/Card1_ChA_t11_000.dat", halvesOf({101, 102})),
+              "T11 committed bytes survive a late same-generation frame");
+        check(verifyFile(dir.path() + "/Card1_ChB_t11_000.dat", halvesOf({-101, -102})),
+              "T11 the B channel of the sealed file is intact too");
+        check(verifyFile(dir.path() + "/Card1_ChA_t11_001.dat", halvesOf({201})),
+              "T11 the late frame lands on a fresh sequence");
+    } catch (const std::exception& e) {
+        check(false, (QString("T11 exception: ") + e.what()).toUtf8().constData());
+    }
+
+    // ── T12: sourceIPv4 变化不得归零序号、不得抵消物理轮次的安全推进 ────
+    try {
+        QTemporaryDir dir(QDir::currentPath() + "/round-t12-XXXXXX");
+        require(dir.isValid(), "T12 temp dir");
+        FileSaver saver(0);
+        saver.startSaving(dir.path(), 2, "t12");
+        saver.consumeTriggerGroup(makeGroup(1, 0, 101, 0, 0x0100007f));
+        saver.consumeTriggerGroup(makeGroup(2, 0, 102, 0, 0x0100007f));
+        // 换物理轮次 +同时换来源 IP：物理轮次轮转会 ++m_fileSequence 作"安全
+        // 推进"，历史实现紧接着的 IP 归零会把它抵消并截断上一轮的 _000。
+        saver.consumeTriggerGroup(makeGroup(3, 1, 201, 0, 0x0200007f));
+        saver.stopSaving();
+        check(verifyFile(dir.path() + "/Card1_ChA_t12_000.dat", halvesOf({101, 102})),
+              "T12 previous round file survives a source change");
+        check(verifyFile(dir.path() + "/Card1_ChA_t12_001.dat", halvesOf({201})),
+              "T12 the physical-round advance is not cancelled by the source change");
+    } catch (const std::exception& e) {
+        check(false, (QString("T12 exception: ") + e.what()).toUtf8().constData());
+    }
+
+    // ── T13: sessionGen 变化只有在目录真的变化时才重起编号 ──────────────
+    try {
+        QTemporaryDir dir(QDir::currentPath() + "/round-t13-XXXXXX");
+        require(dir.isValid(), "T13 temp dir");
+        FileSaver saver(0);
+        const QString shared = QDir(dir.path()).filePath(QStringLiteral("shared"));
+        const QString fresh  = QDir(dir.path()).filePath(QStringLiteral("fresh"));
+        QString active = shared;
+        saver.setSessionDirResolver([&active](std::uint64_t) { return active; });
+        saver.startSaving(shared, 100, "t13");
+        saver.consumeTriggerGroup(makeGroup(1, 0, 101, 1));
+        // gen 1→2 但解析到同一目录：序号不得归零，否则会回头去顶 _000。
+        saver.consumeTriggerGroup(makeGroup(2, 0, 201, 2));
+        // gen 2→3 且目录变化：新目录从空闲序号起。
+        active = fresh;
+        saver.consumeTriggerGroup(makeGroup(3, 0, 301, 3));
+        saver.stopSaving();
+        check(verifyFile(shared + "/Card1_ChA_t13_000.dat", halvesOf({101})),
+              "T13 same-directory generation change keeps 000 intact");
+        check(verifyFile(shared + "/Card1_ChA_t13_001.dat", halvesOf({201})),
+              "T13 same-directory generation change continues the sequence");
+        check(verifyFile(shared + "/Card1_ChB_t13_000.dat", halvesOf({-101})),
+              "T13 same-directory generation change keeps B 000 intact");
+        check(verifyFile(fresh + "/Card1_ChA_t13_000.dat", halvesOf({301})),
+              "T13 a new directory starts at the first free sequence");
+    } catch (const std::exception& e) {
+        check(false, (QString("T13 exception: ") + e.what()).toUtf8().constData());
     }
 
     if (g_failures == 0) {

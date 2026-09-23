@@ -19,7 +19,31 @@
 //
 // 接收路线：WinSock（编译期确定，不可运行时切换）
 // ============================================================
+
+//  由环形扫描参数推导「每圈设计触发数」的唯一入口。
+//
+//  公式：每圈设计触发数 = 单圈总A-line数 / 启用通道数
+//  依据 RingBlockAssembler 的几何约定：每枚全局触发给每个启用通道 1 根 A-line，
+//  全局触发 g 按奇偶交替 wl1/wl2，故每通道每波长每圈 A-line 数 = 总数/(通道数×2)，
+//  而每圈触发枚数 = 2 × 每通道每波长 = 总数/通道数。RingConfigDialog 的
+//  alinesPerChannelPerFrame 换算与此逐字一致。
+//
+//  该结果就是 HostOutput 前端刷新闸门（logicalTriggerIndex >= 阈值即不再推前端）
+//  比对的阈值。环形模式下必须由它产生，任何写死的常量都不得参与：监听启动注入、
+//  RingConfigDialog::applyConfig 下发、configureRingAssembler 三处共用本函数，
+//  避免各处口径漂移。
+//
+//  几何非法（通道数<=0、总数<=0、不能整除、商<=0）返回 0，调用方保持原值不下发。
+inline int ringLogicalTriggersPerRound(int alinesPerFrame, int enabledChannelCount) noexcept {
+    if (alinesPerFrame <= 0 || enabledChannelCount <= 0) return 0;
+    if (alinesPerFrame % enabledChannelCount != 0) return 0;
+    return alinesPerFrame / enabledChannelCount;
+}
+
 struct AcqConfig {
+    // 仅作线性模式 / 尚无环形配置时的回退值。环形模式下每圈设计触发数一律由
+    // ringLogicalTriggersPerRound() 从「单圈总A-line数」推导，本常量不得生效；
+    // 它没有 UI 入口（只经 AcquisitionParams/LogicalTriggersPerRound 读写）。
     static constexpr int kDefaultLogicalTriggersPerRound = 4000;
     int         nCards       = 4;   // 启用的卡数（默认4；自动识别时由扫描在线数决定）
     std::string localBindIP;        // 控制 socket 本地绑定IP（空=INADDR_ANY）
@@ -42,9 +66,11 @@ struct AcqConfig {
     int socketTimestampMode = 0;
 
     // Canonical operational logical-trigger count for one physical round.
-    // It is persisted at AcquisitionParams/LogicalTriggersPerRound and is
-    // overridden by the ring configuration when ring mode is active. The
-    // normalizer never owns or guesses this product setting.
+    // 环形模式下取值来自 ringLogicalTriggersPerRound()（= 单圈总A-line数 /
+    // 启用通道数），在监听启动注入，且此后每次 RingConfigDialog::applyConfig
+    // 都重新下发；禁止回落到 kDefaultLogicalTriggersPerRound。线性模式/尚无
+    // 环形配置时才使用 AcquisitionParams/LogicalTriggersPerRound 的持久化值。
+    // The normalizer never owns or guesses this product setting.
     int logicalTriggersPerRound = kDefaultLogicalTriggersPerRound;
 
     // ══ 数据格式参数（真实采集固定 250 MSa/s 满速率，与 Constants.h 一致）══

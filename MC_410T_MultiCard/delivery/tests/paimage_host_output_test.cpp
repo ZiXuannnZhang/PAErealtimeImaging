@@ -1,5 +1,6 @@
 #include "PaimageAcquisition/HostOutput.h"
 #include "FrontendPreprocessor.h"
+#include "AcqConfig.h"
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <QDir>
@@ -451,6 +452,77 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
                     snapshot.currentPhysicalDistinctCount == 0 &&
                     snapshot.lastCompletedPhysicalDistinctCount == 0,
                 "HostOutput Session A policy seam");
+    }
+    // Frontend refresh gate: the threshold is the per-round designed trigger
+    // count derived from 「单圈总A-line数 / 启用通道数」, never a hard-coded 4000.
+    // Path split is what makes the field symptom "display+imaging frozen while
+    // saving continues" possible: card() owns raw save, sync() owns the frontend.
+    {
+        QTemporaryDir root(QDir::currentPath() + "/gate-XXXXXX");
+        require(root.isValid(), "gate temp dir");
+        FileSaver saver(0);
+        AcqConfig config;
+        config.acqTimeNs = 64;
+        std::atomic<int> frontends{0};
+        DataProcessor processor(0, nullptr, nullptr, config,
+            [&](const TriggerGroupPtr&) {
+                ++frontends;
+                return FrontendSubmitResult::Accepted;
+            });
+        // designed triggers/round = 5, no startup filter, count boundary disabled.
+        HostOutput output(32, 50, {&processor}, {&saver}, nullptr, nullptr, 5,
+                          {}, 0.0, 0, true);
+        output.beginSession(9001);
+        output.start();
+        auto saved = output.startSaving(root.path(), 100, "gate");
+        require(until([&] { return output.savingApplied(saved); }), "gate saving applied");
+        auto make = [](int trigger) {
+            auto f = std::make_shared<CardFrame>();
+            f->card = 0;
+            f->trigger = trigger;
+            f->measurementSession = 9001;
+            f->first = 1000000000LL + trigger;
+            f->closed = f->first;
+            f->complete = true;
+            f->reason = Decision::Complete;
+            f->bytes.resize(128);
+            return f;
+        };
+        for (int i = 0; i < 12; ++i) {
+            auto f = make(100 + i);
+            output.card(f);
+            output.sync(100 + i, {f}, false);
+        }
+        require(until([&] { return saver.savedCount() == 12; }),
+                "G1 raw save is untouched by the frontend gate");
+        require(until([&] { return frontends.load() == 5; }),
+                "G1 only the designed five logical triggers reach the frontend");
+        // Live threshold update: the gate must follow immediately, with no
+        // round boundary, no session boundary and no service restart.
+        output.setConfiguredLogicalTriggersPerRound(20);
+        for (int i = 12; i < 16; ++i) {
+            auto f = make(100 + i);
+            output.card(f);
+            output.sync(100 + i, {f}, false);
+        }
+        require(until([&] { return frontends.load() == 9; }),
+                "G2 the gate follows a live threshold update");
+        require(until([&] { return saver.savedCount() == 16; }),
+                "G2 raw save stays complete across the update");
+        output.stop();
+    }
+    // ringLogicalTriggersPerRound is the single derivation of that threshold.
+    {
+        require(ringLogicalTriggersPerRound(8000, 2) == 4000,
+                "G3 单圈总A-line数 8000 / 2 channels = 4000 designed triggers");
+        require(ringLogicalTriggersPerRound(20000, 2) == 10000,
+                "G3 derivation scales with 单圈总A-line数 instead of staying at 4000");
+        require(ringLogicalTriggersPerRound(8000, 1) == 8000,
+                "G3 a single channel equals the dialog value verbatim");
+        require(ringLogicalTriggersPerRound(8001, 2) == 0,
+                "G3 a non-divisible geometry is rejected");
+        require(ringLogicalTriggersPerRound(0, 2) == 0 && ringLogicalTriggersPerRound(8000, 0) == 0,
+                "G3 zero inputs are rejected");
     }
     // Full-resolution display preparation now lives in the Frontend Preprocessing
     // Stage and must preserve every acquired sample.

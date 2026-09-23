@@ -52,6 +52,11 @@ signals:
     // applyConfig 成功后发出，由 MainWindow 转发给
     // NetworkController::setFrontendFilterConfig（与重建配置下发相互独立）。
     void frontendFilterChanged(const frontend_filter::Config& config);
+    // applyConfig 成功后发出「每圈设计触发数」（= 单圈总A-line数 / 启用通道数，
+    // 由 ringLogicalTriggersPerRound() 推导），由 MainWindow 转发给
+    // NetworkController::setLogicalTriggersPerRound。这是前端刷新闸门阈值的
+    // 唯一来源：改参数即生效，不依赖实时成像是否已开启。
+    void ringRoundTriggersChanged(quint64 logicalTriggersPerRound);
 
 protected:
     void showEvent(QShowEvent *event) override;   // 每次显示时套用记忆的大小

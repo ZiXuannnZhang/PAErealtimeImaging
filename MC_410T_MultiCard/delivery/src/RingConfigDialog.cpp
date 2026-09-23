@@ -1,5 +1,6 @@
 #include "PaimageAcquisition/SettingsPath.h"
 #include "RingConfigDialog.h"
+#include "AcqConfig.h"
 #include "ImagingController.h"
 #include "RoundPolicySettings.h"
 
@@ -695,12 +696,19 @@ bool RingConfigDialog::applyConfig()
 
     int sysDelayCh[8][2] = {{0}};
     sysDelayPerChannel(sysDelayCh);
-    m_controller->configureRing(config(), sysDelayCh);
+    const RingReconCudaConfig applied = config();
+    m_controller->configureRing(applied, sysDelayCh);
     // 应用成功后将物理轮次启动策略同步给当前 NetworkController（MainWindow 转发）
     emit roundPolicyChanged(startupFilterTriggerCount(), disableCountBoundary());
     // 前端滤波参数经独立接线下发到 Frontend Preprocessing 配置（MainWindow 转发），
     // 与重建配置的下发相互独立。
     emit frontendFilterChanged(frontendFilterConfig());
+    // 每圈设计触发数 = 单圈总A-line数 / 启用通道数（前端刷新闸门阈值的唯一来源）。
+    // 改参数即下发，不等实时成像开启、不等 svcReady。
+    const int logicalTriggers =
+        ringLogicalTriggersPerRound(applied.alinesPerFrame, applied.enabledChannelCount);
+    if (logicalTriggers > 0)
+        emit ringRoundTriggersChanged(static_cast<quint64>(logicalTriggers));
     return true;
 }
 
