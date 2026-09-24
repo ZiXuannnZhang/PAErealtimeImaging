@@ -111,8 +111,11 @@ protected:
     void run() override;
 
 private:
+    // 返回值 = 本次开文件前那次关文件刷盘是否成功；失败时不再开新文件。
     void openNewFiles(uint32_t sourceIPv4);
-    void closeFiles();
+    // 返回值 = 关文件前那次刷盘是否成功。~FileSaver 调用时忽略结果（析构里
+    // 不得发信号）；openNewFiles 用它决定要不要继续开新文件。
+    bool closeFiles();
     // 指定序号下的完整路径（generateFileName 即 fileNameFor(channel, m_fileSequence)）。
     QString fileNameFor(const QString& channel, int sequence) const;
     QString generateFileName(const QString& channel) const;
@@ -120,6 +123,10 @@ private:
     // 不存在的序号并落位。撞名被跳过时记一条 "sequence_collision" 轮转。
     // 探测有界，穷尽后保持原序号，交由 NewOnly 打开失败处理（绝不截断）。
     int resolveFreeSequence();
+    // 写盘故障处理：停保存 + 一次性告警（errorOccurred 已接 UI 日志）。
+    // 刻意不 closeFiles()，因此不存在 closeFiles <-> flushWriteBuffers 重入，
+    // 也不会被 ~FileSaver 隐式触发。由各非析构调用点显式调用。
+    void handleWriteFault(const QString& where);
     // Physical-round file state lifecycle: cleared on start/stop/suspend/resume
     // and on auto-save session-gen change so an old measurement can never
     // pollute a new measurement's round boundaries.
@@ -173,5 +180,23 @@ private:
     std::vector<uint16_t> m_writeAccumB;
     int m_accumTriggers = 0;
 
-    void flushWriteBuffers();  // 将积累缓冲写入当前打开的文件并清空
+    // 将积累缓冲写入当前打开的文件并清空。
+    // 返回 false = 本次刷盘失败（IO错误或短写），已把 A/B 双双回退到本次刷盘
+    // 前的记录边界并丢弃本段缓冲——.dat 定长记录无文件头，半个记录会让该文件
+    // 的记录边界永久错位，宁可丢整段也不留半条。本函数只返回 bool 不 emit：
+    // 它也被 closeFiles() / ~FileSaver() 调用，析构里不得发信号。
+    bool flushWriteBuffers();
+    // 首次写盘故障只告警一次（磁盘满通常是持续性的，不要每段刷一条）。
+    // startSaving() 开新会话时复位。
+    bool m_writeFaulted = false;
+
+#ifdef FILESAVER_TEST_SEAM
+public:
+    // 测试专用故障注入口（不编译进生产目标，与 FRONTEND_PREPROCESSOR_TEST_SEAM
+    // 同套路）。mode: 0=正常 1=两通道都失败 2=仅 A 失败 3=仅 B 失败。
+    // 通过把 write() 返回值改写为 -1 模拟失败；回退逻辑负责撤掉已落的字节。
+    void setWriteFaultForTest(int mode) { m_writeFaultForTest = mode; }
+private:
+    int m_writeFaultForTest = 0;
+#endif
 };

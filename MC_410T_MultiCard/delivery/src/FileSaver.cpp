@@ -109,9 +109,13 @@ FileSaver::~FileSaver() {
 // 
 void FileSaver::startSaving(const QString& directory, int triggersPerFile,
                              const QString& suffix) {
-    // 关闭之前可能仍打开的文件（stopSaving 未及时关闭时）
-    flushWriteBuffers();
-    closeFiles();
+    // 关闭之前可能仍打开的文件（stopSaving 未及时关闭时）。关文件前那一次刷盘
+    // 若失败，写盘链路已不可信：告警停保存并保持原目录/原参数不动，绝不带着
+    // 一次已知故障去换目录开新文件。
+    if (!closeFiles()) {
+        handleWriteFault(QStringLiteral("开启新会话前的落盘"));
+        return;
+    }
     m_writeAccumA.clear();
     m_writeAccumB.clear();
     m_accumTriggers = 0;
@@ -122,6 +126,7 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
     m_fileSequence      = 0;
     m_currentFileTriggers = 0;
     m_currentSourceIPv4 = 0;
+    m_writeFaulted = false;   // 新会话重新武装写盘故障告警
     resetPhysicalRoundState();
     // 不保证从 000 开始，只保证不覆盖：复用一个已有数据的目录时让号到空闲序号。
     resolveFreeSequence();
@@ -132,13 +137,14 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
 void FileSaver::stopSaving() {
     m_saving.store(false, std::memory_order_release);
     // 停止时立即刷盘 + 关闭文件，确保未达触发数部分也能完整写入
-    flushWriteBuffers();
+    const bool flushed = flushWriteBuffers();
     closeFiles();
     m_writeAccumA.clear();
     m_writeAccumB.clear();
     m_accumTriggers = 0;
     m_currentFileTriggers = 0;
     resetPhysicalRoundState();
+    if (!flushed) handleWriteFault(QStringLiteral("停止保存时的落盘"));
     emit statusMessage(QString("Card%1: 停止保存，共保存 %2 触发")
                        .arg(m_cardId + 1).arg(m_savedCount.load()));
 }
@@ -229,7 +235,11 @@ int FileSaver::resolveFreeSequence() {
 // 文件操作
 //
 void FileSaver::openNewFiles(uint32_t sourceIPv4) {
-    closeFiles();
+    // 关旧文件时那一次刷盘若已失败，写盘链路已不可信：告警停保存，不开新文件。
+    if (!closeFiles()) {
+        handleWriteFault(QStringLiteral("关闭上一批文件"));
+        return;
+    }
     m_currentSourceIPv4 = sourceIPv4;
 
     QDir().mkpath(m_saveDirectory);
@@ -256,8 +266,8 @@ void FileSaver::openNewFiles(uint32_t sourceIPv4) {
     m_currentFileTriggers = 0;
 }
 
-void FileSaver::closeFiles() {
-    flushWriteBuffers();    // 关题前将尚未写盘的积累数据刷入文件
+bool FileSaver::closeFiles() {
+    const bool flushed = flushWriteBuffers();   // 关闭前将尚未写盘的积累数据刷入文件
     if (m_fileChannelA) {
         m_fileChannelA->close();
         delete m_fileChannelA;
@@ -268,28 +278,83 @@ void FileSaver::closeFiles() {
         delete m_fileChannelB;
         m_fileChannelB = nullptr;
     }
+    return flushed;
 }
 
-// 
-// 存储线程主循环
-// 
-void FileSaver::flushWriteBuffers()
+//
+// 写盘缓冲
+//
+void FileSaver::handleWriteFault(const QString& where) {
+    // 一次性告警：磁盘满/介质拔出通常是持续性的，不要每段刷一条。
+    if (m_writeFaulted) return;
+    m_writeFaulted = true;
+    m_saving.store(false, std::memory_order_release);
+    emit errorOccurred(QString("Card%1: %2 写盘失败，已停止保存；未落盘的一段已按记录边界回退丢弃")
+                           .arg(m_cardId + 1).arg(where));
+}
+
+bool FileSaver::flushWriteBuffers()
 {
-    if (m_accumTriggers == 0) return;
+    if (m_accumTriggers == 0) return true;
     const qint64 bytesA = static_cast<qint64>(m_writeAccumA.size()) * sizeof(uint16_t);
     const qint64 bytesB = static_cast<qint64>(m_writeAccumB.size()) * sizeof(uint16_t);
-    if (m_fileChannelA && m_fileChannelA->isOpen() && bytesA > 0)
-        m_fileChannelA->write(reinterpret_cast<const char*>(m_writeAccumA.data()), bytesA);
-    if (m_fileChannelB && m_fileChannelB->isOpen() && bytesB > 0)
-        m_fileChannelB->write(reinterpret_cast<const char*>(m_writeAccumB.data()), bytesB);
+    const bool openA = m_fileChannelA && m_fileChannelA->isOpen();
+    const bool openB = m_fileChannelB && m_fileChannelB->isOpen();
+    // 本次刷盘前的记录边界。.dat 是定长记录、无文件头，一旦留下半条记录，
+    // 该文件后续所有记录的边界都会错位且无法离线修复，所以失败必须整段回退。
+    const qint64 sizeA = openA ? m_fileChannelA->size() : 0;
+    const qint64 sizeB = openB ? m_fileChannelB->size() : 0;
+
+    qint64 wroteA = 0;
+    qint64 wroteB = 0;
+    if (openA && bytesA > 0)
+        wroteA = m_fileChannelA->write(reinterpret_cast<const char*>(m_writeAccumA.data()), bytesA);
+    if (openB && bytesB > 0)
+        wroteB = m_fileChannelB->write(reinterpret_cast<const char*>(m_writeAccumB.data()), bytesB);
+
+#ifdef FILESAVER_TEST_SEAM
+    if (m_writeFaultForTest == 1) {
+        wroteA = bytesA > 0 ? -1 : 0;
+        wroteB = bytesB > 0 ? -1 : 0;
+    } else if (m_writeFaultForTest == 2) {
+        wroteA = bytesA > 0 ? -1 : 0;
+    } else if (m_writeFaultForTest == 3) {
+        wroteB = bytesB > 0 ? -1 : 0;
+    }
+#endif
+
+    // 成功判据：每通道「不需要写 或 全部字节都写进去了」。短写按失败处理。
+    const bool okA = !openA || bytesA == 0 || wroteA == bytesA;
+    const bool okB = !openB || bytesB == 0 || wroteB == bytesB;
+    if (okA && okB) {
+        m_writeAccumA.clear();
+        m_writeAccumB.clear();
+        m_accumTriggers = 0;
+        return true;
+    }
+
+    // 成对回退：一侧失败也把另一侧撤回，A/B 两侧的记录数恒相等。
+    if (openA) m_fileChannelA->resize(sizeA);
+    if (openB) m_fileChannelB->resize(sizeB);
+    // 本段已不可恢复（不重试，避免把半条记录再写一遍）。
     m_writeAccumA.clear();
     m_writeAccumB.clear();
+    // 计数同步回退：本段 m_accumTriggers 个触发并未落盘，诊断计数必须与文件
+    // 里的实际记录数保持一致，否则现场看到的"已保存触发数"会多于磁盘上的记录。
+    const int dropped = m_accumTriggers;
+    m_currentFileTriggers -= dropped;
+    if (m_currentFileTriggers < 0) m_currentFileTriggers = 0;
+    const std::uint64_t saved = m_savedCount.load(std::memory_order_relaxed);
+    m_savedCount.store(saved > static_cast<std::uint64_t>(dropped)
+                           ? saved - static_cast<std::uint64_t>(dropped) : 0,
+                       std::memory_order_relaxed);
     m_accumTriggers = 0;
+    return false;
 }
 
-// 
+//
 // 存储线程主循环
-// 
+//
 void FileSaver::run() {
     m_running.store(true);
 
@@ -300,8 +365,7 @@ void FileSaver::run() {
             // 圈末/超时边界后由 UI 线程发起，本线程在队列排空后刷盘关闭，
             // 保证采集彻底停止时最后一个会话的数据也已写入
             if (m_closeRequest.exchange(false, std::memory_order_acq_rel)) {
-                flushWriteBuffers();
-                closeFiles();
+                if (!closeFiles()) handleWriteFault(QStringLiteral("会话主动落盘"));
             }
             QThread::msleep(1);  // 队列空，短暂休眠
             continue;
@@ -309,7 +373,7 @@ void FileSaver::run() {
         consumeTriggerGroup(group);
     }
 
-    closeFiles();
+    if (!closeFiles()) handleWriteFault(QStringLiteral("保存线程退出时的落盘"));
 }
 
 
@@ -325,8 +389,12 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     // 按新会话代查询目录（gen=0 保持当前目录，即手动模式）
     const uint64_t gen = group->sessionGen;
     if (gen != m_currentGen) {
-        flushWriteBuffers();
-        closeFiles();
+        // 关上一会话文件时那一次刷盘若失败，已由 handleWriteFault 停保存并
+        // 回退；本帧不再写，避免把新数据接在一条被截断的记录边界后面。
+        if (!closeFiles()) {
+            handleWriteFault(QStringLiteral("会话代切换时的落盘"));
+            return false;
+        }
         m_currentGen = gen;
         m_currentFileTriggers = 0;
         m_dropGen = 0;
@@ -368,8 +436,12 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
             m_haveCurrentPhysicalRound = true;
             m_currentPhysicalRoundGeneration = group->roundGeneration;
         } else if (group->roundGeneration != m_currentPhysicalRoundGeneration) {
-            flushWriteBuffers();
-            closeFiles();
+            // 轮转前那次刷盘若失败，整段已回退丢弃；此时不得推进序号并开新文件，
+            // 否则记录边界会带着缺口继续。停保存并让操作员介入。
+            if (!closeFiles()) {
+                handleWriteFault(QStringLiteral("物理轮次轮转时的落盘"));
+                return false;
+            }
             FileRolloverInfo info;
             info.happened = true;
             info.reason = QStringLiteral("physical_round");
@@ -397,7 +469,12 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
 
     // 文件序号翻滚（容量上限 triggersPerFile）
     if (m_currentFileTriggers >= m_triggersPerFile) {
-        flushWriteBuffers();   // 翻滚前先刷盘
+        // 翻滚前先刷盘。刷盘失败则该段已按记录边界回退丢弃：此时不再推进序号
+        // 并开新文件，避免把缺口带进下一批记录。
+        if (!flushWriteBuffers()) {
+            handleWriteFault(QStringLiteral("文件容量轮转时的落盘"));
+            return false;
+        }
         FileRolloverInfo info;
         info.happened = true;
         info.reason = QStringLiteral("capacity");
@@ -414,6 +491,8 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     }
 
     if (!m_fileChannelA || !m_fileChannelB) {
+        // 写盘故障已由 handleWriteFault 停止保存并报告过，这里不再重复报一条。
+        if (!m_saving.load(std::memory_order_acquire)) return false;
         emit errorOccurred(QString("Card%1: 保存文件未成功打开，已自动停止保存")
                            .arg(m_cardId + 1));
         m_saving.store(false, std::memory_order_release);
@@ -424,26 +503,26 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     int n = group->sampleCount;
     if (n <= 0) return false;
 
+    // float32  float16 批量转换并积累到内存缓冲区
+    const size_t offset = m_writeAccumA.size();
     try {
-        // float32  float16 批量转换并积累到内存缓冲区
-        size_t offset = m_writeAccumA.size();
         m_writeAccumA.resize(offset + n);
         m_writeAccumB.resize(offset + n);
         convertBatch(group->freqA.data(), m_writeAccumA.data() + offset, n);
         convertBatch(group->freqB.data(), m_writeAccumB.data() + offset, n);
-        ++m_accumTriggers;
-
-        // 达到合并阈値时一次性写盘（WRITE_BUFFER_TRIGGERS 个触发合并为一条大 I/O）
-        if (m_accumTriggers >= WRITE_BUFFER_TRIGGERS)
-            flushWriteBuffers();
-
     } catch (const std::bad_alloc&) {
+        // 撤掉本触发刚扩出来的那段：绝不把未转换的尾巴当成记录写进 .dat
+        // （无文件头，脏尾巴会污染其后所有记录的边界）。
+        m_writeAccumA.resize(offset);
+        m_writeAccumB.resize(offset);
         emit errorOccurred(QString("Card%1: 保存线程内存不足，已自动停止保存")
                            .arg(m_cardId + 1));
         m_saving.store(false, std::memory_order_release);
         closeFiles();
         return false;
     } catch (...) {
+        m_writeAccumA.resize(offset);
+        m_writeAccumB.resize(offset);
         emit errorOccurred(QString("Card%1: 保存线程发生异常，已自动停止保存")
                            .arg(m_cardId + 1));
         m_saving.store(false, std::memory_order_release);
@@ -451,15 +530,23 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         return false;
     }
 
+    ++m_accumTriggers;
+    // 记账在周期性 flush 之前完成：flushWriteBuffers 的失败回退按 m_accumTriggers
+    // 扣减，只有当本触发也已入账时扣减才与文件里的实际记录数完全对齐。
     ++m_currentFileTriggers;
     m_savedCount.fetch_add(1, std::memory_order_relaxed);
+
+    // 达到合并阈値时一次性写盘（WRITE_BUFFER_TRIGGERS 个触发合并为一条大 I/O）
+    if (m_accumTriggers >= WRITE_BUFFER_TRIGGERS && !flushWriteBuffers()) {
+        handleWriteFault(QStringLiteral("周期性落盘"));
+        return false;
+    }
     return m_saving.load(std::memory_order_acquire);
 }
 
 void FileSaver::serviceCloseRequest() {
     if (m_closeRequest.exchange(false, std::memory_order_acq_rel)) {
-        flushWriteBuffers();
-        closeFiles();
+        if (!closeFiles()) handleWriteFault(QStringLiteral("会话主动落盘"));
     }
 }
 

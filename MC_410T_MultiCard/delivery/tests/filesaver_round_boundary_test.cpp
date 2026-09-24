@@ -17,6 +17,7 @@
 //   T11 落盘不变量主契约：同 sessionGen 晚到帧不得截断已封存文件（bug2 回归）
 //   T12 sourceIPv4 变化不得归零序号、不得抵消物理轮次的安全推进
 //   T13 sessionGen 变化只有在目录真的变化时才重起编号
+//   W1-W6 写盘失败必须停保存 + 告警 + A/B 双侧按记录边界回退（FILESAVER_TEST_SEAM）
 
 #include "PaimageAcquisition/HostOutput.h"
 #include "FileSaver.h"
@@ -91,6 +92,32 @@ std::vector<std::uint16_t> halvesOf(std::initializer_list<int> values)
     for (int v : values)
         out.push_back(halfOf(static_cast<float>(v)));
     return out;
+}
+
+// 连号区间版本：W 系列要断言几十条记录的逐字节内容。
+std::vector<std::uint16_t> halvesOfRange(int first, int count)
+{
+    std::vector<std::uint16_t> out;
+    out.reserve(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i)
+        out.push_back(halfOf(static_cast<float>(first + i)));
+    return out;
+}
+
+// ChB 存的是 -value（见 makeGroup），对应区间取负。
+std::vector<std::uint16_t> negHalvesOfRange(int first, int count)
+{
+    std::vector<std::uint16_t> out;
+    out.reserve(static_cast<std::size_t>(count));
+    for (int i = 0; i < count; ++i)
+        out.push_back(halfOf(static_cast<float>(-(first + i))));
+    return out;
+}
+
+qint64 fileSizeOf(const QString& path)
+{
+    QFile f(path);
+    return f.exists() ? f.size() : -1;
 }
 
 // Verify a channel file: triggersPerFile-sealed sequence of per-trigger
@@ -687,6 +714,142 @@ int main(int argc, char** argv)
               "T13 a new directory starts at the first free sequence");
     } catch (const std::exception& e) {
         check(false, (QString("T13 exception: ") + e.what()).toUtf8().constData());
+    }
+
+    // ── W1..W6: 写盘失败必须「停保存 + 告警 + A/B 双侧按记录边界回退」────────
+    // .dat 是定长记录、无文件头：一次 IO 失败/短写若留下半条记录，该文件后续
+    // 所有记录的边界都会永久错位且无法离线修复。因此失败必须整段回退，且 A/B
+    // 成对回退（一侧失败也撤回另一侧已写的字节），否则两通道记录数会失配。
+    try {
+        QTemporaryDir dir(QDir::currentPath() + "/round-w-XXXXXX");
+        require(dir.isValid(), "W temp dir");
+        constexpr qint64 kRec = kSamples * 2;   // 一条触发记录 = 16 点 × float16
+        auto path = [&dir](const char* suffix, const char* ch) {
+            return dir.path() + QString("/Card1_Ch%1_%2_000.dat").arg(ch).arg(suffix);
+        };
+
+        // 断言分两层：故障当场只断言内部记账（QIODevice::write 有内部缓冲，
+        // 未落盘时外部 stat 看不到）；逐字节内容断言统一放到 stopSaving() 关文件
+        // 之后——那时读到的就是最终落盘结果。
+        // W5 无故障基线：内容必须与 golden 逐字节一致（防回退逻辑误伤正常写路径）
+        {
+            FileSaver saver(0);
+            saver.setWriteFaultForTest(0);
+            saver.startSaving(dir.path(), 100, "w5");
+            for (int i = 0; i < 32; ++i)
+                saver.consumeTriggerGroup(makeGroup(1, 0, 500 + i));
+            saver.stopSaving();
+            check(verifyFile(path("w5", "A"), halvesOfRange(500, 32)),
+                  "W5 fault-free path stays byte-identical (A)");
+            check(verifyFile(path("w5", "B"), negHalvesOfRange(500, 32)),
+                  "W5 fault-free path stays byte-identical (B)");
+            check(saver.savedCount() == 32 && fileSizeOf(path("w5", "A")) == 32 * kRec,
+                  "W5 counters agree with the records actually on disk");
+        }
+
+        // W1 两通道都失败：停保存 + 恰好一次告警 + 双侧回退 + 计数同步回退；
+        // W4 同一场景下失败后继续提交不得再写入、不得产生半条记录。
+        {
+            int errors = 0;
+            FileSaver saver(0);
+            QObject::connect(&saver, &FileSaver::errorOccurred, &app,
+                             [&errors](const QString&) { ++errors; },
+                             Qt::DirectConnection);
+            saver.startSaving(dir.path(), 100, "w1");
+            for (int i = 0; i < 16; ++i)
+                saver.consumeTriggerGroup(makeGroup(1, 0, 100 + i));
+            check(saver.savedCount() == 16, "W1 first segment accepted");
+            saver.setWriteFaultForTest(1);
+            for (int i = 16; i < 32; ++i)
+                saver.consumeTriggerGroup(makeGroup(1, 0, 100 + i));
+            check(saver.savedCount() == 16, "W1 counters roll back with the bytes");
+            check(!saver.isSaving(), "W1 saving stops on a write fault");
+            check(errors == 1, "W1 exactly one errorOccurred for a sustained fault");
+
+            // W4 失败后继续提交：不再写入、不再告警、计数不动
+            saver.setWriteFaultForTest(0);
+            for (int i = 32; i < 48; ++i)
+                saver.consumeTriggerGroup(makeGroup(1, 0, 100 + i));
+            check(saver.savedCount() == 16 && errors == 1, "W4 counters and alert stay put");
+            saver.stopSaving();
+            check(fileSizeOf(path("w1", "A")) == 16 * kRec &&
+                      fileSizeOf(path("w1", "B")) == 16 * kRec,
+                  "W1/W4 both channels hold exactly the surviving segment");
+            check(fileSizeOf(path("w1", "A")) % kRec == 0, "W4 no partial record left behind");
+            check(verifyFile(path("w1", "A"), halvesOfRange(100, 16)),
+                  "W1 surviving bytes are the original records, not a torn tail");
+            check(verifyFile(path("w1", "B"), negHalvesOfRange(100, 16)),
+                  "W1 the B channel rolled back to the same record count");
+        }
+
+        // W2 仅 A 失败 ⇒ A/B 成对回退，两侧记录数仍相等
+        {
+            int errors = 0;
+            FileSaver saver(0);
+            QObject::connect(&saver, &FileSaver::errorOccurred, &app,
+                             [&errors](const QString&) { ++errors; },
+                             Qt::DirectConnection);
+            saver.startSaving(dir.path(), 100, "w2");
+            for (int i = 0; i < 16; ++i)
+                saver.consumeTriggerGroup(makeGroup(1, 0, 200 + i));
+            saver.setWriteFaultForTest(2);   // 仅 A 失败
+            for (int i = 16; i < 32; ++i)
+                saver.consumeTriggerGroup(makeGroup(1, 0, 200 + i));
+            check(saver.savedCount() == 16 && !saver.isSaving() && errors == 1,
+                  "W2 stop + single alert + counter rollback");
+            saver.stopSaving();
+            check(fileSizeOf(path("w2", "A")) == 16 * kRec &&
+                      fileSizeOf(path("w2", "B")) == 16 * kRec,
+                  "W2 an A-only failure rolls BOTH channels back (pair stays equal)");
+            check(verifyFile(path("w2", "A"), halvesOfRange(200, 16)) &&
+                      verifyFile(path("w2", "B"), negHalvesOfRange(200, 16)),
+                  "W2 both channels keep exactly the first segment's records");
+        }
+
+        // W3 仅 B 失败 ⇒ W2 对称
+        {
+            int errors = 0;
+            FileSaver saver(0);
+            QObject::connect(&saver, &FileSaver::errorOccurred, &app,
+                             [&errors](const QString&) { ++errors; },
+                             Qt::DirectConnection);
+            saver.startSaving(dir.path(), 100, "w3");
+            for (int i = 0; i < 16; ++i)
+                saver.consumeTriggerGroup(makeGroup(1, 0, 300 + i));
+            saver.setWriteFaultForTest(3);   // 仅 B 失败
+            for (int i = 16; i < 32; ++i)
+                saver.consumeTriggerGroup(makeGroup(1, 0, 300 + i));
+            check(saver.savedCount() == 16 && !saver.isSaving() && errors == 1,
+                  "W3 stop + single alert + counter rollback");
+            saver.stopSaving();
+            check(fileSizeOf(path("w3", "A")) == 16 * kRec &&
+                      fileSizeOf(path("w3", "B")) == 16 * kRec,
+                  "W3 a B-only failure rolls BOTH channels back (pair stays equal)");
+            check(verifyFile(path("w3", "A"), halvesOfRange(300, 16)) &&
+                      verifyFile(path("w3", "B"), negHalvesOfRange(300, 16)),
+                  "W3 both channels keep exactly the first segment's records");
+        }
+
+        // W6 前 2 段成功、第 3 段失败 ⇒ 历史 32 条逐字节完整，只丢第 3 段
+        {
+            FileSaver saver(0);
+            saver.startSaving(dir.path(), 100, "w6");
+            for (int i = 0; i < 32; ++i)
+                saver.consumeTriggerGroup(makeGroup(1, 0, 600 + i));
+            check(saver.savedCount() == 32, "W6 first two segments accepted");
+            saver.setWriteFaultForTest(1);
+            for (int i = 32; i < 48; ++i)
+                saver.consumeTriggerGroup(makeGroup(1, 0, 600 + i));
+            check(saver.savedCount() == 32, "W6 counters drop exactly the failing segment");
+            saver.stopSaving();
+            check(fileSizeOf(path("w6", "A")) == 32 * kRec &&
+                      fileSizeOf(path("w6", "B")) == 32 * kRec,
+                  "W6 only the failing segment is dropped; earlier segments stay intact");
+            check(verifyFile(path("w6", "A"), halvesOfRange(600, 32)),
+                  "W6 surviving bytes are still the original records, not a torn tail");
+        }
+    } catch (const std::exception& e) {
+        check(false, (QString("W exception: ") + e.what()).toUtf8().constData());
     }
 
     if (g_failures == 0) {

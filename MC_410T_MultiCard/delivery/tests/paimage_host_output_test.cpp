@@ -524,6 +524,48 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         require(ringLogicalTriggersPerRound(0, 2) == 0 && ringLogicalTriggersPerRound(8000, 0) == 0,
                 "G3 zero inputs are rejected");
     }
+    // H4/H5 anti-revival: in the production save shape (direct sink installed,
+    // legacy queue unused) the legacy branch of DataProcessor::deliverAssembled
+    // must never run. That branch is what silently drops at FILESAVER_QUEUE_SIZE
+    // and what stamps sessionGen from currentGeneration() instead of the
+    // per-round resolveRound() binding.
+    {
+        AcqConfig config;
+        config.acqTimeNs = 64;
+        // Deliberately wire the legacy queue as well: if the direct sink did not
+        // strictly win, these assertions would fail.
+        moodycamel::ConcurrentQueue<TriggerGroupPtr> legacyQueue;
+        std::vector<std::uint64_t> seen;
+        DataProcessor processor(0, &legacyQueue, nullptr, config, {});
+        processor.setDirectSaveSink([&seen](const TriggerGroupPtr& g) {
+            seen.push_back(g->sessionGen);
+            return true;
+        });
+        // The legacy reader's value must be ignored on the production path.
+        processor.setSessionGenReader([] { return std::uint64_t(999); });
+        processor.setSaveEnabled(true);
+
+        auto stamped = [](std::uint64_t sessionGen) {
+            auto g = std::make_shared<TriggerGroup>();
+            g->cardId = 0;
+            g->isComplete = true;
+            g->sampleCount = 4;
+            // HostOutput::card() writes this via tagSaveSession(resolveRound(...)).
+            g->sessionGen = sessionGen;
+            g->freqA.assign(4, 1.0f);
+            g->freqB.assign(4, -1.0f);
+            return g;
+        };
+        const auto r1 = processor.deliverAssembled(stamped(42), true, false);
+        const auto r2 = processor.deliverAssembled(stamped(77), true, false);
+        require(r1.save == DataProcessor::DeliveryResult::Consumed &&
+                    r2.save == DataProcessor::DeliveryResult::Consumed,
+                "S1 the direct save sink consumes even with a legacy queue wired");
+        require(legacyQueue.size_approx() == 0,
+                "S1 the legacy save queue is never used while the direct sink is set");
+        require(seen.size() == 2 && seen[0] == 42 && seen[1] == 77,
+                "S2 the round-resolved sessionGen survives; currentGeneration() is ignored");
+    }
     // Full-resolution display preparation now lives in the Frontend Preprocessing
     // Stage and must preserve every acquired sample.
     {

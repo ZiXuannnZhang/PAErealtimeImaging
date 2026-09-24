@@ -263,7 +263,10 @@ if(WIN32)
         ../src/FileSaver.cpp ../include/FileSaver.h
         ../src/FramePublisher.cpp ../include/FramePublisher.h)
     target_include_directories(filesaver_round_boundary_test PRIVATE ../include)
-    target_compile_definitions(filesaver_round_boundary_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    # FILESAVER_TEST_SEAM 只开给本目标（该目标自行编译一份 FileSaver.cpp），
+    # 生产目标 MC410T_Receiver 的 FileSaver 不含任何故障注入口。
+    target_compile_definitions(filesaver_round_boundary_test PRIVATE
+        FILESAVER_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(filesaver_round_boundary_test PRIVATE paimage_socket Qt6::Core)
     add_test(NAME filesaver_round_boundary_test COMMAND filesaver_round_boundary_test)
     add_executable(ring_round_ui_state_test ring_round_ui_state_test.cpp
