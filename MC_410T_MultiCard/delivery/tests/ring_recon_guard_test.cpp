@@ -353,15 +353,95 @@ void testG4BaselineRegression(bool emit) {
     check(identical, "G4 重跑逐位一致（无隐藏状态）");
 }
 
+// ---------------------------------------------------------------
+// G5/G6 UBP 成对切换（前提 R2）与导数正确性
+// ---------------------------------------------------------------
+void testG5UbpPairedMode() {
+    std::printf("\n[G5/G6] UBP 成对切换：权重 R·Δθ·cosα/d² + 信号 2p − 2t·p′\n");
+
+    // G5a 导数：derivativeCentral 的中心差分 + 端点单侧
+    {
+        std::vector<float> v(9), d(9);
+        for (int i = 0; i < 9; ++i) v[i] = static_cast<float>(i);   // v[i] = i
+        ringrecon_inv::derivativeCentral(v.data(), 9, 1000.0f, d.data());
+        // dv/dn = 1 ⇒ dp/dt = fs·1 = 1000，处处（含端点单侧）相同
+        double maxErr = 0.0;
+        for (int i = 0; i < 9; ++i)
+            maxErr = std::max(maxErr, std::fabs(static_cast<double>(d[i]) - 1000.0));
+        check(maxErr <= 1e-6, "G5a derivativeCentral: 线性信号导数 == fs（含端点）");
+    }
+
+    const ringrecon::ReconParams rp = defaultRecon();
+    std::vector<float> xv, yv;
+    ringrecon::makeGrid(rp.fov, rp.gridSize, xv, yv);
+    const int Nt = 64, nd = 2;
+    const double start = 10.0, span = 40.0;
+    const double arc = span / (nd - 1) * kPi / 180.0;
+    const double th0 = (start + 0.0 * (span / (nd - 1))) * kPi / 180.0;
+
+    // 常数列 ⇒ p = 1，p′ = 0 ⇒ 反演核 b = 2·1 − 2t·0 = 2（恰好已知）
+    const std::vector<float> bconst = singleColumnBscan(Nt, nd, 0, 1.0f);
+
+    ringrecon::ReconParams rpDas = rp, rpUbp = rp;
+    rpUbp.inversion = ringrecon_inv::InversionMode::Ubp;
+    ringrecon::IncrementalState sDas, sUbp;
+    ringrecon::dasReconAppend(bconst, Nt, nd, rpDas, start, span, xv, yv, sDas);
+    ringrecon::dasReconAppend(bconst, Nt, nd, rpUbp, start, span, xv, yv, sUbp);
+
+    // G5 开态权重：accUbp = w_ubp × b = w_ubp × 2
+    int nChecked = 0;
+    double maxRelU = 0.0, maxRelPair = 0.0;
+    for (int ix = 0; ix < static_cast<int>(xv.size()); ++ix) {
+        for (int iy = 0; iy < static_cast<int>(yv.size()); ++iy) {
+            const size_t idx = static_cast<size_t>(ix) * yv.size() + iy;
+            const double x = xv[ix], y = yv[iy];
+            const double wUWant = ubpWeight(rp.R, th0, x, y, arc);
+            const double got = sUbp.acc[idx] / 2.0;      // 除掉已知的 b = 2
+            if (std::fabs(wUWant) < 1e-12) continue;
+            maxRelU = std::max(maxRelU, std::fabs(got - wUWant) / std::fabs(wUWant));
+
+            // G6 成对性：accDas = w_das × p = w_das × 1
+            const double wDWant = dasWeightClosedForm(rp.R, th0, x, y, arc);
+            const double gotD = sDas.acc[idx];
+            if (std::fabs(wDWant) < 1e-12) continue;
+            const double sx = rp.R * std::cos(th0), sy = rp.R * std::sin(th0);
+            const double dd = std::sqrt((x - sx) * (x - sx) + (y - sy) * (y - sy));
+            const double pairWant = rp.R / dd;                // E1：R/d
+            // got 已是 wUbp（acc 除过 b = 2），gotD 已是 wDas（p = 1），
+            // 故两者之比直接就是 R/d，不再除 b/p。
+            const double pairGot = got / gotD;
+            maxRelPair = std::max(maxRelPair,
+                                  std::fabs(pairGot - pairWant) / pairWant);
+            ++nChecked;
+        }
+    }
+    check(nChecked > 0, "G5 有可参与比对的像素");
+    check(maxRelU <= 1e-5, "G5 开态权重逐像素 == R·Δθ·cosα/d²（生产路径）");
+    check(maxRelPair <= 1e-5, "G6 成对性：开/关权重比 == R/d（信号项与权重一起换）");
+
+    // G6b 信号项确实换掉：非常数列下 b = 2p − 2t·p′ ≠ p
+    {
+        const std::vector<float> bvar = deterministicBscan(Nt, nd);
+        ringrecon::IncrementalState d2, u2;
+        ringrecon::dasReconAppend(bvar, Nt, nd, rpDas, start, span, xv, yv, d2);
+        ringrecon::dasReconAppend(bvar, Nt, nd, rpUbp, start, span, xv, yv, u2);
+        bool differs = false;
+        for (size_t k = 0; k < d2.acc.size(); ++k)
+            if (u2.acc[k] != d2.acc[k]) { differs = true; break; }
+        check(differs, "G6b 开关切换确实改变了累加结果（信号项已换）");
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     const bool emit = (argc > 1 && std::string(argv[1]) == "--emit-golden");
-    std::printf("ring_recon_guard_test —— B 档判别性守卫（S2）\n");
+    std::printf("ring_recon_guard_test —— B 档判别性守卫（S2 + S4 骨架）\n");
 
     testG1RatioGuard();
     testG2Identity();
     testG3WeightPair();
+    testG5UbpPairedMode();
     testG4BaselineRegression(emit);
 
     std::printf("\n=====================================\n");

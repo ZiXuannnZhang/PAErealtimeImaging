@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "RingReconInversion.h"
+
 // =====================================================================
 // RingRecon — 双波长环形扫描 DAS 实时重建（MATLAB Handoff 的 C++ CPU 移植）
 //
@@ -34,6 +36,13 @@ struct ReconParams {
     std::string interpolation = "linear";  // linear / nearest
     std::vector<double> soundSpeedRadii;   // 分层声速边界 [m]（空=单声速）
     std::vector<double> soundSpeeds;       // 分层声速 [m/s]（空=用 c）
+
+    // B1 成对开关（前提 R2 / 审核 E1）：
+    //   Das = 现有行为（信号 p，权重 Δθ·cosα/d）
+    //   Ubp = 光声反演（信号 2p − 2t·p′，权重 R·Δθ·cosα/d²）
+    // 用**单一**枚举字段而不是两个 bool，结构上不可能「只换信号项不换权重」。
+    // 默认 Das ⇒ 全关路径逐位保持现有基准（守卫 G4）。
+    ringrecon_inv::InversionMode inversion = ringrecon_inv::InversionMode::Das;
 };
 
 struct PreprocessParams {

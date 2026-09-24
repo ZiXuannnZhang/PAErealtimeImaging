@@ -150,6 +150,21 @@ void dasReconAppend(const std::vector<float>& bscan, int Nt, int nd,
         rp.minDistance > 0.0 ? rp.minDistance : rp.gridSize);
     const float pw = static_cast<float>(rp.distanceWeightExponent + 1.0);  // 2
 
+    // B1 成对切换（前提 R2）：反演模式下逐 A-line 计算时间导数。
+    // 同源约束（前提 G2）：p 与 p′ 都从**同一个 bscan 数组**取，不在别处另存一份；
+    //   故 b = 2p − 2t·p′ 与恒等式 −2r̃²∂(p/r̃)/∂r̃ 一致。
+    // Das 模式不分配、不计算，全关路径逐位不变（守卫 G4）。
+    const bool ubp = (rp.inversion == ringrecon_inv::InversionMode::Ubp);
+    std::vector<float> dscan;
+    if (ubp) {
+        dscan.resize(bscan.size());
+        for (int j = 0; j < nd; ++j) {
+            ringrecon_inv::derivativeCentral(
+                bscan.data() + static_cast<std::size_t>(j) * Nt, Nt, fs,
+                dscan.data() + static_cast<std::size_t>(j) * Nt);
+        }
+    }
+
     // 分层声速（与 MATLAB das_recon_circular_gpu_v2 一致）：
     //   tf = d/c_outer + sum_i Li*(1/c_i - 1/c_{i+1})；无边界时退化为单声速
     const int nBound = static_cast<int>(rp.soundSpeedRadii.size());
@@ -266,8 +281,40 @@ void dasReconAppend(const std::vector<float>& bscan, int Nt, int nd,
                 } else {
                     dsafeP = std::pow(dsafe, pw);
                 }
-                const float w = wscale * dotp / (R * dsafeP);
-                acc += w * vv;
+                // 成对切换：信号项与权重由同一个 InversionMode 决定（R2）。
+                // Das 时 sv == vv、weight 走 dasWeight，与改动前逐字同形。
+                float sv = vv;
+                if (ubp) {
+                    float dvv = 0.0f;
+                    if (linear) {
+                        const float i0f = std::floor(tf);
+                        const float frac = tf - i0f;
+                        const int i0 = static_cast<int>(i0f) + 1;
+                        const bool valid = (i0 >= 1) && (i0 <= Nt - 1);
+                        int i0c = std::max(std::min(i0, Nt - 1), 1);
+                        const float d0 = dscan[static_cast<std::size_t>(i0c - 1) +
+                                               static_cast<std::size_t>(j) * Nt];
+                        const float d1 = dscan[static_cast<std::size_t>(i0c) +
+                                               static_cast<std::size_t>(j) * Nt];
+                        dvv = d0 + frac * (d1 - d0);
+                        if (maskOob && !valid) dvv = 0.0f;
+                    } else {
+                        const int i0n = static_cast<int>(std::floor(tf + 0.5f)) + 1;
+                        const bool valid = (i0n >= 1) && (i0n <= Nt);
+                        const int i0c = std::max(std::min(i0n, Nt), 1);
+                        dvv = dscan[static_cast<std::size_t>(i0c - 1) +
+                                    static_cast<std::size_t>(j) * Nt];
+                        if (maskOob && !valid) dvv = 0.0f;
+                    }
+                    // t 用秒（前提 G2：误用采样点会差 fs 倍）。
+                    // 【开放项 D5】tf/fs 是相对存储数组起点的时间；是否需要
+                    //   systemDelay / delayCut 校准由分发任务 D5 定，骨架不擅自补偿。
+                    const float tSec = tf / fs;
+                    sv = ringrecon_inv::signalValue(rp.inversion, vv, dvv, tSec);
+                }
+                const float w = ringrecon_inv::weight(rp.inversion, wscale, dotp,
+                                                      R, dsafe, dsafeP);
+                acc += w * sv;
                 accw += std::fabs(w);
             }
             st.acc[idx] += acc;
