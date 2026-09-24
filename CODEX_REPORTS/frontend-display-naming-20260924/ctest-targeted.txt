@@ -1,0 +1,20 @@
+TARGETED CTEST — frontend-display-naming-20260924
+IMPLEMENTATION_SOURCE_SHA=8f9e9cdcd309a831bc425456f127294ed5a003ab
+TEST_TREE=/d/Claudecode/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/tests_frontend_display_naming_20260924
+TEST_TREE_REBUILD_BEFORE_RUN=ninja: no work to do.
+COMMAND=ctest -R "card_status_formatting_test|round_policy_settings_test|diagnostic_dialog_test|frontend_preprocessor_test" --output-on-failure
+=== BEGIN CTEST OUTPUT ===
+Internal ctest changing into directory: D:/Claudecode/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/tests_frontend_display_naming_20260924
+Test project D:/Claudecode/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/tests_frontend_display_naming_20260924
+    Start  5: frontend_preprocessor_test
+1/4 Test  #5: frontend_preprocessor_test .......   Passed    0.06 sec
+    Start  9: diagnostic_dialog_test
+2/4 Test  #9: diagnostic_dialog_test ...........   Passed    3.33 sec
+    Start 19: card_status_formatting_test
+3/4 Test #19: card_status_formatting_test ......   Passed    0.05 sec
+    Start 20: round_policy_settings_test
+4/4 Test #20: round_policy_settings_test .......   Passed    0.08 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =   3.56 sec

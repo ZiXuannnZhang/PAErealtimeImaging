@@ -1,0 +1,27 @@
+GIT RECEIPT — frontend-display-naming-20260924
+CAPTURED=2026-09-24T10:03:14Z
+
+=== branch ===
+codex/frontend-display-naming-20260924
+
+=== git rev-parse HEAD ===
+8f9e9cdcd309a831bc425456f127294ed5a003ab
+
+=== git status --porcelain --untracked-files=no ===
+(empty above = tracked tree clean)
+
+=== git log --oneline -3 ===
+8f9e9cd feat: slim the card status tooltip and name ring channels after the signal tabs
+e21b019 docs: record write-fault rollback build and regression receipt
+bf5c226 fix: detect write failures in FileSaver and roll back to a record boundary
+
+=== git diff --stat e21b019..HEAD ===
+ .../delivery/include/CardStatusFormatting.h        | 40 ++++++----
+ MC_410T_MultiCard/delivery/include/ChannelNaming.h | 51 +++++++++++++
+ MC_410T_MultiCard/delivery/src/MainWindow.cpp      | 11 ++-
+ .../delivery/src/RingConfigDialog.cpp              | 15 ++--
+ .../delivery/tests/card_status_formatting_test.cpp | 85 +++++++++++++++++++---
+ 5 files changed, 168 insertions(+), 34 deletions(-)
+
+=== local HEAD ===
+8f9e9cdcd309a831bc425456f127294ed5a003ab

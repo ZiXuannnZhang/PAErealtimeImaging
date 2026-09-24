@@ -1,0 +1,109 @@
+前端显示修改：计数反馈去重 + 环形弹窗通道勾选框命名 — Windows 构建摘要
+================================================================================
+
+TASK=前端显示修改（工作一 计数反馈悬停表去重；工作二 环形弹窗通道勾选框命名）
+TASK_TYPE=DISPLAY / NAMING（无独立任务文档；口径由用户逐项拍板）
+WORKDIR=D:\Claudecode\PAERealtimeImaging\MC_410T_MultiCard\delivery
+
+BUILD_TARGET_BRANCH=codex/frontend-display-naming-20260924   （新建）
+STARTING_SHA=e21b019ba73c8d62556fccd0b197b456e11f544d
+IMPLEMENTATION_SOURCE_SHA=8f9e9cdcd309a831bc425456f127294ed5a003ab
+TRACKED_TREE_CLEAN_BEFORE_BUILD=true
+
+PRODUCTION BUILD
+----------------
+BUILD_COMMAND=cmd /c ".\build_mingw_debug.cmd"
+BUILD_EXIT_CODE=0
+BUILD_ERRORS=0
+BUILD_LOCAL=2026-09-24 (UTC+8)
+
+CONFIGURE_PRESET=mingw-debug   BUILD_PRESET=mingw-debug-build
+BUILD_TYPE=Debug   USE_ZEROMQ=ON   CXX_STANDARD=C++17   GENERATOR=Ninja
+
+TOOLCHAIN:
+CMAKE=3.30.5 (D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe)
+COMPILER=GNU 13.1.0 (D:\Qt\Qt6.8.0\Tools\mingw1310_64\bin\g++.exe)
+NINJA=1.12.1 (D:\Qt\Qt6.8.0\Tools\Ninja\ninja.exe)
+QT=Qt 6.8.0 (D:\Qt\Qt6.8.0\6.8.0\mingw_64)
+
+BUILD_CACHE_NOTE:
+build/mingw_debug 既有 cache 属于同一工作区根，在 IMPLEMENTATION_SOURCE_SHA 上
+重新 configure 成功，无需清 build 子目录。build/ring_recon_cuda 未触碰。
+
+BUILD_IDENTITY (build/mingw_debug/generated/PaimageAcquisition/BuildIdentity.h):
+PAIMAGE_GIT_SHA=8f9e9cdcd309a831bc425456f127294ed5a003ab
+PAIMAGE_TRACKED_DIRTY=false
+PAIMAGE_BUILD_TYPE=Debug
+=> PAIMAGE_GIT_SHA == IMPLEMENTATION_SOURCE_SHA，TRACKED_DIRTY=false ✓
+
+TEST BUILD (separate CMake project over delivery/tests):
+TEST_TREE=MC_410T_MultiCard/delivery/build/tests_frontend_display_naming_20260924
+CONFIGURE=cmake -S tests -B build/tests_frontend_display_naming_20260924 -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_PREFIX_PATH=D:/Qt/Qt6.8.0/6.8.0/mingw_64
+          -DCMAKE_CXX_COMPILER=D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe
+          -DCMAKE_MAKE_PROGRAM=D:/Qt/Qt6.8.0/Tools/Ninja/ninja.exe
+          -DQt6_DIR=D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/cmake/Qt6
+CONFIGURE_EXIT_CODE=0 / BUILD=cmake --build ... -j 8 / BUILD_EXIT_CODE=0
+  （313 个编译/链接目标，0 compiler errors）
+TEST_TREE_REBUILD_BEFORE_FINAL_RUN=ninja: no work to do
+  （被测二进制确实由最终源码树构建）
+
+TESTS EXECUTED: see ctest-targeted.txt (4 targeted) and ctest-full.txt (44 total)
+TESTS RESULT  : targeted 4/4 PASS
+                full 44/44 PASS（本次捕获的单次原始输出，EXIT_CODE=0）
+                add_test 注册项计数仍为 44：本轮断言并入既有
+                card_status_formatting_test，未新增/删除测试目标。
+
+FLAKE TALLY — physical_round_normalizer_test 并发偶发 SEGFAULT
+--------------------------------------------------------------
+本轮做全量回归时观察到 `37 - physical_round_normalizer_test (SEGFAULT)` 偶发。
+如实记录多次运行统计（不是只取绿的一次）：
+
+  孤立运行 physical_round_normalizer_test
+    新树（含本轮改动）      13 次 → 13 PASS
+    旧树（不含本轮改动）     3 次 →  3 PASS
+  全量 ctest -j 4（44 条）
+    新树（tests_frontend_display_naming_20260924）  9 次 → 7 PASS / 2 SEGFAULT
+    旧树（tests_save_write_fault_20260924）         4 次 → 2 PASS / 2 SEGFAULT
+
+结论：该偶发**先于本轮存在**，与本轮改动无关——旧树（不含本轮任何文件）复现率
+（2/4）反而高于新树（2/9）。判据另有链接集不相交这一条硬证据：
+
+  physical_round_normalizer_test 只编译 tests/paimage_core/physical_round_normalizer_test.cpp
+  并链接 paimage_source（SourceCore / OutputQueues / ControlState /
+  FrameConverter / PhysicalRoundNormalizer），其 include 只有
+  PaimageAcquisition/PhysicalRoundNormalizer.h。
+  本轮改动的 5 个文件（ChannelNaming.h / CardStatusFormatting.h /
+  MainWindow.cpp / RingConfigDialog.cpp / card_status_formatting_test.cpp）
+  **不在它的翻译单元，也不在它的链接集内**，因此不可能被本轮改动影响。
+
+该用例是单线程纯逻辑（0 处 thread 引用），偶发只出现在 -j 4 的并发全量下、
+且只在系统负载较高时。属**套件既有偶发**，建议单独立项排查（本轮不修）。
+
+COUNTER-PROOF (判别力反证，取证后已还原并复验 44/44):
+把 CardStatusFormatting.h 换回改动前版本（13 项悬停表 + 常驻栏含跳号数）、
+并把 ChannelNaming::channelShortName 还原成 `通道%1` 后重建
+card_status_formatting_test 并运行：
+
+  24 FAILURE(S)，精确落在两处改动上——
+    A1 resident status text is 缺失/已采集 only          x1
+    A1 跳号数 is no longer resident                     x1
+    A3 跳号数 moved into the tooltip                    x1
+    A4 丢失包率 folded into 丢包                        x1
+    A4 存储队列丢弃 folded into 触发丢弃                x1
+    A5 丢失包率 no longer occupies its own line         x1
+    A5 存储队列丢弃 no longer occupies its own line     x1
+    A6 tooltip is 12 lines                              x1
+    C1 channelShortName(0..7)                           x8
+    C3 short name from shared pair(0..7)                x8
+  同时保持 PASS 的对照组：A2（常驻栏紧凑性）与 C2（完整名「卡1-通道A」不变）
+  —— 证明这批断言只对本轮两处改动有判别力，且未把副作用带进未改动项。
+反证后从备份还原两个头文件，重跑 build + card_status_formatting_test + 全量 = 绿。
+
+KNOWN LIMITATIONS / NOT VERIFIED:
+- 以上全部为 source/code correctness + automated build/test 证据。
+- 本轮是纯显示层改动。**实机观感**（悬停表是否真的更好判断、勾选框名是否与现场
+  通道一一对上）不在自动化范围内，需用户实机确认。
+- physical_round_normalizer_test 的并发偶发 SEGFAULT 本轮只做了定位与影响面排除，
+  未修复。
