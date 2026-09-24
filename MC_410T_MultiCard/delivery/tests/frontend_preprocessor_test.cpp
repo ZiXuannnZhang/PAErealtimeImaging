@@ -1415,6 +1415,68 @@ void testFilterExceptionContainment() {
     std::cout << "PASS  F13 exception containment: filter fault stayed on the worker and later frames kept flowing\n";
 }
 
+// ================================================================ S3
+// S3 分工守卫：成像路径（ring sink）恰好被零相位滤波一次，不多不少。
+//
+// 依据（前提文档 G2）：B1 的反演核 b = 2p − 2r̃·p′ = −2r̃²·∂(p/r̃)/∂r̃ 成立的前提是
+//   p 与 p′ 来自同一个信号数组。若成像数据被零相位滤两次，则 b 与「只滤一次」的
+//   G2 合同不一致。故成像路径只允许一级滤波 = 既有 FrontendFilter，B1 不得再加一级。
+//
+// 反证：断言同时比对「恰好一次」与「两次」两个独立参考，且显式要求两者不同，
+//       证明本守卫对「误加第二级滤波」确实有判别力，不是恒真式。
+void testSingleFilterStageInImagingPath() {
+    const frontend_filter::Config cfg = zeroPhaseConfig();
+    require(frontend_filter::validate(cfg) == frontend_filter::Validation::Ok,
+            "S3 config valid");
+    const frontend_filter::Bank bank(cfg);
+    require(bank.active(), "S3 bank designs coefficients");
+
+    FrontendPreprocessor stage(0, 8);
+    require(stage.setFilterConfig(cfg), "S3 stage accepts the config");
+    DisplayBuffer display;
+    stage.setDisplayBuffer(&display);
+    RingRecorder ring;
+    stage.setRingSink(ring.sink());
+    stage.start();
+    stage.beginSession(1);
+
+    auto raw = makeGroup(0, 1, 128, 1, 0, 0, false);
+    const std::vector<float> inputA = raw->freqA;
+    const std::vector<float> inputB = raw->freqB;
+
+    // 独立参考：恰好滤一次 / 滤两次（每次都用全新的 Bank，状态恒零，与生产一致）
+    std::vector<float> onceA = inputA, onceB = inputB;
+    require(frontend_filter::Bank(cfg).apply(onceA.data(), onceA.size()),
+            "S3 once-pass A executed");
+    require(frontend_filter::Bank(cfg).apply(onceB.data(), onceB.size()),
+            "S3 once-pass B executed");
+    std::vector<float> twiceA = onceA, twiceB = onceB;
+    require(frontend_filter::Bank(cfg).apply(twiceA.data(), twiceA.size()),
+            "S3 twice-pass A executed");
+    require(frontend_filter::Bank(cfg).apply(twiceB.data(), twiceB.size()),
+            "S3 twice-pass B executed");
+    require(twiceA != onceA && twiceB != onceB,
+            "S3 判别力：两次滤波结果确实不同于一次（否则守卫无效）");
+    require(onceA != inputA,
+            "S3 滤波确实改变了序列（配置非平凡）");
+
+    require(stage.submit(raw) == FrontendSubmitResult::Accepted, "S3 submit accepted");
+    require(until([&] { return ring.count.load() == 1; }), "S3 dispatch");
+    {
+        std::lock_guard<std::mutex> lock(ring.mutex);
+        require(ring.freqAs.front() == onceA,
+                "S3 成像路径 A 线恰好被滤一次");
+        require(ring.freqBs.front() == onceB,
+                "S3 成像路径 B 线恰好被滤一次");
+        require(ring.freqAs.front() != twiceA,
+                "S3 成像路径 A 线未被滤两次");
+        require(ring.freqBs.front() != twiceB,
+                "S3 成像路径 B 线未被滤两次");
+    }
+    stage.stop();
+    std::cout << "PASS  S3 single filter stage: imaging path is zero-phase filtered exactly once\n";
+}
+
 }  // namespace
 
 int main() {
@@ -1445,12 +1507,14 @@ int main() {
         testFilterConcurrentConfigUpdate();
         testFilterConfigValidation();
         testFilterExceptionContainment();
+
+        testSingleFilterStageInImagingPath();
     } catch (const std::exception& error) {
         std::cout << "FAIL  " << error.what() << "\n";
         return 1;
     }
     if (g_failures) return 1;
     std::cout << "PASS  frontend_preprocessor_test: 12/12 architecture contracts + "
-                 "13/13 filter contracts\n";
+                 "13/13 filter contracts + S3 single-filter-stage guard\n";
     return 0;
 }
