@@ -1,6 +1,6 @@
 # PAERealtimeImaging 当前项目状态
 
-> 更新时间：2026-09-18（UTC+8）
+> 更新时间：2026-09-24（UTC+8）
 >
 > 本文件是**当前项目状态的单一事实入口**。分支/历史治理以 `REPOSITORY_BASELINE.md` 为准；构建与交付以 `BUILD_STANDARD.md` 为准；具体任务特殊要求以 `codex/task-docs:TASKS/<task>.md` 为准。
 
@@ -18,6 +18,8 @@
 - 但现场额外 startup trigger 的**底层 FPGA/LabVIEW 精确来源仍未证明**；“7 / 4007”继续只是当前控制环境中的现场观察/操作配置，不是协议常量。
 - START-admission 软件修复已经存在于本次接受的 source tree 中；这不等于已证明历史启动 ingress-loss 的唯一硬件根因。
 - 远端旧实现/验证分支采用**非破坏性整理**：保留用于 traceability，不删除、不重写，不再作为新任务默认 baseline。
+- **2026-09-24**：已通过实机验收的前端链（全分辨率显示裁切 → Frontend Preprocessing Stage → 逐 A-line 零相位前端滤波 → 保存/闸门与写盘故障修复 → 显示命名）以 **fast-forward** 进入 canonical `main`：无 merge commit、无 force push、无 history 重写。canonical `main` = `491aa34cfa9553954eea949a7703df7194eb7699`。
+- **2026-09-24**：环形成像零相位滤波与光声反演分支 `codex/ring-zero-phase-pa-inversion-20260919-025754` 定为**只作参考、不再实现或维护**（详见第 6 节）。其阶段 B1 任务中「B1 通过后的 exact SHA 将作为 B2 起点」的约定**作废**：后续环形成像工作一律从 latest `origin/main` 出发。
 
 当前状态标签：
 
@@ -36,7 +38,10 @@ START_ADMISSION_SOFTWARE                  = INCLUDED_AND_APPROVED
 START_ADMISSION_HARDWARE_ROOT_CAUSE       = NOT_PROVEN
 
 CANONICAL_SOURCE_BASELINE                 = main
+CANONICAL_MAIN_HEAD                       = 491aa34cfa9553954eea949a7703df7194eb7699
 REMOTE_BRANCH_CLEANUP                     = NON_DESTRUCTIVE
+RING_ZERO_PHASE_PA_INVERSION_BRANCH       = REFERENCE_ONLY_NO_MAINTENANCE
+NEXT_RING_WORK_BASELINE                   = latest origin/main（B1 起点契约作废）
 ```
 
 ## 2. Canonical source / accepted provenance
@@ -63,6 +68,29 @@ Session C candidate code / accepted production-test tree:
 
 Session D final traceability HEAD:
   69a7606f95c97c839fd618115f4092a4291d8906
+
+--- 2026-09-24 并入 canonical main 的前端链（已过实机验收）---
+
+full-resolution display crop:
+  c31fd09
+
+Frontend Preprocessing Stage (Task 1 identity):
+  5af8c39
+
+per-A-line zero-phase frontend filtering:
+  093f8cc
+
+save/gate bugfix（落盘数据永不被改写）:
+  4660740
+
+write-fault rollback（H2/H1）:
+  bf5c226
+
+card-status / channel display naming:
+  8f9e9cd
+
+canonical main fast-forward HEAD:
+  491aa34cfa9553954eea949a7703df7194eb7699
 ```
 
 A/B/C/D 最终 candidate ancestry 中包含 START-admission 软件修复；不要在后续整理中手术式剥离该祖先，否则会形成未经同等验证的新 source tree。
@@ -124,14 +152,42 @@ canonical main 在完成远端文档/历史集成后，其 Git SHA 会变化，�
 
 | 角色 | 状态 |
 |---|---|
-| `main` | 唯一 canonical source/docs baseline |
-| `codex/task-docs` | 任务规格专用分支 |
+| `main` | 唯一 canonical source/docs baseline（2026-09-24 fast-forward 至 `491aa34`） |
+| `codex/task-docs` | 任务规格专用分支（48 条独有提交，保留；非生产实现 baseline） |
+| `codex/ring-zero-phase-pa-inversion-20260919-025754` | **参考专用 / 不再维护**：阶段 A 算法基准 + 阶段 B1，tip `3032550`、B1 构建源 `d8dd3da` |
 | Session A/B/C/D 分支 | historical / traceability，保留 |
 | `codex/physical-round-normalizer-integrated-20260916` | historical validation point，保留 |
 | `codex/start-admission-fence-fix-20260913-003112` | historical validation point，保留 |
 | 其他旧 `codex/*` / backup / experiment | historical，非默认 baseline |
 
 非破坏性整理原则：不因本次收尾删除远端旧分支，不重写其 history，不 force push。
+
+### 6.1 `codex/ring-zero-phase-pa-inversion-20260919-025754` 的定位（2026-09-24 决定）
+
+```text
+分支用途   = 只作参考，不在其上继续实现或维护
+tip        = 3032550
+B1 构建源  = d8dd3daf2f1bce3afdc01e0452e7ae487f3a1697
+```
+
+- 阶段 A 的算法材料（`CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/`）仍是光声反演公式、
+  时间轴、滤波顺序/端点与配置拒绝规则的**数值参考**，后续工作不得重新推导这些已收口结论。
+- 阶段 B1 任务条款「B1 通过后的 exact SHA 将作为 B2 起点」**作废**。
+- 该分支与 canonical `main` 同出于 `fb10721e` 且**至今未合流**；其 `RingRecon/zero_phase_filter.cpp`
+  等阶段 B1 产物**不在** canonical `main` 中。若后续任务需要该滤波行为，须在 `main` 上重新
+  落地或显式迁移，不得默认认为 `main` 已具备。
+
+### 6.2 2026-09-24 远端分支盘点（本次未删除任何分支）
+
+共 33 条远端分支：
+
+| 分类 | 数量 | 说明 |
+|---|---|---|
+| 零独有提交、已完整并入 `main` | 18 | 前端链工作分支 5 条 + Session A/B/C/D、`physical-round-normalizer*`、`start-admission-fence-fix`、`integrate-abcd-to-main`、`diagnostics-*`、`docs/readme-main-architecture`、`safety/pre-shm-observability`、`backup/main-pre-diagnostics` 等 13 条历史验证点 |
+| 含独有提交、必须保留 | 15 | `codex/task-docs`(48)、`codex/ring-zero-phase-pa-inversion-20260919-025754`(10)、`codex/ring-pipeline-refactor-20260912`(6)、`codex/start-race-validation-20260912-205615`(4)、`codex/host-ingress-protection-experiment-20260908`(4)、`codex/physical-round-blockers-fix-20260916`(3)、`codex/network-ingress-observability-20260907`(3)、`codex/local-history-supplement-20260913`(2)、`backup/local-workspace-source-20260913`(2)、`codex/baseline-role-ack-20260907-132500`(2)、`master`(1)、`backup/sysdelay-per-channel-20260817`(1)、`backup/cf-dmas-pcf-20260816`(1)、`codex/ssh-unattended-test`(1)、`codex/diagnostic-log-export-20260907`(1) |
+
+零独有提交集合的删除不会丢失任何提交（全部仍可由 `main` 抵达），但按本次决定**保留**，
+留待单独的清理决策。
 
 ## 7. 下一步
 
