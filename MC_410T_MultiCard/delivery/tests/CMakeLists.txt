@@ -18,6 +18,15 @@ target_link_libraries(timeout_presentation_test PRIVATE Qt6::Core)
 add_test(NAME timeout_presentation_test COMMAND timeout_presentation_test)
 add_test(NAME ring_block_assembler_test COMMAND ring_block_assembler_test)
 
+# B 档判别性守卫测试（S2）：比值守卫 / 反演核恒等式 / 权重成对 / 全关逐位回归。
+# 宿主是 src/RingRecon 的 CPU reference（纯 C++，不依赖 Qt/CUDA）。
+add_executable(ring_recon_guard_test
+    ring_recon_guard_test.cpp
+    ../src/RingRecon/ring_recon.cpp)
+target_include_directories(ring_recon_guard_test PRIVATE ../include ../src/RingRecon)
+target_compile_features(ring_recon_guard_test PRIVATE cxx_std_17)
+add_test(NAME ring_recon_guard_test COMMAND ring_recon_guard_test)
+
 add_executable(imaging_bypass_test imaging_bypass_test.cpp ../src/ImagingBypass.cpp)
 target_include_directories(imaging_bypass_test PRIVATE ../include)
 target_compile_features(imaging_bypass_test PRIVATE cxx_std_17)
