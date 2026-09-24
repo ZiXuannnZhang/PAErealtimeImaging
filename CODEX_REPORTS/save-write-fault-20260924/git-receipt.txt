@@ -1,0 +1,28 @@
+GIT RECEIPT — save-write-fault-20260924
+CAPTURED=2026-09-24T03:22:19Z
+
+=== branch ===
+codex/save-gate-bugfix-20260924
+
+=== git rev-parse HEAD ===
+bf5c226dd87378e412e82383c07e2a63edae5fad
+
+=== git status --porcelain --untracked-files=no ===
+(empty above = tracked tree clean)
+
+=== git log --oneline -4 ===
+bf5c226 fix: detect write failures in FileSaver and roll back to a record boundary
+f3e4558 docs: record save/gate bugfix build and regression receipt
+4660740 fix: never rewrite saved data; drive the frontend gate from 单圈总A-line数
+40102ea docs: record frontend filter stage build and regression receipt
+
+=== git diff --stat f3e4558..HEAD ===
+ MC_410T_MultiCard/delivery/include/FileSaver.h     |  29 +++-
+ MC_410T_MultiCard/delivery/src/FileSaver.cpp       | 159 +++++++++++++++-----
+ MC_410T_MultiCard/delivery/tests/CMakeLists.txt    |   5 +-
+ .../tests/filesaver_round_boundary_test.cpp        | 163 +++++++++++++++++++++
+ .../delivery/tests/paimage_host_output_test.cpp    |  42 ++++++
+ 5 files changed, 359 insertions(+), 39 deletions(-)
+
+=== local HEAD ===
+bf5c226dd87378e412e82383c07e2a63edae5fad

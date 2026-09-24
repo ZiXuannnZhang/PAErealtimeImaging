@@ -1,0 +1,118 @@
+H2/H1 写盘静默丢弃修复 + H4/H5 防复活断言 — Windows 构建摘要
+================================================================================
+
+TASK=上一轮 save/gate bugfix 回执第 5 节隐患清单中 H1..H6 的可修部分
+TASK_TYPE=BUGFIX（无独立任务文档；范围由用户按「生产可达性」逐项拍板）
+WORKDIR=D:\Claudecode\PAERealtimeImaging\MC_410T_MultiCard\delivery
+
+BUILD_TARGET_BRANCH=codex/save-gate-bugfix-20260924   （续用同一分支）
+STARTING_SHA=f3e45587d69deb75c70b735ed2c0a5330db75a71
+IMPLEMENTATION_SOURCE_SHA=bf5c226dd87378e412e82383c07e2a63edae5fad
+TRACKED_TREE_CLEAN_BEFORE_BUILD=true
+
+PRODUCTION BUILD
+----------------
+BUILD_COMMAND=cmd /c ".\build_mingw_debug.cmd"
+BUILD_EXIT_CODE=0
+BUILD_ERRORS=0
+BUILD_LOCAL=2026-09-24 (UTC+8)
+
+CONFIGURE_PRESET=mingw-debug
+BUILD_PRESET=mingw-debug-build
+BUILD_TYPE=Debug
+USE_ZEROMQ=ON
+CXX_STANDARD=C++17
+GENERATOR=Ninja
+
+TOOLCHAIN (preflight: all four canonical paths present before configure):
+CMAKE=3.30.5 (D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe)
+COMPILER=GNU 13.1.0 (D:\Qt\Qt6.8.0\Tools\mingw1310_64\bin\g++.exe)
+NINJA=1.12.1 (D:\Qt\Qt6.8.0\Tools\Ninja\ninja.exe)
+QT=Qt 6.8.0 (D:\Qt\Qt6.8.0\6.8.0\mingw_64)
+
+BUILD_CACHE_NOTE:
+build/mingw_debug 的既有 cache 属于同一工作区根，build_mingw_debug.cmd 在
+IMPLEMENTATION_SOURCE_SHA 上重新 configure 成功，无需清 build 子目录。
+build/ring_recon_cuda 未触碰。
+
+CONFIGURE/BUILD LOG SUMMARY:
+  -- Configuring done / -- Generating done
+  windeployqt executed (Qt runtime + plugins deployed next to the exe)
+  3 warnings, all non-fatal windeployqt notices.  0 compiler errors.
+
+BUILD_IDENTITY (build/mingw_debug/generated/PaimageAcquisition/BuildIdentity.h):
+PAIMAGE_GIT_SHA=bf5c226dd87378e412e82383c07e2a63edae5fad
+PAIMAGE_TRACKED_DIRTY=false
+PAIMAGE_BUILD_TYPE=Debug
+PAIMAGE_COMPILER=GNU 13.1.0
+PAIMAGE_PRODUCT_BASELINE=e66a29bfbbaa6534911a23d48e8624fb8d552bec
+PAIMAGE_SOURCE_SHA256=2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec
+=> PAIMAGE_GIT_SHA == IMPLEMENTATION_SOURCE_SHA，TRACKED_DIRTY=false ✓
+
+TEST BUILD (separate CMake project over delivery/tests):
+TEST_TREE=MC_410T_MultiCard/delivery/build/tests_save_write_fault_20260924
+SOURCE_DIR=MC_410T_MultiCard/delivery/tests
+CONFIGURE=cmake -S tests -B build/tests_save_write_fault_20260924 -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_PREFIX_PATH=D:/Qt/Qt6.8.0/6.8.0/mingw_64
+          -DCMAKE_CXX_COMPILER=D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe
+          -DCMAKE_MAKE_PROGRAM=D:/Qt/Qt6.8.0/Tools/Ninja/ninja.exe
+          -DQt6_DIR=D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/cmake/Qt6
+CONFIGURE_EXIT_CODE=0
+BUILD=cmake --build build/tests_save_write_fault_20260924 -j 8
+BUILD_EXIT_CODE=0
+  （313 个编译/链接目标，0 compiler errors）
+NOTE: -DCMAKE_PREFIX_PATH 是必需的，否则 tests/CMakeLists.txt 里
+find_package(Qt6 COMPONENTS Widgets) 会报 "Failed to find required Qt
+component Widgets"。
+
+TEST_SEAM_ISOLATION:
+FILESAVER_TEST_SEAM 只经 target_compile_definitions 开给
+filesaver_round_boundary_test（该目标自行编译一份 FileSaver.cpp）。生产目标
+MC410T_Receiver 的 FileSaver 编译单元不含任何故障注入口——与
+FRONTEND_PREPROCESSOR_TEST_SEAM / DATA_PROCESSOR_TEST_SEAM 的既有隔离方式一致。
+
+TEST_TREE_REBUILD_BEFORE_FINAL_RUN=ninja: no work to do
+  （被测二进制确实由最终源码树构建，而非提交前的旧产物）
+
+TESTS EXECUTED: see ctest-targeted.txt (6 targeted) and ctest-full.txt (44 total)
+TESTS RESULT  : targeted 6/6 PASS; full 44/44 PASS (0 FAIL / 0 SKIP / 0 NOT_RUN)
+                add_test 注册项计数仍为 44：W/S 断言写进既有测试可执行文件，
+                未新增也未删除测试目标。
+
+COUNTER-PROOF (判别力反证，取证后已还原并复验 44/44):
+把 FileSaver::flushWriteBuffers 的失败分支换回旧语义（忽略 write() 返回值、
+不回退、恒返回 true）后重建 filesaver_round_boundary_test 并运行：
+  16 FAILURE(S)，全部落在 W 系列的写盘故障断言上——
+    W1 counters roll back with the bytes
+    W1 saving stops on a write fault
+    W1 exactly one errorOccurred for a sustained fault
+    W4 counters and alert stay put
+    W1/W4 both channels hold exactly the surviving segment
+    W1 surviving bytes are the original records, not a torn tail
+    W1 the B channel rolled back to the same record count
+    W2 stop + single alert + counter rollback
+    W2 an A-only failure rolls BOTH channels back (pair stays equal)
+    W2 both channels keep exactly the first segment's records
+    W3 stop + single alert + counter rollback
+    W3 a B-only failure rolls BOTH channels back (pair stays equal)
+    W3 both channels keep exactly the first segment's records
+    W6 counters drop exactly the failing segment
+    W6 only the failing segment is dropped; earlier segments stay intact
+    W6 surviving bytes are still the original records, not a torn tail
+  同时保持 PASS 的对照组：T1..T13 全部（覆盖/轮次/序号契约）与 W5（无故障
+  基线）——证明这批断言只对"写盘失败处理"有判别力，既不是恒真式，也没有
+  把回退逻辑的副作用带进正常写路径。
+反证后 git checkout HEAD -- FileSaver.cpp 还原（tracked tree 立即 clean），
+重跑 build + 全量 ctest = 44/44 PASS。
+
+KNOWN LIMITATIONS / NOT VERIFIED:
+- 以上全部为 source/code correctness + automated build/test 证据。
+- W 系列的写盘故障由 FILESAVER_TEST_SEAM 注入（把 write() 返回值改写为 -1，
+  再由回退逻辑撤掉已落字节）。**不声称已覆盖真实磁盘满 / 介质拔出 / 驱动层
+  短写**；实机长跑下的真实写盘故障表现仍属未验证项。
+- W 系列的逐字节内容断言在 stopSaving() 关文件后执行。原因：QIODevice::write
+  有内部缓冲，未落盘时外部 stat 看不到字节（回退用的 QFile::resize 会刷盘，
+  所以故障当场的文件尺寸断言也成立）。这一点在测试文件里有注释说明。
+- H3（断电下文件尾持久性）与 H6（FileSaver 成员同步）本轮明确不做，理由见
+  validation-receipt.md 第 4 节可达性核查。

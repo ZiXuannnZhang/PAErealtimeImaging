@@ -1,0 +1,24 @@
+TARGETED CTEST — save-write-fault-20260924
+IMPLEMENTATION_SOURCE_SHA=bf5c226dd87378e412e82383c07e2a63edae5fad
+TEST_TREE=/d/Claudecode/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/tests_save_write_fault_20260924
+TEST_TREE_REBUILD_BEFORE_RUN=ninja: no work to do.
+COMMAND=ctest -R "filesaver_round_boundary_test|paimage_host_output_test|auto_save_round_coordinator_test|count_boundary_save_binding_test|data_processor_imaging_isolation_test|frontend_preprocessor_test" --output-on-failure
+=== BEGIN CTEST OUTPUT ===
+Internal ctest changing into directory: D:/Claudecode/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/tests_save_write_fault_20260924
+Test project D:/Claudecode/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/tests_save_write_fault_20260924
+    Start  4: data_processor_imaging_isolation_test
+1/6 Test  #4: data_processor_imaging_isolation_test ...   Passed    0.07 sec
+    Start  5: frontend_preprocessor_test
+2/6 Test  #5: frontend_preprocessor_test ..............   Passed    0.06 sec
+    Start 26: paimage_host_output_test
+3/6 Test #26: paimage_host_output_test ................   Passed    0.64 sec
+    Start 27: filesaver_round_boundary_test
+4/6 Test #27: filesaver_round_boundary_test ...........   Passed    0.44 sec
+    Start 30: auto_save_round_coordinator_test
+5/6 Test #30: auto_save_round_coordinator_test ........   Passed    0.09 sec
+    Start 31: count_boundary_save_binding_test
+6/6 Test #31: count_boundary_save_binding_test ........   Passed    0.37 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Total Test time (real) =   1.68 sec
