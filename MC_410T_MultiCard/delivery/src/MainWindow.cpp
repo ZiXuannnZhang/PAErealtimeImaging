@@ -15,6 +15,7 @@
 #include "DiagnosticExportDialog.h"
 #include "Constants.h"
 #include "AcqConfig.h"
+#include "ChannelNaming.h"
 #include "StartupPolicy.h"
 #include "SystemCaptureStatus.h"
 #include "PaimageAcquisition/CardDiscovery.h"
@@ -1035,7 +1036,9 @@ void MainWindow::rebuildDynamicUI()
             int globalCard = m_currentGroup * CARDS_PER_DISPLAY_GROUP + card;
             bool cardExists = (globalCard < m_nCards);
             QString tabName = cardExists
-                ? QString("卡%1-通道%2").arg(globalCard + 1).arg(ch == 0 ? 'A' : 'B')
+                // 与环形扫描参数设定的启用通道勾选框共用 ChannelNaming 的换算，
+                // 两处命名必然逐位对应（本处是完整名 "卡1-通道A"）。
+                ? ChannelNaming::channelFullName(globalCard * 2 + ch)
                 : QString("--");
 
             // Tab 页
@@ -3469,8 +3472,8 @@ void MainWindow::onUpdateStatistics()
             const auto &s = statsOpt.value();
             if (s.recvMbps > HIGH_RATE_THRESHOLD) anyExceeds = true;
 
-            // 常驻栏只显示 缺失/跳号数/已采集；详细采集统计集中放入 tooltip，避免
-            // 状态栏文本随计数增长而撑宽布局或掩盖关键信息。
+            // 常驻栏只显示 缺失/已采集；跳号数与其余明细一并集中放入 tooltip，
+            // 避免状态栏文本随计数增长而撑宽布局或掩盖关键信息。
             m_lblStats[i]->setText(formatCardStatusText(virtualCardNum, s, roundDisplay));
             m_lblStats[i]->setToolTip(formatCardStatusTooltip(s, roundDisplay));
 
@@ -4045,7 +4048,7 @@ void MainWindow::updateGroupDisplay(int groupIndex)
         for (int ch = 0; ch < 2; ++ch) {
             int tabIdx = slot * 2 + ch;
             QString chName = cardExists
-                ? QString("卡%1-通道%2").arg(globalCard + 1).arg(ch == 0 ? 'A' : 'B')
+                ? ChannelNaming::channelFullName(globalCard * 2 + ch)
                 : QString("--");
 
             ui->tabWidget->setTabText(tabIdx, chName);

@@ -27,12 +27,12 @@ inline QString text(int cardNumber, const CardStats::Snapshot& stats,
                     const RoundDisplay& round)
 {
     // 冻结口径：缺失 = 部分到达但未完整组装的 trigger 数（triggersPartial）；
-    // 跳号数 = 完全 0 包到达的 missing trigger 数（missingTriggerCount）；
     // 已采集 = 全局物理轮 distinct physical trigger 数（含被启动过滤的）。
-    return QStringLiteral("卡%1 | 缺失: %2 | 跳号数: %3 | 已采集: %4")
+    // 跳号数（missingTriggerCount，完全 0 包到达的 trigger 数）已移入 tooltip：
+    // 常驻栏只留判断"有没有少"最必要的两项，明细归悬停表。
+    return QStringLiteral("卡%1 | 缺失: %2 | 已采集: %3")
         .arg(cardNumber)
         .arg(QString::number(static_cast<qulonglong>(stats.triggersPartial)))
-        .arg(QString::number(static_cast<qulonglong>(stats.missingTriggerCount)))
         .arg(QString::number(static_cast<qulonglong>(round.collected)));
 }
 
@@ -40,22 +40,31 @@ inline QString tooltip(const CardStats::Snapshot& stats, const RoundDisplay& rou
 {
     // 丢包 = packetsDropped 原语义：partial trigger 内缺失包 + 完整 missing
     // trigger 的 gap * expectedPackets 包当量（不是 trigger 数）。
+    // 跳号数 = 完全 0 包到达的 missing trigger 数（自常驻栏移入）。
+    //
+    // 合并的两处都是"同一量的另一种表达"，不是信息删减：
+    //   * 丢失包率就是 packetsDropped 的相对值（NetworkController 里
+    //     packetLossRate = ddrop / totalPkts，ddrop 即 packetsDropped 增量）；
+    //   * 存储队列丢弃与触发丢弃在 DataProcessor 里同步递增（两处都是双增），
+    //     前者是后者的成因细分。
+    // 被并入项的原名以括注保留：只少占行，不丢术语。
     return QStringLiteral(
         "触发完成: %1\n"
-        "丢包: %2\n"
-        "处队: %3\n"
-        "存队: %4\n"
-        "Socket接收: %5\n"
-        "Processor出队: %6\n"
-        "批边界丢弃: %7\n"
-        "速率: %8 Mb/s\n"
-        "触发率: %9 Hz\n"
-        "丢失包率: %10\n"
-        "触发丢弃: %11\n"
-        "存储队列丢弃: %12\n"
-        "已过滤: %13")
+        "跳号数: %2\n"
+        "丢包: %3（丢失包率: %4）\n"
+        "处队: %5\n"
+        "存队: %6\n"
+        "Socket接收: %7\n"
+        "Processor出队: %8\n"
+        "批边界丢弃: %9\n"
+        "速率: %10 Mb/s\n"
+        "触发率: %11 Hz\n"
+        "触发丢弃: %12（存储队列丢弃: %13）\n"
+        "已过滤: %14")
         .arg(QString::number(static_cast<qulonglong>(stats.triggersComplete)))
+        .arg(QString::number(static_cast<qulonglong>(stats.missingTriggerCount)))
         .arg(QString::number(static_cast<qulonglong>(stats.packetsDropped)))
+        .arg(stats.packetLossRate, 0, 'f', 6)
         .arg(stats.inputQueueDepth)
         .arg(stats.saveQueueDepth)
         .arg(QString::number(static_cast<qulonglong>(stats.socketPacketsReceived)))
@@ -63,7 +72,6 @@ inline QString tooltip(const CardStats::Snapshot& stats, const RoundDisplay& rou
         .arg(QString::number(static_cast<qulonglong>(stats.batchBoundaryDiscards)))
         .arg(stats.recvMbps, 0, 'f', 2)
         .arg(stats.triggerHz, 0, 'f', 2)
-        .arg(stats.packetLossRate, 0, 'f', 6)
         .arg(QString::number(static_cast<qulonglong>(stats.triggersDiscarded)))
         .arg(QString::number(static_cast<qulonglong>(stats.saveQueueDiscards)))
         .arg(QString::number(static_cast<qulonglong>(round.filtered)));

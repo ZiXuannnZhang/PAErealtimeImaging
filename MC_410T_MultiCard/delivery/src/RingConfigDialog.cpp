@@ -1,6 +1,7 @@
 #include "PaimageAcquisition/SettingsPath.h"
 #include "RingConfigDialog.h"
 #include "AcqConfig.h"
+#include "ChannelNaming.h"
 #include "ImagingController.h"
 #include "RoundPolicySettings.h"
 
@@ -183,7 +184,10 @@ void RingConfigDialog::buildUi()
     fCh->addRow("拼接羽化宽度", m_spnSpliceBlend);
     auto *chRow = new QHBoxLayout;
     for (int c = 0; c < 8; ++c) {
-        m_chkCh[c] = new QCheckBox(QString("通道%1").arg(c + 1));
+        // 命名与主程序时域/频域信号选项卡逐位对应（前端「卡1-通道A」⇒ 这里「1-A」）。
+        // 换算只在 ChannelNaming 一处，避免两套命名各自演化后对不上现场通道。
+        // 持久化键仍是 ch%1，与显示文本无关，既有配置无需迁移。
+        m_chkCh[c] = new QCheckBox(ChannelNaming::channelShortName(c));
         m_chkCh[c]->setChecked(true);
         chRow->addWidget(m_chkCh[c]);
     }
@@ -191,22 +195,23 @@ void RingConfigDialog::buildUi()
     // 每通道重建参数：重建半径 + 波长1/波长2 延时截断（同一行排列）。
     // 半径随配准模式/通道勾选联动；双波长延时始终可编辑（与通道是否勾选无关）。
     for (int c = 0; c < 8; ++c) {
+        const QString chName = ChannelNaming::channelShortName(c);
         m_spnRadiusCh[c] = new QDoubleSpinBox;
         m_spnRadiusCh[c]->setRange(0.1, 50);
         m_spnRadiusCh[c]->setDecimals(4);
         m_spnRadiusCh[c]->setValue(6.57);
         m_spnRadiusCh[c]->setSuffix(" mm");
         m_spnRadiusCh[c]->setToolTip(
-            QString("通道%1 重建半径（该通道传感器的实际扫描旋转半径）").arg(c + 1));
+            QString("%1 重建半径（该通道传感器的实际扫描旋转半径）").arg(chName));
 
         for (int w = 0; w < 2; ++w) {
             m_spnSysDelayCh[c][w] = new QSpinBox;
             m_spnSysDelayCh[c][w]->setRange(1, 100000);
             m_spnSysDelayCh[c][w]->setValue(w == 0 ? 358 : 371);
             m_spnSysDelayCh[c][w]->setToolTip(
-                QString("通道%1 波长%2 延时截断起点（1-based，采样点）。\n"
+                QString("%1 波长%2 延时截断起点（1-based，采样点）。\n"
                         "用于消除全系统链路延迟导致的时域未对齐。")
-                    .arg(c + 1).arg(w == 0 ? 1 : 2));
+                    .arg(chName).arg(w == 0 ? 1 : 2));
         }
 
         auto *row = new QWidget;
@@ -218,7 +223,7 @@ void RingConfigDialog::buildUi()
         rowLay->addWidget(new QLabel(QStringLiteral("波长2延时")));
         rowLay->addWidget(m_spnSysDelayCh[c][1]);
         rowLay->addStretch();
-        fCh->addRow(QString("通道%1重建半径").arg(c + 1), row);
+        fCh->addRow(QString("%1 重建半径").arg(chName), row);
     }
     // 使能联动：配准模式勾选时按通道勾选决定；未勾选时仅通道1可写（统一半径）
     auto syncRadiusEditable = [this]() {
