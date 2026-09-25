@@ -29,16 +29,17 @@ Frontend Preprocessing Stage、逐 A-line 零相位前端滤波、保存/闸门�
 
 ## Canonical documentation
 
-按以下顺序读取：
+按以下顺序读取（**权威顺序**以 `Codex-GitHub双端联动快速上手.md` §1 为准，两处清单同一套治理文档）：
 
 1. `PROJECT_STATUS.md` — 当前项目与验证状态；
 2. `REPOSITORY_BASELINE.md` — branch / history / merge governance；
 3. `BUILD_STANDARD.md` — Windows build、runtime provenance、delivery；
-4. `Codex-GitHub双端联动快速上手.md` — ChatGPT / Codex 协作方式；
-5. `MC_410T_MultiCard/delivery/README.md` — 当前生产采集/实时成像架构；
-6. `CODEX_REPORTS/README.md` — 历史执行、验证与诊断档案说明。
+4. `HANDOFF.md` — 简洁的当前接力入口，不替代上述三份治理文档；
+5. `Codex-GitHub双端联动快速上手.md` — ChatGPT / Codex 协作方式；
+6. `MC_410T_MultiCard/delivery/README.md` — 当前生产采集/实时成像架构；
+7. `CODEX_REPORTS/README.md` — 历史执行、验证与诊断档案说明。
 
-根 `HANDOFF.md` 是简洁的当前接力入口，不替代上述治理文档。
+任务特殊要求以 `codex/task-docs:TASKS/<task>.md` 为准，可覆盖上述治理文档中与之冲突的条款。
 
 ## Production data path
 

@@ -12,6 +12,7 @@ git fetch --prune origin
 git show origin/main:PROJECT_STATUS.md
 git show origin/main:REPOSITORY_BASELINE.md
 git show origin/main:BUILD_STANDARD.md
+git show origin/main:HANDOFF.md
 ```
 
 有任务文档时再读：
@@ -20,14 +21,17 @@ git show origin/main:BUILD_STANDARD.md
 git show origin/codex/task-docs:TASKS/<任务文件名>
 ```
 
-权威顺序：
+权威顺序（与 `README.md`「Canonical documentation」是同一套清单）：
 
 1. `PROJECT_STATUS.md`
 2. `REPOSITORY_BASELINE.md`
 3. `BUILD_STANDARD.md`
-4. task-specific document
-5. module README/docs
-6. historical `CODEX_REPORTS`
+4. `HANDOFF.md`（接力入口，不替代上述三份治理文档）
+5. `Codex-GitHub双端联动快速上手.md`（协作方式，本文件）
+6. `MC_410T_MultiCard/delivery/README.md`（当前生产采集/实时成像架构）
+7. `CODEX_REPORTS/README.md`（历史执行、验证与诊断档案说明）
+
+任务特殊要求以 `codex/task-docs:TASKS/<task>.md` 为准，可覆盖上述治理文档中与之冲突的条款。
 
 ## 2. Current project state
 
