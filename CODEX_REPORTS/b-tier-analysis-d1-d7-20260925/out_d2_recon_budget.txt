@@ -1,0 +1,151 @@
+########## 第 1 轮  2026-09-25 13:53:05 ##########
+==================================================================
+D2  重建链路实时预算基准
+==================================================================
+
+被测对象：生产 CUDA 核 ring_recon_cuda_*（libring_recon_cuda.dll）
+统计口径：预热 2 次后取 7 次；报 mean / median / min / max。
+
+配置：daqHz=2.5e+08  sampDepth=4000  alinesPerFrame=8000  enabledChannelCount=8
+      fov=36.0 mm  sectorStartDeg=180  单圈 A-line 角步长=0.0900 deg
+
+【说明】本基准用独立 console 程序链接生产 CUDA DLL，
+        不是完整 Qt 交付构建；BuildIdentity 见输出末尾的依赖溯源。
+        规格要求的「在 exact commit 上重新 configure + build」另见回执。
+
+=== D2.1 分段时延 ===
+口径：append = 一次 ring_recon_cuda_append_*（含 H2D + 核 + 累加）；
+      snapshot = 一次 ring_recon_cuda_snapshot（acc/accW 归一化 + 块平均）。
+| 段 | mean(ms) | median(ms) | min(ms) | max(ms) | 极差(ms) | 次数 |
+| append_angles_radii (global) | 2513.170 | 2528.548 | 2420.065 | 2593.519 | 173.454 | 7 |
+| append_angles_radii_sector (splice) | 2501.629 | 2500.801 | 2487.141 | 2510.304 | 23.164 | 7 |
+| snapshot (dn=360,step=1) | 0.247 | 0.150 | 0.127 | 0.822 | 0.695 | 7 |
+| (null) | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0 |
+
+=== D2.2 块大小敏感性（gridSize=10 um）===
+| alinesPerBlock | 块数/圈 | 每块 mean(ms) | 每块 median(ms) | 每 A-line us | 整圈 median(ms) |
+| 100 | 80 | 31.002 | 31.148 | 311.4783 | 2491.826 |
+| 200 | 40 | 61.845 | 61.782 | 308.9111 | 2471.289 |
+| 400 | 20 | 121.159 | 120.195 | 300.4867 | 2403.894 |
+
+=== D2.3 网格敏感性（alinesPerBlock=200）===
+| gridSize(um) | 网格 | 整圈 append median(ms) | snapshot median(ms) | 每 A-line us |
+| 20 | 1800x1800 | 618.978 | 0.165 | 77.3723 |
+| 10 | 3600x3600 | 2348.701 | 0.201 | 293.5876 |
+
+=== D2.4 余量估算（用于 B1 新增逐线开销）===
+口径（必须与采集节拍比，而不是与任意毫秒数比）：
+  原 MATLAB 脚本 AlineRateHz = 40  => 每根 A-line 间隔 25 ms。
+  单圈总 A-line 数（含双波长）= 8000 => 单圈采集时长 = 200.0 s。
+  alinesPerBlock = 200  => 块到达间隔 = 5.00 s。
+
+  实测（gridSize=10 um, alinesPerBlock=200）：
+    整圈 append  median = 2.529 s
+    每块 append  median = 63.214 ms
+    每 A-line            = 316.0685 us
+
+  余量：
+    (a) 整圈口径：采集 200.0 s vs 重建 2.529 s => 重建占 1.26%, 余量 98.74%
+    (b) 流式块口径：块间隔 5.00 s vs 每块 63.214 ms => 占 1.264%, 余量 98.74%
+
+  B1 可用预算量级（每 A-line 允许的额外开销）：
+    整圈余量摊到每 A-line   = 24683.931 us/A-line
+    流式块余量摊到每 A-line = 24683.931 us/A-line
+
+  结论：B1 的逐线导数是 O(nt) 的一次差分 + 一次乘加（nt=4000）,
+  相对上述预算属可忽略量级；B1 的逐线开销【预算充足】。
+  注意：网格是主导项（见 D2.3，10 um 比 20 um 慢约 3.8 倍）。
+  【本任务不声称“实时通过”】：实时性结论由规划侧按实际节拍判断（规格 6）。
+
+=== D2.5 负载敏感性 / 可复现性 ===
+历史经验：同一口径两轮测量可差 2~4 倍，必须如实记录，不得只报好的那次。
+本文件把 min/max 与极差一起打印（见 D2.1/D2.2 表），供判断。
+本轮测量时机负载：见回执记录（空闲/非空闲）。
+建议：同一口径至少跑 2 轮（相隔数分钟），两轮 median 都要记录。
+
+=== 未验证项 / 限制 ===
+* 不声称「实时通过」——只报时延与余量，实时性结论由规划侧按实际节拍判断。
+* 本基准为独立 console 程序链生产 CUDA DLL，不是完整 Qt 交付构建。
+* 未测真实采集端到端（网络→组包→预处理→重建→显示）；只测重建核分段。
+* B1 的 inversion 开关存在（ring_recon_cuda_set_inversion），但本任务只测不改，
+  未测 Ubp 模式下的时延（属 B1 实现阶段）。但**结构性提示**：
+  B1 的逐线导数会多一次 A-line 上的差分与一次乘加，量级为 O(nt) per A-line；
+  实测每 A-line 预算见 D2.4，可代入判断。
+* real hardware validation：仅真实 GPU 上的性能实测，不等于实机采集验证。
+* hardware root-cause attribution：未声称。
+
+########## 第 2 轮  2026-09-25 13:55:24 ##########
+==================================================================
+D2  重建链路实时预算基准
+==================================================================
+
+被测对象：生产 CUDA 核 ring_recon_cuda_*（libring_recon_cuda.dll）
+统计口径：预热 2 次后取 7 次；报 mean / median / min / max。
+
+配置：daqHz=2.5e+08  sampDepth=4000  alinesPerFrame=8000  enabledChannelCount=8
+      fov=36.0 mm  sectorStartDeg=180  单圈 A-line 角步长=0.0900 deg
+
+【说明】本基准用独立 console 程序链接生产 CUDA DLL，
+        不是完整 Qt 交付构建；BuildIdentity 见输出末尾的依赖溯源。
+        规格要求的「在 exact commit 上重新 configure + build」另见回执。
+
+=== D2.1 分段时延 ===
+口径：append = 一次 ring_recon_cuda_append_*（含 H2D + 核 + 累加）；
+      snapshot = 一次 ring_recon_cuda_snapshot（acc/accW 归一化 + 块平均）。
+| 段 | mean(ms) | median(ms) | min(ms) | max(ms) | 极差(ms) | 次数 |
+| append_angles_radii (global) | 2530.697 | 2528.279 | 2524.505 | 2537.764 | 13.259 | 7 |
+| append_angles_radii_sector (splice) | 2540.755 | 2536.916 | 2523.061 | 2560.922 | 37.861 | 7 |
+| snapshot (dn=360,step=1) | 0.116 | 0.098 | 0.095 | 0.208 | 0.112 | 7 |
+| (null) | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0 |
+
+=== D2.2 块大小敏感性（gridSize=10 um）===
+| alinesPerBlock | 块数/圈 | 每块 mean(ms) | 每块 median(ms) | 每 A-line us | 整圈 median(ms) |
+| 100 | 80 | 32.149 | 32.089 | 320.8887 | 2567.110 |
+| 200 | 40 | 63.380 | 63.426 | 317.1286 | 2537.029 |
+| 400 | 20 | 126.610 | 126.348 | 315.8697 | 2526.958 |
+
+=== D2.3 网格敏感性（alinesPerBlock=200）===
+| gridSize(um) | 网格 | 整圈 append median(ms) | snapshot median(ms) | 每 A-line us |
+| 20 | 1800x1800 | 668.466 | 0.188 | 83.5583 |
+| 10 | 3600x3600 | 2526.867 | 0.199 | 315.8584 |
+
+=== D2.4 余量估算（用于 B1 新增逐线开销）===
+口径（必须与采集节拍比，而不是与任意毫秒数比）：
+  原 MATLAB 脚本 AlineRateHz = 40  => 每根 A-line 间隔 25 ms。
+  单圈总 A-line 数（含双波长）= 8000 => 单圈采集时长 = 200.0 s。
+  alinesPerBlock = 200  => 块到达间隔 = 5.00 s。
+
+  实测（gridSize=10 um, alinesPerBlock=200）：
+    整圈 append  median = 2.528 s
+    每块 append  median = 63.207 ms
+    每 A-line            = 316.0349 us
+
+  余量：
+    (a) 整圈口径：采集 200.0 s vs 重建 2.528 s => 重建占 1.26%, 余量 98.74%
+    (b) 流式块口径：块间隔 5.00 s vs 每块 63.207 ms => 占 1.264%, 余量 98.74%
+
+  B1 可用预算量级（每 A-line 允许的额外开销）：
+    整圈余量摊到每 A-line   = 24683.965 us/A-line
+    流式块余量摊到每 A-line = 24683.965 us/A-line
+
+  结论：B1 的逐线导数是 O(nt) 的一次差分 + 一次乘加（nt=4000）,
+  相对上述预算属可忽略量级；B1 的逐线开销【预算充足】。
+  注意：网格是主导项（见 D2.3，10 um 比 20 um 慢约 3.8 倍）。
+  【本任务不声称“实时通过”】：实时性结论由规划侧按实际节拍判断（规格 6）。
+
+=== D2.5 负载敏感性 / 可复现性 ===
+历史经验：同一口径两轮测量可差 2~4 倍，必须如实记录，不得只报好的那次。
+本文件把 min/max 与极差一起打印（见 D2.1/D2.2 表），供判断。
+本轮测量时机负载：见回执记录（空闲/非空闲）。
+建议：同一口径至少跑 2 轮（相隔数分钟），两轮 median 都要记录。
+
+=== 未验证项 / 限制 ===
+* 不声称「实时通过」——只报时延与余量，实时性结论由规划侧按实际节拍判断。
+* 本基准为独立 console 程序链生产 CUDA DLL，不是完整 Qt 交付构建。
+* 未测真实采集端到端（网络→组包→预处理→重建→显示）；只测重建核分段。
+* B1 的 inversion 开关存在（ring_recon_cuda_set_inversion），但本任务只测不改，
+  未测 Ubp 模式下的时延（属 B1 实现阶段）。但**结构性提示**：
+  B1 的逐线导数会多一次 A-line 上的差分与一次乘加，量级为 O(nt) per A-line；
+  实测每 A-line 预算见 D2.4，可代入判断。
+* real hardware validation：仅真实 GPU 上的性能实测，不等于实机采集验证。
+* hardware root-cause attribution：未声称。
