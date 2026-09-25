@@ -1,10 +1,22 @@
-# Codex ↔ GitHub 双端联动快速上手
+# 执行代理 ↔ 分析代理 双端联动快速上手（原 Codex ↔ GitHub 双端联动）
+
+## 0. 双端角色定义
+
+本文以功能角色称呼双端 Agent，不绑定任何具体产品、模型或厂商：
+
+- **执行代理**（原称 Codex 端 / 本地端）：在本地工作区 checkout 源码、实施改动、运行构建与测试、推送实现分支的一端。
+- **分析代理**（原称网页端 / ChatGPT 端 / GitHub 端）：不使用本地工作区，直接以 GitHub 远端（`origin/main`、远端分支与提交历史）为对象进行状态分析、文档治理、独立审查与规划的一端。
+
+两条共通规则：
+
+- 角色是功能位。任何 Agent 接手时按本节对号入座，不得因自己的产品名与历史称谓不符而推断本文件不适用于自己。
+- 仓库中的分支前缀 `codex/`（含 `codex/task-docs`）与目录 `CODEX_REPORTS/` 是既有命名，保持不变；它们不再暗示只有某一产品可以充当执行代理或分析代理。
 
 ## 1. Source of truth
 
 `ZiXuannnZhang/PAErealtimeImaging` 的 canonical source 是 `origin/main`。
 
-每次开始工作：
+执行代理每次开始工作：
 
 ```powershell
 Set-Location "D:\ChatGPT\PAERealtimeImaging"
@@ -14,6 +26,8 @@ git show origin/main:REPOSITORY_BASELINE.md
 git show origin/main:BUILD_STANDARD.md
 git show origin/main:HANDOFF.md
 ```
+
+分析代理没有本地工作区，对同一组对象（上述四份文档、相关分支与提交历史）直接通过 GitHub 远端 API 读取核对，并记录 main exact SHA；不执行本地 fetch。
 
 有任务文档时再读：
 
@@ -51,7 +65,7 @@ exact FPGA/LabVIEW source of extra startup triggers = NOT_PROVEN
 
 ## 3. New implementation task
 
-除非任务明确 override，标准流程：
+除非任务明确 override，执行代理的标准流程：
 
 ```powershell
 git fetch --prune origin
@@ -94,7 +108,7 @@ git show origin/codex/task-docs:TASKS/<task>.md
 
 ## 6. Submission
 
-完成任务后：
+执行代理完成任务后：
 
 1. 确认 tracked tree；
 2. 记录 exact source SHA；
