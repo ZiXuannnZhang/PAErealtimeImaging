@@ -143,6 +143,17 @@ RING_RECON_CUDA_API int ring_recon_cuda_append_angles_radii_sector(
     const float* sectorTheta0Deg, float sectorWidthDeg);
 RING_RECON_CUDA_API int ring_recon_cuda_get_state(void* handle, float* acc,
                                                   float* accW, int* nBlock);
+// B1 成对开关（前提 R2 / 审核 E1）：同时切换反演信号项 2p − 2t·p′ 与
+// 立体角权重 R·Δθ·cosα/d²。单一 mode 同时决定两者，结构上不可能只换其一。
+//   mode = 0  Das（默认）：信号 p，权重 Δθ·cosα/d —— 全关时逐位保持现有基准
+//   mode = 1  Ubp        ：信号 2p − 2t·p′（t 用秒），权重 R·Δθ·cosα/d²
+//
+// 仅允许在累积开始前调用（对应「参数只在采集/成像停止时应用」）；
+// 已 append 过则返回错误码、不静默改变正在累积的图像。ring_recon_cuda_reset 后可再改。
+//
+// 设计说明：刻意用独立导出函数而不是给 RingReconCudaConfig 加字段 —— 结构体布局不变，
+// 旧消费者无需重建；版本错配是链接期响亮失败，而不是静默读错偏移。
+RING_RECON_CUDA_API int ring_recon_cuda_set_inversion(void* handle, int mode);
 // 按圈清零累积器（d_acc/d_accW）并复位块计数
 RING_RECON_CUDA_API int ring_recon_cuda_reset(void* handle);
 // 显示快照：acc/accW 归一化到 dn×dn 输出（hostOut 长度 dn*dn，float）。

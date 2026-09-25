@@ -3,6 +3,7 @@
 // backprojection, linear/nearest interpolation, distance weighting, FOV mask,
 // and incremental acc/accW accumulation.
 #include "ring_recon_cuda.h"
+#include "RingReconInversion.h"
 
 #include <cuda_runtime.h>
 
@@ -63,9 +64,16 @@ struct Handle {
     float* d_preCoeff = nullptr;
     float* d_rb2s = nullptr;
     float* d_disp = nullptr;       // 显示快照输出（设备缓冲）
+    float* d_dscan = nullptr;      // Ubp 模式的逐 A-line 时间导数（Das 时为空）
     int    d_bscanCap = 0;
     int    d_detCap = 0;
     int    d_dispCap = 0;
+    int    d_dscanCap = 0;
+
+    // B1 成对开关（前提 R2）。默认 0 = Das，全关路径逐位保持现有基准（守卫 G4）。
+    int  inversionMode = 0;
+    // 累积已开始后禁止改模式（「不能在一幅累积图像中混合不同算法参数」）
+    bool appendStarted = false;
 };
 
 }  // namespace
@@ -220,8 +228,21 @@ __global__ void ring_blend_weights_kernel(
     else             { prevW[idx] = 0.0f; nextW[idx] = nb; }
 }
 
+// B1 反演用：逐 A-line 时间导数 dp/dt，沿采样维、逐列独立、无跨块状态。
+// 一线程一列，直接调用共享头的 derivativeCentral —— 与 CPU reference 共用同一份表达式。
+// 同源约束（前提 G2）：导数在同一次 append 里从**同一个 bscan** 算出，不另存已滤波副本。
+__global__ void ring_derivative_kernel(const float* __restrict__ bscan, int nt, int nd,
+                                       float fs, float* __restrict__ dscan) {
+    const int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if (j >= nd) return;
+    ringrecon_inv::derivativeCentral(bscan + static_cast<size_t>(j) * nt, nt, fs,
+                                     dscan + static_cast<size_t>(j) * nt);
+}
+
 __global__ void ring_das_kernel(
         const float* __restrict__ bscan, int nt, int nd,
+        const float* __restrict__ dscan,   // Ubp 时间导数（Das 时为 nullptr）
+        int inversionMode, float invFs,    // B1 成对开关 + 1/fs（t 用秒，前提 G2）
         const float* __restrict__ detx, const float* __restrict__ dety,
         const float* __restrict__ wscale,
         const float* __restrict__ radius,   // 逐根探测器半径（多扫描半径配准）
@@ -240,6 +261,11 @@ __global__ void ring_das_kernel(
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     const int total = nx * ny;
     if (idx >= total) return;
+
+    // B1 成对开关（前提 R2）：单一 mode 同时决定信号项与权重
+    const ringrecon_inv::InversionMode mode = inversionMode
+        ? ringrecon_inv::InversionMode::Ubp
+        : ringrecon_inv::InversionMode::Das;
 
     const int ix = idx / ny;
     const int iy = idx - ix * ny;
@@ -343,9 +369,38 @@ __global__ void ring_das_kernel(
         } else {
             dsafeP = powf(dsafe, pw);
         }
-        const float wBase = wscale[j] * dotp / (Rj * dsafeP);
+        // 成对切换：信号项与权重由同一个 mode 决定（R2）。
+        // Das 时 sv == vv、weight 走 dasWeight，与改动前逐字同形（守卫 G4）。
+        float sv = vv;
+        if (mode == ringrecon_inv::InversionMode::Ubp) {
+            float dvv = 0.0f;
+            const size_t dbase = static_cast<size_t>(j) * nt;
+            if (linear) {
+                const float i0f = floorf(tf);
+                const float frac = tf - i0f;
+                const int i0 = static_cast<int>(i0f) + 1;
+                const bool valid = (i0 >= 1) && (i0 <= nt - 1);
+                int i0c = i0 < 1 ? 1 : (i0 > nt - 1 ? nt - 1 : i0);
+                const float d0 = dscan[dbase + i0c - 1];
+                const float d1 = dscan[dbase + i0c];
+                dvv = d0 + frac * (d1 - d0);
+                if (maskOob && !valid) dvv = 0.0f;
+            } else {
+                const int i0n = static_cast<int>(floorf(tf + 0.5f)) + 1;
+                const bool valid = (i0n >= 1) && (i0n <= nt);
+                int i0c = i0n < 1 ? 1 : (i0n > nt ? nt : i0n);
+                dvv = dscan[dbase + i0c - 1];
+                if (maskOob && !valid) dvv = 0.0f;
+            }
+            // t 用秒（前提 G2：误用采样点序号会差 fs 倍）。
+            // 【开放项 D5】tf/fs 是相对存储数组起点的时间；systemDelay / delayCut
+            //   校准待 D5 定，本版不擅自补偿。
+            sv = ringrecon_inv::signalValue(mode, vv, dvv, tf * invFs);
+        }
+        const float wBase = ringrecon_inv::weight(mode, wscale[j], dotp,
+                                                  Rj, dsafe, dsafeP);
         const float w = blendMask ? wBase * blendW : wBase;
-        accv += w * vv;
+        accv += w * sv;
         accwv += fabsf(w);
     }
     acc[idx] += accv;
@@ -520,6 +575,7 @@ extern "C" RING_RECON_CUDA_API void ring_recon_cuda_destroy(void* handle) {
     if (h->d_blendPrevW) cudaFree(h->d_blendPrevW);
     if (h->d_blendNextW) cudaFree(h->d_blendNextW);
     if (h->d_disp) cudaFree(h->d_disp);
+    if (h->d_dscan) cudaFree(h->d_dscan);
     delete h;
 }
 
@@ -538,6 +594,26 @@ extern "C" RING_RECON_CUDA_API int ring_recon_cuda_reset(void* handle) {
         return 1;
     }
     h->nBlock = 0;
+    // 复位后可再次更改反演模式（「参数只在采集/成像停止时应用」）
+    h->appendStarted = false;
+    return 0;
+}
+
+extern "C" RING_RECON_CUDA_API int ring_recon_cuda_set_inversion(void* handle, int mode) {
+    if (!handle) {
+        setError("null handle");
+        return 1;
+    }
+    if (mode != 0 && mode != 1) {
+        setError("inversion mode must be 0 (Das) or 1 (Ubp)");
+        return 1;
+    }
+    Handle* h = static_cast<Handle*>(handle);
+    if (h->appendStarted) {
+        setError("cannot change inversion mode after accumulation started; call reset first");
+        return 1;
+    }
+    h->inversionMode = mode;
     return 0;
 }
 
@@ -659,6 +735,31 @@ static int appendImpl(void* handle, const float* bscan,
         }
         h->d_bscanCap = static_cast<int>(bscanBytes);
     }
+    // B1：Ubp 模式下生成逐 A-line 时间导数。
+    // 同源约束（前提 G2）：从**同一个 d_bscan** 算出，不另存已滤波副本。
+    // Das 模式不分配、不计算 —— 全关路径零额外开销（守卫 G4）。
+    if (h->inversionMode) {
+        const size_t dscanBytes = static_cast<size_t>(nt) * nd * sizeof(float);
+        if (dscanBytes > static_cast<size_t>(h->d_dscanCap)) {
+            if (h->d_dscan) cudaFree(h->d_dscan);
+            h->d_dscan = nullptr;
+            cudaError_t derr = cudaMalloc(&h->d_dscan, dscanBytes);
+            if (derr != cudaSuccess) {
+                setError(cudaGetErrorString(derr));
+                return 1;
+            }
+            h->d_dscanCap = static_cast<int>(dscanBytes);
+        }
+        const int dThreads = 128;
+        const int dBlocks = (nd + dThreads - 1) / dThreads;
+        ring_derivative_kernel<<<dBlocks, dThreads>>>(
+            h->d_bscan, nt, nd, static_cast<float>(h->cfg.daqHz), h->d_dscan);
+        cudaError_t derr = cudaDeviceSynchronize();
+        if (derr != cudaSuccess) {
+            setError(cudaGetErrorString(derr));
+            return 1;
+        }
+    }
     if (nd > h->d_detCap) {
         if (h->d_detx) cudaFree(h->d_detx);
         if (h->d_dety) cudaFree(h->d_dety);
@@ -718,6 +819,8 @@ static int appendImpl(void* handle, const float* bscan,
 
     ring_das_kernel<<<blocks, threads>>>(
         h->d_bscan, nt, nd,
+        h->d_dscan, h->inversionMode,
+        static_cast<float>(1.0 / h->cfg.daqHz),
         h->d_detx, h->d_dety, h->d_wscale,
         h->d_radius,
         h->d_sectorIdx, h->sectorStartRad, sectorFovRad, h->sectorCount, sectorMask,
@@ -734,6 +837,8 @@ static int appendImpl(void* handle, const float* bscan,
         return 1;
     }
     ++h->nBlock;
+    // 累积开始后禁止改反演模式（「不能在一幅累积图像中混合不同算法参数」）
+    h->appendStarted = true;
     return 0;
 }
 
