@@ -27,6 +27,16 @@ target_include_directories(ring_recon_guard_test PRIVATE ../include ../src/RingR
 target_compile_features(ring_recon_guard_test PRIVATE cxx_std_17)
 add_test(NAME ring_recon_guard_test COMMAND ring_recon_guard_test)
 
+# 合成体模前向模型契约测试（D6/D7 的已知真值数据源）。
+# 前向模型是独立参考实现；本测试把生产重建当被测对象做往返闭环。
+add_executable(ring_phantom_forward_test
+    ring_phantom_forward_test.cpp
+    ../src/RingRecon/RingPhantomForward.cpp
+    ../src/RingRecon/ring_recon.cpp)
+target_include_directories(ring_phantom_forward_test PRIVATE ../include ../src/RingRecon)
+target_compile_features(ring_phantom_forward_test PRIVATE cxx_std_17)
+add_test(NAME ring_phantom_forward_test COMMAND ring_phantom_forward_test)
+
 add_executable(imaging_bypass_test imaging_bypass_test.cpp ../src/ImagingBypass.cpp)
 target_include_directories(imaging_bypass_test PRIVATE ../include)
 target_compile_features(imaging_bypass_test PRIVATE cxx_std_17)
