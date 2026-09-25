@@ -39,7 +39,8 @@ START_ADMISSION_SOFTWARE                  = INCLUDED_AND_APPROVED
 START_ADMISSION_HARDWARE_ROOT_CAUSE       = NOT_PROVEN
 
 CANONICAL_SOURCE_BASELINE                 = main
-CANONICAL_MAIN_HEAD                       = 491aa34cfa9553954eea949a7703df7194eb7699
+CANONICAL_SOURCE_IDENTITY                 = 491aa34cfa9553954eea949a7703df7194eb7699（源树身份）
+CANONICAL_MAIN_HEAD                       = 以最新 origin/main 为准（其后仅文档提交推进 HEAD）
 REMOTE_BRANCH_CLEANUP                     = NON_DESTRUCTIVE
 RING_ZERO_PHASE_PA_INVERSION_BRANCH       = REFERENCE_ONLY_NO_MAINTENANCE
 DAS_DUAL_WAVELENGTH_B_TIER_BRANCH         = EXPERIMENTAL_NO_FURTHER_WORK
@@ -93,6 +94,14 @@ card-status / channel display naming:
 
 canonical main fast-forward HEAD:
   491aa34cfa9553954eea949a7703df7194eb7699
+
+--- 2026-09-24 之后 main 的移动（仅文档提交，源码树未变）---
+
+65de782  远端分支盘点与治理记录（PROJECT_STATUS.md / REPOSITORY_BASELINE.md）
+f304242  分支角色标注（PROJECT_STATUS.md）
+
+以上两笔不改任何 production/test source；main 的源码树身份仍为 491aa34。
+canonical main HEAD 会继续因文档提交而移动，接手时一律以最新 origin/main 为准。
 ```
 
 A/B/C/D 最终 candidate ancestry 中包含 START-admission 软件修复；不要在后续整理中手术式剥离该祖先，否则会形成未经同等验证的新 source tree。
@@ -146,15 +155,19 @@ Ring/CUDA software selftest= PASS
 delivery candidate         = READY
 ```
 
-该候选二进制对应 source commit `d9daa2d7af6bb8341349e405433824e89e42bcd4`。
+该候选二进制对应 source commit `d9daa2d7af6bb8341349e405433824e89e42bcd4`，上表数字是该时点的记录。
 
-canonical main 在完成远端文档/历史集成后，其 Git SHA 会变化，但 production/test source tree 应保持与 `d9daa2d7af6bb8341349e405433824e89e42bcd4` 一致。执行代理随后按远端 main 整理本地工作区时，应在新的 canonical main HEAD 上重新 configure/build 并生成新的 BuildIdentity/交付回执；这属于 canonical-main 构建追溯，不表示需要重新设计 A/B/C/D 语义。
+**2026-09-25 更正**：此前「canonical main 完成文档/历史集成后 production/test source tree 应保持与 `d9daa2d7` 一致」的说法**已不成立**。2026-09-24 前端链以 fast-forward 进入 main 后，production/test source tree 相对 `d9daa2d7` 已有实际源码改动（41 个文件，+4549 / −618，见第 2 节列出的六个前端链追溯点）。因此：
+
+- A/B/C/D 的语义与验证结论仍由 `d9daa2d7` / `69a7606` 追溯点承载，不因源码树前进而失效，也不需要重新设计；
+- 但**不得**再以 `d9daa2d7` 的源码树或二进制身份代表当前 main；当前 main 的源码树身份是 `491aa34`；
+- 在 canonical main 上构建时，必须在该 exact SHA 上重新 configure/build 并生成新的 BuildIdentity/交付回执，不得复用旧候选的 binary/BuildIdentity（见 `BUILD_STANDARD.md` §2.3）。
 
 ## 6. 远端分支角色
 
 | 角色 | 状态 |
 |---|---|
-| `main` | 唯一 canonical source/docs baseline（2026-09-24 fast-forward 至 `491aa34`） |
+| `main` | 唯一 canonical source/docs baseline。源码树身份 `491aa34`（2026-09-24 前端链 fast-forward）；其后仅文档提交推进 HEAD，接手以最新 `origin/main` 为准 |
 | `codex/task-docs` | 任务规格专用分支（48 条独有提交，保留；非生产实现 baseline） |
 | `codex/ring-zero-phase-pa-inversion-20260919-025754` | **参考专用 / 不再维护**：阶段 A 算法基准 + 阶段 B1，tip `3032550`、B1 构建源 `d8dd3da` |
 | `codex/das-dual-wavelength-quality-b-tier-20260925` | **实验性 / 不再维护、不再实现**：DAS 双波长质量增强 B 档（S2–S4 + D1–D7），tip `2573572`，见 6.3 |

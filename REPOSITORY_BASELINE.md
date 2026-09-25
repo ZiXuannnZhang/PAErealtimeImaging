@@ -8,6 +8,8 @@ As of 2026-09-18, the accepted A/B/C/D source chain has been integrated back int
 
 As of 2026-09-24, the field-validated frontend chain (full-resolution display crop, Frontend Preprocessing Stage, per-A-line zero-phase frontend filtering, the save/gate and write-fault fixes, and card-status/channel display naming) has been transferred into canonical `main` at `491aa34cfa9553954eea949a7703df7194eb7699` by a plain fast-forward: no merge commit, no force push, no history rewrite. Subsequent ring-imaging work starts from latest `origin/main`.
 
+As of 2026-09-25, canonical `main` has moved past `491aa34` by documentation-only commits (branch inventory and branch-role records). No production/test source changed after `491aa34`, so the canonical **source-tree identity** remains `491aa34cfa9553954eea949a7703df7194eb7699`, while the canonical **HEAD** advances with each documentation commit and must always be read from the latest `origin/main`.
+
 Formal project state is split by purpose:
 
 - `PROJECT_STATUS.md` — current project/validation status.
@@ -28,6 +30,8 @@ Session D final traceability HEAD = 69a7606f95c97c839fd618115f4092a4291d8906
 ```
 
 This ancestry also contains the accepted START-admission software changes. Do not remove or replay only a subset of these ancestors merely to produce a cleaner-looking history; doing so would create a different source combination.
+
+These two points are the source identity at which Session D was validated. Canonical `main`'s source tree has since advanced (see Canonical baseline above): do not use `d9daa2d7` or its binaries to represent current `main`, and do not use a build made at `d9daa2d7` as the delivery identity of a later `main` SHA.
 
 Hardware status for this round:
 

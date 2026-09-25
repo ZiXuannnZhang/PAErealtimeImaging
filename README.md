@@ -4,10 +4,11 @@ Windows 多卡实时光声采集与成像项目。当前正式源码与开发基
 
 ## Current status
 
-截至 2026-09-18：
+截至 2026-09-25：
 
 ```text
 canonical source                         = main
+canonical source identity                = 491aa34cfa9553954eea949a7703df7194eb7699
 Session A/B/C software review            = APPROVE
 Session D integration review             = APPROVE
 A/B/C/D functional hardware validation   = PASS_FOR_CURRENT_SCOPE
@@ -17,6 +18,11 @@ exact FPGA/LabVIEW extra-trigger source  = NOT_PROVEN
 
 本轮 START-admission、PhysicalRoundNormalizer、RoundIdentity、variable-length timeout、
 realtime imaging cap、AutoSave binding、Ring/CUDA reset/stale barrier 已进入 canonical source。
+
+2026-09-24 另有前端链经实机验收后以 fast-forward 进入 canonical source：全分辨率显示裁切、
+Frontend Preprocessing Stage、逐 A-line 零相位前端滤波、保存/闸门与写盘故障修复、
+卡片状态/通道显示命名。自该时点起 main 的源码树身份为上表 `491aa34`，其后 main 仅因
+文档提交而移动 HEAD。
 
 “当前验证范围通过”表示已执行的实机场景未发现与预期不一致，不表示已经证明额外 startup trigger
 的底层 FPGA/LabVIEW 精确产生机制。

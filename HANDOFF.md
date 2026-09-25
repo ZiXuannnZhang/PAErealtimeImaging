@@ -4,6 +4,8 @@
 >
 > 交接源基线：`main@fb10721e07f9ea8c9e46bc308d250b788defb829`
 >
+> 本文状态块为 **2026-09-21 时点快照**；当前项目状态一律以 `PROJECT_STATUS.md` 为准（2026-09-25 已更正 canonical 源码树身份口径，见其第 2、5 节）。
+>
 > 本文件提交后，新的 canonical HEAD 会因为“仅文档变更”向前移动；新会话实际接手时始终以**最新 `origin/main`** 为唯一 canonical baseline。除本 HANDOFF 文档外，本次交接不改变 production/test source。
 
 ---

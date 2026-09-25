@@ -74,6 +74,14 @@ accepted A/B/C/D candidate code = d9daa2d7af6bb8341349e405433824e89e42bcd4
 Session D final traceability HEAD = 69a7606f95c97c839fd618115f4092a4291d8906
 ```
 
+上面两点是 Session D 验证时的 source identity，**不代表当前 `main`**。2026-09-24 前端链
+fast-forward 进入后，canonical `main` 的源码树已越过 `d9daa2d7`（当前源码树身份 `491aa34`，
+见 `PROJECT_STATUS.md` 第 2 节）。因此：
+
+- 不得用 `d9daa2d7` 的 source tree 或 binary/BuildIdentity 充当当前 `main` 的交付身份；
+- 在 `main` 上构建时一律取最新 `origin/main` 的 exact SHA 重新 configure/build；
+- A/B/C/D 的验证语义仍由上述追溯点承载，不因源码树前进而需要重新设计。
+
 当前实机结论为“当前验证范围通过；底层额外 trigger 精确 FPGA/LabVIEW 来源未证明”。历史 validation branch 继续保留，但不再是默认正式 build target。
 
 START-admission 软件修复已存在于 canonical ancestry；其历史硬件 root-cause attribution 仍是独立命题。

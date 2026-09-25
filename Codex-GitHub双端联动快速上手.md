@@ -31,7 +31,10 @@ git show origin/codex/task-docs:TASKS/<任务文件名>
 
 ## 2. Current project state
 
-截至 2026-09-18，START-admission 与 Session A/B/C/D accepted source chain 已集成进入 main。
+截至 2026-09-25，START-admission 与 Session A/B/C/D accepted source chain 已集成进入 main；
+2026-09-24 另有已过实机验收的前端链（全分辨率显示裁切、Frontend Preprocessing Stage、
+逐 A-line 零相位前端滤波、保存/闸门与写盘故障修复、显示命名）以 fast-forward 进入 main。
+main 的源码树身份为 `491aa34cfa9553954eea949a7703df7194eb7699`，其后 main 仅因文档提交移动 HEAD。
 当前实机状态：
 
 ```text
