@@ -121,6 +121,9 @@ When Codex organizes the local workspace from the remote repository:
 7. Historical local branches/worktrees may be removed only after confirming they contain no unique unpushed work that needs preservation.
 8. Remote historical branches are not deleted as part of this canonical integration; remote cleanup is intentionally non-destructive.
 
+9. Agents must not delete files directly in the local workspace. Move every deletion candidate to the root `_pending_delete/` directory for user review; only the user may perform the final deletion.
+10. Group each task's deletion candidates in `_pending_delete/<YYYYMMDD-HHMMSS>/` and include a brief `README.md` listing the candidate paths and why they are pending deletion. Do not delete, empty, or rewrite `_pending_delete/` during synchronization. If a candidate cannot be moved, leave it in place and report it instead of deleting it.
+
 ## Task document naming
 
 Single-task documents live under `TASKS/` on `codex/task-docs` and use:
