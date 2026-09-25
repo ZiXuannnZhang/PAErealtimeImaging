@@ -25,6 +25,14 @@
 //       （守卫 G4 的冻结基准）。
 // ============================================================
 
+// 本函数会被 __global__ 核调用，因此必须同时是 __host__ __device__。
+// 非 CUDA 翻译单元下展开为空，保持纯 C++ 头的零依赖。
+#if defined(__CUDACC__)
+#  define RINGRECON_INV_HD __host__ __device__
+#else
+#  define RINGRECON_INV_HD
+#endif
+
 namespace ringrecon_inv {
 
 // 成对开关：Ubp 同时切换信号项与权重，不允许只切其一。
@@ -49,19 +57,19 @@ enum class InversionMode : int {
 
 // 现有权重：与 ring_recon.cpp / ring_recon_cuda.cu 的既有表达式逐字同形。
 template <typename T>
-inline T dasWeight(T wscale, T dotp, T R, T dsafeP2) {
+RINGRECON_INV_HD inline T dasWeight(T wscale, T dotp, T R, T dsafeP2) {
     return wscale * dotp / (R * dsafeP2);          // dsafeP2 = dsafe*dsafe
 }
 
 // UBP 立体角权重。
 template <typename T>
-inline T ubpWeight(T wscale, T dotp, T dsafe) {
+RINGRECON_INV_HD inline T ubpWeight(T wscale, T dotp, T dsafe) {
     return wscale * dotp / (dsafe * dsafe * dsafe);
 }
 
 // 按模式取权重。成对切换的「权重」半边。
 template <typename T>
-inline T weight(InversionMode mode, T wscale, T dotp, T R, T dsafe, T dsafeP2) {
+RINGRECON_INV_HD inline T weight(InversionMode mode, T wscale, T dotp, T R, T dsafe, T dsafeP2) {
     return (mode == InversionMode::Ubp) ? ubpWeight(wscale, dotp, dsafe)
                                         : dasWeight(wscale, dotp, R, dsafeP2);
 }
@@ -78,13 +86,13 @@ inline T weight(InversionMode mode, T wscale, T dotp, T R, T dsafe, T dsafeP2) {
 //
 // 同源约束：p 与 dp 必须来自同一数组的同一位置。本函数只收标量，不收数组。
 template <typename T>
-inline T inversionKernel(T p, T dp, T tSeconds) {
+RINGRECON_INV_HD inline T inversionKernel(T p, T dp, T tSeconds) {
     return (T)2 * p - (T)2 * tSeconds * dp;
 }
 
 // 按模式取信号值。Das 直接透传，Ubp 走反演核。
 template <typename T>
-inline T signalValue(InversionMode mode, T p, T dp, T tSeconds) {
+RINGRECON_INV_HD inline T signalValue(InversionMode mode, T p, T dp, T tSeconds) {
     return (mode == InversionMode::Ubp) ? inversionKernel(p, dp, tSeconds) : p;
 }
 
@@ -97,7 +105,7 @@ inline T signalValue(InversionMode mode, T p, T dp, T tSeconds) {
 // 一旦 D1 给出截止区间，应在此处或其调用点补上，且不得只对导数支路滤波
 // （那会破坏 G2 同源，见前提文档 S3 结论）。
 template <typename T>
-inline void derivativeCentral(const T* v, int n, T fs, T* out) {
+RINGRECON_INV_HD inline void derivativeCentral(const T* v, int n, T fs, T* out) {
     if (n <= 0) return;
     if (n == 1) { out[0] = (T)0; return; }
     out[0]     = (v[1]     - v[0])     * fs;      // 端点单侧
