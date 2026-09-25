@@ -585,25 +585,69 @@ P('');
   const sigB3 = rows[0].b3w / 1e6;
   P(`  信号 -3 dB 带宽（实测，Card1_ChA）= ${F(sigB3, 3)} MHz；中心频率 ${F(rows[0].fc / 1e6, 3)} MHz。`);
   P('');
-  if (okFc.length === 0) {
-    P('  【结论：导数型信号项在本数据上不可行】');
-    P('  依据：在全部扫描的 fc 上，B1 信号项 2p-2t*p\' 的 SNR 都比 DAS 的 p 低 6 dB 以上。');
-    P('  原因是微分按 f 加权放大噪声，而本数据的噪声谱一直到 Nyquist 都不为零，');
-    P('  低通只能截断积分上限，无法抵消 (2*pi*f*t0)^2 的放大因子。');
-    P('  若必须走 B1 路线，应先提高实测 SNR，或改用不带导数项的权重改造。');
-  } else {
-    const lo = Math.min(...okFc), hi = Math.max(...okFc);
-    P(`  【结论：导数型信号项在本数据上有条件可行】`);
-    P(`  建议 B2 低通截止区间：${lo} ~ ${hi} MHz（该区间内 B1 的 SNR 损失 <= 6 dB）。`);
-    P(`  下限约束：不得低于信号 -3 dB 带宽的下沿（实测 ${F(rows[0].b3l / 1e6, 3)} MHz），否则削信号；`);
-    P(`  上限约束：fc 越高，(2*pi*f*t0)^2 放大越强，SNR 损失越大。`);
-    P('  【注意 t0 依赖】t0 = r_tilde/c 用秒。t0 越大（像素越远），2t*p\' 项越重，');
-    P('  损失越大；上表用的是回波处的 t0，环外/远处像素会更差。');
-    P('  【附加约束 G5】成像路径已经过前端零相位滤波（FrontendPreprocessor::dispatch');
-    P('  把滤波后的 clone 同时喂 DisplayBuffer 与 ring()）。B2 若在重建侧再加低通，');
-    P('  就是成像数据被滤第二次。必须先定分工口径，不得让成像数据被零相位滤两次。');
-    P('  因此【本任务不给出“立刻实施”的建议】，只给出 fc 数值区间与该前置口径约束。');
+  // 逐评估点的可行 fc 上限，取交集（保守口径）
+  P('  逐评估点的可行 fc 上限（判据：B1 的 SNR 相对 DAS 损失 <= 6 dB）：');
+  const perPointOk = [];
+  for (const pt of points) {
+    const t0 = pt.i / FS_HZ, p0 = m[pt.i], dp0 = dm[pt.i];
+    const sigD = Math.abs(p0), sigB = Math.abs(2 * p0 - 2 * t0 * dp0);
+    const ok = [];
+    for (const fcMHz of fcs) {
+      const fc = fcMHz * 1e6;
+      let vD = 0, vB = 0;
+      for (let k = 1; k < nBinN; k++) {
+        const f = k * dfN; if (f > fc) break;
+        const s = Sden[k] * dfN;
+        vD += s; vB += 4 * (1 + Math.pow(2 * Math.PI * f * t0, 2)) * s;
+      }
+      const nD = sigD / Math.sqrt(vD), nB = sigB / Math.sqrt(vB);
+      if (20 * Math.log10(nB / nD) >= -6) ok.push(fcMHz);
+    }
+    perPointOk.push({ name: pt.name, ok });
+    P(`    「${pt.name}」: ${ok.length ? ok.join(',') + ' MHz' : '（无）'}`);
   }
+  const inter = fcs.filter((f) => perPointOk.every((p) => p.ok.includes(f)));
+  const fcHi = inter.length ? Math.max(...inter) : NaN;
+  const fcLo = inter.length ? Math.min(...inter) : NaN;
+  P(`  保守交集：${inter.length ? fcLo + ' ~ ' + fcHi + ' MHz' : '（空集）'}`);
+  P('');
+
+  // 决定性权衡：低通 fc 同时决定轴向分辨率 delta_z = c/(2*BW)
+  const SOUND_SPEED = 1490.0;
+  const dz = (bwMHz) => SOUND_SPEED / (2 * bwMHz * 1e6) * 1e6;   // um
+  P('  【决定性权衡】低通 fc 同时决定轴向分辨率 delta_z = c/(2*BW)：');
+  P(`    按信号 -3 dB 带宽 ${F(sigB3, 3)} MHz        => delta_z = ${F(dz(sigB3), 2)} um`);
+  if (inter.length) {
+    P(`    按保守 fc 上限 ${fcHi} MHz 低通后          => delta_z = ${F(dz(fcHi), 2)} um`);
+    P(`    轴向分辨率损失倍数                     = ${F(dz(fcHi) / dz(sigB3), 1)} x`);
+  }
+  P('');
+  const resLoss = inter.length ? dz(fcHi) / dz(sigB3) : Infinity;
+  if (!inter.length || resLoss > 3.0) {
+    P('  【结论：导数型信号项在本数据上不可行】—— B2 的「先低通再求导」走不通');
+    P('  依据（两条同时成立）：');
+    P('  (1) 要压住 (2*pi*f*t0)^2 的噪声放大，低通 fc 必须压到 ' +
+      (inter.length ? fcHi + ' MHz 以内（各评估点可行上限的交集）' : '更窄（无交集）') + '；');
+    P('  (2) 而实测信号 -3 dB 带宽有 ' + F(sigB3, 2) + ' MHz，把 fc 压到上述量级会把轴向分辨率');
+    P('      拖差 ' + (inter.length ? F(resLoss, 1) : '数') + ' 倍（' +
+      F(dz(sigB3), 1) + ' um -> ' + (inter.length ? F(dz(fcHi), 1) : '?') + ' um）。');
+    P('  即「保住微分 SNR」与「保住分辨率」在本数据上不能同时满足。');
+    P('  另：不同评估点的可行 fc 上限差别很大（见上），说明结论强依赖回波处的局部斜率，');
+    P('  不存在一个对所有像素都成立的 fc。');
+    P('  若必须走 B1 路线，应考虑：不带导数项的权重改造（保留 p 的信号项）、');
+    P('  或先提高实测 SNR（本数据噪声底约 ' + F(rows[0].noiseRms, 1) +
+      '，回波峰值约 ' + F(rows[0].echoPeak, 0) + '）。');
+  } else {
+    P('  【结论：导数型信号项在本数据上有条件可行】');
+    P(`  建议 B2 低通截止区间：${fcLo} ~ ${fcHi} MHz（该区间内 B1 的 SNR 损失 <= 6 dB，`);
+    P(`  且轴向分辨率损失 ${F(resLoss, 1)} 倍，尚可接受）。`);
+  }
+  P('');
+  P('  【注意 t0 依赖】t0 = r_tilde/c 用秒。t0 越大（像素越远），2t*p\' 项越重，');
+  P('  损失越大；环外/远处像素会比上表更差。');
+  P('  【附加约束 G5】成像路径已经过前端零相位滤波（FrontendPreprocessor::dispatch');
+  P('  把滤波后的 clone 同时喂 DisplayBuffer 与 ring()）。B2 若在重建侧再加低通，');
+  P('  就是成像数据被滤第二次。必须先定分工口径，不得让成像数据被零相位滤两次。');
   P('');
   P('  附加风险：本数据中最强成分是启动 ring-down（比噪声底高 ~' + F(rows[0].snr, 0) + ' 倍），');
   P('  微分会进一步放大其陡峭前沿。B2 必须先做 ring-down 抑制（现有 dbrSigRemove/maskLength');
