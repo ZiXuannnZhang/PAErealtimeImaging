@@ -1,6 +1,6 @@
 # PAERealtimeImaging 当前项目状态
 
-> 更新时间：2026-09-24（UTC+8）
+> 更新时间：2026-09-25（UTC+8）
 >
 > 本文件是**当前项目状态的单一事实入口**。分支/历史治理以 `REPOSITORY_BASELINE.md` 为准；构建与交付以 `BUILD_STANDARD.md` 为准；具体任务特殊要求以 `codex/task-docs:TASKS/<task>.md` 为准。
 
@@ -20,6 +20,7 @@
 - 远端旧实现/验证分支采用**非破坏性整理**：保留用于 traceability，不删除、不重写，不再作为新任务默认 baseline。
 - **2026-09-24**：已通过实机验收的前端链（全分辨率显示裁切 → Frontend Preprocessing Stage → 逐 A-line 零相位前端滤波 → 保存/闸门与写盘故障修复 → 显示命名）以 **fast-forward** 进入 canonical `main`：无 merge commit、无 force push、无 history 重写。canonical `main` = `491aa34cfa9553954eea949a7703df7194eb7699`。
 - **2026-09-24**：环形成像零相位滤波与光声反演分支 `codex/ring-zero-phase-pa-inversion-20260919-025754` 定为**只作参考、不再实现或维护**（详见第 6 节）。其阶段 B1 任务中「B1 通过后的 exact SHA 将作为 B2 起点」的约定**作废**：后续环形成像工作一律从 latest `origin/main` 出发。
+- **2026-09-25**：DAS 双波长质量增强 B 档分支 `codex/das-dual-wavelength-quality-b-tier-20260925` 定为**实验性分支、后续不再维护、不在其上继续实现**（详见第 6.3 节）。该分支的生产/测试源改动**均未进入** canonical `main`；后续相关工作一律从 latest `origin/main` 出发，需要其中任何产物时须在 `main` 上重新落地或显式迁移。
 
 当前状态标签：
 
@@ -41,6 +42,7 @@ CANONICAL_SOURCE_BASELINE                 = main
 CANONICAL_MAIN_HEAD                       = 491aa34cfa9553954eea949a7703df7194eb7699
 REMOTE_BRANCH_CLEANUP                     = NON_DESTRUCTIVE
 RING_ZERO_PHASE_PA_INVERSION_BRANCH       = REFERENCE_ONLY_NO_MAINTENANCE
+DAS_DUAL_WAVELENGTH_B_TIER_BRANCH         = EXPERIMENTAL_NO_FURTHER_WORK
 NEXT_RING_WORK_BASELINE                   = latest origin/main（B1 起点契约作废）
 ```
 
@@ -155,6 +157,7 @@ canonical main 在完成远端文档/历史集成后，其 Git SHA 会变化，�
 | `main` | 唯一 canonical source/docs baseline（2026-09-24 fast-forward 至 `491aa34`） |
 | `codex/task-docs` | 任务规格专用分支（48 条独有提交，保留；非生产实现 baseline） |
 | `codex/ring-zero-phase-pa-inversion-20260919-025754` | **参考专用 / 不再维护**：阶段 A 算法基准 + 阶段 B1，tip `3032550`、B1 构建源 `d8dd3da` |
+| `codex/das-dual-wavelength-quality-b-tier-20260925` | **实验性 / 不再维护、不再实现**：DAS 双波长质量增强 B 档（S2–S4 + D1–D7），tip `2573572`，见 6.3 |
 | Session A/B/C/D 分支 | historical / traceability，保留 |
 | `codex/physical-round-normalizer-integrated-20260916` | historical validation point，保留 |
 | `codex/start-admission-fence-fix-20260913-003112` | historical validation point，保留 |
@@ -188,6 +191,45 @@ B1 构建源  = d8dd3daf2f1bce3afdc01e0452e7ae487f3a1697
 
 零独有提交集合的删除不会丢失任何提交（全部仍可由 `main` 抵达），但按本次决定**保留**，
 留待单独的清理决策。
+
+### 6.3 `codex/das-dual-wavelength-quality-b-tier-20260925` 的定位（2026-09-25 决定）
+
+```text
+分支用途   = 实验性分支，后续不再维护，不在其上继续实现
+tip        = 2573572e83538afb1c51318654f89690ef96f6f4
+分叉点     = 65de782（canonical main）
+独有提交   = 11 条，线性（无 merge commit、无 force push）
+回滚锚点   = anchor/00 … anchor/07（本地与远端齐备）
+```
+
+**分支性质**：DAS 双波长实时成像质量增强的 B 档实验链（S2 判别性守卫 → S3 滤波分工守卫 →
+S4 反演成对开关骨架与 CUDA 侧改造 → 合成体模前向模型 → D1–D7 分析与 D7 环外重跑）。
+按本决定停止维护与后续实现。
+
+**可作数值参考的收口结论**（后续工作不得重新推导，但引用须带上下文）：
+
+- 内窥几何（声源全在探测环**外**）下，现有 DAS 权重 `w = Δθ·cosα/d` 的符号约定与几何相反：
+  同侧最近探测器 `cosα = −1` 取最大**负**权重，对侧穿行射线 `cosα = +1` 取最大**正**权重；
+  图像负能量占比约 50%。
+- 环内伪影与真目标同量级（0.92–1.00 × 目标峰值）；**显示层**零值掩膜只改善视觉，不改善
+  CR/gCNR/CNR（目标与背景区本就在 `ρ > R`）。
+- 建模衰减后，四种权重变体的位置误差收敛；稳健差异仅在「负能量占比」与「环内伪影强度」两项。
+
+**上述结论的适用边界**（不得越过）：合成前向模型无噪声、无折射/透射、无有限探头尺寸；
+权重符号问题**未在实测数据上验证**；双极性图像的 CR 因符号相消而偏高，不可直接与单极性图像比较。
+
+**不在 canonical `main` 中的产物**——后续任务不得默认 `main` 已具备：
+
+| 类别 | 文件 |
+|---|---|
+| 生产源 | `RingRecon/ring_recon.cpp`、`ring_recon.h`、`ring_recon_cuda.cu`、`ring_recon_cuda.h` |
+| 新增源 | `RingRecon/RingReconInversion.h`、`RingRecon/RingPhantomForward.h/.cpp` |
+| 测试 | `tests/ring_recon_guard_test.cpp`、`tests/ring_phantom_forward_test.cpp`、`tests/CMakeLists.txt`、`tests/frontend_preprocessor_test.cpp` |
+
+canonical `main` 的生产代码保持 B 档前基线：B1 反演开关默认 `Das`、未接线，
+全关路径与 prebuilt DLL **逐字节一致**（证据：`CODEX_REPORTS/s4-cuda-switch-20260925/`）。
+若后续任务需要其中任何产物，须在 `main` 上重新落地或显式迁移并重新走 BUILD_STANDARD，
+不得直接从该实验性分支合入。
 
 ## 7. 下一步
 
