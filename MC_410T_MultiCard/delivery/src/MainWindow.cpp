@@ -2055,6 +2055,7 @@ void MainWindow::onStartListenClicked()
         options.baseIP = m_scanBaseIP;
         options.candidateCount = m_scanIPCount;
         options.localBindIP = m_localBindIP;
+        options.expectedCardCount = m_nCards;
         options.configDurationNs = ui->edtDataTime->text().toInt();
         options.delayANs = ui->edtADelay->text().toInt();
         options.delayBNs = ui->edtBDelay->text().toInt();
@@ -2070,11 +2071,13 @@ void MainWindow::onStartListenClicked()
         options = paimage::sanitizeDiscoveryOptions(options, &normalizationNote);
         if (!normalizationNote.isEmpty())
             logMessage(QString("发现参数已规范化：%1").arg(normalizationNote));
-        logMessage(QString("发现参数：ACK 窗口 %1ms × 最多 %2 轮，末轮宽限 %3ms（总等待上限约 %4 s）")
-                   .arg(options.ackWindowMs).arg(options.maxAttempts)
-                   .arg(options.finalGraceMs)
-                   .arg((options.ackWindowMs * options.maxAttempts + options.finalGraceMs) / 1000.0,
-                        0, 'f', 1));
+        logMessage(QString("发现参数：ACK 窗口 %1ms × 最多 %2 轮，末轮宽限 %3ms"
+                           "（总等待上限约 %4 s，确认满 %5 张卡即提前结束）")
+                       .arg(options.ackWindowMs).arg(options.maxAttempts)
+                       .arg(options.finalGraceMs)
+                       .arg((options.ackWindowMs * options.maxAttempts + options.finalGraceMs) / 1000.0,
+                            0, 'f', 1)
+                       .arg(options.expectedCardCount));
 
         // 后台发现只接收值快照与取消标志；完成后由 QFutureWatcher 回到 UI。
         // QPointer 使窗口在发现完成前关闭时直接丢弃回调，避免访问悬空 this。
@@ -2138,6 +2141,12 @@ void MainWindow::onStartListenClicked()
                             .arg(result.verifiedIPs.size())
                             .arg(timedOut)
                             .arg(sendFailed));
+                    if (result.expectedCountReached)
+                        window->logMessage(
+                            QString("⚡ 已确认满期望卡数 %1 张，第 %2 轮提前结束发现（用时 %3 ms）")
+                                .arg(result.verifiedIPs.size())
+                                .arg(result.roundsUsed)
+                                .arg(result.totalDurationNs / 1000000));
                     if (result.verifiedIPs.isEmpty()) {
                         window->logMessage("❌ 未发现任何返回 60 字节 CONFIG 确认的采集卡，"
                                            "请检查网线/交换机/采集卡上电状态");
@@ -3679,15 +3688,17 @@ void MainWindow::loadSettings()
     ui->cmbDisplayType->blockSignals(true);
     ui->cmbImagingMode->blockSignals(true);
 
-    // ── 注册表专属配置（无 UI 接口）────────────────────────────────────
+    // ── INI 专属配置（无 UI 接口）────────────────────────────────────
     // 采集卡数量：AcquisitionParams/NCards（默认4，有效范围1~MAX_CARDS）
-    // 修改方式：regedit → HKCU\Software\MC410T\MC410T_Receiver
+    // 修改方式：编辑本 exe 同目录 PAimageReceiverDiagnostics.ini
     int savedNCards = settings.value("AcquisitionParams/NCards", 4).toInt();
     m_nCards = qBound(1, savedNCards, MAX_CARDS);
-    // 控制 socket 本地绑定 IP：NetworkParams/LocalBindIP（默认空，即 INADDR_ANY）
-    // 双口网卡（如 ConnectX-5 MCX512A-ACAT）只接一个口时必须填写已连接口的本地IP
-    // 修改方式：reg add "HKCU\Software\MC410T\MC410T_Receiver\NetworkParams" /v LocalBindIP /t REG_SZ /d "192.168.0.100" /f
-    m_localBindIP = settings.value("NetworkParams/LocalBindIP", "").toString();
+    // 控制 socket 本地绑定 IP：NetworkParams/LocalBindIP（默认 DEFAULT_LOCAL_BIND_IP，
+    // 即与采集卡通信的控制包源地址；该 IP 必须已配置在本机网卡上）
+    // 修改方式：编辑本 exe 同目录 PAimageReceiverDiagnostics.ini；留空按默认值处理
+    m_localBindIP = settings.value("NetworkParams/LocalBindIP",
+                                   QString(DEFAULT_LOCAL_BIND_IP)).toString().trimmed();
+    if (m_localBindIP.isEmpty()) m_localBindIP = QString(DEFAULT_LOCAL_BIND_IP);
     // 网段扫描范围（自动识别采集卡用）：ScanBaseIP 默认 192.168.0.2，ScanIPCount 默认 32
     m_scanBaseIP  = settings.value("NetworkParams/ScanBaseIP", QString(DEFAULT_SCAN_BASE_IP)).toString();
     m_scanIPCount = qBound(1, settings.value("NetworkParams/ScanIPCount", DEFAULT_SCAN_IP_COUNT).toInt(), MAX_CARDS);
@@ -4239,20 +4250,23 @@ void MainWindow::updateNetworkInfoLabels()
         portText = QString("数据端口: %1-%2").arg(portStart).arg(portEnd);
     ui->lblDataPorts->setText(portText);
 
-    // tooltip 提示管理员如何修改（注册表）
+    // tooltip 提示如何修改（exe 同目录 INI 文件）
     QString bindIPInfo = m_localBindIP.isEmpty()
-        ? QString("未设置（INADDR_ANY）— 双口网卡请必须设置!")
+        ? QString("未设置（启动时按最佳路由自动选择本机网卡 IP）")
         : m_localBindIP;
     ui->lblTargetIPs->setToolTip(
         QString("采集卡数量: %1\n"
-                "  注册表键: HKCU\\Software\\MC410T\\MC410T_Receiver\\AcquisitionParams\\NCards\n"
+                "  INI 键: PAimageReceiverDiagnostics.ini → AcquisitionParams/NCards\n"
                 "控制包本地绑定IP: %2\n"
-                "  注册表键: ...\\NetworkParams\\LocalBindIP\n"
-                "  双口网卡只接一口时必须填已连接口的本地IP（如 192.168.0.100）\n"
+                "  含义: 与采集卡通信（CONFIG/START/STOP → 卡端口 8080）的控制包源地址，\n"
+                "  即控制 socket 绑定的本机网卡 IP；该 IP 必须已配置在本机网卡上\n"
+                "  INI 键: PAimageReceiverDiagnostics.ini → NetworkParams/LocalBindIP\n"
+                "  默认 %3；双口网卡只接一口时必须填已连接口的本地IP，\n"
                 "  否则控制包可能从错误网口发出，采集卡收不到指令\n"
-                "接收路线: WinSock")
+                "接收路线: %4")
         .arg(m_nCards)
         .arg(bindIPInfo)
+        .arg(DEFAULT_LOCAL_BIND_IP)
         .arg("路线A WinSock")
     );
     updateNetworkInfoIndicator();
@@ -4274,12 +4288,12 @@ void MainWindow::updateNetworkInfoIndicator()
     info += ui->lblDataPorts->text();
     info += "\n──────────\n";
     const QString bindIPInfo = m_localBindIP.isEmpty()
-        ? QString("未设置（INADDR_ANY）— 双口网卡请必须设置!")
+        ? QString("未设置（启动时按最佳路由自动选择本机网卡 IP）")
         : m_localBindIP;
     info += QString("采集卡数量: %1\n").arg(m_nCards);
     info += QString("控制包本地绑定IP: %2\n").arg(bindIPInfo);
     info += "接收路线: WinSock\n";
-    info += "注册表键: HKCU\\Software\\MC410T\\MC410T_Receiver";
+    info += "INI 键: PAimageReceiverDiagnostics.ini（exe 同目录）";
     ind->setToolTip(info);
 }
 

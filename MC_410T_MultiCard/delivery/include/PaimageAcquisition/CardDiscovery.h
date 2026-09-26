@@ -34,6 +34,12 @@ struct DiscoveryOptions {
     int maxAttempts = 5;
     int finalGraceMs = 500;
     int icmpTimeoutMs = 150;
+    // Expected card count (INI AcquisitionParams/NCards). Once this many
+    // candidates carry a verified 60-byte CONFIG ACK, remaining ack windows
+    // and the final grace are skipped: late rounds cannot add targets, so
+    // waiting longer would only delay a complete result. 0 (the default)
+    // disables the early exit and keeps the full-budget fallback.
+    int expectedCardCount = 0;
     QString discoveryId;
 };
 
@@ -96,6 +102,8 @@ struct DiscoveryResult {
     QString error;
     bool cancelled = false;
     qint64 totalDurationNs = 0;
+    bool expectedCountReached = false;  // closed early on verified >= expectedCardCount
+    int roundsUsed = 0;
 };
 
 // Transport seam. The production implementation owns the WinSock reference,

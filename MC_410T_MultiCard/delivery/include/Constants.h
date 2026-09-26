@@ -72,3 +72,7 @@ constexpr int    CONFIG_ACK_MAX_RETRY  = 3;      // 每卡最大重发次数（�
 constexpr char   DEFAULT_SCAN_BASE_IP[] = "192.168.0.2";  // 默认扫描起始 IP
 constexpr int    DEFAULT_SCAN_IP_COUNT  = 32;               // 默认扫描 IP 数量
 constexpr int    SCAN_ICMP_TIMEOUT_MS   = 150;              // 扫描 ICMP 探测超时（ms）
+
+//  控制包 socket 本地绑定 IP：与采集卡通信（CONFIG/START/STOP → 卡端口 8080）
+//  的本机网卡地址。INI NetworkParams/LocalBindIP 可覆盖为本机其他网卡 IP。
+constexpr char   DEFAULT_LOCAL_BIND_IP[] = "192.168.0.1";
