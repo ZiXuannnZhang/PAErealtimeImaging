@@ -49,6 +49,7 @@ set(SOURCES
     src/ImagingController.cpp
     src/ImagingBypass.cpp
     src/RingConfigDialog.cpp
+    src/RingSignalEnhancer.cpp
     src/ImagingDisplayWindow.cpp
     src/RingImageWidget.cpp
     src/RingColorBarWidget.cpp
@@ -85,6 +86,8 @@ set(HEADERS
     include/ImagingController.h
     include/ImagingBypass.h
     include/RingConfigDialog.h
+    include/RingEnhanceConfig.h
+    include/RingSignalEnhancer.h
     include/ImagingDisplayWindow.h
     include/RingImageWidget.h
     include/RingColorBarWidget.h

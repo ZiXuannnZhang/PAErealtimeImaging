@@ -8,6 +8,7 @@
 | --- | --- |
 | `诊断日志导出.md` | 导出诊断 ZIP、证据边界和基本判读 |
 | `ZeroMQ依赖说明.md` | 当前 third_party ZeroMQ runtime / import library 与重建边界 |
+| `环形重建增强.md` | 未验收的环形 H(f)/双极补偿实现边界、参数与验证要求 |
 
 相关文档位于其他目录：
 

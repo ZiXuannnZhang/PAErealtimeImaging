@@ -9,7 +9,9 @@
 #include "ImagingParams.h"
 #include "RingShmObservability.h"
 #include "RoundIdentity.h"
+#include "RingEnhanceConfig.h"
 #include "RingReconRoundState.h"
+#include "RingSignalEnhancer.h"
 #include "ring_recon_cuda.h"
 
 namespace zmq { class context_t; class socket_t; }
@@ -71,6 +73,8 @@ private:
 
     // 环形扫描并行分支
     RingReconCudaConfig m_ringConfig;
+    RingEnhanceConfig   m_ringEnhanceConfig;
+    RingSignalEnhancer  m_ringEnhancer;
     int                 m_ringSysDelayCh[8][2] = {
         {358, 371}, {358, 371}, {358, 371}, {358, 371},
         {358, 371}, {358, 371}, {358, 371}, {358, 371}};   // 每通道双波长延时截断（实时预处理使用）

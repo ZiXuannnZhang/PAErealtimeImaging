@@ -3,6 +3,7 @@
 #include <QDialog>
 #include "Constants.h"
 #include "FrontendFilter.h"
+#include "RingEnhanceConfig.h"
 #include "ring_recon_cuda.h"
 
 class ImagingController;
@@ -29,6 +30,7 @@ public:
     void setAcquisitionParams(double sampleIntervalNs, int acqTimeNs);
 
     RingReconCudaConfig config() const;   // 当前控件值（含换算后的每通道每波长每圈A线数）
+    RingEnhanceConfig enhanceConfig() const; // 环形重建增强配置（独立于 CUDA ABI）
     void sysDelayPerChannel(int out[8][2]) const;   // 每通道双波长延时截断（[通道][波长]）
     bool applyConfig();                   // 校验并下发配置（应用/确定共用）
 
@@ -110,6 +112,11 @@ private:
     QComboBox       *m_cmbApod;
     QDoubleSpinBox  *m_spnDistWeight;
     QDoubleSpinBox  *m_spnMinDistMm;
+    QCheckBox       *m_chkEnhanceBipolar;
+    QCheckBox       *m_chkEnhanceFreq;
+    QDoubleSpinBox  *m_spnFreqCompFcMhz;
+    QDoubleSpinBox  *m_spnFreqCompHmax;
+    QDoubleSpinBox  *m_spnFreqCompOrder;
     QCheckBox       *m_chkMaskOob;
     QLineEdit       *m_edtSosRadii;    // 分层声速边界 [mm]（空/0=单一声速，多个用逗号分隔）
     QLineEdit       *m_edtSosSpeeds;   // 各层声速 [m/s]（元素数=边界数+1，逗号分隔）

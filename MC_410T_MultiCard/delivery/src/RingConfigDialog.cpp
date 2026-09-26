@@ -325,6 +325,42 @@ void RingConfigDialog::buildUi()
     fGrid->addRow("", m_chkMaskOob);
     reconLayout->addWidget(grpGrid);
 
+    auto *grpEnhance = new QGroupBox("重建增强");
+    auto *fEnhance = new QFormLayout(grpEnhance);
+    m_chkEnhanceBipolar = new QCheckBox("启用双极波形补偿");
+    m_chkEnhanceBipolar->setChecked(false);
+    m_chkEnhanceBipolar->setToolTip("g(t) = p(t) - t*d(p(t))/dt；不进行正整流。");
+    m_chkEnhanceFreq = new QCheckBox("启用低频补偿");
+    m_chkEnhanceFreq->setChecked(false);
+    m_spnFreqCompFcMhz = new QDoubleSpinBox;
+    m_spnFreqCompFcMhz->setRange(0.001, 124.999);
+    m_spnFreqCompFcMhz->setDecimals(3);
+    m_spnFreqCompFcMhz->setSuffix(" MHz");
+    m_spnFreqCompFcMhz->setValue(10.0);
+    m_spnFreqCompHmax = new QDoubleSpinBox;
+    m_spnFreqCompHmax->setRange(1.0, 20.0);
+    m_spnFreqCompHmax->setDecimals(3);
+    m_spnFreqCompHmax->setValue(2.0);
+    m_spnFreqCompOrder = new QDoubleSpinBox;
+    m_spnFreqCompOrder->setRange(0.1, 10.0);
+    m_spnFreqCompOrder->setDecimals(2);
+    m_spnFreqCompOrder->setValue(2.0);
+    m_spnFreqCompFcMhz->setToolTip("低频补偿转折频率。");
+    m_spnFreqCompHmax->setToolTip("零频最大增益，必须不小于 1。");
+    m_spnFreqCompOrder->setToolTip("H(f) 曲线衰减阶数。");
+    fEnhance->addRow("", m_chkEnhanceBipolar);
+    fEnhance->addRow("", m_chkEnhanceFreq);
+    fEnhance->addRow("fc(MHz)", m_spnFreqCompFcMhz);
+    fEnhance->addRow("Hmax", m_spnFreqCompHmax);
+    fEnhance->addRow("curve order", m_spnFreqCompOrder);
+    reconLayout->addWidget(grpEnhance);
+    connect(m_chkEnhanceFreq, &QCheckBox::toggled, this, [this](bool enabled) {
+        m_spnFreqCompFcMhz->setEnabled(enabled);
+        m_spnFreqCompHmax->setEnabled(enabled);
+        m_spnFreqCompOrder->setEnabled(enabled);
+    });
+
+
     auto *grpSos = new QGroupBox("声速模型（双声速，与 Ringscan_DAS_loop_realtime_dual 一致）");
     auto *fSos = new QFormLayout(grpSos);
     m_edtSosRadii = new QLineEdit("0");
@@ -485,6 +521,14 @@ void RingConfigDialog::restoreDefaults()
     m_cmbApod->setCurrentIndex(val("apod", 0).toInt());
     m_spnDistWeight->setValue(val("distWeight", 1).toInt());
     m_spnMinDistMm->setValue(val("minDistMm", 0).toDouble());
+    m_chkEnhanceBipolar->setChecked(val("enhanceBipolar", false).toBool());
+    m_chkEnhanceFreq->setChecked(val("enhanceFreq", false).toBool());
+    m_spnFreqCompFcMhz->setValue(val("enhanceFreqFcMhz", 10.0).toDouble());
+    m_spnFreqCompHmax->setValue(val("enhanceFreqHmax", 2.0).toDouble());
+    m_spnFreqCompOrder->setValue(val("enhanceFreqOrder", 2.0).toDouble());
+    m_spnFreqCompFcMhz->setEnabled(m_chkEnhanceFreq->isChecked());
+    m_spnFreqCompHmax->setEnabled(m_chkEnhanceFreq->isChecked());
+    m_spnFreqCompOrder->setEnabled(m_chkEnhanceFreq->isChecked());
     m_chkMaskOob->setChecked(val("maskOob", true).toBool());
     m_edtSosRadii->setText(val("sosRadii", "0").toString());
     m_edtSosSpeeds->setText(val("sosSpeeds", "1490,1540").toString());
@@ -538,6 +582,11 @@ void RingConfigDialog::saveDefaults()
     s.setValue("apod", m_cmbApod->currentIndex());
     s.setValue("distWeight", m_spnDistWeight->value());
     s.setValue("minDistMm", m_spnMinDistMm->value());
+    s.setValue("enhanceBipolar", m_chkEnhanceBipolar->isChecked());
+    s.setValue("enhanceFreq", m_chkEnhanceFreq->isChecked());
+    s.setValue("enhanceFreqFcMhz", m_spnFreqCompFcMhz->value());
+    s.setValue("enhanceFreqHmax", m_spnFreqCompHmax->value());
+    s.setValue("enhanceFreqOrder", m_spnFreqCompOrder->value());
     s.setValue("maskOob", m_chkMaskOob->isChecked());
     s.setValue("sosRadii", m_edtSosRadii->text());
     s.setValue("sosSpeeds", m_edtSosSpeeds->text());
@@ -633,6 +682,17 @@ RingReconCudaConfig RingConfigDialog::config() const
     return cfg;
 }
 
+RingEnhanceConfig RingConfigDialog::enhanceConfig() const
+{
+    RingEnhanceConfig cfg;
+    cfg.enableBipolarCompensation = m_chkEnhanceBipolar->isChecked();
+    cfg.enableFreqCompensation = m_chkEnhanceFreq->isChecked();
+    cfg.freqCompFcMhz = m_spnFreqCompFcMhz->value();
+    cfg.freqCompHmax = m_spnFreqCompHmax->value();
+    cfg.freqCompOrder = m_spnFreqCompOrder->value();
+    return cfg;
+}
+
 void RingConfigDialog::sysDelayPerChannel(int out[8][2]) const
 {
     for (int c = 0; c < 8; ++c)
@@ -702,7 +762,15 @@ bool RingConfigDialog::applyConfig()
     int sysDelayCh[8][2] = {{0}};
     sysDelayPerChannel(sysDelayCh);
     const RingReconCudaConfig applied = config();
-    m_controller->configureRing(applied, sysDelayCh);
+    const RingEnhanceConfig enhance = enhanceConfig();
+    const char *enhanceError = nullptr;
+    if (!ring_enhance::validate(enhance, &enhanceError)) {
+        QMessageBox::warning(this, "参数错误",
+            QString("重建增强参数无效：%1")
+                .arg(QString::fromUtf8(enhanceError ? enhanceError : "unknown")));
+        return false;
+    }
+    m_controller->configureRing(applied, enhance, sysDelayCh);
     // 应用成功后将物理轮次启动策略同步给当前 NetworkController（MainWindow 转发）
     emit roundPolicyChanged(startupFilterTriggerCount(), disableCountBoundary());
     // 前端滤波参数经独立接线下发到 Frontend Preprocessing 配置（MainWindow 转发），

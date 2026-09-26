@@ -5,6 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 find_package(Python3 COMPONENTS Interpreter QUIET)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
+
+add_executable(ring_signal_enhancer_test
+    ring_signal_enhancer_test.cpp
+    ../src/RingSignalEnhancer.cpp)
+target_include_directories(ring_signal_enhancer_test PRIVATE ../include)
+target_compile_features(ring_signal_enhancer_test PRIVATE cxx_std_17)
+add_test(NAME ring_signal_enhancer_test COMMAND ring_signal_enhancer_test)
 
 add_executable(ring_block_assembler_test
     ring_block_assembler_test.cpp
