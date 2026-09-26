@@ -79,6 +79,9 @@ DiscoveryOptions sanitizeDiscoveryOptions(const DiscoveryOptions& options,
     clamp(normalized.finalGraceMs, 0, 2000, 500, "FinalGraceMs");
     clamp(normalized.icmpTimeoutMs, 50, 1000, 150, "IcmpTimeoutMs");
     clamp(normalized.candidateCount, 1, 254, 32, "CandidateCount");
+    // 0 keeps the full-budget fallback; anything outside 0..64 would never be
+    // a trustworthy expectation, so it falls back to the disabled default.
+    clamp(normalized.expectedCardCount, 0, 64, 0, "ExpectedCardCount");
     if (normalized.configDurationNs <= 0) {
         notes << QStringLiteral("ConfigDurationNs %1->20000").arg(normalized.configDurationNs);
         normalized.configDurationNs = 20000;
@@ -249,14 +252,18 @@ void processDatagram(DiscoverySession& session, const DiscoveryDatagram& dgram)
 
 // Drains the feedback socket until the absolute deadline; short select
 // timeouts inside the channel are polling only and never fail a candidate.
+// earlyStop, when provided, closes the drain as soon as it returns true
+// (evaluated after each processed batch); it never marks a candidate failed.
 void drainUntil(DiscoverySession& session,
                 qint64 deadlineNs,
-                const std::atomic<bool>& cancel)
+                const std::atomic<bool>& cancel,
+                const std::function<bool()>& earlyStop = {})
 {
     while (!cancel.load()) {
         std::vector<DiscoveryDatagram> dgrams =
             session.channel.waitAndReceive(deadlineNs, cancel);
         for (const DiscoveryDatagram& dgram : dgrams) processDatagram(session, dgram);
+        if (earlyStop && earlyStop()) return;
         if (session.channel.nowNs() >= deadlineNs) return;
     }
 }
@@ -454,8 +461,22 @@ DiscoveryResult runDiscoveryCore(const DiscoveryOptions& rawOptions,
                                          options.delayBNs);
 
     // 6. Bounded multi-round CONFIG probing; only unverified candidates with
-    // remaining send budget are re-sent each round.
+    // remaining send budget are re-sent each round. When expectedCardCount is
+    // set and that many 60-byte confirmations have arrived, the remaining
+    // rounds cannot add targets, so discovery closes early instead of
+    // draining the leftover ack windows and the final grace.
+    const int expectedCount = options.expectedCardCount;
+    auto verifiedCount = [&session]() {
+        int count = 0;
+        for (const DiscoveryCandidateEvidence& c : session.candidates)
+            if (c.state == DiscoveryCandidateState::Verified) ++count;
+        return count;
+    };
+    auto expectationMet = [&expectedCount, &verifiedCount]() {
+        return expectedCount > 0 && verifiedCount() >= expectedCount;
+    };
     bool cancelled = false;
+    bool expectationMetFlag = false;
     for (session.round = 1; session.round <= options.maxAttempts; ++session.round) {
         if (cancel.load()) { cancelled = true; break; }
         for (std::size_t i = 0; i < session.candidates.size(); ++i) {
@@ -486,12 +507,17 @@ DiscoveryResult runDiscoveryCore(const DiscoveryOptions& rawOptions,
                                         : QStringLiteral("CONFIG 发送失败"),
                                fields);
         }
-        drainUntil(session, channel.nowNs() + qint64(options.ackWindowMs) * 1000000, cancel);
+        drainUntil(session, channel.nowNs() + qint64(options.ackWindowMs) * 1000000, cancel,
+                   expectationMet);
+        if (expectationMet()) { expectationMetFlag = true; break; }
         if (cancel.load()) { cancelled = true; break; }
     }
-    // 7. Final grace window keeps accepting late 60-byte confirmations.
-    if (!cancelled && !cancel.load()) {
-        drainUntil(session, channel.nowNs() + qint64(options.finalGraceMs) * 1000000, cancel);
+    // 7. Final grace window keeps accepting late 60-byte confirmations; it is
+    // pointless once the expected card count has already been confirmed.
+    if (!cancelled && !expectationMetFlag && !cancel.load()) {
+        drainUntil(session, channel.nowNs() + qint64(options.finalGraceMs) * 1000000, cancel,
+                   expectationMet);
+        if (expectationMet()) expectationMetFlag = true;
         if (cancel.load()) cancelled = true;
     }
 
@@ -530,6 +556,9 @@ DiscoveryResult runDiscoveryCore(const DiscoveryOptions& rawOptions,
     for (const DiscoveryCandidateEvidence& c : session.candidates)
         result.candidates.append(c);
     result.cancelled = cancelled;
+    result.expectedCountReached = expectationMetFlag;
+    result.roundsUsed = expectationMetFlag ? session.round
+                                           : qMin(session.round, options.maxAttempts);
     result.totalDurationNs = channel.nowNs() - startedNs;
     emitComplete(session, QString(), cancelled);
     return result;

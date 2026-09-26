@@ -340,6 +340,58 @@ int main()
         require(f.channel.closeCount >= 1, "channel closed after mid-wait cancel");
     }
 
+    // Expected-count early exit: once four cards carry a verified 60-byte ACK,
+    // discovery closes in round 1 — later rounds never re-send CONFIG and the
+    // final grace never admits a later fifth card (documented trade-off).
+    {
+        Fixture f;
+        DiscoveryOptions options = baseOptions(5);
+        options.finalGraceMs = 500;
+        options.expectedCardCount = 4;
+        const qint64 start = f.channel.now;
+        f.channel.addArrival(start + 100000000, QStringLiteral("192.168.0.2"), 60);
+        f.channel.addArrival(start + 120000000, QStringLiteral("192.168.0.3"), 60);
+        f.channel.addArrival(start + 140000000, QStringLiteral("192.168.0.4"), 60);
+        f.channel.addArrival(start + 160000000, QStringLiteral("192.168.0.5"), 60);
+        // A fifth card answers late, inside the would-be final grace window.
+        f.channel.addArrival(start + 5 * qint64(500) * 1000000 + 100000000,
+                             QStringLiteral("192.168.0.6"), 60);
+        const DiscoveryResult result = runDiscovery(options, f.cancel, f.channel, f.environment());
+        require(result.verifiedIPs.size() == 4, "expected four cards close discovery");
+        require(result.expectedCountReached, "early exit flagged");
+        require(result.roundsUsed == 1, "closed in round 1");
+        require(f.channel.sends.size() == 5, "one CONFIG per candidate, no re-sends");
+        for (const auto& c : result.candidates)
+            require(c.attemptsSent == 1, "later rounds skipped after expectation met");
+        requireState(result, QStringLiteral("192.168.0.6"),
+                     DiscoveryCandidateState::TimedOut, "late fifth card not admitted");
+    }
+
+    // Expected count not reached: one ACK against expected=2 keeps the full
+    // multi-round budget and returns the fallback result.
+    {
+        Fixture f;
+        DiscoveryOptions options = baseOptions();
+        options.expectedCardCount = 2;
+        f.channel.addArrival(f.channel.now + 100000000, QStringLiteral("192.168.0.2"), 60);
+        const DiscoveryResult result = runDiscovery(options, f.cancel, f.channel, f.environment());
+        require(result.verifiedIPs.size() == 1, "single card still accepted");
+        require(!result.expectedCountReached, "expectation not flagged");
+        require(result.roundsUsed == options.maxAttempts, "full budget used");
+        requireState(result, QStringLiteral("192.168.0.2"),
+                     DiscoveryCandidateState::Verified, "verified state");
+    }
+
+    // expectedCardCount=0 keeps the historical full-budget behaviour.
+    {
+        Fixture f;
+        DiscoveryOptions options = baseOptions();
+        const DiscoveryResult result = runDiscovery(options, f.cancel, f.channel, f.environment());
+        require(!result.expectedCountReached, "early exit disabled");
+        require(result.roundsUsed == options.maxAttempts, "full budget used");
+        require(result.verifiedIPs.isEmpty(), "no cards without ACK");
+    }
+
     // 14. Stale discovery results cannot override the active session.
     {
         DiscoveryResult stale;
@@ -367,13 +419,22 @@ int main()
         options.ackWindowMs = 10;
         options.maxAttempts = 99;
         options.finalGraceMs = 99999;
+        options.expectedCardCount = 99;
         QString note;
         const DiscoveryOptions normalized = sanitizeDiscoveryOptions(options, &note);
         require(normalized.ackWindowMs == 2000 && normalized.maxAttempts == 5 &&
                     normalized.finalGraceMs == 500,
                 "defaults restored");
-        require(note.contains(QStringLiteral("AckWindowMs")) && note.contains(QStringLiteral("MaxAttempts")),
+        require(normalized.expectedCardCount == 0,
+                "untrustworthy expectation falls back to disabled");
+        require(note.contains(QStringLiteral("AckWindowMs")) && note.contains(QStringLiteral("MaxAttempts")) &&
+                    note.contains(QStringLiteral("ExpectedCardCount")),
                 "normalization note recorded");
+        DiscoveryOptions valid = baseOptions();
+        valid.expectedCardCount = 4;
+        QString validNote;
+        const DiscoveryOptions kept = sanitizeDiscoveryOptions(valid, &validNote);
+        require(kept.expectedCardCount == 4, "valid expectation preserved");
     }
 
     std::cout << "PASS discovery policy: local exclusion, 60-byte-only admission, slow retries, ordering, cancel, stale sessions" << std::endl;
