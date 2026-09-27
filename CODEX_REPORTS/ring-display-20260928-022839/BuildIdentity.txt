@@ -1,0 +1,14 @@
+#pragma once
+#define PAIMAGE_GIT_SHA "c649a4e1450f8fa256ff4853e7b91d9744650b31"
+#define PAIMAGE_TRACKED_DIRTY false
+#define PAIMAGE_BUILD_TYPE "Debug"
+#define PAIMAGE_COMPILER "GNU 13.1.0"
+#define PAIMAGE_PRODUCT_BASELINE "e66a29bfbbaa6534911a23d48e8624fb8d552bec"
+#define PAIMAGE_SOURCE_SHA256 "2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec"
+
+// 来源：MC_410T_MultiCard/delivery/build/mingw_debug/generated/PaimageAcquisition/BuildIdentity.h
+// 生成于提交后全量重建（build_mingw_debug.cmd configure+build @c649a4e，tracked clean）。
+// 该头仅被 src/main.cpp 包含 → 嵌入 PAimageReceiverDiagnostics.exe（已随本次构建重链，
+// mtime 02:19:49 晚于头生成时刻 02:18:51）。ImagingSvc.exe / ring_svc_selftest.exe /
+// ring_udp_replay.exe 不编译任何本任务改动源文件（显示层仅进入 PAimageReceiverDiagnostics
+// 目标），其未重链与本任务无关。

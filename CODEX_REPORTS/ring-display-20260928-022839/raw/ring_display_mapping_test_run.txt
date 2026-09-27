@@ -1,0 +1,1 @@
+ring_display_mapping_test: PASS

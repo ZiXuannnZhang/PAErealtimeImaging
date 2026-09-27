@@ -1,0 +1,63 @@
+# git-receipt — ring-display 20260928-022839
+# 环形显示层优化：零值显示掩膜（工作一）+ 实时成像毫米坐标（工作二）
+recorded: 2026-09-28T02:40:00+08:00
+
+## branch side
+c649a4e feat(display): millimeter coordinate ticks for realtime imaging        (工作二)
+cfb1bbf feat(display): ring-center zero-value circular display mask            (工作一)
+fb6370b evidence: ring-enhance FFT optimization (A1/A2/A3 + A4 gate) records   (任务基线 tip)
+HEAD: c649a4e1450f8fa256ff4853e7b91d9744650b31
+branch: codex/ring-reconstruction-enhancement-20260926-181824
+remote (pre-push): fb6370b6cc2765af33e47603efdf9ce6905b18f0
+tracked dirty: 0 entries
+
+## 提交链校验
+cfb1bbf parent = fb6370b (expected)
+c649a4e parent = cfb1bbf (expected)
+两提交与任务基线逐层叠加；最终树与本任务实现会话的验证状态逐字节一致
+（核对：git diff <实现会话全量备份悬空提交 2c163a4> HEAD -- delivery 仅含
+3 个原本 untracked 的新文件，9 个修改文件零差异）。
+
+## production-source scope proof
+diff fb6370b..c649a4e（含 tests 驱动；生产源 = src/ + include/，tests 单列）:
+ .../delivery/include/ImagingDisplayWindow.h        |  40 ++-
+ .../delivery/include/MainWindow.h                  |  13 +
+ .../delivery/include/RingConfigDialog.h            |   9 +
+ .../delivery/include/RingDisplayMapping.h          | 147 +++++++++  (new, 工作一/二共享几何头)
+ .../delivery/include/RingImageWidget.h             |  10 +
+ .../delivery/src/ImagingDisplayWindow.cpp          | 138 ++++++++-
+ .../delivery/src/MainWindow.cpp                    |  44 ++-
+ .../delivery/src/RingConfigDialog.cpp              |  30 ++
+ .../delivery/src/RingImageWidget.cpp               |  85 ++++++-
+tests（新增驱动与接线）:
+ .../delivery/tests/CMakeLists.txt                  |  33 ++
+ .../delivery/tests/ring_display_mapping_test.cpp   | 290 ++++++++++  (new)
+ .../delivery/tests/ring_display_render_test.cpp    | 336 ++++++++++  (new)
+合计 12 files changed, 1144 insertions(+), 31 deletions(-)
+
+禁改边界核对（全部未触碰）：RingReconCudaConfig 结构、ring JSON 键集、ImagingSvc、
+SHM 布局、ring_snapshot_kernel、FileSaver/原始保存、RoundPresentation 簿记状态机、
+渲染方向/翻转、RingImageWidget 内部视图状态语义（m_zoom/m_center 仍像素空间）、
+右键菜单结构。渲染三路（屏幕 QImage / capturePngWriter / grab 继承）掩膜行为见
+bitwise_comparison.md。
+
+## BuildIdentity (branch final build @c649a4e)
+#define PAIMAGE_GIT_SHA "c649a4e1450f8fa256ff4853e7b91d9744650b31"
+#define PAIMAGE_TRACKED_DIRTY false
+#define PAIMAGE_BUILD_TYPE "Debug"
+#define PAIMAGE_COMPILER "GNU 13.1.0"
+#define PAIMAGE_PRODUCT_BASELINE "e66a29bfbbaa6534911a23d48e8624fb8d552bec"
+#define PAIMAGE_SOURCE_SHA256 "2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec"
+
+构建：build_mingw_debug.cmd（configure + build 全量，exit 0，4 关键 exe 校验通过）。
+该头仅被 src/main.cpp 包含 → 嵌入 PAimageReceiverDiagnostics.exe（重链于头再生之后）。
+ImagingSvc.exe / ring_svc_selftest.exe / ring_udp_replay.exe 的源文件集不含本任务任何
+改动文件（ninja 无重链动作即证），显示层改动仅进入 PAimageReceiverDiagnostics 目标。
+
+## 本任务实现侧缺陷修复记录（未提交会话产物 → 验证会话修复 1 处）
+tests/ring_display_render_test.cpp：PNG 产物定位由固定文件名
+（off_frame1_532nm.png）改为目录枚举 glob（off_*_frame1_532nm.png）。
+根因：capturePngWriter 落盘名含毫秒时间戳（<suffix>_<yyyyMMdd_HHmmss_zzz>_frame<seq>_
+<wl>nm.png），该命名是 fb6370b 既有行为（git show fb6370b 同款代码行证实）——
+固定名查找永远读不到文件 → loadPng 返回空 QImage → 4 项断言假失败 +
+247MB QImage::pixel 越界告警。修复仅动测试文件，生产代码零改动。
