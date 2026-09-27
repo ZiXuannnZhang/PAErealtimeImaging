@@ -34,6 +34,14 @@ target_include_directories(ring_enhancer_parity_test PRIVATE ../include)
 target_compile_features(ring_enhancer_parity_test PRIVATE cxx_std_17)
 add_test(NAME ring_enhancer_parity_test COMMAND ring_enhancer_parity_test)
 
+# 显示层几何纯函数（TASKS/环形显示层优化_显示掩膜与毫米坐标_20260928-003123.md
+# §验收 1）：映射往返/边界 + 掩膜行区间 LUT + LUT↔单像素判定一致性（纯 std，无 Qt）。
+add_executable(ring_display_mapping_test
+    ring_display_mapping_test.cpp)
+target_include_directories(ring_display_mapping_test PRIVATE ../include)
+target_compile_features(ring_display_mapping_test PRIVATE cxx_std_17)
+add_test(NAME ring_display_mapping_test COMMAND ring_display_mapping_test)
+
 add_executable(ring_block_assembler_test
     ring_block_assembler_test.cpp
     ../src/RingBlockAssembler.cpp)

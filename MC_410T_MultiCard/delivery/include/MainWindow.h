@@ -341,6 +341,11 @@ private:
     QString m_reconSaveDir;
     QString m_reconSaveSuffix;
 
+    // 显示掩膜缓存（工作一）：对话框 displayMaskChanged 信号的最新值；显示窗口
+    // 未创建时缓存、创建后注入。仅显示层，不进 RingReconCudaConfig/JSON/ImagingSvc。
+    bool   m_displayMaskEnabled = false;
+    double m_displayMaskRadiusMm = 6.57;
+
     // 自动保存（环形）：勾选后随采集触发开始、随圈末/超时重置停止；
     // 会话数据存于 输入路径上一级 下的三位数编号文件夹（001、002…）
     bool m_autoSaveEnabled = false;

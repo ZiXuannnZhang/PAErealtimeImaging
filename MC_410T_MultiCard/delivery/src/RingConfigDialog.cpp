@@ -323,6 +323,25 @@ void RingConfigDialog::buildUi()
     fGrid->addRow("距离权重指数", m_spnDistWeight);
     fGrid->addRow("MinDistance(mm,0=自动)", m_spnMinDistMm);
     fGrid->addRow("", m_chkMaskOob);
+    // 显示掩膜（工作一）：环阵内相干图像无意义但不得限制环内反演——仅在显示
+    // 输出上以零值圆形掩膜遮蔽环内。仅显示层参数：不写 RingReconCudaConfig、
+    // 不进 ring JSON / ImagingSvc；Apply/OK 成功后经 displayMaskChanged 下发。
+    m_spnDisplayMaskRadiusMm = new QDoubleSpinBox;
+    m_spnDisplayMaskRadiusMm->setRange(0.1, 200);
+    m_spnDisplayMaskRadiusMm->setDecimals(3);
+    m_spnDisplayMaskRadiusMm->setValue(6.57);
+    m_spnDisplayMaskRadiusMm->setSuffix(" mm");
+    m_spnDisplayMaskRadiusMm->setToolTip(
+        "显示掩膜半径（单位毫米，默认 6.57 = 环阵半径）。\n"
+        "像素中心到环心距离小于该半径的像素在显示中置零。\n"
+        "仅作用于显示输出（屏幕/PNG/手动保存），不影响重建、保存、发布数据。");
+    fGrid->addRow("显示掩膜半径(mm)", m_spnDisplayMaskRadiusMm);
+    m_chkDisplayMask = new QCheckBox("启用显示掩膜");
+    m_chkDisplayMask->setChecked(false);   // 默认关闭：与现状逐位一致的显示行为
+    m_chkDisplayMask->setToolTip(
+        "勾选后环内（显示掩膜半径以内）像素显示为 0，关闭即恢复。\n"
+        "仅显示层：不限制环内反演，不改任何成像数据与链路。");
+    fGrid->addRow("", m_chkDisplayMask);
     reconLayout->addWidget(grpGrid);
 
     auto *grpEnhance = new QGroupBox("重建增强");
@@ -530,6 +549,10 @@ void RingConfigDialog::restoreDefaults()
     m_spnFreqCompHmax->setEnabled(m_chkEnhanceFreq->isChecked());
     m_spnFreqCompOrder->setEnabled(m_chkEnhanceFreq->isChecked());
     m_chkMaskOob->setChecked(val("maskOob", true).toBool());
+    // 显示掩膜（工作一）：与既有键同一 Defaults group、同一读写路径；
+    // 无历史键时回退出厂默认（不启用、6.57mm）。
+    m_chkDisplayMask->setChecked(val("displayMaskEnabled", false).toBool());
+    m_spnDisplayMaskRadiusMm->setValue(val("displayMaskRadiusMm", 6.57).toDouble());
     m_edtSosRadii->setText(val("sosRadii", "0").toString());
     m_edtSosSpeeds->setText(val("sosSpeeds", "1490,1540").toString());
     // 双波长延时截断已改为每通道独立：旧全局键 sysDelay1/sysDelay2 作为各通道迁移回退值
@@ -588,6 +611,9 @@ void RingConfigDialog::saveDefaults()
     s.setValue("enhanceFreqHmax", m_spnFreqCompHmax->value());
     s.setValue("enhanceFreqOrder", m_spnFreqCompOrder->value());
     s.setValue("maskOob", m_chkMaskOob->isChecked());
+    // 显示掩膜（工作一）与其他默认参数同一次“设为默认”落盘（同一 Defaults group）
+    s.setValue("displayMaskEnabled", m_chkDisplayMask->isChecked());
+    s.setValue("displayMaskRadiusMm", m_spnDisplayMaskRadiusMm->value());
     s.setValue("sosRadii", m_edtSosRadii->text());
     s.setValue("sosSpeeds", m_edtSosSpeeds->text());
     for (int c = 0; c < 8; ++c) {
@@ -782,6 +808,10 @@ bool RingConfigDialog::applyConfig()
         ringLogicalTriggersPerRound(applied.alinesPerFrame, applied.enabledChannelCount);
     if (logicalTriggers > 0)
         emit ringRoundTriggersChanged(static_cast<quint64>(logicalTriggers));
+    // 显示掩膜参数（工作一）：applyConfig 成功后随其他信号一并下发；
+    // MainWindow 持有最新值并转发给显示窗口（未创建则缓存、创建后注入）。
+    emit displayMaskChanged(m_chkDisplayMask->isChecked(),
+                            m_spnDisplayMaskRadiusMm->value());
     return true;
 }
 

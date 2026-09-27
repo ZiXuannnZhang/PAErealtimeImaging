@@ -179,7 +179,7 @@ void ImagingDisplayWindow::buildUi()
                 m_ringFrame->size() >= static_cast<size_t>(m_lastDn) * m_lastDn * 2) {
                 const float *src = m_ringFrame->data()
                     + (index == 1 ? static_cast<size_t>(m_lastDn) * m_lastDn : 0);
-                w->setImage(renderFrame(src, m_lastDn, lo, hi));
+                w->setImage(renderFrame(src, m_lastDn, lo, hi, m_mask));
             emit presentationChanged();
             }
         });
@@ -189,14 +189,26 @@ void ImagingDisplayWindow::buildUi()
                 return;
             const float *src = m_ringFrame->data()
                 + (index == 1 ? static_cast<size_t>(m_lastDn) * m_lastDn : 0);
-            const size_t n = static_cast<size_t>(m_lastDn) * m_lastDn;
+            const int dn = m_lastDn;
+            // 自适应范围：掩膜启用时跳过掩膜内像素（避免环内相干杂波拉伸色标）；
+            // 掩膜关闭时遍历顺序与基线逐位一致（x 外层、行内层 = 线性索引顺序）。
+            const std::vector<ringdisplay::RowSpan> *maskRows = nullptr;
+            if (m_mask && m_mask->enabled && m_mask->nx == dn &&
+                static_cast<int>(m_mask->rows.size()) == dn)
+                maskRows = &m_mask->rows;
+            const size_t n = static_cast<size_t>(dn) * dn;
             double mn = std::numeric_limits<double>::infinity();
             double mx = -mn;
-            for (size_t i = 0; i < n; ++i) {
-                const double v = static_cast<double>(src[i]);
-                if (!std::isfinite(v)) continue;
-                mn = std::min(mn, v);
-                mx = std::max(mx, v);
+            for (int x = 0; x < dn; ++x) {
+                const float *col = src + static_cast<size_t>(x) * dn;
+                for (int r = 0; r < dn; ++r) {
+                    if (maskRows && (*maskRows)[static_cast<size_t>(r)].covers(x))
+                        continue;   // 掩膜内像素不参与 min/max
+                    const double v = static_cast<double>(col[r]);
+                    if (!std::isfinite(v)) continue;
+                    mn = std::min(mn, v);
+                    mx = std::max(mx, v);
+                }
             }
             if (!std::isfinite(mn)) { mn = 0.0; mx = 1.0; }
             if (mx <= mn) { mx = mn + 1.0; }
@@ -204,12 +216,12 @@ void ImagingDisplayWindow::buildUi()
             if (index == 0) {
                 m_range1 = r;
                 m_bar1->setRange(r.lower, r.upper);
-                m_img1->setImage(renderFrame(src, m_lastDn, r.lower, r.upper));
+                m_img1->setImage(renderFrame(src, dn, r.lower, r.upper, m_mask));
             emit presentationChanged();
             } else {
                 m_range2 = r;
                 m_bar2->setRange(r.lower, r.upper);
-                m_img2->setImage(renderFrame(src, m_lastDn, r.lower, r.upper));
+                m_img2->setImage(renderFrame(src, dn, r.lower, r.upper, m_mask));
             emit presentationChanged();
             }
         });
@@ -234,7 +246,7 @@ void ImagingDisplayWindow::buildUi()
             const float *src = m_ringFrame->data()
                 + (index == 1 ? static_cast<size_t>(m_lastDn) * m_lastDn : 0);
             RingImageWidget *w = index == 0 ? m_img1 : m_img2;
-            w->setImage(renderFrame(src, m_lastDn, lo, hi));
+            w->setImage(renderFrame(src, m_lastDn, lo, hi, m_mask));
             emit presentationChanged();
         }
     };
@@ -244,10 +256,17 @@ void ImagingDisplayWindow::buildUi()
             [applyBarRange](double lo, double hi) { applyBarRange(1, lo, hi); });
 }
 
-QImage ImagingDisplayWindow::renderFrame(const float *buf, int dn, double lo, double hi)
+QImage ImagingDisplayWindow::renderFrame(const float *buf, int dn, double lo, double hi,
+                                         const std::shared_ptr<const DisplayMask> &mask)
 {
     if (!buf || dn <= 0) return QImage();
     const double span = hi - lo;
+    // 显示掩膜（工作一）：仅在 LUT 与该帧尺寸匹配时生效；mask 为空（默认）时
+    // 与基线渲染逐位一致。掩膜内像素渲染期置零，不改任何缓存数据。
+    const std::vector<ringdisplay::RowSpan> *maskRows = nullptr;
+    if (mask && mask->enabled && mask->nx == dn &&
+        static_cast<int>(mask->rows.size()) == dn)
+        maskRows = &mask->rows;
     // 缓冲区布局：x-major（索引 = xIdx*dn + yIdx，与 MATLAB column-major 参考一致）。
     // 屏幕映射：列 = x 轴（右），行自顶向下对应 y 由小到大。首通道起点
     // （9 点钟方向 = 数学角 180°，x 最小、y 居中）落在图像左侧中心，
@@ -267,7 +286,12 @@ QImage ImagingDisplayWindow::renderFrame(const float *buf, int dn, double lo, do
             for (int x = x0; x < xEnd; ++x) {
                 const float *col = buf + static_cast<size_t>(x) * dn;
                 for (int r = r0; r < rEnd; ++r) {
-                    const double v = col[r];
+                    double v = col[r];
+                    if (maskRows) {
+                        const ringdisplay::RowSpan &s = (*maskRows)[static_cast<size_t>(r)];
+                        if (s.covers(x))
+                            v = 0.0;   // 渲染期置零：环内显示为 0（可逆，缓存保持原始数据）
+                    }
                     double t = 0.0;
                     if (std::isfinite(v) && span > 0.0)
                         t = (v - lo) / span;
@@ -297,6 +321,10 @@ void ImagingDisplayWindow::applyRingFrame(std::shared_ptr<std::vector<float>> fr
     const bool sizeChanged = (nx != m_lastDn);
     m_lastDn = nx;
     m_lastSeq = frameIdx;   // 与主窗口相同的“圈末/超时重置后重新计数”序号
+    // 掩膜 LUT 与帧尺寸失配（如快照路径未先经 displayMaskForFrame）时按当前
+    // spacing/半径重建，保证右键重绘/后续捕获与新帧尺寸一致。
+    if (m_mask && m_mask->nx != nx)
+        rebuildMaskLut(nx);
     m_img1->setImage(img1);
     m_img2->setImage(img2);
     if (sizeChanged) {
@@ -307,6 +335,57 @@ void ImagingDisplayWindow::applyRingFrame(std::shared_ptr<std::vector<float>> fr
     m_bar2->setRange(m_range2.lower, m_range2.upper);
     if (m_lblStatus) m_lblStatus->setText(QString("第 %1 帧").arg(frameIdx));
     syncBarHeights();
+}
+
+// ── 显示掩膜（工作一）与毫米网格几何（工作二）─────────────────────────
+
+void ImagingDisplayWindow::setDisplayMask(bool enabled, double radiusMm)
+{
+    if (m_mask && m_mask->enabled == enabled && m_mask->radiusMm == radiusMm)
+        return;   // 值未变化：不重建、不重绘（避免无谓的 presentationChanged）
+    auto next = std::make_shared<DisplayMask>();
+    next->enabled = enabled;
+    next->radiusMm = radiusMm;
+    m_mask = std::move(next);
+    rebuildMaskLut(m_lastDn);
+    // 沿既有 range 变更路径：重绘当前帧并刷新捕获（PNG 写入器按新掩膜重建）
+    rerenderCurrentFrame();
+}
+
+std::shared_ptr<const ImagingDisplayWindow::DisplayMask>
+ImagingDisplayWindow::displayMaskForFrame(int nx)
+{
+    if (m_mask && m_mask->nx == nx && m_mask->spacingMm == m_spacingMm)
+        return m_mask;
+    rebuildMaskLut(nx);
+    return m_mask;
+}
+
+void ImagingDisplayWindow::rebuildMaskLut(int nx)
+{
+    const bool enabled = m_mask ? m_mask->enabled : false;
+    const double radiusMm = m_mask ? m_mask->radiusMm : 0.0;
+    auto next = std::make_shared<DisplayMask>();
+    next->nx = nx;
+    next->spacingMm = m_spacingMm;
+    next->enabled = enabled && m_spacingMm > 0.0 && nx > 1 && radiusMm > 0.0;
+    next->radiusMm = radiusMm;
+    if (next->enabled)
+        next->rows = ringdisplay::buildMaskRows(nx, m_spacingMm, radiusMm);
+    m_mask = std::move(next);
+}
+
+void ImagingDisplayWindow::rerenderCurrentFrame()
+{
+    if (m_lastDn <= 0 || !m_ringFrame ||
+        m_ringFrame->size() < static_cast<size_t>(m_lastDn) * m_lastDn * 2)
+        return;
+    m_img1->setImage(renderFrame(m_ringFrame->data(), m_lastDn,
+                                 m_range1.lower, m_range1.upper, m_mask));
+    m_img2->setImage(renderFrame(m_ringFrame->data()
+                                     + static_cast<size_t>(m_lastDn) * m_lastDn,
+                                 m_lastDn, m_range2.lower, m_range2.upper, m_mask));
+    emit presentationChanged();
 }
 
 bool ImagingDisplayWindow::saveWindowPngs(const QString &dir, const QString &suffix,
@@ -320,18 +399,25 @@ ImagingDisplayWindow::PngWriter ImagingDisplayWindow::capturePngWriter(int seq) 
 {
     const auto frame = m_ringFrame;
     const auto range1 = m_range1, range2 = m_range2;
+    const auto mask = m_mask;   // 捕获时点的掩膜快照（与屏幕渲染同源）
     const int srcN = m_lastDn;
     if (srcN <= 0 || !frame || frame->size() < static_cast<size_t>(srcN) * srcN * 2)
         return {};
-    return [frame, range1, range2, srcN, seq](const QString& dir, const QString& suffix) {
+    return [frame, range1, range2, mask, srcN, seq](const QString& dir, const QString& suffix) {
     constexpr int kOut = 1600;
 
     // 与窗口渲染一致的映射：当前手动/自适应色标范围（m_range1/2），块平均降采样到 1600²；
-    // 方向与 renderFrame 相同（列=x、行自顶向下 y 由小到大，顺时针展开）
-    auto render = [srcN](const float *buf, const RingImageWidget::Range &r) {
+    // 方向与 renderFrame 相同（列=x、行自顶向下 y 由小到大，顺时针展开）。
+    // 掩膜（工作一）：与 renderFrame 同步置零——掩膜内源像素按 0 参与块平均
+    // （环内块全掩 → 输出 0；环外不变；掩膜关闭时与基线逐位一致）。
+    auto render = [srcN, mask](const float *buf, const RingImageWidget::Range &r) {
         QImage img(kOut, kOut, QImage::Format_ARGB32);
         const double lo = r.lower;
         const double span = r.upper - r.lower;
+        const ringdisplay::RowSpan *rows =
+            (mask && mask->enabled && mask->nx == srcN &&
+             static_cast<int>(mask->rows.size()) == srcN)
+                ? mask->rows.data() : nullptr;
         for (int y = 0; y < kOut; ++y) {
             const int y0 = y * srcN / kOut;
             const int y1 = std::max(y0 + 1, (y + 1) * srcN / kOut);
@@ -345,7 +431,12 @@ ImagingDisplayWindow::PngWriter ImagingDisplayWindow::capturePngWriter(int seq) 
                 int cnt = 0;
                 for (int sx = x0; sx < x1; ++sx) {
                     for (int sy = sy0; sy < sy1; ++sy) {
-                        const double v = buf[static_cast<size_t>(sx) * srcN + sy];
+                        double v = buf[static_cast<size_t>(sx) * srcN + sy];
+                        if (rows) {
+                            const ringdisplay::RowSpan &sp = rows[sy];
+                            if (sp.covers(sx))
+                                v = 0.0;   // 渲染期置零（与 renderFrame 同步）
+                        }
                         if (std::isfinite(v)) { s += v; ++cnt; }
                     }
                 }

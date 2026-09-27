@@ -495,6 +495,9 @@ MainWindow::MainWindow(QWidget *parent)
                     m_timeoutPresentation.updateWriter(
                         m_imagingDisplayWindow->capturePngWriter(m_imagingDisplayWindow->lastSeq()));
                 });
+                // 显示掩膜注入（显示层任务）：对话框未打开过时为默认关闭/6.57mm
+                m_imagingDisplayWindow->setDisplayMask(m_displayMaskEnabled,
+                                                       m_displayMaskRadiusMm);
             }
             if (!m_imagingDisplayWindow->isVisible()) {
                 m_imagingDisplayWindow->show();
@@ -511,12 +514,14 @@ MainWindow::MainWindow(QWidget *parent)
                 auto frame = std::make_shared<std::vector<float>>(n * 2);
                 const RingImageWidget::Range r1 = m_imagingDisplayWindow->range1();
                 const RingImageWidget::Range r2 = m_imagingDisplayWindow->range2();
+                // 显示掩膜快照（UI 线程取与该帧 nx 匹配的 LUT，后台线程只读）
+                const auto displayMask = m_imagingDisplayWindow->displayMaskForFrame(nx);
                 QPointer<ImagingDisplayWindow> win(m_imagingDisplayWindow);
                 QPointer<ImagingController> ctrl(m_imagingController);
                 const int idx = bufferIndex;
                 const auto presentationEpoch = m_roundUi.snapshot().epoch;
                 QPointer<MainWindow> owner(this);
-                QThreadPool::globalInstance()->start([ctrl, idx, frame, n, nx, seq, frameIdx, r1, r2, win, owner, round, presentationEpoch,
+                QThreadPool::globalInstance()->start([ctrl, idx, frame, n, nx, seq, frameIdx, r1, r2, displayMask, win, owner, round, presentationEpoch,
                                    saveNow, saveDir, saveSuffix]() {
                     const float *src = ctrl ? ctrl->snapshotBuffer(idx) : nullptr;
                     if (!src) {
@@ -526,9 +531,9 @@ MainWindow::MainWindow(QWidget *parent)
                     std::memcpy(frame->data(), src, frame->size() * sizeof(float));
                     if (ctrl) ctrl->releaseSnapshotBuffer(idx);
                     const QImage img1 = ImagingDisplayWindow::renderFrame(
-                        frame->data(), nx, r1.lower, r1.upper);
+                        frame->data(), nx, r1.lower, r1.upper, displayMask);
                     const QImage img2 = ImagingDisplayWindow::renderFrame(
-                        frame->data() + n, nx, r2.lower, r2.upper);
+                        frame->data() + n, nx, r2.lower, r2.upper, displayMask);
                     if (!win) return;
                     QMetaObject::invokeMethod(qApp, [win, frame, nx, frameIdx, img1, img2, owner, round, presentationEpoch,
                                                      saveNow, saveDir, saveSuffix]() {
@@ -4357,6 +4362,16 @@ void MainWindow::ensureRingConfigDialog()
             this, [this](quint64 logicalTriggersPerRound) {
         if (!m_netController) return;
         m_netController->setLogicalTriggersPerRound(logicalTriggersPerRound);
+    });
+    // 显示掩膜（工作一，仅显示层）：持有最新值；显示窗口已存在则即时下发，
+    // 未创建则缓存（创建窗口时注入）。
+    connect(m_ringConfigDialog, &RingConfigDialog::displayMaskChanged,
+            this, [this](bool enabled, double radiusMm) {
+        m_displayMaskEnabled = enabled;
+        m_displayMaskRadiusMm = radiusMm;
+        if (m_imagingDisplayWindow) {
+            m_imagingDisplayWindow->setDisplayMask(enabled, radiusMm);
+        }
     });
 }
 

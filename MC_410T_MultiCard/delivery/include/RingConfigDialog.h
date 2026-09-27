@@ -59,6 +59,10 @@ signals:
     // NetworkController::setLogicalTriggersPerRound。这是前端刷新闸门阈值的
     // 唯一来源：改参数即生效，不依赖实时成像是否已开启。
     void ringRoundTriggersChanged(quint64 logicalTriggersPerRound);
+    // applyConfig 成功后发出显示掩膜参数（工作一）。仅显示层：不写
+    // RingReconCudaConfig / 不进 ring JSON / ImagingSvc；MainWindow 持有最新值
+    // 并转发给 ImagingDisplayWindow::setDisplayMask（窗口未创建则缓存）。
+    void displayMaskChanged(bool enabled, double radiusMm);
 
 protected:
     void showEvent(QShowEvent *event) override;   // 每次显示时套用记忆的大小
@@ -118,6 +122,11 @@ private:
     QDoubleSpinBox  *m_spnFreqCompHmax;
     QDoubleSpinBox  *m_spnFreqCompOrder;
     QCheckBox       *m_chkMaskOob;
+    // 显示掩膜（工作一）：仅显示层参数，不入 RingReconCudaConfig/JSON/ImagingSvc；
+    // 持久化于 RingConfigDialog/Defaults（displayMaskEnabled / displayMaskRadiusMm），
+    // Apply/OK 成功后经 displayMaskChanged 下发（MainWindow → 显示窗口）。
+    QDoubleSpinBox  *m_spnDisplayMaskRadiusMm;   // 显示掩膜半径(mm)，默认 6.57（环阵半径）
+    QCheckBox       *m_chkDisplayMask;           // 启用显示掩膜（默认不勾=与现状一致）
     QLineEdit       *m_edtSosRadii;    // 分层声速边界 [mm]（空/0=单一声速，多个用逗号分隔）
     QLineEdit       *m_edtSosSpeeds;   // 各层声速 [m/s]（元素数=边界数+1，逗号分隔）
     QSpinBox        *m_spnMaskLen;
