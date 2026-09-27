@@ -116,6 +116,15 @@ struct RingSignalEnhancer::Impl {
     RingEnhanceConfig config;
     double fs = 1.0;
     std::unordered_map<int, FFTPlan> plans;
+    // 计划指针缓存：ImagingSvc 逐 A-line 以同一 sampleCount 连续调用，
+    // 免去热路径上的 unordered_map 查找；setConfig 变更时失效。
+    const FFTPlan *lastPlan = nullptr;
+    int lastPlanCount = -1;
+    // 逐 A-line 复用缓冲（A2）：消除每次 apply 的堆分配；按需增长，
+    // 容量跨调用保留。缓冲内容在每次使用前整体重写，不影响数值结果。
+    std::vector<double> work;
+    std::vector<double> derivative;
+    std::vector<std::complex<double>> values;
 
     bool enabled() const {
         return config.enableBipolarCompensation ||
@@ -126,7 +135,7 @@ struct RingSignalEnhancer::Impl {
         if (!samples || sampleCount <= 0) return false;
         if (!enabled()) return true;
 
-        std::vector<double> work(samples, samples + sampleCount);
+        work.assign(samples, samples + sampleCount);
         if (config.enableFreqCompensation &&
             !applyFrequencyGain(work, sampleCount)) {
             return false;
@@ -146,12 +155,18 @@ private:
     bool applyFrequencyGain(std::vector<double> &samples, int sampleCount) {
         const std::size_t fftSize =
             nextPowerOfTwo(static_cast<std::size_t>(std::max(1, sampleCount)));
-        auto &plan = plans[sampleCount];
-        if (plan.size != fftSize || plan.freqGain.size() != fftSize) {
-            plan.build(fftSize, fs, config);
+        if (lastPlan == nullptr || lastPlanCount != sampleCount) {
+            FFTPlan &plan = plans[sampleCount];
+            if (plan.size != fftSize || plan.freqGain.size() != fftSize) {
+                plan.build(fftSize, fs, config);
+            }
+            lastPlan = &plan;
+            lastPlanCount = sampleCount;
         }
+        const FFTPlan &plan = *lastPlan;
 
-        std::vector<std::complex<double>> values(fftSize, {0.0, 0.0});
+        const std::complex<double> zero{0.0, 0.0};
+        values.assign(fftSize, zero);
         const int extra = static_cast<int>(fftSize) - sampleCount;
         const int left = extra / 2;
         for (std::size_t out = 0; out < fftSize; ++out) {
@@ -184,7 +199,7 @@ private:
 
     void applyBipolarCompensation(std::vector<double> &samples) {
         const int n = static_cast<int>(samples.size());
-        std::vector<double> derivative(samples.size(), 0.0);
+        derivative.resize(samples.size());
         derivative.front() = (samples[1] - samples[0]) * fs;
         derivative.back() =
             (samples.back() - samples[samples.size() - 2]) * fs;
@@ -212,6 +227,8 @@ void RingSignalEnhancer::setConfig(const RingEnhanceConfig &config,
     impl_->fs = sampleRateHz;
     impl_->config = config;
     impl_->plans.clear();
+    impl_->lastPlan = nullptr;
+    impl_->lastPlanCount = -1;
 }
 
 const RingEnhanceConfig &RingSignalEnhancer::config() const {

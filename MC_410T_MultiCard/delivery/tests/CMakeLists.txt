@@ -24,6 +24,16 @@ target_include_directories(ring_enhancer_bench PRIVATE ../include)
 target_compile_features(ring_enhancer_bench PRIVATE cxx_std_17)
 add_test(NAME ring_enhancer_bench COMMAND ring_enhancer_bench)
 
+# 优化任务 A2/A3 对拍（TASKS/环形增强FFT性能优化_20260927-141217.md §3/§5）。
+# 内嵌参考实现 = 预算任务 1 时的算法逐字转录；CTest 默认 --max-ulp 1（A3 政策），
+# A2 验收以 --max-ulp 0 手动复跑（要求逐位一致）。
+add_executable(ring_enhancer_parity_test
+    ring_enhancer_parity_test.cpp
+    ../src/RingSignalEnhancer.cpp)
+target_include_directories(ring_enhancer_parity_test PRIVATE ../include)
+target_compile_features(ring_enhancer_parity_test PRIVATE cxx_std_17)
+add_test(NAME ring_enhancer_parity_test COMMAND ring_enhancer_parity_test)
+
 add_executable(ring_block_assembler_test
     ring_block_assembler_test.cpp
     ../src/RingBlockAssembler.cpp)
