@@ -1,0 +1,36 @@
+# git-receipt — ring-enhance-opt 20260927-205601
+recorded: 2026-09-27T22:40:33+08:00
+
+## branch side
+961f606 perf(A3): real-FFT fast path via N/2-point packed transform
+6ad2631 perf(A1+A2): fix boundary method doc and remove per-A-line allocations
+7f60a38 evidence: raw logs of ring-enhance-budget as .txt (repo ignores *.log)
+6c20580 evidence: ring enhance real-time budget test (Layer 1/2a + criteria)
+162b712 test: wait for ZMQ pair readiness before selftest configure
+HEAD: 961f60625010173f9c15d5798972544ba4d08287
+branch: codex/ring-reconstruction-enhancement-20260926-181824
+remote (pre-push): 961f60625010173f9c15d5798972544ba4d08287
+tracked dirty: 0 entries
+
+## production-source scope proof
+diff ee8049e..HEAD excluding test driver/tests/CODEX_REPORTS/docs:
+ .../delivery/src/RingSignalEnhancer.cpp            | 143 +++++++++++++++++----
+ 1 file changed, 116 insertions(+), 27 deletions(-)
+
+## BuildIdentity (branch final build @961f606)
+#define PAIMAGE_GIT_SHA "961f60625010173f9c15d5798972544ba4d08287"
+#define PAIMAGE_TRACKED_DIRTY false
+#define PAIMAGE_BUILD_TYPE "Debug"
+#define PAIMAGE_COMPILER "GNU 13.1.0"
+#define PAIMAGE_PRODUCT_BASELINE "e66a29bfbbaa6534911a23d48e8624fb8d552bec"
+#define PAIMAGE_SOURCE_SHA256 "2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec"
+
+## BuildIdentity (main worktree, unchanged @c95917f)
+#define PAIMAGE_GIT_SHA "c95917f178967ced841699ba47a1c78a1372bb65"
+#define PAIMAGE_TRACKED_DIRTY false
+#define PAIMAGE_BUILD_TYPE "Debug"
+
+## relationship
+6ad2631 parent = 7f60a38 (7f60a38 expected)
+961f606 parent = 6ad2631 (6ad2631 expected)
+math definitions unchanged: H(f) and g(t)=p-t*p' untouched (verify: git diff 7f60a38..HEAD -- MC_410T_MultiCard/delivery/src/RingSignalEnhancer.cpp shows only buffers/plan/transform restructure)

@@ -1,0 +1,1 @@
+A2 release both-vs-task1-both: IDENTICAL=60 DIFF=0

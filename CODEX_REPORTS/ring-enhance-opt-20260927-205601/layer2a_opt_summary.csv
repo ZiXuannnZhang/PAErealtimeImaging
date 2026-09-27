@@ -1,0 +1,19 @@
+stage,preset,unit,svc_build,svc_avg_process_us,driver_block_ms_avg,round_wall_ms_median,off_vs_main_memcmp,both_frames_vs_pre_opt
+task1-baseline,mingw-debug,main,c95917f,464644.5,676.51,3850.43,n/a,n/a
+task1-baseline,mingw-debug,branch-off,162b712,461360.6,677.45,3849.12,60/60 identical (vs main),n/a
+task1-baseline,mingw-debug,branch-both,162b712,2258816.2,2484.95,13007.80,n/a,n/a
+A2,mingw-debug,main,c95917f,429988.0,672.18,n/a,reference,n/a
+A2,mingw-debug,branch-off,6ad2631,427500.9,659.13,n/a,60/60 identical (vs main),n/a
+A2,mingw-debug,branch-both,6ad2631,2581190.2,2834.33,n/a,n/a,60/60 files memcmp-identical (vs task1 frames)
+task1-baseline,mingw-release,main,c95917f,443108.6,546.32,3212.75,n/a,n/a
+task1-baseline,mingw-release,branch-off,162b712,444778.5,550.65,3256.26,60/60 identical (vs main),n/a
+task1-baseline,mingw-release,branch-both,162b712,1318560.3,1424.76,7537.91,n/a,n/a
+A2,mingw-release,main,c95917f,521389.5,862.39,n/a,reference,n/a
+A2,mingw-release,branch-off,6ad2631,439993.9,547.90,n/a,60/60 identical (vs main),n/a
+A2,mingw-release,branch-both,6ad2631,1385446.0,1510.11,n/a,n/a,60/60 files memcmp-identical (vs task1 frames)
+A3,mingw-debug,main,c95917f,473350.7,690.0,n/a,reference,n/a
+A3,mingw-debug,branch-off,961f606,538359.3,1059.67,n/a,60/60 identical (vs main),n/a
+A3,mingw-debug,branch-both,961f606,2145118.5,694.61,n/a,n/a,bitwise 777600000/777600000 samples (vs task1 frames)
+A3,mingw-release,main,c95917f,449620.8,n/a,n/a,reference,n/a
+A3,mingw-release,branch-off,961f606,447319.6,n/a,n/a,60/60 identical (vs main),n/a
+A3,mingw-release,branch-both,961f606,867226.8,n/a,n/a,n/a,bitwise 777597060 + ulp1 1464 + residue 1476 + beyond 0 (of 777600000)

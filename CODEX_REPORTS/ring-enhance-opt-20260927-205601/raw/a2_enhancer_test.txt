@@ -1,0 +1,6 @@
+PASS  validation
+PASS  frequency gain curve
+PASS  disabled identity
+PASS  frequency compensation
+PASS  bipolar compensation
+PASS  ring_signal_enhancer_test
