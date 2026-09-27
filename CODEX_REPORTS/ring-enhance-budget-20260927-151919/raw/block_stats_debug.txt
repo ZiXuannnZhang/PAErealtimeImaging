@@ -1,0 +1,5 @@
+main: n=25 median=675.93 mean=677.64 min=657.56 max=700.90
+branch_off: n=25 median=677.88 mean=679.19 min=672.09 max=691.26
+branch_bipolar: n=25 median=731.32 mean=731.64 min=717.04 max=742.01
+branch_freq: n=25 median=2399.53 mean=2398.10 min=2350.12 max=2468.64
+branch_both: n=25 median=2489.00 mean=2510.47 min=2456.51 max=2622.32

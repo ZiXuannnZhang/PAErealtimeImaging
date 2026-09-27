@@ -1,0 +1,38 @@
+# git-receipt — ring-enhance-budget 20260927-151919
+recorded: 2026-09-27T15:47:00+08:00
+
+## branch side (implementation branch)
+162b712 test: wait for ZMQ pair readiness before selftest configure
+4bf72c9 test: add ring enhance budget bench and selftest enhance injection
+ee8049e feat: add ring reconstruction enhancement controls
+c95917f docs: generalize the dual-end agent roles in the quick start guide
+HEAD: 162b712eaac9494f9c430b7c49918d7405b94bfc
+branch: codex/ring-reconstruction-enhancement-20260926-181824
+remote: ee8049e92debd5c5dac9e2fb5f658d9896a07cb7 (pre-push value)
+tracked dirty: 0 entries (must be 0)
+
+## main side (baseline worktree)
+c95917f docs: generalize the dual-end agent roles in the quick start guide
+HEAD: c95917f178967ced841699ba47a1c78a1372bb65
+tracked dirty: 0 entries (untracked cufft64_12.dll only; see dependency note)
+
+## relationship
+parent of 162b712 = 4bf72c9 (expected ee8049e)
+main@HEAD == origin/main c95917f178967ced841699ba47a1c78a1372bb65: c95917f178967ced841699ba47a1c78a1372bb65
+production-source diff ee8049e..HEAD excluding test-driver/tests: 0 lines (must be 0)
+
+## BuildIdentity (branch, final build at HEAD)
+#define PAIMAGE_GIT_SHA "162b712eaac9494f9c430b7c49918d7405b94bfc"
+#define PAIMAGE_TRACKED_DIRTY false
+#define PAIMAGE_BUILD_TYPE "Debug"
+#define PAIMAGE_COMPILER "GNU 13.1.0"
+#define PAIMAGE_PRODUCT_BASELINE "e66a29bfbbaa6534911a23d48e8624fb8d552bec"
+#define PAIMAGE_SOURCE_SHA256 "2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec"
+
+## BuildIdentity (main worktree)
+#define PAIMAGE_GIT_SHA "c95917f178967ced841699ba47a1c78a1372bb65"
+#define PAIMAGE_TRACKED_DIRTY false
+#define PAIMAGE_BUILD_TYPE "Debug"
+#define PAIMAGE_COMPILER "GNU 13.1.0"
+#define PAIMAGE_PRODUCT_BASELINE "e66a29bfbbaa6534911a23d48e8624fb8d552bec"
+#define PAIMAGE_SOURCE_SHA256 "2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec"
