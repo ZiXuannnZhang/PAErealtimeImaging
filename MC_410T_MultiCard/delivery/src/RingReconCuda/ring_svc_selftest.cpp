@@ -24,6 +24,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -101,6 +102,10 @@ int main(int argc, char** argv) {
     const bool splice = argInt(args, "--splice", 0) != 0;          // 1=拼接模式（需配准模式）
     const double spliceBlendDeg = argDouble(args, "--splice-blend", 0.0);  // 拼接羽化宽度（°）
     const std::string sysDelayPerCh = argStr(args, "--sys-delay-per-ch");   // 空=各通道统一默认
+    // 预算测试扩展：--enhance 注入 ring.enhance（字段名与 ImagingSvc.cpp 解析端一致）；
+    // 不传 --enhance 则完全不注入该字段（main 构建口径）。
+    const std::string enhanceMode = argStr(args, "--enhance");
+    const int roundsArg = argInt(args, "--rounds", 2);
 
     if (dataPath.empty() || svcPath.empty()) {
         std::fprintf(stderr,
@@ -110,7 +115,17 @@ int main(int argc, char** argv) {
             "[--radius-per-ch 6.57,6.55,...] [--splice 1] [--splice-blend 1.5] "
             "[--sos-radii-mm 3] [--sos 1490,1540] "
             "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...] "
-            "[--identity-jump-at N] [--drop-block N]\n");
+            "[--identity-jump-at N] [--drop-block N] "
+            "[--enhance off|bipolar|freq|both] [--rounds N]\n");
+        return 2;
+    }
+    if (!enhanceMode.empty() && enhanceMode != "off" && enhanceMode != "bipolar" &&
+        enhanceMode != "freq" && enhanceMode != "both") {
+        std::fprintf(stderr, "--enhance must be off|bipolar|freq|both\n");
+        return 2;
+    }
+    if (roundsArg < 1) {
+        std::fprintf(stderr, "--rounds must be >= 1\n");
         return 2;
     }
 
@@ -340,6 +355,18 @@ int main(int argc, char** argv) {
     ring["sectorCcw"] = 1;
     ring["triggerWlOdd"] = 1;
 
+    if (!enhanceMode.empty()) {
+        QJsonObject enhance;
+        enhance["enableBipolarCompensation"] =
+            (enhanceMode == "bipolar" || enhanceMode == "both");
+        enhance["enableFreqCompensation"] =
+            (enhanceMode == "freq" || enhanceMode == "both");
+        enhance["freqCompFcMhz"] = 10.0;
+        enhance["freqCompHmax"] = 2.0;
+        enhance["freqCompOrder"] = 2.0;
+        ring["enhance"] = enhance;
+    }
+
     QJsonObject params;
     params["imagingMode"] = "ring";
     params["ring"] = ring;
@@ -357,8 +384,16 @@ int main(int argc, char** argv) {
     double totalMs = 0.0;
     std::vector<float> lastWl1, lastWl2;   // 逐块对比缓存
     std::vector<float> firstWl1, firstWl2;
+    // 预算测试扩展：逐圈 wall（首块 submitWallUs → round_complete）与观测 kind 计数
+    std::uint64_t currentRoundGen = 0;
+    bool haveRoundGen = false;
+    std::uint64_t roundFirstSubmitUs = 0;
+    std::map<std::string, int> obsKindCounts;
     ring_shm_obs::Tracker producerObs;
     producerObs.beginSession();
+    std::printf("[selftest] enhance=%s rounds=%d grid_mm=%.4f block=%d channels=0x%X\n",
+                enhanceMode.empty() ? "unset" : enhanceMode.c_str(),
+                roundsArg, gridMm, perChBlock, chMask);
     QJsonObject lastObservation;
     QJsonObject mismatchObservation;
     int mismatchCount = 0;
@@ -376,6 +411,11 @@ int main(int argc, char** argv) {
             return;
         }
         const uint64_t submitWallUs = ring_shm_obs::wallNowUs();
+        if (!haveRoundGen || round.roundGeneration != currentRoundGen) {
+            currentRoundGen = round.roundGeneration;
+            haveRoundGen = true;
+            roundFirstSubmitUs = submitWallUs;
+        }
         uint8_t previousReady = 0;
         uint32_t previousSeq = 0;
         shm.lock();
@@ -419,6 +459,7 @@ int main(int argc, char** argv) {
                 const QString cmd = obj["cmd"].toString();
                 if (cmd == QStringLiteral("ring_shm_observation")) {
                     lastObservation = obj;
+                    ++obsKindCounts[obj.value(QStringLiteral("kind")).toString().toStdString()];
                     if (obj.value(QStringLiteral("kind")).toString() ==
                         QStringLiteral("round_block_count_mismatch")) {
                         ++mismatchCount;
@@ -442,6 +483,13 @@ int main(int argc, char** argv) {
         if (!got || !identityMatch) {
             std::fprintf(stderr, "timeout at block %d\n", blockSeq);
             std::exit(2);
+        }
+        if (expectedComplete) {
+            // 整圈 wall：首块 submitWallUs → round_complete 快照到达
+            const double wallMs =
+                static_cast<double>(ring_shm_obs::wallNowUs() - roundFirstSubmitUs) / 1000.0;
+            std::printf("[round-wall] generation=%llu wall_ms=%.2f blocks=%d\n",
+                        static_cast<unsigned long long>(currentRoundGen), wallMs, nBlocks);
         }
 
         std::vector<float> wl1(frameSize), wl2(frameSize);
@@ -494,13 +542,18 @@ int main(int argc, char** argv) {
             }
         }
 
-        char nm[64];
-        std::snprintf(nm, sizeof(nm), "svc_wl1_%03d.raw", blockSeq + 1);
+        char nm[96];
+        // 逐圈帧文件带圈号（blockSeq 每圈归零，多圈不互相覆盖）
+        std::snprintf(nm, sizeof(nm), "svc_wl1_r%03llu_%03d.raw",
+                      static_cast<unsigned long long>(round.roundGeneration),
+                      blockSeq + 1);
         if (!saveRaw(outDir + "/" + nm, wl1)) {
             std::fprintf(stderr, "write %s failed\n", nm);
             std::exit(2);
         }
-        std::snprintf(nm, sizeof(nm), "svc_wl2_%03d.raw", blockSeq + 1);
+        std::snprintf(nm, sizeof(nm), "svc_wl2_r%03llu_%03d.raw",
+                      static_cast<unsigned long long>(round.roundGeneration),
+                      blockSeq + 1);
         if (!saveRaw(outDir + "/" + nm, wl2)) {
             std::fprintf(stderr, "write %s failed\n", nm);
             std::exit(2);
@@ -519,7 +572,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "[selftest] timeout reset fired\n");
     });
 
-    const int nRounds = 2;   // 复现“第 2 圈起 wl2 最后一帧不刷新”的跨圈行为
+    const int nRounds = roundsArg;   // 预算测试用 --rounds 6（第 1 圈预热不计入）；
+                                     // 默认 2 保持既有复现行为
     const int nBlocksTotal = nBlocks * nRounds;
     int resetBase = 0;       // 超时复位后新一圈的数据列基准（模拟重新开始采集）
     std::uint64_t roundGeneration = 0;
@@ -575,6 +629,7 @@ int main(int argc, char** argv) {
             const QJsonObject obj = QJsonDocument::fromJson(data).object();
             if (obj["cmd"].toString() == QStringLiteral("ring_shm_observation")) {
                 lastObservation = obj;
+                ++obsKindCounts[obj.value(QStringLiteral("kind")).toString().toStdString()];
                 if (obj.value(QStringLiteral("kind")).toString() ==
                     QStringLiteral("round_block_count_mismatch")) {
                     ++mismatchCount;
@@ -615,6 +670,11 @@ int main(int argc, char** argv) {
 
     std::printf("done: channels=%d K=%d rounds=%d blocks=%d total=%.1f ms avg=%.2f ms\n",
                 cnt, K, nRounds, nBlocksTotal, totalMs, totalMs / nBlocksTotal);
+    std::printf("[RingSHMObs] kinds:");
+    if (obsKindCounts.empty()) std::printf(" none");
+    for (const auto &kv : obsKindCounts)
+        std::printf(" %s=%d", kv.first.c_str(), kv.second);
+    std::printf("\n");
     if (!lastObservation.isEmpty()) {
         std::printf("[RingSHMObs] service kind=%s session=%lld epoch=%lld submitted=%lld "
                     "notifications=%lld consumed=%lld mismatch=%lld ready_zero=%lld "

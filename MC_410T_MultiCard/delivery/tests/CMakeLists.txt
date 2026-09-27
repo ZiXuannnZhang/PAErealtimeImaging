@@ -14,6 +14,16 @@ target_include_directories(ring_signal_enhancer_test PRIVATE ../include)
 target_compile_features(ring_signal_enhancer_test PRIVATE cxx_std_17)
 add_test(NAME ring_signal_enhancer_test COMMAND ring_signal_enhancer_test)
 
+# 预算测试 Layer 1 微基准（TASKS/环形增强实时预算测试_20260927-141217.md §4）。
+# CTest 入口跑无参模式（内置语义断言 + 合成矩阵）；实录数据矩阵用
+# --data <14.dat> 手动复跑，不进 CTest。
+add_executable(ring_enhancer_bench
+    ring_enhancer_bench.cpp
+    ../src/RingSignalEnhancer.cpp)
+target_include_directories(ring_enhancer_bench PRIVATE ../include)
+target_compile_features(ring_enhancer_bench PRIVATE cxx_std_17)
+add_test(NAME ring_enhancer_bench COMMAND ring_enhancer_bench)
+
 add_executable(ring_block_assembler_test
     ring_block_assembler_test.cpp
     ../src/RingBlockAssembler.cpp)
