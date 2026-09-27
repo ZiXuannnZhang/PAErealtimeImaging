@@ -1,4 +1,5 @@
 #include "RingImageWidget.h"
+#include "RingDisplayMapping.h"
 
 #include <QPainter>
 #include <QMouseEvent>
@@ -19,6 +20,16 @@ constexpr int kMarginRight = 6;
 constexpr double kZoomStep = 1.25;
 constexpr double kZoomMin = 1.0;
 constexpr double kZoomMax = 64.0;
+
+// 毫米刻度自适应小数位：按当前刻度间隔取 1–3 位，避免默认配置下相邻刻度同值
+// （默认 spacing≈10µm：1:1 全图间隔≈9mm → 1 位；放大 64× 后间隔≈0.02mm → 3 位）。
+int mmLabelDecimals(double stepMm)
+{
+    if (!(stepMm > 0.0)) return 3;
+    if (stepMm >= 1.0) return 1;
+    if (stepMm >= 0.1) return 2;
+    return 3;
+}
 }
 
 RingImageWidget::RingImageWidget(QWidget *parent)
@@ -48,6 +59,14 @@ void RingImageWidget::resetView()
     m_zoom = 1.0;
     m_center = QPointF(m_image.width() / 2.0, m_image.height() / 2.0);
     update();
+}
+
+void RingImageWidget::setGridGeometry(double spacingMm, double fovMm)
+{
+    if (spacingMm == m_spacingMm && fovMm == m_fovMm) return;
+    m_spacingMm = spacingMm;
+    m_fovMm = fovMm;
+    update();   // 下一帧渲染即用新几何标注（刻度标签为显示层纯标注，可即时切换）
 }
 
 int RingImageWidget::squareSide() const
@@ -145,17 +164,33 @@ void RingImageWidget::paintEvent(QPaintEvent *)
     f.setPointSizeF(8.0);
     p.setFont(f);
 
-    // x 刻度：数据坐标 0..nx-1
+    // 毫米刻度模式（工作二）：spacing 注入后按屏幕口径标注毫米（右=+、上=+）；
+    // 未注入（spacing<=0）前回退现行像素刻度。x_mm/y_mm 换算与掩膜 LUT 共用
+    // RingDisplayMapping 同一 spacing（自洽，见 RingDisplayMapping.h）。
+    const bool mmMode = m_spacingMm > 0.0;
+    int xDecimals = 0, yDecimals = 0;
+    if (mmMode) {
+        // 相邻刻度间隔（毫米）= 可见数据宽度/4 个间隔 × spacing
+        xDecimals = mmLabelDecimals((x1 - x0) / 4.0 * m_spacingMm);
+        yDecimals = mmLabelDecimals((y1 - y0) / 4.0 * m_spacingMm);
+    }
+
+    // x 刻度：数据坐标 0..nx-1（毫米模式标注 x_mm = −fov/2 + 列·spacing）
     for (int k = 0; k < 5; ++k) {
         const double t = k / 4.0;
         const double xd = x0 + t * (x1 - x0);
         const int xi = qBound(0, static_cast<int>(std::lround(xd)), nx - 1);
         const double wx = vp.left() + t * vp.width();
         p.drawLine(QPointF(wx, vp.bottom()), QPointF(wx, vp.bottom() + 4));
+        const QString label = mmMode
+            ? QString::number(ringdisplay::colToXmm(xi, nx, m_spacingMm),
+                              'f', xDecimals)
+            : QString::number(xi);
         p.drawText(QRectF(wx - 30, vp.bottom() + 5, 60, 16),
-                   Qt::AlignHCenter | Qt::AlignTop, QString::number(xi));
+                   Qt::AlignHCenter | Qt::AlignTop, label);
     }
-    // y 刻度：反向（0 在上），显示 0..ny-1
+    // y 刻度：反向（0 在上），显示 0..ny-1；毫米模式按屏幕口径（上=+）标注：
+    // 显示值 v = ny−1−行号 → y_mm = v·spacing − fov/2（RingDisplayMapping 同源）
     for (int k = 0; k < 5; ++k) {
         const double t = k / 4.0;
         const double yd = y0 + t * (y1 - y0);
@@ -163,9 +198,19 @@ void RingImageWidget::paintEvent(QPaintEvent *)
         const double display = ny - 1 - yi;   // 反向显示
         const double wy = vp.top() + t * vp.height();
         p.drawLine(QPointF(vp.left() - 4, wy), QPointF(vp.left(), wy));
+        const QString label = mmMode
+            ? QString::number(ringdisplay::displayValueToYmm(
+                                  static_cast<int>(display), ny, m_spacingMm),
+                              'f', yDecimals)
+            : QString::number(static_cast<int>(display));
         p.drawText(QRectF(0, wy - 8, kMarginLeft - 8, 16),
-                   Qt::AlignRight | Qt::AlignVCenter,
-                   QString::number(static_cast<int>(display)));
+                   Qt::AlignRight | Qt::AlignVCenter, label);
+    }
+    // 轴角静态单位标注：x 轴右下角（视口内角落，避开刻度数字区）
+    if (mmMode) {
+        p.setPen(QPen(QColor(140, 140, 140)));
+        p.drawText(QRectF(vp.right() - 30, vp.bottom() - 17, 27, 14),
+                   Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("mm"));
     }
 }
 
@@ -274,13 +319,23 @@ void RingImageWidget::mouseDoubleClickEvent(QMouseEvent *event)
 
     const double x0 = vis.left(), x1 = vis.right();
     const double y0 = vis.top(),  y1 = vis.bottom();
-    // 编辑初始值 = 该端当前显示的数字（y 轴显示数为反向：ny-1-行号）
+    const int nImg = m_image.width();
+    // 毫米模式（工作二）：编辑初始值 = 该端毫米值（屏幕口径：x 右=+、y 上=+）；
+    // 未注入 spacing 时回退现行像素刻度（初始值=该端当前显示的刻度数字）。
+    // y 轴显示数为反向（ny−1−行号）；端点值未取整，换算用分数变体保持精度。
+    const bool mmMode = m_spacingMm > 0.0;
     QString initText;
     if (hitAxis == 0) {
-        initText = QString::number((t < 0.5) ? x0 : x1, 'g', 10);
+        initText = mmMode
+            ? QString::number(ringdisplay::colToXmmF((t < 0.5) ? x0 : x1,
+                                                      nImg, m_spacingMm), 'g', 10)
+            : QString::number((t < 0.5) ? x0 : x1, 'g', 10);
     } else {
         const double row = (t < 0.5) ? y0 : y1;
-        initText = QString::number((m_image.height() - 1) - row, 'g', 10);
+        initText = mmMode
+            ? QString::number(ringdisplay::displayValueToYmmF(
+                                  (m_image.height() - 1) - row, nImg, m_spacingMm), 'g', 10)
+            : QString::number((m_image.height() - 1) - row, 'g', 10);
     }
 
     QLineEdit *ed = new QLineEdit(this);
@@ -302,14 +357,22 @@ void RingImageWidget::mouseDoubleClickEvent(QMouseEvent *event)
         if (!ok) return;
         const double nxImg = static_cast<double>(m_image.width());
         const double nyImg = static_cast<double>(m_image.height());
+        // 毫米模式：毫米输入 → 分数像素/显示值（xmmToColF / ymmToDisplayValueF）
+        // 反解后走与像素模式完全相同的钳位/缩放逻辑；内部 m_zoom/m_center
+        // 保持像素空间不变（任务 §2.4）。未注入 spacing 回退像素输入。
+        const bool mmMode = m_spacingMm > 0.0;
         if (hitAxis == 0) {
+            const double vPix = mmMode
+                ? ringdisplay::xmmToColF(v, m_image.width(), m_spacingMm) : v;
             double nx0 = x0, nx1 = x1;
-            if (t < 0.5) nx0 = qBound(0.0, v, nx1 - 1.0);
-            else         nx1 = qBound(nx0 + 1.0, v, nxImg);
+            if (t < 0.5) nx0 = qBound(0.0, vPix, nx1 - 1.0);
+            else         nx1 = qBound(nx0 + 1.0, vPix, nxImg);
             m_zoom = qBound(kZoomMin, nxImg / (nx1 - nx0), kZoomMax);
             m_center.setX((nx0 + nx1) / 2.0);
         } else {
-            const double newRow = (nyImg - 1) - v;   // 显示数反向映射回数据行
+            const double vDisp = mmMode
+                ? ringdisplay::ymmToDisplayValueF(v, m_image.height(), m_spacingMm) : v;
+            const double newRow = (nyImg - 1) - vDisp;   // 显示数反向映射回数据行
             double ny0 = y0, ny1 = y1;
             if (t < 0.5) ny0 = qBound(0.0, newRow, ny1 - 1.0);
             else         ny1 = qBound(ny0 + 1.0, newRow, nyImg - 1);

@@ -32,6 +32,13 @@ public:
     int squareSide() const;    // 当前正方形视口边长（像素），供色标对齐
     int squareTop() const;     // 当前正方形视口顶部 Y（像素），供色标对齐
 
+    // 毫米网格几何（工作二）：spacing = fov/(nx−1)（真实像素间距，≠ gridSize）。
+    // 注入后刻度标签/双击坐标范围编辑切换为毫米（屏幕口径：上=+，右=+）；
+    // 未注入（spacing<=0）前回退现行像素刻度。内部视图状态 m_zoom/m_center
+    // 保持像素空间不变。与掩膜 LUT 共用同一 spacing（MainWindow 统一下发）。
+    void setGridGeometry(double spacingMm, double fovMm);
+    double spacingMm() const { return m_spacingMm; }
+
 signals:
     void saveRequested();
     void copyRequested();
@@ -66,4 +73,7 @@ private:
     int     m_squareSide = 0;
     int     m_squareTop = 0;
     bool    m_initialized = false;
+    // 毫米网格几何（setGridGeometry 注入；spacing<=0 = 未注入 → 像素刻度回退）
+    double  m_spacingMm = 0.0;
+    double  m_fovMm = 0.0;
 };

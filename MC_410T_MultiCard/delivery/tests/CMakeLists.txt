@@ -42,6 +42,31 @@ target_include_directories(ring_display_mapping_test PRIVATE ../include)
 target_compile_features(ring_display_mapping_test PRIVATE cxx_std_17)
 add_test(NAME ring_display_mapping_test COMMAND ring_display_mapping_test)
 
+# 显示渲染掩膜断言 + 默认恒等 + PNG 写入器掩膜行为（工作一/二渲染路径）。
+# 内嵌基线 = fb6370b renderFrame/capturePngWriter render lambda 逐字转录；
+# offscreen 平台先例同 diagnostic_dialog_test。
+add_executable(ring_display_render_test
+    ring_display_render_test.cpp
+    ../src/ImagingDisplayWindow.cpp
+    ../src/RingImageWidget.cpp
+    ../src/RingColorBarWidget.cpp
+    # 头文件显式列出（沿主工程 add_executable 先例）：AUTOMOC 需要
+    ../include/ImagingDisplayWindow.h
+    ../include/RingImageWidget.h
+    ../include/RingColorBarWidget.h)
+target_include_directories(ring_display_render_test PRIVATE ../include)
+target_compile_features(ring_display_render_test PRIVATE cxx_std_17)
+target_link_libraries(ring_display_render_test PRIVATE Qt6::Widgets)
+add_test(NAME ring_display_render_test COMMAND ring_display_render_test)
+set_tests_properties(ring_display_render_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+if(WIN32 AND TARGET Qt6::QOffscreenIntegrationPlugin)
+    add_custom_command(TARGET ring_display_render_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ring_display_render_test>/platforms"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>"
+            "$<TARGET_FILE_DIR:ring_display_render_test>/platforms/")
+endif()
+
 add_executable(ring_block_assembler_test
     ring_block_assembler_test.cpp
     ../src/RingBlockAssembler.cpp)

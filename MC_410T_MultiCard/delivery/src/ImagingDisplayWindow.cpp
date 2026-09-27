@@ -352,6 +352,21 @@ void ImagingDisplayWindow::setDisplayMask(bool enabled, double radiusMm)
     rerenderCurrentFrame();
 }
 
+void ImagingDisplayWindow::setGridGeometry(double spacingMm, double fovMm)
+{
+    if (spacingMm == m_spacingMm && fovMm == m_fovMm)
+        return;
+    m_spacingMm = spacingMm;
+    m_fovMm = fovMm;
+    // 两个图像控件共用同一 spacing（毫米刻度标签与掩膜几何自洽）。
+    // 按任务规格“nx/fov 变更后下一帧生效”：此处不重绘当前帧（其像素仍为旧
+    // 几何），毫米刻度与掩膜几何随下一帧 setImage/displayMaskForFrame 生效。
+    if (m_img1) m_img1->setGridGeometry(spacingMm, fovMm);
+    if (m_img2) m_img2->setGridGeometry(spacingMm, fovMm);
+    if (m_mask)
+        rebuildMaskLut(m_lastDn);   // 后续渲染（下一帧/右键重绘）用新几何
+}
+
 std::shared_ptr<const ImagingDisplayWindow::DisplayMask>
 ImagingDisplayWindow::displayMaskForFrame(int nx)
 {

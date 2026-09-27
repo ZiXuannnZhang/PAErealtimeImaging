@@ -495,7 +495,9 @@ MainWindow::MainWindow(QWidget *parent)
                     m_timeoutPresentation.updateWriter(
                         m_imagingDisplayWindow->capturePngWriter(m_imagingDisplayWindow->lastSeq()));
                 });
-                // 显示掩膜注入（显示层任务）：对话框未打开过时为默认关闭/6.57mm
+                // 显示层任务注入：毫米网格几何（spacing=fov/(nx−1)）与缓存的
+                // 显示掩膜参数（对话框未打开过时为默认关闭/6.57mm）。
+                pushRingDisplayGridGeometry();
                 m_imagingDisplayWindow->setDisplayMask(m_displayMaskEnabled,
                                                        m_displayMaskRadiusMm);
             }
@@ -507,6 +509,9 @@ MainWindow::MainWindow(QWidget *parent)
             const int nx = m_imagingController->ringDisplayNx();
             const float *buf = m_imagingController->snapshotBuffer(bufferIndex);
             if (buf && nx > 0 && m_imagingDisplayWindow) {
+                // 几何守卫：nx/fov 变化（含运行中自动重启等绕过对话框信号路径）
+                // 时重推网格几何，保证毫米刻度与掩膜 LUT 始终与实际帧几何一致。
+                pushRingDisplayGridGeometry();
                 // 解耦成像刷新与信号显示：数据拷贝（~103MB）与 float→QImage 灰度
                 // 转换放到线程池，UI 线程只做贴图。原同步路径每次快照阻塞 UI
                 // 数十毫秒，导致时域频域信号显示周期性卡顿。
@@ -4364,15 +4369,33 @@ void MainWindow::ensureRingConfigDialog()
         m_netController->setLogicalTriggersPerRound(logicalTriggersPerRound);
     });
     // 显示掩膜（工作一，仅显示层）：持有最新值；显示窗口已存在则即时下发，
-    // 未创建则缓存（创建窗口时注入）。
+    // 未创建则缓存（创建窗口时注入）。applyConfig 每次成功都会发出该信号，
+    // 顺带重推网格几何（fov/nx 变更后下一帧生效）。
     connect(m_ringConfigDialog, &RingConfigDialog::displayMaskChanged,
             this, [this](bool enabled, double radiusMm) {
         m_displayMaskEnabled = enabled;
         m_displayMaskRadiusMm = radiusMm;
         if (m_imagingDisplayWindow) {
+            pushRingDisplayGridGeometry();
             m_imagingDisplayWindow->setDisplayMask(enabled, radiusMm);
         }
     });
+}
+
+// 显示窗口几何注入（显示层任务）：spacing = fov/(nx−1)（真实像素间距，事实 1，
+// ≠ gridSize），fov 配置存储单位为米。窗口创建时与每次 applyConfig 后调用；
+// nx/fov 任一变化才重新下发（几何守卫覆盖运行中自动重启等绕过对话框信号路径）。
+void MainWindow::pushRingDisplayGridGeometry()
+{
+    if (!m_imagingDisplayWindow || !m_imagingController) return;
+    const RingReconCudaConfig &cfg = m_imagingController->ringConfig();
+    const int nx = m_imagingController->ringDisplayNx();
+    if (nx <= 1 || cfg.fov <= 0.0) return;
+    const double fovMm = cfg.fov * 1e3;
+    if (nx == m_displayGridNx && fovMm == m_displayGridFovMm) return;
+    m_displayGridNx = nx;
+    m_displayGridFovMm = fovMm;
+    m_imagingDisplayWindow->setGridGeometry(fovMm / (nx - 1), fovMm);
 }
 
 void MainWindow::onImagingConfigClicked()

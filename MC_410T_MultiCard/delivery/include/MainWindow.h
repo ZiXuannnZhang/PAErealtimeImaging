@@ -334,6 +334,10 @@ private:
     ImagingSubmitResult ringFeedSink(const TriggerGroupConstPtr& frame);
     void configureRingAssembler();     // 按控制器环形配置初始化组包器
     void ensureRingConfigDialog();     // 惰性创建环形参数窗口并接通物理轮次策略转发
+    // 显示窗口几何/掩膜注入（显示层任务）：窗口创建时与每次 applyConfig 后，
+    // 从 ringConfig().fov + ringDisplayNx() 计算 spacing=fov/(nx−1) 下发
+    // setGridGeometry，并注入缓存的显示掩膜参数。
+    void pushRingDisplayGridGeometry();
     bool loadTestImagingData();        // 加载测试数据bin文件
 
     // 实时重建图像保存（随数据保存开关联动）
@@ -345,6 +349,10 @@ private:
     // 未创建时缓存、创建后注入。仅显示层，不进 RingReconCudaConfig/JSON/ImagingSvc。
     bool   m_displayMaskEnabled = false;
     double m_displayMaskRadiusMm = 6.57;
+    // 已下发 setGridGeometry 的 (nx, fovMm)（几何守卫：任一变化才重新下发，
+    // 覆盖运行中自动重启等绕过对话框信号路径的 nx/fov 变更）
+    int    m_displayGridNx = 0;
+    double m_displayGridFovMm = 0.0;
 
     // 自动保存（环形）：勾选后随采集触发开始、随圈末/超时重置停止；
     // 会话数据存于 输入路径上一级 下的三位数编号文件夹（001、002…）
