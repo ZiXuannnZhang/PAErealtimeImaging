@@ -370,7 +370,17 @@ int main(int argc, char** argv) {
     QJsonObject params;
     params["imagingMode"] = "ring";
     params["ring"] = ring;
-    sendJson(sock, {{"cmd", "configure"}, {"params", params}});
+    // PAIR 未连接时 dontwait send 会 EWOULDBLOCK：以“可写”为 svc ZMQ 就绪信号，
+    // 冷启动（如 Defender 首扫新构建 exe）时反复尝试，避免 configure 被静默丢弃。
+    bool configured = false;
+    for (int attempt = 0; attempt < 50 && !configured; ++attempt) {
+        configured = sendJson(sock, {{"cmd", "configure"}, {"params", params}});
+        if (!configured) QThread::msleep(200);
+    }
+    if (!configured) {
+        std::fprintf(stderr, "ImagingSvc never accepted configure (ZMQ pair)\n");
+        return 2;
+    }
     QThread::msleep(50);
     sendJson(sock, {{"cmd", "start"}});
     QThread::msleep(200);
