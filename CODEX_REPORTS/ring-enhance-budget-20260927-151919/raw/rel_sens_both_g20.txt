@@ -1,0 +1,57 @@
+[IngressProtection] requestedPriority=BELOW_NORMAL priorityApply=ok effectivePriority=BELOW_NORMAL originalProcessMask=0xFFFFFFFF requestedProcessMask=0xFFFFFFFA affinityApply=ok effectiveProcessMask=0xFFFFFFFA reservedLogicalCpus=0,2
+ImagingSvc: linear shared memory not present (ring mode?)
+ImagingSvc ring mode: channels= 8 perChannelBlock= 200 blockSize= 6400000 frameSize= 3240000 nx= 1800
+[RingSHMObs] {"avg_copy_lock_us":9243,"avg_process_us":0,"avg_queue_delay_us":12469,"cmd":"ring_shm_observation","component":"consumer","consumed":1,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":9243,"last_notify_seq":0,"last_process_us":0,"last_queue_delay_us":12469,"last_shm_seq":0,"last_submit_index":1,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":1,"notify_shm_mismatch":0,"old_generation":"0","old_session":"0","ready_zero_before_copy":0,"round_generation":"0","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"0"}
+[RingSHMObs] {"avg_copy_lock_us":6876.166666666667,"avg_process_us":1012628.8,"avg_queue_delay_us":11555.833333333334,"cmd":"ring_shm_observation","component":"consumer","consumed":6,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":6644,"last_notify_seq":5,"last_process_us":999347,"last_queue_delay_us":10312,"last_shm_seq":5,"last_submit_index":6,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":6,"notify_shm_mismatch":0,"old_generation":"0","old_session":"1","ready_zero_before_copy":0,"round_generation":"1","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"1"}
+[RingSHMObs] {"avg_copy_lock_us":7132.090909090909,"avg_process_us":1033176,"avg_queue_delay_us":12236.09090909091,"cmd":"ring_shm_observation","component":"consumer","consumed":11,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":8252,"last_notify_seq":10,"last_process_us":1061993,"last_queue_delay_us":15889,"last_shm_seq":10,"last_submit_index":11,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":11,"notify_shm_mismatch":0,"old_generation":"1","old_session":"1","ready_zero_before_copy":0,"round_generation":"2","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"2"}
+[RingSHMObs] {"avg_copy_lock_us":7440.5625,"avg_process_us":1054541.1333333333,"avg_queue_delay_us":12729.5,"cmd":"ring_shm_observation","component":"consumer","consumed":16,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":8804,"last_notify_seq":15,"last_process_us":1103000,"last_queue_delay_us":15170,"last_shm_seq":15,"last_submit_index":16,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":16,"notify_shm_mismatch":0,"old_generation":"2","old_session":"1","ready_zero_before_copy":0,"round_generation":"3","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"3"}
+[RingSHMObs] {"avg_copy_lock_us":7591.3,"avg_process_us":1060442.7,"avg_queue_delay_us":12868,"cmd":"ring_shm_observation","component":"consumer","consumed":20,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"final","last_copy_lock_us":7892,"last_notify_seq":19,"last_process_us":1064380,"last_queue_delay_us":14141,"last_shm_seq":19,"last_submit_index":20,"last_submit_interval_us":0,"last_submitted_seq":0,"notifications":20,"notify_shm_mismatch":0,"ready_zero_before_copy":0,"session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"submitted":0}
+QProcess: Destroyed while process (".\\ImagingSvc.exe") is still running.
+[selftest] enhance=both rounds=4 grid_mm=0.0200 block=200 channels=0xFF
+block   1/5: 1068.75 ms
+  diff vs prev: wl1=103275 wl2=118982
+block   2/5: 1036.34 ms
+  diff vs prev: wl1=70515.9 wl2=95030.3
+block   3/5: 1048.18 ms
+  diff vs prev: wl1=54536.5 wl2=58878.9
+block   4/5: 1046.14 ms
+[round-wall] generation=0 wall_ms=5794.58 blocks=5
+  diff vs prev: wl1=37896.5 wl2=44124.4
+block   5/5: 1034.16 ms
+  diff vs prev: wl1=149780 wl2=177946
+block   6/5: 1027.16 ms
+  diff vs prev: wl1=103275 wl2=118982
+block   7/5: 1109.62 ms
+  diff vs prev: wl1=70515.9 wl2=95030.3
+block   8/5: 1119.66 ms
+  diff vs prev: wl1=54536.5 wl2=58878.9
+block   9/5: 1085.94 ms
+[round-wall] generation=1 wall_ms=6070.79 blocks=5
+  diff vs prev: wl1=37896.5 wl2=44124.4
+block  10/5: 1093.43 ms
+  diff vs prev: wl1=149780 wl2=177946
+block  11/5: 1138.83 ms
+  diff vs prev: wl1=103275 wl2=118982
+block  12/5: 1102.59 ms
+  diff vs prev: wl1=70515.9 wl2=95030.3
+block  13/5: 1193.45 ms
+  diff vs prev: wl1=54536.5 wl2=58878.9
+block  14/5: 1084.17 ms
+[round-wall] generation=2 wall_ms=6284.72 blocks=5
+  diff vs prev: wl1=37896.5 wl2=44124.4
+block  15/5: 1134.48 ms
+  diff vs prev: wl1=149780 wl2=177946
+block  16/5: 1099.36 ms
+  diff vs prev: wl1=103275 wl2=118982
+block  17/5: 1154.22 ms
+  diff vs prev: wl1=70515.9 wl2=95030.3
+block  18/5: 1093.45 ms
+  diff vs prev: wl1=54536.5 wl2=58878.9
+block  19/5: 1107.57 ms
+[round-wall] generation=3 wall_ms=6176.26 blocks=5
+  diff vs prev: wl1=37896.5 wl2=44124.4
+block  20/5: 1101.78 ms
+done: channels=8 K=500 rounds=4 blocks=20 total=21879.3 ms avg=1093.96 ms
+[RingSHMObs] kinds: final=1 round_barrier_reset=4
+[RingSHMObs] service kind=final session=1 epoch=0 submitted=0 notifications=20 consumed=20 mismatch=0 ready_zero=0 duplicate=0 gap=0 avg_queue_us=12868.0 avg_copy_us=7591.3 avg_process_us=1060442.7
+[RingSHMObs] producer session=1 submitted=20 slot_busy=0 last_seq=19 last_interval_us=1261709
