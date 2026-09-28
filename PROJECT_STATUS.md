@@ -1,6 +1,6 @@
 # PAERealtimeImaging 当前项目状态
 
-> 更新时间：2026-09-25（UTC+8）
+> 更新时间：2026-09-28（UTC+8）
 >
 > 本文件是**当前项目状态的单一事实入口**。分支/历史治理以 `REPOSITORY_BASELINE.md` 为准；构建与交付以 `BUILD_STANDARD.md` 为准；具体任务特殊要求以 `codex/task-docs:TASKS/<task>.md` 为准。
 
@@ -21,6 +21,7 @@
 - **2026-09-24**：已通过实机验收的前端链（全分辨率显示裁切 → Frontend Preprocessing Stage → 逐 A-line 零相位前端滤波 → 保存/闸门与写盘故障修复 → 显示命名）以 **fast-forward** 进入 canonical `main`：无 merge commit、无 force push、无 history 重写。canonical `main` = `491aa34cfa9553954eea949a7703df7194eb7699`。
 - **2026-09-24**：环形成像零相位滤波与光声反演分支 `codex/ring-zero-phase-pa-inversion-20260919-025754` 定为**只作参考、不再实现或维护**（详见第 6 节）。其阶段 B1 任务中「B1 通过后的 exact SHA 将作为 B2 起点」的约定**作废**：后续环形成像工作一律从 latest `origin/main` 出发。
 - **2026-09-25**：DAS 双波长质量增强 B 档分支 `codex/das-dual-wavelength-quality-b-tier-20260925` 定为**实验性分支、后续不再维护、不在其上继续实现**（详见第 6.3 节）。该分支的生产/测试源改动**均未进入** canonical `main`；后续相关工作一律从 latest `origin/main` 出发，需要其中任何产物时须在 `main` 上重新落地或显式迁移。
+- **2026-09-28**：环形 DAS 质量增强工作流（双极波形补偿、低频补偿 H(f)、FFT 路径优化、显示层零值掩膜与毫米坐标）在实现分支 `codex/ring-reconstruction-enhancement-20260926-181824` 完成实现、预算测试与独立源码审核（tip `1b7c4c2`）；另有发现链早退实现分支 `codex/discovery-early-exit-localbind-20260926-123437`（领先 main 1 笔）。两者**均未经实机验收、未合入 canonical `main`**（详见第 6.4 节）；合并决策待用户实机验证后做出。
 
 当前状态标签：
 
@@ -45,6 +46,10 @@ REMOTE_BRANCH_CLEANUP                     = NON_DESTRUCTIVE
 RING_ZERO_PHASE_PA_INVERSION_BRANCH       = REFERENCE_ONLY_NO_MAINTENANCE
 DAS_DUAL_WAVELENGTH_B_TIER_BRANCH         = EXPERIMENTAL_NO_FURTHER_WORK
 NEXT_RING_WORK_BASELINE                   = latest origin/main（B1 起点契约作废）
+
+PENDING_ACCEPTANCE_WORK_BRANCH            = codex/ring-reconstruction-enhancement-20260926-181824 @ 1b7c4c2（未合入 main）
+WORK_BRANCH_HARDWARE_VALIDATION           = NOT_PERFORMED（Layer 2b T_arr 实测未执行，实时性结论为条件性）
+DISCOVERY_EARLY_EXIT_BRANCH               = codex/discovery-early-exit-localbind-20260926-123437（领先 main 1 笔，未合入）
 ```
 
 ## 2. Canonical source / accepted provenance
@@ -171,6 +176,8 @@ delivery candidate         = READY
 | `codex/task-docs` | 任务规格专用分支（48 条独有提交，保留；非生产实现 baseline） |
 | `codex/ring-zero-phase-pa-inversion-20260919-025754` | **参考专用 / 不再维护**：阶段 A 算法基准 + 阶段 B1，tip `3032550`、B1 构建源 `d8dd3da` |
 | `codex/das-dual-wavelength-quality-b-tier-20260925` | **实验性 / 不再维护、不再实现**：DAS 双波长质量增强 B 档（S2–S4 + D1–D7），tip `2573572`，见 6.3 |
+| `codex/ring-reconstruction-enhancement-20260926-181824` | **待验收实现分支 / 未合入 main**：环形 DAS 质量增强工作流（双极/低频补偿 + FFT 优化 + 显示层掩膜/毫米坐标），tip `1b7c4c2`，见 6.4 |
+| `codex/discovery-early-exit-localbind-20260926-123437` | **待验收实现分支 / 未合入 main**：发现链早退 + 控制包本地绑定默认 IP，领先 main 1 笔，见 6.4 |
 | Session A/B/C/D 分支 | historical / traceability，保留 |
 | `codex/physical-round-normalizer-integrated-20260916` | historical validation point，保留 |
 | `codex/start-admission-fence-fix-20260913-003112` | historical validation point，保留 |
@@ -232,6 +239,62 @@ tip        = 2573572e83538afb1c51318654f89690ef96f6f4
 canonical `main` 不包含该分支的任何源码改动。若后续任务需要其中任何产物，须在 `main` 上
 重新落地或显式迁移并重新走 `BUILD_STANDARD.md`，不得直接从该实验性分支合入。
 
+### 6.4 待验收实现分支（2026-09-28 登记；未经实机验收，未合入 main）
+
+两条**未合并实现分支**处于「实现与测量验证完成、等待实机验收与合并决策」状态。本节仅登记
+分支角色与状态元数据；分支中的度量数字与结论以分支内证据为准，在合并前**不作为 canonical
+`main` 的能力或结论引用**，后续任务不得默认 `main` 已具备其中任何产物。
+
+#### 6.4.1 `codex/ring-reconstruction-enhancement-20260926-181824`（环形 DAS 质量增强工作流）
+
+```text
+tip        = 1b7c4c2a88a43df8c69129cf234c0f0633dd5832
+分叉点     = c95917f（canonical main，2026-09-28 时点）
+状态       = 实现、预算测试与独立源码审核完成；未经实机验收；未合入 main
+```
+
+内容范围（实现层概述）：
+
+- 环形重建增强信号域算子 `RingSignalEnhancer`：双极波形补偿 `g(t)=p−t·p′`（λ(t)=t 固定、
+  无逐图归一化、无正整流、保持 signed DAS）与低频补偿 `H(f)`，挂 `ImagingSvc` 逐 A-line
+  路径；配置经独立 struct + ring JSON `enhance` 键，**无 `RingReconCudaConfig` ABI 变化**。
+- FFT 路径性能优化：A1 边界方法文档化、A2 预分配、A3 实 FFT pack-trick；A4（混合基）
+  经门评估不实施、A5 未派发。
+- 显示层：零值圆形显示掩膜（`RingDisplayMapping.h` 纯函数 + 渲染三路置零 + 自适应范围
+  排除；默认关闭、半径 6.57mm）与实时成像毫米坐标（屏幕口径上=+、spacing=fov/(nx−1)、
+  双击刻度编辑毫米化）。
+- 测试：全量 CTest 51/51；全关路径与基线逐位一致（memcmp）；分析侧已完成独立源码审核
+  （双版本 diff 逐文件 + 内嵌基线逐字比对 + 独立几何实测 16/16）。
+
+边界与待办：
+
+- **未经实机验收**。实时性正式结论依赖 Layer 2b 全链回放的 T_arr 实测（需用户在场；复跑
+  命令见分支 `CODEX_REPORTS/ring-enhance-budget-20260927-151919/layer2b_blocked.md`），
+  当前为 40 Hz 设计节拍下的**条件性**结论。
+- 合并决策待用户实机验收后做出；合并前新任务默认仍从 latest `origin/main` 出发，不得把
+  分支能力表述为 canonical `main` 已有能力。
+- 证据：分支 `CODEX_REPORTS/ring-enhance-budget-20260927-151919/`、
+  `ring-enhance-opt-20260927-205601/`、`ring-display-20260928-022839/`；
+  任务文档 `codex/task-docs` @ `7d87eee`。
+
+#### 6.4.2 `codex/discovery-early-exit-localbind-20260926-123437`（发现链早退 + 控制包本地绑定）
+
+```text
+tip        = 领先 main 1 笔提交（父 = c95917f）
+状态       = 实现 + 全量 CTest 46/46；未经实机验收；未合入 main
+```
+
+内容：卡发现在达期望卡数后提前结束（`DiscoveryOptions::expectedCardCount`，默认 4，
+0=禁用保持旧行为）+ 控制包本地绑定 IP 默认值 `192.168.0.1`（INI 可覆盖）+ 相关 tooltip
+与注释更正 + 3 个新测试用例。合并决策同样待用户验收。
+
+#### 6.4.3 2026-09-28 远端分支快照
+
+实测 **39 条**（含 main）。相对 2026-09-24 盘点（33，不含 main）+ §6.3（+1）以来新增
+5 条 ref：§6.3 的 das 实验分支、`codex/b-tier-analysis-d1-d7-20260925`（B 档 D1–D7 分析
+产出）、`codex/local-workspace-delete-rule-20260925-200656`（其唯一提交已 fast-forward
+并入 main @ `31a0cb7`，ref 保留）、以及本节两条。完整重盘点留待单独决策。
+
 ## 7. 下一步
 
 1. 以最新 `origin/main` 为唯一 canonical source 基准整理本地工作区。
@@ -239,6 +302,9 @@ canonical `main` 不包含该分支的任何源码改动。若后续任务需要
 3. 保留 ignored CUDA/runtime、testdata、artifacts、硬件 captures 和历史 build evidence。
 4. 在 canonical main HEAD 上重新 configure/build，记录新的 BuildIdentity 和关键依赖 SHA。
 5. 后续新功能/修复从 latest `origin/main` 建新任务分支；A/B/C/D 分支不再作为默认开发起点。
+6. 第 6.4 节两条待验收分支：待用户实机验收后做出合并决策；`ring-reconstruction-enhancement`
+   合并前应先补 Layer 2b T_arr 实测（实时性正式结论依赖它），合并采用与前端链相同的
+   fast-forward 纪律（无 merge commit、无 force push、无 history 重写）。
 
 ## 8. 文档权威层级
 

@@ -10,6 +10,8 @@ As of 2026-09-24, the field-validated frontend chain (full-resolution display cr
 
 As of 2026-09-25, canonical `main` has moved past `491aa34` by documentation-only commits (branch inventory and branch-role records). No production/test source changed after `491aa34`, so the canonical **source-tree identity** remains `491aa34cfa9553954eea949a7703df7194eb7699`, while the canonical **HEAD** advances with each documentation commit and must always be read from the latest `origin/main`.
 
+As of 2026-09-28, canonical `main` is at `c95917f` (still documentation-only past `491aa34`). Two implementation branches are **pending acceptance and unmerged** (the ring-DAS quality-enhancement work branch and the discovery early-exit branch — see Branch roles below); none of their content is part of canonical `main`, and merge decisions await the user's real-hardware validation.
+
 Formal project state is split by purpose:
 
 - `PROJECT_STATUS.md` — current project/validation status.
@@ -102,6 +104,27 @@ Rules:
 - The Stage B1 task clause "B1 通过后的 exact SHA 将作为 B2 起点" is **superseded**. Future ring-imaging work branches from latest `origin/main`, not from this branch.
 - This branch and canonical `main` share base `fb10721e` and have never been merged. Its Stage B1 artifacts (including `src/RingRecon/zero_phase_filter.cpp`) are **not** in canonical `main`. If a future task needs that filter behaviour it must be landed or explicitly migrated onto `main`; never assume `main` already has it.
 
+### `codex/ring-reconstruction-enhancement-20260926-181824` — active work branch (pending joint acceptance)
+
+Registered 2026-09-28. This branch carries the ring-DAS quality-enhancement workflow: the `RingSignalEnhancer` signal-domain operators (bipolar waveform compensation `g(t)=p−t·p′` with fixed λ(t)=t and no rectification, plus the user-requested low-frequency compensation `H(f)`), the FFT-path optimization (A1 boundary documentation, A2 allocation removal, A3 real-FFT pack trick; A4 mixed-radix gated out, A5 not dispatched), and the display-layer work (zero-value circular display mask + millimeter coordinate ticks). Configuration flows through a separate struct and the ring JSON `enhance` key — **no `RingReconCudaConfig` ABI change**.
+
+```text
+tip        = 1b7c4c2a88a43df8c69129cf234c0f0633dd5832
+fork point = c95917f (canonical main)
+status     = implemented, budget-tested and independently source-audited;
+             NOT hardware-validated; NOT merged into canonical main
+```
+
+Rules:
+
+- None of its content is part of canonical `main`. Do not describe branch capabilities as canonical-main capabilities, and do not start new tasks from this branch unless a task explicitly targets it.
+- The real-time verdict is **conditional**: the Layer 2b full-chain replay (T_arr measurement, user presence required) has not been executed; see `CODEX_REPORTS/ring-enhance-budget-20260927-151919/layer2b_blocked.md` on the branch.
+- Merge decision belongs to the user after real-hardware validation; merge with the same fast-forward discipline as the frontend chain (no merge commit, no force push, no history rewrite). Evidence: branch `CODEX_REPORTS/ring-enhance-budget-20260927-151919/`, `ring-enhance-opt-20260927-205601/`, `ring-display-20260928-022839/`; task documents on `codex/task-docs` @ `7d87eee`.
+
+### `codex/discovery-early-exit-localbind-20260926-123437` — unmerged implementation branch
+
+Registered 2026-09-28. One commit ahead of canonical `main` (parent `c95917f`): card discovery exits early once the expected card count is reached (`DiscoveryOptions::expectedCardCount`, default 4, 0 = legacy behaviour), the control-packet local bind IP defaults to `192.168.0.1` (INI-overridable), plus tooltip/comment corrections and 3 new test cases. Full CTest 46/46 recorded on the branch. Not hardware-validated, not merged; merge decision awaits the user's acceptance.
+
 ## START-admission status
 
 The START-admission software fix is included in the accepted canonical source ancestry and remains software-approved.
@@ -154,3 +177,4 @@ Single-task documents live under `TASKS/` on `codex/task-docs` and use:
 - Historical branches may later be pruned only by a separate explicit cleanup decision after local/remote inventory.
 - Do not recreate the previously user-deleted `codex/local-docs-sync-20260913`.
 - Remote branch inventory 2026-09-24 (explicitly non-destructive — **no branch deleted**): 33 remote branches classified. 18 are fully contained in canonical `main` (zero unique commits: the 5 frontend-chain work branches plus 13 historical validation points). 15 retain unique commits and must be kept (`codex/task-docs`, `codex/ring-zero-phase-pa-inversion-20260919-025754`, and 13 historical/experiment branches). Deleting the zero-unique-commit set would lose no commits, but it was deliberately deferred to a separate cleanup decision.
+- Remote branch snapshot 2026-09-28: 39 branch refs (including `main`). Since the 2026-09-24 inventory, 5 refs were added: `codex/das-dual-wavelength-quality-b-tier-20260925` (see PROJECT_STATUS §6.3), `codex/b-tier-analysis-d1-d7-20260925` (B-tier D1–D7 analysis outputs), `codex/local-workspace-delete-rule-20260925-200656` (its single commit was fast-forwarded into main at `31a0cb7`; the ref is retained), `codex/discovery-early-exit-localbind-20260926-123437` and `codex/ring-reconstruction-enhancement-20260926-181824` (both pending acceptance, see Branch roles above). No branch was deleted. A full re-inventory is deferred to a separate decision.

@@ -4,7 +4,7 @@ Windows 多卡实时光声采集与成像项目。当前正式源码与开发基
 
 ## Current status
 
-截至 2026-09-25：
+截至 2026-09-28：
 
 ```text
 canonical source                         = main
@@ -14,6 +14,8 @@ Session D integration review             = APPROVE
 A/B/C/D functional hardware validation   = PASS_FOR_CURRENT_SCOPE
 exact FPGA/LabVIEW extra-trigger source  = NOT_PROVEN
 7 / 4007                                 = field observation, not protocol constant
+pending work branch (unmerged)           = codex/ring-reconstruction-enhancement-20260926-181824 @ 1b7c4c2
+pending work branch (unmerged)           = codex/discovery-early-exit-localbind-20260926-123437
 ```
 
 本轮 START-admission、PhysicalRoundNormalizer、RoundIdentity、variable-length timeout、
@@ -26,6 +28,12 @@ Frontend Preprocessing Stage、逐 A-line 零相位前端滤波、保存/闸门�
 
 “当前验证范围通过”表示已执行的实机场景未发现与预期不一致，不表示已经证明额外 startup trigger
 的底层 FPGA/LabVIEW 精确产生机制。
+
+2026-09-28：两条实现分支**待实机验收、未合入 main**，其内容不属于 canonical source：
+`codex/ring-reconstruction-enhancement-20260926-181824`（环形 DAS 质量增强工作流：双极波形
+补偿、低频补偿 H(f)、FFT 路径优化、显示层零值掩膜与毫米坐标）与
+`codex/discovery-early-exit-localbind-20260926-123437`（发现链早退 + 控制包本地绑定默认 IP）。
+实时性正式结论依赖 Layer 2b T_arr 实测（条件性）；详见 `PROJECT_STATUS.md` 第 6.4 节。
 
 ## Canonical documentation
 

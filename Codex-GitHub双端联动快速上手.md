@@ -63,6 +63,13 @@ exact FPGA/LabVIEW source of extra startup triggers = NOT_PROVEN
 因此不要再把 START/Session C/Session D/integration branch 当作“尚未合并的 current candidate”。
 它们现在是 traceability branches。
 
+2026-09-28 起另有**两条待验收实现分支未合入 main**，其内容不属于 canonical main：
+`codex/ring-reconstruction-enhancement-20260926-181824`（tip `1b7c4c2`；环形 DAS 质量增强
+工作流：双极波形补偿、低频补偿 H(f)、FFT 路径优化、显示层零值掩膜与毫米坐标）与
+`codex/discovery-early-exit-localbind-20260926-123437`（发现链早退 + 控制包本地绑定默认 IP，
+领先 main 1 笔）。两者均未经实机验收；新任务默认仍从 latest `origin/main` 出发，不得把
+分支能力当作 canonical main 已有能力（详见 `PROJECT_STATUS.md` §6.4）。
+
 ## 3. New implementation task
 
 除非任务明确 override，执行代理的标准流程：
