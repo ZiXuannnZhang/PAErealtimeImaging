@@ -1,0 +1,74 @@
+# git-receipt — discovery-earlyexit-port 20260928-214240
+# 卡发现早退移植至环形增强分支（A 范围，B 范围不引入）
+recorded: 2026-09-28T22:10:00+08:00
+
+## 任务与依据
+任务文档: codex/task-docs @ 4eb0e8d TASKS/卡发现早退移植至环形增强分支_20260928-213124.md
+参考实现: 6bca496efd76e3e0d482fb6d6584260f6dfc160f
+          （codex/discovery-early-exit-localbind-20260926-123437 唯一提交，父 = c95917f）
+目标分支: codex/ring-reconstruction-enhancement-20260926-181824（沿既有分支续提交，未新建分支）
+
+## 提交链
+1b7c4c2  evidence: ring display-layer mask + mm coordinates records   （任务基线 tip）
+6744787  feat: port card-discovery early exit onto ring enhancement branch (A scope only)   （本任务 port commit）
+         parent = 1b7c4c2（expected ✓）
+HEAD: 6744787fc954acb449d26795b6752ff8139aec2d
+branch: codex/ring-reconstruction-enhancement-20260926-181824
+remote (pre-push): 1b7c4c2a88a43df8c69129cf234c0f0633dd5832
+tracked dirty: 0 entries（port commit 后核对）
+
+## port commit 内容（5 files changed, +130/−12）
+ .../delivery/docs/环形重建增强.md                        | 11 ++   （验收第 8 条「卡发现早退（移植）」小节）
+ .../delivery/include/PaimageAcquisition/CardDiscovery.h  |  8 +
+ .../delivery/src/MainWindow.cpp                          | 19 +−    （恰 3 处 A hunk）
+ .../delivery/src/PaimageAcquisition/CardDiscovery.cpp    | 41 +−
+ .../delivery/tests/paimage_core/discovery_checks.cpp     | 63 +
+include/Constants.h **不在** port commit 中（B 范围未引入，与移植前逐字节一致）。
+
+## 操作记录（cherry-pick → B 还原 → amend）
+1. 移植前基线：HEAD=1b7c4c2、tracked clean；build_mingw_debug.cmd 全量 configure+build
+   exit 0；全量 CTest 51 目标（首跑 50 过 + ring_enhancer_bench 间歇 SegFault 1 次，
+   复跑 3/3 绿，见 01/05 号文件）。
+2. `git cherry-pick 6bca496` → 无冲突自动合并，临时提交 9089c38
+   （含全部 16 hunk = A 12 + B 4，MainWindow.cpp auto-merge）。
+3. B 范围还原（方案一续）：`git checkout 1b7c4c2 -- include/Constants.h src/MainWindow.cpp`
+   将两文件恢复到移植前逐字节状态，再以 A-only 补丁（30 号文件，从参考 diff 机械切分出
+   MainWindow.cpp 的 3 处 A hunk）`git apply` 干净重放（3 hunk 均命中，+10 行偏移来自
+   该分支显示层自有改动，符合任务文档 §0 事实 2 的预期）。
+4. docs/环形重建增强.md 增补 + `git commit --amend` → 最终 port commit 6744787。
+   临时提交 9089c38 仅存于 reflog，未推送。
+
+## 提交树 §1.2 复核（对 HEAD=6744787 重跑）
+- A 文件 vs 6bca496：CardDiscovery.h / CardDiscovery.cpp / discovery_checks.cpp diff = 0 行
+- Constants.h vs 移植前 1b7c4c2：diff = 0 行（DEFAULT_LOCAL_BIND_IP 检索 0 处）
+- MainWindow.cpp vs 移植前 1b7c4c2：diff 恰 3 hunk（@2065/@2080/@2148 = 参考 @2055/@2070/
+  @2138 + 10 偏移），hunk 体与参考 A hunk 逐字一致（12 号文件 diff 证明），无 B 痕迹
+  （DEFAULT_LOCAL_BIND_IP / 注册表键 / HKCU 检索 0 处）
+
+## 构建（提交后全量重建）
+- MinGW-Debug（正式口径）：build_mingw_debug.cmd（configure + build），exit 0，
+  4 关键 exe 校验通过 → 40 号日志 + 44 号 BuildIdentity
+- MinGW-Release（参考口径）：preset 无 release 配置，按 BUILD_STANDARD §3 本地 override
+  手动 configure（不改仓库 preset；CMake 参数与 mingw-debug preset 相同、
+  CMAKE_BUILD_TYPE=Release，二进制目录 build/mingw_release），exit 0，4 关键 exe +
+  CUDA runtime DLL 齐 → 41 号日志 + 45 号 BuildIdentity
+- Release 构建波折（如实记录）：前两次构建在「链接后置 copy_if_different
+  ring_recon_cuda.dll」步骤失败，根因是首次 configure 时 CUDA_BIN 误传
+  build/ring_recon_cuda（正确为 build/ring_recon_cuda/bin，cmd 脚本口径 %CUDA_BLD%\bin），
+  导入库路径正确故链接成功、仅运行时 DLL 拷贝路径错；修正 CUDA_BIN 重新 configure 后
+  第三次构建 exit 0。42/43 号日志保留失败现场，qcustomplot 的 QDateTime 弃用告警
+  在 Debug/Release 均为 warning，不构成失败。
+
+## 依赖 SHA256（mingw_debug bin）
+ring_recon_cuda.dll      bf40472d5a46363a35dd1084a01a8c15f13ef203f3ed5b4bb5edf767eeec14b5
+cudart64_12.dll          c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344
+libzmq-v141-mt-4_3_5.dll 37610023d91951bc4177db1f96b54b28911976ac70b221a852887709a02a9ad3
+pa_recon_core.dll        c1a37e73147c1b8250f96ccdc1fcfc08ca28cecbf1cb3c046d4ab426f2ea0893
+cufft64_12.dll           2480d8ab849d7e9a375275f6c0278b8764c14ac0c1a3bdacaf256ae4a93c5590
+Ring CUDA source = 本地 build/ring_recon_cuda（预编译产物沿用，本任务未触碰 CUDA 核心）
+
+## 红线自查
+- 未合 main、未 force push、未新建分支、未清理 stash@{0}
+- 未触碰环形增强 / FFT 优化 / 显示层行为；RingReconCudaConfig、ring JSON 键集、
+  ImagingSvc、SHM 布局零改动（port commit 文件清单即证）
+- 软件层证据仅覆盖：源码一致性、构建、自动化测试；实机验收项留给用户（验收第 9 条）

@@ -1,0 +1,13 @@
+# pre-port state (baseline)
+recorded: 2026-09-28T21:42:50+0800
+HEAD: 1b7c4c2a88a43df8c69129cf234c0f0633dd5832
+branch: codex/ring-reconstruction-enhancement-20260926-181824
+remote task branch: 1b7c4c2a88a43df8c69129cf234c0f0633dd5832
+reference: 6bca496efd76e3e0d482fb6d6584260f6dfc160f (codex/discovery-early-exit-localbind-20260926-123437 tip, parent=c95917f)
+task-docs tip: 4eb0e8dfd95d921d06b9b5d40001d121fabe44f1
+tracked dirty: 0 entries
+?? CODEX_REPORTS/discovery-earlyexit-port-20260928-214240/
+?? References/
+?? _pending_delete/
+?? _task_work/
+?? verification/

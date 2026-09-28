@@ -1,0 +1,2 @@
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  one CONFIG per candidate, no re-sends

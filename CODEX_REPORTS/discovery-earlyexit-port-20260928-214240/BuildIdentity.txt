@@ -1,0 +1,32 @@
+# BuildIdentity — port commit 6744787（提交后全量重建，tracked clean）
+
+## MinGW-Debug（正式口径）
+#define PAIMAGE_GIT_SHA "6744787fc954acb449d26795b6752ff8139aec2d"
+#define PAIMAGE_TRACKED_DIRTY false
+#define PAIMAGE_BUILD_TYPE "Debug"
+#define PAIMAGE_COMPILER "GNU 13.1.0"
+#define PAIMAGE_PRODUCT_BASELINE "e66a29bfbbaa6534911a23d48e8624fb8d552bec"
+#define PAIMAGE_SOURCE_SHA256 "2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec"
+
+构建：build_mingw_debug.cmd（configure + build 全量，exit 0，4 关键 exe 校验通过）。
+原始头文件：build/mingw_debug/generated/PaimageAcquisition/BuildIdentity.h（44 号为其副本）。
+
+## MinGW-Release（参考口径，本地 override configure）
+#define PAIMAGE_GIT_SHA "6744787fc954acb449d26795b6752ff8139aec2d"
+#define PAIMAGE_TRACKED_DIRTY false
+#define PAIMAGE_BUILD_TYPE "Release"
+#define PAIMAGE_COMPILER "GNU 13.1.0"
+#define PAIMAGE_PRODUCT_BASELINE "e66a29bfbbaa6534911a23d48e8624fb8d552bec"
+#define PAIMAGE_SOURCE_SHA256 "2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec"
+
+构建：cmake -S . -B build/mingw_release -G Ninja（工具链/依赖路径与 mingw-debug preset
+一致，CMAKE_BUILD_TYPE=Release；preset 文件未改动），build exit 0。
+原始头文件：build/mingw_release/generated/PaimageAcquisition/BuildIdentity.h（45 号为其副本）。
+
+## 字段说明
+- PAIMAGE_GIT_SHA / PAIMAGE_TRACKED_DIRTY 由 CMake configure 时动态写入（本任务唯一动态身份）。
+- PAIMAGE_PRODUCT_BASELINE 与 PAIMAGE_SOURCE_SHA256 是 include/PaimageAcquisition/
+  BuildIdentity.h.in 模板中的**硬编码常量**（非动态变量），历次构建同值属预期，不代表
+  本任务源码树哈希。
+- Release 仅为构建核对（参考口径），未在 Release 二进制上运行测试；测试证据均为
+  MinGW-Debug 测试树（build/tests_all_mingw_debug）产物。
