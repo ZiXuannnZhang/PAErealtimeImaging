@@ -22,6 +22,7 @@
 - **2026-09-24**：环形成像零相位滤波与光声反演分支 `codex/ring-zero-phase-pa-inversion-20260919-025754` 定为**只作参考、不再实现或维护**（详见第 6 节）。其阶段 B1 任务中「B1 通过后的 exact SHA 将作为 B2 起点」的约定**作废**：后续环形成像工作一律从 latest `origin/main` 出发。
 - **2026-09-25**：DAS 双波长质量增强 B 档分支 `codex/das-dual-wavelength-quality-b-tier-20260925` 定为**实验性分支、后续不再维护、不在其上继续实现**（详见第 6.3 节）。该分支的生产/测试源改动**均未进入** canonical `main`；后续相关工作一律从 latest `origin/main` 出发，需要其中任何产物时须在 `main` 上重新落地或显式迁移。
 - **2026-09-28**：环形 DAS 质量增强工作流（双极波形补偿、低频补偿 H(f)、FFT 路径优化、显示层零值掩膜与毫米坐标）在实现分支 `codex/ring-reconstruction-enhancement-20260926-181824` 完成实现、预算测试与独立源码审核（tip `1b7c4c2`）；另有发现链早退实现分支 `codex/discovery-early-exit-localbind-20260926-123437`（领先 main 1 笔）。两者**均未经实机验收、未合入 canonical `main`**（详见第 6.4 节）；合并决策待用户实机验证后做出。
+- **2026-09-29**：两项推进（均**未经实机验收、未合入 canonical `main`**，详见第 6.4 节）：(a) 卡发现早退 **A 范围**（达期望卡数后提前结束发现）自 discovery 分支原样移植入环形增强分支（`6744787`，分支 tip 随之推进至 `69af295`；B 范围仍留原分支，见 §6.4.1/§6.4.2）；(b) 前端刷新闸门解耦（计数边界后时域/频域信号窗口持续刷新、实时成像保持冻结）在**新建**实现分支 `codex/count-boundary-frontend-only-20260929-024946`（tip `3c6323d`）完成实现与软件级验证——该分支自环形增强分支 tip `69af295` 线性分叉，**原环形增强分支保持 `69af295` 不动**（见 §6.4.3）。
 
 当前状态标签：
 
@@ -47,9 +48,11 @@ RING_ZERO_PHASE_PA_INVERSION_BRANCH       = REFERENCE_ONLY_NO_MAINTENANCE
 DAS_DUAL_WAVELENGTH_B_TIER_BRANCH         = EXPERIMENTAL_NO_FURTHER_WORK
 NEXT_RING_WORK_BASELINE                   = latest origin/main（B1 起点契约作废）
 
-PENDING_ACCEPTANCE_WORK_BRANCH            = codex/ring-reconstruction-enhancement-20260926-181824 @ 1b7c4c2（未合入 main）
+PENDING_ACCEPTANCE_WORK_BRANCH            = codex/ring-reconstruction-enhancement-20260926-181824 @ 69af295（未合入 main；含 2026-09-29 早退移植 6744787）
 WORK_BRANCH_HARDWARE_VALIDATION           = NOT_PERFORMED（Layer 2b T_arr 实测未执行，实时性结论为条件性）
 DISCOVERY_EARLY_EXIT_BRANCH               = codex/discovery-early-exit-localbind-20260926-123437（领先 main 1 笔，未合入）
+DISCOVERY_EARLY_EXIT_SCOPE_A              = PORTED_TO_RING_BRANCH（@ 6744787；B 范围仍留原分支，归宿待用户决策）
+COUNT_BOUNDARY_FRONTEND_ONLY_BRANCH       = codex/count-boundary-frontend-only-20260929-024946 @ 3c6323d（未合入 main；原分支保持 69af295 不动）
 ```
 
 ## 2. Canonical source / accepted provenance
@@ -248,9 +251,9 @@ canonical `main` 不包含该分支的任何源码改动。若后续任务需要
 #### 6.4.1 `codex/ring-reconstruction-enhancement-20260926-181824`（环形 DAS 质量增强工作流）
 
 ```text
-tip        = 1b7c4c2a88a43df8c69129cf234c0f0633dd5832
+tip        = 69af29528b91f0b606e3771827df91cedc0b9993（2026-09-29；1b7c4c2 之后仅增早退移植 6744787 及其证据提交）
 分叉点     = c95917f（canonical main，2026-09-28 时点）
-状态       = 实现、预算测试与独立源码审核完成；未经实机验收；未合入 main
+状态       = 实现、预算测试与独立源码审核完成（含 2026-09-29 早退移植及分析侧独立审查）；未经实机验收；未合入 main
 ```
 
 内容范围（实现层概述）：
@@ -263,6 +266,11 @@ tip        = 1b7c4c2a88a43df8c69129cf234c0f0633dd5832
 - 显示层：零值圆形显示掩膜（`RingDisplayMapping.h` 纯函数 + 渲染三路置零 + 自适应范围
   排除；默认关闭、半径 6.57mm）与实时成像毫米坐标（屏幕口径上=+、spacing=fov/(nx−1)、
   双击刻度编辑毫米化）。
+- 卡发现早退（移植，2026-09-29 @ `6744787`）：自 discovery 分支 `6bca496` 原样移植 **A 范围**
+  （`DiscoveryOptions::expectedCardCount` 默认 0=禁用、`expectedCountReached`/`roundsUsed`、
+  sanitize 0..64 越界回退、UI 接线与日志、`discovery_checks` 3 个新测试块）；参考提交捆绑的
+  **B 范围**（`DEFAULT_LOCAL_BIND_IP`、注册表→INI tooltip 文案）**未移植**，仍留原分支。
+  分析侧独立审查通过（A 范围三文件与参考版逐字节一致等三条对照）。
 - 测试：全量 CTest 51/51；全关路径与基线逐位一致（memcmp）；分析侧已完成独立源码审核
   （双版本 diff 逐文件 + 内嵌基线逐字比对 + 独立几何实测 16/16）。
 
@@ -274,8 +282,9 @@ tip        = 1b7c4c2a88a43df8c69129cf234c0f0633dd5832
 - 合并决策待用户实机验收后做出；合并前新任务默认仍从 latest `origin/main` 出发，不得把
   分支能力表述为 canonical `main` 已有能力。
 - 证据：分支 `CODEX_REPORTS/ring-enhance-budget-20260927-151919/`、
-  `ring-enhance-opt-20260927-205601/`、`ring-display-20260928-022839/`；
-  任务文档 `codex/task-docs` @ `7d87eee`。
+  `ring-enhance-opt-20260927-205601/`、`ring-display-20260928-022839/`、
+  `discovery-earlyexit-port-20260928-214240/`；
+  任务文档 `codex/task-docs`（早退移植任务 @ `4eb0e8d`）。
 
 #### 6.4.2 `codex/discovery-early-exit-localbind-20260926-123437`（发现链早退 + 控制包本地绑定）
 
@@ -288,12 +297,51 @@ tip        = 领先 main 1 笔提交（父 = c95917f）
 0=禁用保持旧行为）+ 控制包本地绑定 IP 默认值 `192.168.0.1`（INI 可覆盖）+ 相关 tooltip
 与注释更正 + 3 个新测试用例。合并决策同样待用户验收。
 
-#### 6.4.3 2026-09-28 远端分支快照
+2026-09-29 注记：**A 范围（卡发现早退）已原样移植至环形增强分支**（`6744787`，
+见 §6.4.1）；**B 范围（本地绑定默认值 + 注册表→INI tooltip 文案迁移）仍为本分支独有
+未移植内容**，归宿（移植/留原分支验收/放弃）待用户单独决策；分支暂不标记
+「不再继续实现」，待其全部内容有归宿后再做分支定位标记。
+
+#### 6.4.3 `codex/count-boundary-frontend-only-20260929-024946`（前端刷新闸门解耦：计数边界后时频持续刷新）
+
+```text
+tip        = 3c6323dcdf587322c896f8039868eca19ba5a3d5（aa9097e 实现 + e8eeba6/3c6323d 证据）
+分叉点     = 69af295（环形增强分支 tip，线性分叉；原环形增强分支保持 69af295 不动）
+状态       = 实现与软件级验证完成、分析侧独立源码审查通过；未经实机验收；未合入 main
+```
+
+内容（用户 2026-09-29 裁定）：勾选「禁用计数重置」且接收触发数达到每圈设计触发数
+（单圈总Aline数推导）后，`HostOutput::sync` 计数边界过滤三态化（Drop / FrontendOnly /
+Pass）——超界组改走「仅前端信号路径」：时域/频域窗口持续刷新，实时成像保持冻结
+不重置（FramePublisher 跳过 + `TriggerGroup::frontendDisplayOnly` 标记使
+`FrontendPreprocessor::dispatch` 跳过 Ring 腿——生产成像主链经 stage 的 Ring sink，
+任务文档 §0 事实 2 的必要偏差，已披露并文档化）；保存与卡片状态计数照常；
+「禁用计数重置」不勾选模式全链路逐位不变。
+
+边界与待办：
+
+- 未经实机验收（用户口径：时域/频域持续刷新 / 实时成像冻结不重置 / 保存与卡片计数
+  照常三项，软件 PASS ≠ 实机 PASS）。
+- **已知证据缺口**：证据目录 README 文件表所列 6 个 `.log`（CTest 全量 transcript、
+  反证红/绿输出等）因仓库 `.gitignore` 忽略 `*.log` 未入库、且未按早退移植先例做
+  `.txt` 存档——「CTest 全量」目前仅反证 README 内摘录可查，需执行代理补一笔
+  `.txt` 存档证据提交。
+- 归并策略：新分支与环形增强分支线性，用户实机验收通过后按 fast-forward 纪律并回
+  `codex/ring-reconstruction-enhancement-20260926-181824`（或与其余待验收内容一并
+  决策合并路径），由分析代理届时执行；验收前不得把分支能力表述为 canonical `main`
+  已有能力。
+- 证据：分支 `CODEX_REPORTS/count-boundary-frontend-only-20260929-100554/`；
+  任务文档 `codex/task-docs:TASKS/前端刷新闸门解耦_计数边界后时频持续刷新_20260929-023810.md`
+  （2026-09-29 修订 1，@ `cceb435`）；分支 `docs/环形重建增强.md` 第 7 节。
+
+#### 6.4.4 2026-09-28 远端分支快照
 
 实测 **39 条**（含 main）。相对 2026-09-24 盘点（33，不含 main）+ §6.3（+1）以来新增
 5 条 ref：§6.3 的 das 实验分支、`codex/b-tier-analysis-d1-d7-20260925`（B 档 D1–D7 分析
 产出）、`codex/local-workspace-delete-rule-20260925-200656`（其唯一提交已 fast-forward
 并入 main @ `31a0cb7`，ref 保留）、以及本节两条。完整重盘点留待单独决策。
+2026-09-29 增量：+1 ref（`codex/count-boundary-frontend-only-20260929-024946`，见
+§6.4.3），实测 **40 条**（含 main）。
 
 ## 7. 下一步
 
@@ -302,9 +350,11 @@ tip        = 领先 main 1 笔提交（父 = c95917f）
 3. 保留 ignored CUDA/runtime、testdata、artifacts、硬件 captures 和历史 build evidence。
 4. 在 canonical main HEAD 上重新 configure/build，记录新的 BuildIdentity 和关键依赖 SHA。
 5. 后续新功能/修复从 latest `origin/main` 建新任务分支；A/B/C/D 分支不再作为默认开发起点。
-6. 第 6.4 节两条待验收分支：待用户实机验收后做出合并决策；`ring-reconstruction-enhancement`
-   合并前应先补 Layer 2b T_arr 实测（实时性正式结论依赖它），合并采用与前端链相同的
-   fast-forward 纪律（无 merge commit、无 force push、无 history 重写）。
+6. 第 6.4 节各待验收分支（环形增强分支、其线性延伸的 count-boundary 分支、discovery
+   分支）：待用户实机验收后做出合并决策；`ring-reconstruction-enhancement` 合并前应先补
+   Layer 2b T_arr 实测（实时性正式结论依赖它）；`count-boundary-frontend-only` 归并路径
+   见 §6.4.3；合并采用与前端链相同的 fast-forward 纪律（无 merge commit、无 force push、
+   无 history 重写）。
 
 ## 8. 文档权威层级
 

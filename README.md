@@ -14,8 +14,9 @@ Session D integration review             = APPROVE
 A/B/C/D functional hardware validation   = PASS_FOR_CURRENT_SCOPE
 exact FPGA/LabVIEW extra-trigger source  = NOT_PROVEN
 7 / 4007                                 = field observation, not protocol constant
-pending work branch (unmerged)           = codex/ring-reconstruction-enhancement-20260926-181824 @ 1b7c4c2
-pending work branch (unmerged)           = codex/discovery-early-exit-localbind-20260926-123437
+pending work branch (unmerged)           = codex/ring-reconstruction-enhancement-20260926-181824 @ 69af295（含 2026-09-29 早退移植）
+pending work branch (unmerged)           = codex/discovery-early-exit-localbind-20260926-123437（A 范围已移植，B 范围留原分支）
+pending work branch (unmerged)           = codex/count-boundary-frontend-only-20260929-024946 @ 3c6323d（自 69af295 线性分叉，原分支保持不动）
 ```
 
 本轮 START-admission、PhysicalRoundNormalizer、RoundIdentity、variable-length timeout、
