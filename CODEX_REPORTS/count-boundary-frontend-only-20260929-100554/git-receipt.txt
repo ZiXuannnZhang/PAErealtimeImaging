@@ -1,0 +1,41 @@
+git-receipt — 前端刷新闸门解耦（计数边界后时频持续刷新，实时成像保持冻结）
+===========================================================================
+
+仓库: ZiXuannnZhang/PAErealtimeImaging
+工作区: D:\ChatGPT\PAERealtimeImaging
+执行日期: 2026-09-29
+
+分支与提交链
+------------
+实现分支: codex/count-boundary-frontend-only-20260929-024946（新建）
+分叉点:   69af29528b91f0b606e3771827df91cedc0b9993
+          = origin/codex/ring-reconstruction-enhancement-20260926-181824 tip
+          （switch 后 ff-only 合并核对，git rev-parse HEAD 逐位一致）
+实现 commit: aa9097ef126ab3ea4a2a1ce2c5786ecaba7cd184（父 = 69af295，线性）
+  标题: feat(frontend): count-boundary frontend-only delivery keeps time/freq displays live
+  含任务文档名与「仅勾选模式行为变化、不勾选模式逐位不变」声明；
+  同一 commit 更新 docs/环形重建增强.md（第 7 节，任务文档验收第 8 条）。
+证据 commit: 本目录（CODEX_REPORTS/count-boundary-frontend-only-20260929-100554/）
+  作为后续 evidence commit 提交（沿环形分支 c649a4e→1b7c4c2 先例：BuildIdentity
+  与 CTest 记录锚定实现 commit，证据文件紧随其后的 evidence commit 承载）。
+
+原分支不动核对
+--------------
+codex/ring-reconstruction-enhancement-20260926-181824 全程零推送、零 merge/rebase
+回写、零 force push；本任务首推仅 push -u origin codex/count-boundary-frontend-only-20260929-024946。
+（push 后的远端核对值见 README.md 返回段；远端 tip 应仍为 69af29528b91f0b606e3771827df91cedc0b9993。）
+
+push 时点核对（追加于 push 完成后）
+-----------------------------------
+（占位 — push 后由 README.md「返回段」承载实际核对值）
+
+构建前 tracked tree 状态
+------------------------
+git status --porcelain --untracked-files=no = 空（仅既有未跟踪目录
+References/、_pending_delete/、_task_work/、verification/，未触碰）。
+stash@{0} 保护性备份（stale-WIP-before-switch-to-ring-recon-enhancement）未动。
+
+任务文档
+--------
+codex/task-docs:TASKS/前端刷新闸门解耦_计数边界后时频持续刷新_20260929-023810.md
+codex/task-docs tip 核对: cceb435d225048aa6c7acbca0e30accccff62cf2 == cceb435 ✓
