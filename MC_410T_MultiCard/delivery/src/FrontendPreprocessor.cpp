@@ -319,7 +319,13 @@ void FrontendPreprocessor::dispatch(TriggerGroupPtr& frontend) {
         displayBuffer_->updateFullRes(frontend);
         displayUpdates_.fetch_add(1, std::memory_order_relaxed);
     }
-    if (ring) {
+    // Count-boundary FrontendOnly groups (frontendDisplayOnly, set by
+    // DataProcessor::deliverAssembled when imagingSubmit=false) refresh the
+    // display above but never reach the imaging publisher: the Ring leg is
+    // skipped without counting a downstream attempt, so ImagingBypass/Ring
+    // statistics stay untouched and the realtime image stays frozen. Only
+    // reachable while disableCountBoundary is checked.
+    if (ring && !frontend->frontendDisplayOnly) {
         downstreamRingAttempts_.fetch_add(1, std::memory_order_relaxed);
         if (observer) observer("ring", frontend.get());
         try {

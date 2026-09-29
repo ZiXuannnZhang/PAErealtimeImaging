@@ -51,6 +51,15 @@ struct TriggerGroup {
     // marker from this field, never from the one-shot pulse.
     bool isFinalLogicalTrigger = false;
     bool sourceTimedOut = false;
+    // Count-boundary FrontendOnly delivery (任务文档 20260929-023810): set by
+    // DataProcessor::deliverAssembled when a beyond-count-boundary group may
+    // refresh the frontend signal windows but must not reach the imaging
+    // publisher. FrontendPreprocessor::dispatch skips only its Ring leg for
+    // such groups; DisplayBuffer still receives the same frontend clone. The
+    // deep copy in the stage worker carries this flag, the raw save path never
+    // sees a sync-path group, and the flag is unreachable while
+    // disableCountBoundary is false.
+    bool frontendDisplayOnly = false;
 
     // The normalized Ring path consumes this pair as one immutable identity.
     // Keeping the legacy scalar fields preserves the existing save contract
@@ -128,6 +137,7 @@ struct TriggerGroup {
         roundComplete = false;
         isFinalLogicalTrigger = false;
         sourceTimedOut = false;
+        frontendDisplayOnly = false;
         freqA.clear(); freqB.clear();
         phaseA_display.clear(); phaseB_display.clear();
         freqA_display.clear();  freqB_display.clear();

@@ -55,10 +55,11 @@ void OutputWorkers::pushCard(Frame f){
     saveEnqueued_.fetch_add(1);const auto depth=saveDepth_.fetch_add(1)+1;updateMax(savePeakDepth_,depth);
     event(Result::CardQueued,f);cardReady_.notify_one();
 }
-void OutputWorkers::pushSync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
+void OutputWorkers::pushSync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup,
+                             bool beyondCountBoundary){
     std::lock_guard<std::mutex> lock(syncMutex_);
     if(stopping_){for(auto f:frames)event(Result::ListenerDiscard,f);return;}
-    auto evicted=syncQueue_.pushSync(trigger,frames,startup);
+    auto evicted=syncQueue_.pushSync(trigger,frames,startup,beyondCountBoundary);
     for(auto& x:evicted)for(auto f:x.cards)event(Result::SyncEvicted,f);
     for(auto f:frames)event(Result::SyncQueued,f);
     syncReady_.notify_one();

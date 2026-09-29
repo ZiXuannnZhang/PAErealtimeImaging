@@ -1,6 +1,7 @@
 #include "PaimageAcquisition/HostOutput.h"
 #include "FrontendPreprocessor.h"
 #include "AcqConfig.h"
+#include "FramePublisher.h"
 #include <QCoreApplication>
 #include <QTemporaryDir>
 #include <QDir>
@@ -464,8 +465,14 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         AcqConfig config;
         config.acqTimeNs = 64;
         std::atomic<int> frontends{0};
+        std::atomic<int> imagingArrivals{0}, frontendOnlyArrivals{0};
         DataProcessor processor(0, nullptr, nullptr, config,
-            [&](const TriggerGroupPtr&) {
+            [&](const TriggerGroupPtr& group) {
+                // The count-boundary FrontendOnly stamp is visible at the
+                // frontend sink: it is what separates "frontend signal path
+                // refresh" from "imaging publisher arrival" below.
+                if (group->frontendDisplayOnly) ++frontendOnlyArrivals;
+                else ++imagingArrivals;
                 ++frontends;
                 return FrontendSubmitResult::Accepted;
             });
@@ -495,8 +502,10 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         }
         require(until([&] { return saver.savedCount() == 12; }),
                 "G1 raw save is untouched by the frontend gate");
-        require(until([&] { return frontends.load() == 5; }),
-                "G1 only the designed five logical triggers reach the frontend");
+        require(until([&] { return frontends.load() == 12; }),
+                "G1 every trigger keeps reaching the frontend signal path beyond the count boundary");
+        require(imagingArrivals.load() == 5 && frontendOnlyArrivals.load() == 7,
+                "G1 imaging arrivals stop at the designed five; the rest arrive frontend-only");
         // Live threshold update: the gate must follow immediately, with no
         // round boundary, no session boundary and no service restart.
         output.setConfiguredLogicalTriggersPerRound(20);
@@ -505,11 +514,173 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             output.card(f);
             output.sync(100 + i, {f}, false);
         }
-        require(until([&] { return frontends.load() == 9; }),
-                "G2 the gate follows a live threshold update");
+        require(until([&] { return frontends.load() == 16; }),
+                "G2 the frontend signal path continues across the live threshold update");
+        require(until([&] { return imagingArrivals.load() == 9; }),
+                "G2 imaging arrivals follow the live threshold update");
         require(until([&] { return saver.savedCount() == 16; }),
                 "G2 raw save stays complete across the update");
         output.stop();
+    }
+    // Count-boundary FrontendOnly contract (任务文档
+    // 前端刷新闸门解耦_计数边界后时频持续刷新_20260929-023810, 勾选「禁用计数
+    // 重置」): triggers at or beyond the designed per-round count keep
+    // refreshing the frontend signal windows (displayUpdates increments) while
+    // both imaging publishers stay frozen at N -- the FramePublisher submit
+    // and the frontend stage's Ring dispatch (the ImagingBypass feed that
+    // drives the realtime image). Save continues throughout. The two Drop
+    // conditions (startup control trigger, expired-round frame) must reach
+    // neither frontend nor publisher in any mode, and the unchecked mode must
+    // pass the same input through bit-identically to the pre-change behavior.
+    {
+        QTemporaryDir root(QDir::currentPath()+"/frontend-only-XXXXXX");
+        require(root.isValid(), "frontend-only temp dir");
+        FileSaver saver(0);
+        AcqConfig config;config.acqTimeNs=64;
+        DisplayBuffer display;
+        std::atomic<int> ringArrivals{0},ringFinals{0};
+        std::vector<std::unique_ptr<FrontendPreprocessor>> frontends;
+        frontends.push_back(makeFrontend(0,&display,
+            [&](const TriggerGroupConstPtr& frame){
+                if(frame&&frame->roundComplete)++ringFinals;
+                ++ringArrivals;
+                return ImagingSubmitResult::Accepted;
+            }));
+        FramePublisher publisher;
+        publisher.configure(true,1,16);
+        std::atomic<int> publisherFrames{0};
+        QObject::connect(&publisher,&FramePublisher::framePublished,
+            qApp,[&](int,int){++publisherFrames;},Qt::DirectConnection);
+        publisher.start();
+        DataProcessor processor(0,nullptr,&publisher,config,
+            [stage=frontends.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
+        // Designed N=4 triggers/round, 「禁用计数重置」 checked, one startup
+        // control identity (Drop), and a 1s physical idle timeout so the
+        // expired-round Drop can be exercised deterministically.
+        HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,4,
+            {},1.0,1,true);
+        wireFrontends(output,frontends);
+        output.beginSession(9100);output.start();
+        const auto save=output.startSaving(root.path(),100,"frontend-only");
+        require(until([&]{return output.savingApplied(save);}),
+                "FO save configuration");
+        auto make=[&](std::uint64_t session,std::uint16_t trigger,std::int64_t time){
+            auto frame=std::make_shared<CardFrame>();frame->card=0;frame->trigger=trigger;
+            frame->measurementSession=session;frame->first=time;frame->closed=time;
+            frame->complete=true;frame->reason=Decision::Complete;frame->bytes.resize(16*8);
+            for(int i=0;i<16;++i){const std::int32_t b=-static_cast<std::int32_t>(trigger);
+                const std::int32_t a=static_cast<std::int32_t>(trigger);
+                std::memcpy(frame->bytes.data()+i*8,&b,4);
+                std::memcpy(frame->bytes.data()+i*8+4,&a,4);}
+            return frame;
+        };
+        auto send=[&](std::uint16_t trigger,std::int64_t time){
+            auto frame=make(9100,trigger,time);output.card(frame);output.sync(trigger,{frame},false);
+        };
+        // FO1 Drop invariance (startup control): the first distinct identity
+        // is classified OperationalStartupControl and reaches neither the
+        // frontend nor any publisher nor save. The gate decision is taken
+        // synchronously before any enqueue, so the zero counts are stable.
+        send(100,1000000000LL);
+        require(frontends[0]->snapshot().displayUpdates==0&&ringArrivals.load()==0&&
+                publisherFrames.load()==0&&saver.savedCount()==0,
+                "FO1 startup control trigger reaches neither frontend nor publisher");
+        // FO2 the N designed logical triggers: display, both imaging
+        // publishers and save each receive exactly N.
+        for(std::uint16_t trigger=101;trigger<=104;++trigger)
+            send(trigger,1000000000LL+trigger);
+        require(until([&]{return frontends[0]->snapshot().displayUpdates==4&&
+                                  ringArrivals.load()==4&&publisherFrames.load()==4&&
+                                  saver.savedCount()==4;}),
+                "FO2 N designed triggers reach display, imaging publishers and save");
+        // FO3 beyond the count boundary (N+1..N+k): the frontend keeps
+        // refreshing (time/frequency windows) while both imaging publishers
+        // stay frozen at N and raw save continues.
+        for(std::uint16_t trigger=105;trigger<=106;++trigger)
+            send(trigger,1000000000LL+trigger);
+        require(until([&]{return frontends[0]->snapshot().displayUpdates==6&&
+                                  saver.savedCount()==6;}),
+                "FO3 display keeps refreshing and save continues beyond the boundary");
+        require(ringArrivals.load()==4,
+                "FO3 imaging frozen at N: frontend Ring leg skipped");
+        require(publisherFrames.load()==4,
+                "FO3 imaging frozen at N: FramePublisher submit skipped");
+        require(ringFinals.load()==0,
+                "FO3 no synthetic final beyond the boundary");
+        // FO4 Drop invariance (expired round): force the physical idle
+        // timeout, then a late old-round sync reaches neither frontend nor
+        // publisher.
+        require(output.pollPhysicalRoundTimeout(4000000000LL),
+                "FO4 physical idle timeout fired");
+        output.sync(104,{make(9100,104,1000000000LL+104)},false);
+        require(frontends[0]->snapshot().displayUpdates==6&&ringArrivals.load()==4&&
+                publisherFrames.load()==4,
+                "FO4 expired-round late sync reaches neither frontend nor publisher");
+        // FO5 the gate reopens for the next physical round: the round reset
+        // re-arms the startup filter (same admission semantics C8 relies on),
+        // so the first new identity is a control Drop again and the second
+        // one is the first logical Pass (logical index 0) of the new round.
+        send(200,4000000000LL+1);
+        send(201,4000000000LL+2);
+        require(until([&]{return frontends[0]->snapshot().displayUpdates==7&&
+                                  ringArrivals.load()==5&&publisherFrames.load()==5&&
+                                  saver.savedCount()==7;}),
+                "FO5 new round passes again after the timeout boundary");
+        const auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));
+        output.stop();stopFrontends(frontends);
+        publisher.requestInterruption();publisher.wait();
+        // FO6 unchecked identity: with 「禁用计数重置」 unchecked, the same
+        // input passes through bit-identically to the pre-change behavior --
+        // every logical trigger reaches display, both imaging publishers and
+        // save, and the Nth trigger still produces the one-shot CountBoundary.
+        FileSaver saver2(0);
+        DisplayBuffer display2;
+        std::atomic<int> ringArrivals2{0},ringFinals2{0};
+        std::vector<std::unique_ptr<FrontendPreprocessor>> frontends2;
+        frontends2.push_back(makeFrontend(0,&display2,
+            [&](const TriggerGroupConstPtr& frame){
+                if(frame&&frame->roundComplete)++ringFinals2;
+                ++ringArrivals2;
+                return ImagingSubmitResult::Accepted;
+            }));
+        FramePublisher publisher2;
+        publisher2.configure(true,1,16);
+        std::atomic<int> publisherFrames2{0};
+        QObject::connect(&publisher2,&FramePublisher::framePublished,
+            qApp,[&](int,int){++publisherFrames2;},Qt::DirectConnection);
+        publisher2.start();
+        DataProcessor processor2(0,nullptr,&publisher2,config,
+            [stage=frontends2.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
+        HostOutput output2(32,50,{&processor2},{&saver2},nullptr,nullptr,4,
+            {},0.0,1,false);
+        wireFrontends(output2,frontends2);
+        output2.beginSession(9200);output2.start();
+        const auto save2=output2.startSaving(root.path(),100,"identity");
+        require(until([&]{return output2.savingApplied(save2);}),
+                "FO6 save configuration");
+        auto send2=[&](std::uint16_t trigger,std::int64_t time){
+            auto frame=make(9200,trigger,time);output2.card(frame);output2.sync(trigger,{frame},false);
+        };
+        send2(100,1000000000LL);
+        for(std::uint16_t trigger=101;trigger<=106;++trigger)
+            send2(trigger,1000000000LL+trigger);
+        // Unchecked-mode identity: exactly five groups pass through (the Nth
+        // trigger closes the round, and the first identity of the next
+        // generation is re-admitted as a startup control by the UNCHANGED
+        // normalizer admission semantics -- identical to the pre-change
+        // behavior for this input), the Nth carries the one-shot final and
+        // the generation advances.
+        require(until([&]{return frontends2[0]->snapshot().displayUpdates==5&&
+                                  ringArrivals2.load()==5&&publisherFrames2.load()==5&&
+                                  saver2.savedCount()==5;}),
+                "FO6 unchecked mode: identical pass-through for the same input");
+        require(ringFinals2.load()==1,
+                "FO6 unchecked mode: exactly one CountBoundary final at N");
+        require(output2.normalizerSnapshot().roundGeneration==1,
+                "FO6 unchecked mode: generation advanced at the count boundary");
+        const auto stopped2=output2.stopSaving();require(until([&]{return output2.savingApplied(stopped2);}));
+        output2.stop();stopFrontends(frontends2);
+        publisher2.requestInterruption();publisher2.wait();
     }
     // ringLogicalTriggersPerRound is the single derivation of that threshold.
     {
