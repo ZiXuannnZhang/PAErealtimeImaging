@@ -25,9 +25,15 @@ codex/ring-reconstruction-enhancement-20260926-181824 全程零推送、零 merg
 回写、零 force push；本任务首推仅 push -u origin codex/count-boundary-frontend-only-20260929-024946。
 （push 后的远端核对值见 README.md 返回段；远端 tip 应仍为 69af29528b91f0b606e3771827df91cedc0b9993。）
 
-push 时点核对（追加于 push 完成后）
+push 时点核对（2026-09-29 首推后实测，git fetch --prune origin 后读取）
 -----------------------------------
-（占位 — push 后由 README.md「返回段」承载实际核对值）
+local  HEAD                          = e8eeba66850369664609b64920754a36f2453f6e
+remote HEAD（origin/codex/count-boundary-frontend-only-20260929-024946）
+                                     = e8eeba66850369664609b64920754a36f2453f6e  （local == remote ✓）
+origin/codex/ring-reconstruction-enhancement-20260926-181824 tip
+                                     = 69af29528b91f0b606e3771827df91cedc0b9993  （原分支不动 ✓，本地同名分支 tip 一致）
+本分支提交链（远端可见）: 69af295 → aa9097e（impl）→ e8eeba6（evidence，本 receipt 所在 commit 的父）
+无 force push；未合 main。
 
 构建前 tracked tree 状态
 ------------------------
