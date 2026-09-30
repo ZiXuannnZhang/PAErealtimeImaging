@@ -4,7 +4,7 @@ Windows 多卡实时光声采集与成像项目。当前正式源码与开发基
 
 ## Current status
 
-截至 2026-09-28：
+截至 2026-10-01：
 
 ```text
 canonical source                         = main
@@ -14,9 +14,9 @@ Session D integration review             = APPROVE
 A/B/C/D functional hardware validation   = PASS_FOR_CURRENT_SCOPE
 exact FPGA/LabVIEW extra-trigger source  = NOT_PROVEN
 7 / 4007                                 = field observation, not protocol constant
-pending work branch (unmerged)           = codex/ring-reconstruction-enhancement-20260926-181824 @ 69af295（含 2026-09-29 早退移植）
-pending work branch (unmerged)           = codex/discovery-early-exit-localbind-20260926-123437（A 范围已移植，B 范围留原分支）
-pending work branch (unmerged)           = codex/count-boundary-frontend-only-20260929-024946 @ 3c6323d（自 69af295 线性分叉，原分支保持不动）
+pending work branch (unmerged)           = codex/ring-reconstruction-enhancement-20260926-181824 @ bd69785（含 2026-09-29 早退移植 + 2026-10-01 count-boundary 并回；发现早退 A 范围与 count-boundary 已实机验收通过）
+pending work branch (unmerged)           = codex/discovery-early-exit-localbind-20260926-123437（A 范围已移植并实机验收通过；B 范围留原分支待用户决策）
+merged (read-only ref kept)              = codex/count-boundary-frontend-only-20260929-024946（实机验收通过，2026-10-01 fast-forward 并回环形增强分支 @ bd69785）
 ```
 
 本轮 START-admission、PhysicalRoundNormalizer、RoundIdentity、variable-length timeout、

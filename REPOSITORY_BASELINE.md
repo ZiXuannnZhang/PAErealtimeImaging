@@ -14,6 +14,8 @@ As of 2026-09-28, canonical `main` is at `c95917f` (still documentation-only pas
 
 2026-09-29 update: the ring work branch tip moved to `69af295` (the discovery early-exit **A scope** — early exit only — was transplanted into it verbatim at `6744787`; the B scope stays unique to the discovery branch), and a new implementation branch `codex/count-boundary-frontend-only-20260929-024946` (tip `3c6323d`) was forked linearly from that tip for the count-boundary frontend-only decoupling task, with the ring branch kept untouched at `69af295`. All three remain pending acceptance and unmerged; see PROJECT_STATUS §6.4.
 
+2026-10-01 update: the count-boundary branch **passed real-machine acceptance** and was fast-forwarded back into the ring work branch by the analysis agent (ring tip `69af295` → `bd69785`, where `bd69785` is the branch's own post-registration delivery-receipt evidence commit; no merge commit, no force push, no history rewrite; the count-boundary ref is kept for traceability). The transplanted discovery **A scope** also **passed real-machine acceptance** on the ring branch (user feedback). The bipolar-compensation tuning work was **shelved** by the user (real-machine verdict: no operator/filter combination compensates the inherent DAS low-pass effect). The ring work branch remains pending its overall merge decision; see PROJECT_STATUS §6.4.
+
 Formal project state is split by purpose:
 
 - `PROJECT_STATUS.md` — current project/validation status.
@@ -111,12 +113,14 @@ Rules:
 Registered 2026-09-28. This branch carries the ring-DAS quality-enhancement workflow: the `RingSignalEnhancer` signal-domain operators (bipolar waveform compensation `g(t)=p−t·p′` with fixed λ(t)=t and no rectification, plus the user-requested low-frequency compensation `H(f)`), the FFT-path optimization (A1 boundary documentation, A2 allocation removal, A3 real-FFT pack trick; A4 mixed-radix gated out, A5 not dispatched), and the display-layer work (zero-value circular display mask + millimeter coordinate ticks). Configuration flows through a separate struct and the ring JSON `enhance` key — **no `RingReconCudaConfig` ABI change**.
 
 ```text
-tip        = 69af29528b91f0b606e3771827df91cedc0b9993 (2026-09-29; past 1b7c4c2 it carries
-             only the discovery early-exit A-scope transplant 6744787 and its evidence commit)
+tip        = bd697851d2a1b6f11c39c06baf7308f1cac372ce (2026-10-01; past 1b7c4c2 it carries
+             the discovery early-exit A-scope transplant 6744787 + evidence, and the
+             count-boundary branch fast-forwarded in (aa9097e/e8eeba6/3c6323d/bd69785))
 fork point = c95917f (canonical main)
-status     = implemented, budget-tested and independently source-audited (including the
-             2026-09-29 transplant and its independent analysis-side review);
-             NOT hardware-validated; NOT merged into canonical main
+status     = implemented, budget-tested and independently source-audited; partial contents
+             hardware-accepted on 2026-10-01 (discovery early-exit A scope, count-boundary
+             frontend-only decoupling); bipolar-compensation tuning shelved by the user;
+             overall merge decision pending; NOT merged into canonical main
 ```
 
 Rules:
@@ -131,22 +135,25 @@ Registered 2026-09-28. One commit ahead of canonical `main` (parent `c95917f`): 
 
 2026-09-29 note: the early-exit **A scope** was transplanted verbatim into the ring work branch (`6744787`, see above). The **B scope** (local-bind default + registry→INI tooltip copy migration) remains unique to this branch; its disposition (transplant / accept here / drop) is the user's separate decision. The branch is not marked "no further work" until every scope it carries has a home.
 
-### `codex/count-boundary-frontend-only-20260929-024946` — active work branch (pending joint acceptance)
+2026-10-01 note: the transplanted **A scope** passed real-machine acceptance on the ring work branch (user feedback). The **B scope** disposition is still the user's separate decision; the branch stays unmarked until B has a home.
 
-Registered 2026-09-29. Forked **linearly from the ring work branch tip `69af295`** (the ring branch itself stays untouched at `69af295` — no pushes, no rewrite). Implements the count-boundary frontend-only decoupling: with 「禁用计数重置」 checked and the received trigger count at or beyond the per-round design count, beyond-boundary sync groups keep refreshing the frontend signal windows (time/frequency displays) while both imaging feeds stay frozen (FramePublisher submit skipped and the frontend stage's Ring leg skipped via `TriggerGroup::frontendDisplayOnly`) — save and card-status counters unaffected; the unchecked mode is bit-identical to pre-change behaviour.
+### `codex/count-boundary-frontend-only-20260929-024946` — merged into the ring work branch (read-only traceability)
+
+Registered 2026-09-29. Forked **linearly from the ring work branch tip `69af295`**. Implements the count-boundary frontend-only decoupling: with 「禁用计数重置」 checked and the received trigger count at or beyond the per-round design count, beyond-boundary sync groups keep refreshing the frontend signal windows (time/frequency displays) while both imaging feeds stay frozen (FramePublisher submit skipped and the frontend stage's Ring leg skipped via `TriggerGroup::frontendDisplayOnly`) — save and card-status counters unaffected; the unchecked mode is bit-identical to pre-change behaviour.
 
 ```text
-tip        = 3c6323dcdf587322c896f8039868eca19ba5a3d5 (aa9097e impl + e8eeba6/3c6323d evidence)
-fork point = 69af295 (ring work branch tip, linear)
-status     = implemented, software-verified, analysis-side independent source review passed;
-             NOT hardware-validated; NOT merged into canonical main
+tip        = bd697851d2a1b6f11c39c06baf7308f1cac372ce (3c6323d + delivery-receipt evidence bd69785)
+fork point = 69af295 (ring work branch tip at fork time, linear)
+status     = real-machine acceptance PASSED (2026-10-01, user feedback); fast-forwarded into
+             the ring work branch (69af295 → bd69785, no merge commit, no force push);
+             this ref is kept read-only for traceability and no longer evolves on its own
 ```
 
 Rules:
 
 - None of its content is part of canonical `main`; the fork base is the ring work branch, not canonical main. Real-hardware acceptance items belong to the user (signal displays keep refreshing / imaging stays frozen / save and counters unchanged).
 - Known evidence gap: the evidence directory's README lists several `.log` transcripts (full CTest output, counter-proof red/green) that are excluded by the repo `.gitignore` (`*.log`) and were not archived as `.txt` — a follow-up evidence commit is required from the executor before acceptance sign-off.
-- Consolidation path after user acceptance: fast-forward into `codex/ring-reconstruction-enhancement-20260926-181824` (the branch is a linear descendant) or decide jointly with the other pending branches; executed by the analysis agent with the fast-forward discipline. Evidence: branch `CODEX_REPORTS/count-boundary-frontend-only-20260929-100554/`; task document `codex/task-docs:TASKS/前端刷新闸门解耦_计数边界后时频持续刷新_20260929-023810.md` (revision 1, `cceb435`).
+- Consolidation record: real-machine acceptance passed on 2026-10-01; the branch was fast-forwarded into `codex/ring-reconstruction-enhancement-20260926-181824` (`69af295` → `bd69785`) by the analysis agent with the fast-forward discipline. Evidence: branch `CODEX_REPORTS/count-boundary-frontend-only-20260929-100554/` (including the `bd69785` delivery receipt); task document `codex/task-docs:TASKS/前端刷新闸门解耦_计数边界后时频持续刷新_20260929-023810.md` (revision 1, `cceb435`).
 
 ## START-admission status
 
@@ -202,3 +209,4 @@ Single-task documents live under `TASKS/` on `codex/task-docs` and use:
 - Remote branch inventory 2026-09-24 (explicitly non-destructive — **no branch deleted**): 33 remote branches classified. 18 are fully contained in canonical `main` (zero unique commits: the 5 frontend-chain work branches plus 13 historical validation points). 15 retain unique commits and must be kept (`codex/task-docs`, `codex/ring-zero-phase-pa-inversion-20260919-025754`, and 13 historical/experiment branches). Deleting the zero-unique-commit set would lose no commits, but it was deliberately deferred to a separate cleanup decision.
 - Remote branch snapshot 2026-09-28: 39 branch refs (including `main`). Since the 2026-09-24 inventory, 5 refs were added: `codex/das-dual-wavelength-quality-b-tier-20260925` (see PROJECT_STATUS §6.3), `codex/b-tier-analysis-d1-d7-20260925` (B-tier D1–D7 analysis outputs), `codex/local-workspace-delete-rule-20260925-200656` (its single commit was fast-forwarded into main at `31a0cb7`; the ref is retained), `codex/discovery-early-exit-localbind-20260926-123437` and `codex/ring-reconstruction-enhancement-20260926-181824` (both pending acceptance, see Branch roles above). No branch was deleted. A full re-inventory is deferred to a separate decision.
 - Remote branch snapshot 2026-09-29: 40 branch refs (including `main`); one ref added since 2026-09-28 — `codex/count-boundary-frontend-only-20260929-024946` (pending acceptance, see Branch roles above). No branch was deleted.
+- 2026-10-01: no ref added or deleted (the count-boundary content was fast-forwarded into the ring work branch; its ref is kept for traceability). Still 40 refs.
