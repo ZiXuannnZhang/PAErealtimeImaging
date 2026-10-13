@@ -4,11 +4,12 @@ Windows 多卡实时光声采集与成像项目。当前正式源码与开发基
 
 ## Current status
 
-截至 2026-10-01：
+截至 2026-10-13（按远端分支与提交历史复核）：
 
 ```text
 canonical source                         = main
 canonical source identity                = 491aa34cfa9553954eea949a7703df7194eb7699
+remote main audited before this update   = 29bb51e15243974a6812fd622e291e91550083f4
 Session A/B/C software review            = APPROVE
 Session D integration review             = APPROVE
 A/B/C/D functional hardware validation   = PASS_FOR_CURRENT_SCOPE
@@ -16,7 +17,7 @@ exact FPGA/LabVIEW extra-trigger source  = NOT_PROVEN
 7 / 4007                                 = field observation, not protocol constant
 pending work branch (unmerged)           = codex/ring-reconstruction-enhancement-20260926-181824 @ bd69785（含 2026-09-29 早退移植 + 2026-10-01 count-boundary 并回；发现早退 A 范围与 count-boundary 已实机验收通过）
 pending work branch (unmerged)           = codex/discovery-early-exit-localbind-20260926-123437（A 范围已移植并实机验收通过；B 范围留原分支待用户决策）
-merged (read-only ref kept)              = codex/count-boundary-frontend-only-20260929-024946（实机验收通过，2026-10-01 fast-forward 并回环形增强分支 @ bd69785）
+merged into ring branch (not main)       = codex/count-boundary-frontend-only-20260929-024946（实机验收通过，与环形增强分支同指 bd69785；ref 保留追溯）
 ```
 
 本轮 START-admission、PhysicalRoundNormalizer、RoundIdentity、variable-length timeout、
@@ -30,11 +31,15 @@ Frontend Preprocessing Stage、逐 A-line 零相位前端滤波、保存/闸门�
 “当前验证范围通过”表示已执行的实机场景未发现与预期不一致，不表示已经证明额外 startup trigger
 的底层 FPGA/LabVIEW 精确产生机制。
 
-2026-09-28：两条实现分支**待实机验收、未合入 main**，其内容不属于 canonical source：
+当前仍有两条实现分支**未合入 main**，其内容不属于 canonical source：
 `codex/ring-reconstruction-enhancement-20260926-181824`（环形 DAS 质量增强工作流：双极波形
 补偿、低频补偿 H(f)、FFT 路径优化、显示层零值掩膜与毫米坐标）与
 `codex/discovery-early-exit-localbind-20260926-123437`（发现链早退 + 控制包本地绑定默认 IP）。
-实时性正式结论依赖 Layer 2b T_arr 实测（条件性）；详见 `PROJECT_STATUS.md` 第 6.4 节。
+2026-10-01 已接受环形增强分支上的发现早退 A 范围与 count-boundary 前端刷新解耦；
+双极波形补偿效果调优已搁置，discovery B 范围归宿待决定。实时性正式结论仍依赖
+Layer 2b T_arr 实测，分支整体合并未获决定。环形分支与 main 已分叉，当前不能直接
+fast-forward；完整 40 条分支的 tip、领先/落后数量与关系见 `REPOSITORY_BASELINE.md`
+「2026-10-13 remote branch inventory」，验收边界见 `PROJECT_STATUS.md` §6.4。
 
 ## Canonical documentation
 
@@ -58,9 +63,12 @@ FPGA cards
  -> SourceCore
  -> HostOutput
       -> CardFrame -> FileSaver
-      -> SyncFrame -> display / publisher
-      -> ImagingBypass -> RingBlockAssembler
-           -> ImagingController -> ImagingSvc -> ring_recon_cuda
+      -> SyncFrame -> DataProcessor::deliverAssembled
+           -> FramePublisher (raw group, optional)
+           -> FrontendPreprocessor (async clone / filter / display preparation)
+                -> DisplayBuffer
+                -> Ring feed -> RingBlockAssembler
+                     -> ImagingController -> ImagingSvc -> ring_recon_cuda
 ```
 
 旧 `MultiPortReceiver / PacketAssemblyBuffer` 代码仍可用于兼容、工具或测试，但不是 current

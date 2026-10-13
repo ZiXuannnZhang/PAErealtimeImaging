@@ -1,18 +1,24 @@
-# HANDOFF — PAERealtimeImaging 网页端新会话交接
+# HANDOFF — PAERealtimeImaging 当前接力入口
 
-> 交接时间：2026-09-21（UTC+8）
+> 更新时间：2026-10-13（UTC+8）
 >
-> 交接源基线：`main@fb10721e07f9ea8c9e46bc308d250b788defb829`
+> 本次核查远端基线：`main@29bb51e15243974a6812fd622e291e91550083f4`；源码身份仍为 `491aa34`。
 >
-> 本文状态块为 **2026-09-21 时点快照**；当前项目状态一律以 `PROJECT_STATUS.md` 为准（2026-09-25 已更正 canonical 源码树身份口径，见其第 2、5 节）。
+> 当前项目状态以 `PROJECT_STATUS.md` 为准，完整远端分支关系见 `REPOSITORY_BASELINE.md`。本次同步不改变源码或产生新的构建、测试、实机验收结论。
 >
-> 本文件提交后，新的 canonical HEAD 会因为“仅文档变更”向前移动；新会话实际接手时始终以**最新 `origin/main`** 为唯一 canonical baseline。除本 HANDOFF 文档外，本次交接不改变 production/test source。
+> 本次一级文档更新会推进 canonical HEAD；接手时始终以**最新 `origin/main`** 为唯一 canonical baseline。
 
 ---
 
 ## 1. 新会话首先要知道的事
 
 本项目已经完成上一阶段 START-admission、PhysicalRoundNormalizer、RoundIdentity、Session A/B/C/D 的实现、软件审查与当前范围实机验证收尾。
+
+2026-09-24 已验收前端链进入 main，源码身份推进至 `491aa34`；其后 main 仅更新文档。
+2026-10-01 环形增强分支上的发现早退 A 范围与 count-boundary 已实机验收，后者已并回
+环形分支，但两条 ref 同指的 `bd69785` **未进入 main**。双极补偿效果调优搁置，Layer 2b
+T_arr 实测、环形分支整体合并与 discovery B 范围归宿仍待决定。环形/count-boundary
+相对本次核查 main 各领先 17 / 落后 3，当前不能直接 fast-forward。
 
 当前正式状态：
 
@@ -46,11 +52,12 @@ FULL_ROUND_TRIGGER_4007                    = FIELD_OBSERVATION_NOT_PROTOCOL_CONS
 
 ---
 
-## 2. 关于远端那个“提前于 main”的实验分支
+## 2. 实验分支与未合入 main 的工作分支
 
-远端当前存在一个 tip **ahead of `main`** 的分支。
-
-该分支属于**另一个会话的实验工作**，不属于本次交接范围。
+`codex/das-dual-wavelength-quality-b-tier-20260925` 是已停止维护的 B 档实验分支。
+其源码、测试、文档与结论不作为 canonical main 的事实；具体边界见 `PROJECT_STATUS.md` §6.3。
+以下默认规则只针对该实验分支，不覆盖 §6.4 已登记的环形增强、discovery 与 count-boundary
+工作分支。2026-10-13 用户明确要求全分支盘点，本次仅登记这些分支的 Git 元数据与关系。
 
 新会话默认规则：
 
@@ -87,13 +94,15 @@ git show origin/main:HANDOFF.md
 1. `PROJECT_STATUS.md`
 2. `REPOSITORY_BASELINE.md`
 3. `BUILD_STANDARD.md`
-4. `Codex-GitHub双端联动快速上手.md`
-5. 当前具体任务文档：`origin/codex/task-docs:TASKS/<task>.md`
+4. `HANDOFF.md`（接力入口，不替代前三份）
+5. `Codex-GitHub双端联动快速上手.md`
 6. `MC_410T_MultiCard/delivery/README.md`
 7. 各子模块 README / docs
 8. `CODEX_REPORTS/` 历史材料
 
 本 HANDOFF 是快速接力入口，不覆盖上面更高优先级的治理文档。
+
+具体任务特殊要求以 `origin/codex/task-docs:TASKS/<task>.md` 为准，可覆盖冲突条款。
 
 历史 report / receipt / handoff / validation branch 中的 PENDING、旧路径、旧 executable、旧候选状态只保留历史语境，不能反向覆盖 current main。
 
@@ -120,13 +129,17 @@ CardFrame
 
 SyncFrame / TriggerGroup
   -> DataProcessor::deliverAssembled
-  -> DisplayBuffer
-  -> ImagingBypass
-  -> RingBlockAssembler
-  -> ImagingController
-  -> ImagingSvc
-  -> ring_recon_cuda
+       -> FramePublisher (raw group, optional)
+       -> FrontendPreprocessor (async frontend-owned clone)
+            -> processFrontendSignal / display preparation
+            -> DisplayBuffer
+            -> Ring feed -> RingBlockAssembler
+                 -> ImagingController -> ImagingSvc -> ring_recon_cuda
 ```
+
+保存与可选 publisher 使用 raw 对象；显示和 Ring 消费同一 frontend clone。
+本图按 `DataProcessor.cpp`、`FrontendPreprocessor.cpp` 与 PAimage 的 stage 接线复核；
+不得用 2026-09-24 之前“DisplayBuffer 直接消费 raw”的历史图覆盖当前实现。
 
 控制链：
 

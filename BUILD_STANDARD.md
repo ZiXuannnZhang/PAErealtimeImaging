@@ -67,6 +67,11 @@ tracked working tree clean
 
 2026-09-18 A/B/C/D 收尾后，默认正式构建对象是最新 `origin/main`，除非当前 task document 明确指定其他 reviewed commit。
 
+2026-10-13 复核：本次文档更新前远端 main 为 `29bb51e`，生产/测试源码仍与 `491aa34`
+一致。环形增强与 count-boundary 分支虽同指 `bd69785` 且已有部分实机验收，仍未进入
+main；其测试数字、候选二进制和 BuildIdentity 不能代表 main。本次仓库同步与文档核查
+没有执行 configure/build、CTest 或实机验证，不产生新的构建/验收结论。
+
 本轮接受链的追溯点：
 
 ```text

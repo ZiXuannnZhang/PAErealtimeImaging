@@ -49,7 +49,7 @@ git show origin/codex/task-docs:TASKS/<任务文件名>
 
 ## 2. Current project state
 
-截至 2026-09-25，START-admission 与 Session A/B/C/D accepted source chain 已集成进入 main；
+截至 2026-10-13 复核，START-admission 与 Session A/B/C/D accepted source chain 已集成进入 main；
 2026-09-24 另有已过实机验收的前端链（全分辨率显示裁切、Frontend Preprocessing Stage、
 逐 A-line 零相位前端滤波、保存/闸门与写盘故障修复、显示命名）以 fast-forward 进入 main。
 main 的源码树身份为 `491aa34cfa9553954eea949a7703df7194eb7699`，其后 main 仅因文档提交移动 HEAD。
@@ -63,12 +63,17 @@ exact FPGA/LabVIEW source of extra startup triggers = NOT_PROVEN
 因此不要再把 START/Session C/Session D/integration branch 当作“尚未合并的 current candidate”。
 它们现在是 traceability branches。
 
-2026-09-28 起另有**两条待验收实现分支未合入 main**，其内容不属于 canonical main：
-`codex/ring-reconstruction-enhancement-20260926-181824`（tip `1b7c4c2`；环形 DAS 质量增强
-工作流：双极波形补偿、低频补偿 H(f)、FFT 路径优化、显示层零值掩膜与毫米坐标）与
-`codex/discovery-early-exit-localbind-20260926-123437`（发现链早退 + 控制包本地绑定默认 IP，
-领先 main 1 笔）。两者均未经实机验收；新任务默认仍从 latest `origin/main` 出发，不得把
-分支能力当作 canonical main 已有能力（详见 `PROJECT_STATUS.md` §6.4）。
+本次更新前核查 main 为 `29bb51e`（2026-10-01，仅文档提交）。两条实现分支仍未合入 main：
+`codex/ring-reconstruction-enhancement-20260926-181824`（tip `bd69785`，环形增强、FFT 优化、
+显示掩膜/毫米坐标、发现早退 A 范围与 count-boundary）和
+`codex/discovery-early-exit-localbind-20260926-123437`（tip `6bca496`）。
+2026-10-01 已接受环形分支上的发现早退 A 范围与 count-boundary；count-boundary ref
+已并回环形分支，两者同指 `bd69785`，保留追溯。双极补偿效果调优搁置，Layer 2b T_arr
+实测与整体合并仍待决定；discovery B 范围归宿也待决定。
+
+相对核查 main，环形/count-boundary 各领先 17 / 落后 3，discovery 领先 1 / 落后 3，
+均已分叉，当前不能直接 fast-forward 到 main。新任务默认仍从 latest `origin/main` 出发；
+完整 40 条分支快照见 `REPOSITORY_BASELINE.md`，验收边界见 `PROJECT_STATUS.md` §6.4。
 
 ## 3. New implementation task
 
