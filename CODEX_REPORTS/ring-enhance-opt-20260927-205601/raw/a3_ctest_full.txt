@@ -1,0 +1,106 @@
+Test project D:/ChatGPT/PAERealtimeImaging/_task_work/reb
+      Start  1: ring_signal_enhancer_test
+ 1/47 Test  #1: ring_signal_enhancer_test ...............   Passed    0.05 sec
+      Start  2: ring_enhancer_bench
+ 2/47 Test  #2: ring_enhancer_bench .....................***Exception: SegFault  7.91 sec
+      Start  3: ring_enhancer_parity_test
+ 3/47 Test  #3: ring_enhancer_parity_test ...............   Passed    0.30 sec
+      Start  4: timeout_presentation_test
+ 4/47 Test  #4: timeout_presentation_test ...............   Passed    0.62 sec
+      Start  5: ring_block_assembler_test
+ 5/47 Test  #5: ring_block_assembler_test ...............   Passed    0.17 sec
+      Start  6: imaging_bypass_test
+ 6/47 Test  #6: imaging_bypass_test .....................   Passed    0.07 sec
+      Start  7: data_processor_imaging_isolation_test
+ 7/47 Test  #7: data_processor_imaging_isolation_test ...   Passed    0.28 sec
+      Start  8: frontend_preprocessor_test
+ 8/47 Test  #8: frontend_preprocessor_test ..............   Passed    0.47 sec
+      Start  9: ring_production_blockers_test
+ 9/47 Test  #9: ring_production_blockers_test ...........   Passed    0.14 sec
+      Start 10: diagnostic_recorder_test
+10/47 Test #10: diagnostic_recorder_test ................   Passed    1.23 sec
+      Start 11: ring_shm_observability_test
+11/47 Test #11: ring_shm_observability_test .............   Passed    0.05 sec
+      Start 12: diagnostic_dialog_test
+12/47 Test #12: diagnostic_dialog_test ..................   Passed    4.97 sec
+      Start 13: diagnostic_time_window_test
+13/47 Test #13: diagnostic_time_window_test .............   Passed    0.55 sec
+      Start 14: process_scheduling_test
+14/47 Test #14: process_scheduling_test .................   Passed    0.08 sec
+      Start 15: network_ingress_observability_test
+15/47 Test #15: network_ingress_observability_test ......   Passed    0.27 sec
+      Start 16: network_snapshot_test
+16/47 Test #16: network_snapshot_test ...................   Passed    0.11 sec
+      Start 17: network_diagnostics_test
+17/47 Test #17: network_diagnostics_test ................   Passed    4.49 sec
+      Start 18: measurement_session_transaction_test
+18/47 Test #18: measurement_session_transaction_test ....   Passed    0.17 sec
+      Start 19: session_boundary_test
+19/47 Test #19: session_boundary_test ...................   Passed    1.43 sec
+      Start 20: session_boundary_receiver_test
+20/47 Test #20: session_boundary_receiver_test ..........   Passed    9.88 sec
+      Start 21: data_processor_batch_test
+21/47 Test #21: data_processor_batch_test ...............   Passed    0.24 sec
+      Start 22: card_status_formatting_test
+22/47 Test #22: card_status_formatting_test .............   Passed    0.12 sec
+      Start 23: round_policy_settings_test
+23/47 Test #23: round_policy_settings_test ..............   Passed    0.08 sec
+      Start 24: paimage_network_test
+24/47 Test #24: paimage_network_test ....................   Passed    2.28 sec
+      Start 25: paimage_production_gap_test
+25/47 Test #25: paimage_production_gap_test .............   Passed    3.45 sec
+      Start 26: paimage_start_race
+26/47 Test #26: paimage_start_race ......................   Passed    0.52 sec
+      Start 27: paimage_start_fence_regression
+27/47 Test #27: paimage_start_fence_regression ..........   Passed    0.26 sec
+      Start 28: paimage_start_overflow
+28/47 Test #28: paimage_start_overflow ..................   Passed    0.29 sec
+      Start 29: paimage_host_output_test
+29/47 Test #29: paimage_host_output_test ................   Passed    1.46 sec
+      Start 30: filesaver_round_boundary_test
+30/47 Test #30: filesaver_round_boundary_test ...........   Passed    1.40 sec
+      Start 31: ring_round_ui_state_test
+31/47 Test #31: ring_round_ui_state_test ................   Passed    0.03 sec
+      Start 32: ring_round_identity_test
+32/47 Test #32: ring_round_identity_test ................   Passed    0.06 sec
+      Start 33: auto_save_round_coordinator_test
+33/47 Test #33: auto_save_round_coordinator_test ........   Passed    0.19 sec
+      Start 34: count_boundary_save_binding_test
+34/47 Test #34: count_boundary_save_binding_test ........   Passed    1.13 sec
+      Start 35: paimage_trace_bundle_test
+35/47 Test #35: paimage_trace_bundle_test ...............   Passed    0.95 sec
+      Start 36: paimage_discovery_checks
+36/47 Test #36: paimage_discovery_checks ................   Passed    1.06 sec
+      Start 37: paimage_discovery_socket_checks
+37/47 Test #37: paimage_discovery_socket_checks .........   Passed    3.59 sec
+      Start 38: paimage_core_checks
+38/47 Test #38: paimage_core_checks .....................   Passed    0.09 sec
+      Start 39: paimage_output_checks
+39/47 Test #39: paimage_output_checks ...................   Passed    0.03 sec
+      Start 40: physical_round_normalizer_test
+40/47 Test #40: physical_round_normalizer_test ..........***Exception: SegFault  0.18 sec
+      Start 41: paimage_control_checks
+41/47 Test #41: paimage_control_checks ..................   Passed    0.16 sec
+      Start 42: paimage_socket_short
+42/47 Test #42: paimage_socket_short ....................   Passed    2.57 sec
+      Start 43: paimage_trace_checks
+43/47 Test #43: paimage_trace_checks ....................   Passed    0.11 sec
+      Start 44: paimage_worker_checks
+44/47 Test #44: paimage_worker_checks ...................   Passed    0.28 sec
+      Start 45: paimage_protocol_checks
+45/47 Test #45: paimage_protocol_checks .................   Passed    0.49 sec
+      Start 46: paimage_conversion_checks
+46/47 Test #46: paimage_conversion_checks ...............   Passed    0.07 sec
+      Start 47: paimage_looplog_checks
+47/47 Test #47: paimage_looplog_checks ..................   Passed    0.09 sec
+
+96% tests passed, 2 tests failed out of 47
+
+Total Test time (real) =  54.51 sec
+
+The following tests FAILED:
+	  2 - ring_enhancer_bench (SEGFAULT)
+	 40 - physical_round_normalizer_test (SEGFAULT)
+Errors while running CTest
+Output from these tests are in: D:/ChatGPT/PAERealtimeImaging/_task_work/reb/Testing/Temporary/LastTest.log
+Use "--rerun-failed --output-on-failure" to re-run the failed cases verbosely.

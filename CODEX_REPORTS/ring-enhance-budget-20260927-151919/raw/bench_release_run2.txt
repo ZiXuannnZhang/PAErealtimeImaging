@@ -1,0 +1,20 @@
+ASSERT  all semantic assertions PASS
+DATA  real=D:/ChatGPT/PAERealtimeImaging/testdata/14.dat lines=64 rms=908.1727
+CSV  src,switch,length,hmax,median_us,mean_us,range_us,per_block_ms_1600al,per_round_ms_8000al,rounds,warmup
+CSV  real-14dat-cols,off,3830,2.0000,0.0203,0.0231,0.0109,0.0325,0.1625,5,20
+CSV  real-14dat-cols,off,3830,20.0000,0.0219,0.0225,0.0063,0.0350,0.1750,5,20
+CSV  real-14dat-cols,bipolar,3830,2.0000,4.4812,4.4778,0.3734,7.1700,35.8500,5,20
+CSV  real-14dat-cols,bipolar,3830,20.0000,4.4547,4.6491,0.9359,7.1275,35.6375,5,20
+CSV  real-14dat-cols,freq,3830,2.0000,524.8703,527.3891,20.2031,839.7925,4198.9625,5,20
+CSV  real-14dat-cols,freq,3830,20.0000,531.6453,531.3369,25.0875,850.6325,4253.1625,5,20
+CSV  real-14dat-cols,both,3830,2.0000,536.5984,533.9547,15.4281,858.5575,4292.7875,5,20
+CSV  real-14dat-cols,both,3830,20.0000,541.4672,544.4762,26.5687,866.3475,4331.7375,5,20
+CSV  synthetic-Nwave-noise,off,12330,2.0000,0.0234,0.0231,0.0172,0.0375,0.1875,5,20
+CSV  synthetic-Nwave-noise,off,12330,20.0000,0.0234,0.0216,0.0141,0.0375,0.1875,5,20
+CSV  synthetic-Nwave-noise,bipolar,12330,2.0000,14.9109,16.1087,5.7344,23.8575,119.2875,5,20
+CSV  synthetic-Nwave-noise,bipolar,12330,20.0000,18.6719,17.3369,5.5937,29.8750,149.3750,5,20
+CSV  synthetic-Nwave-noise,freq,12330,2.0000,2508.7922,2521.1784,53.6391,4014.0675,20070.3375,5,20
+CSV  synthetic-Nwave-noise,freq,12330,20.0000,2531.8922,2528.7409,33.7797,4051.0275,20255.1375,5,20
+CSV  synthetic-Nwave-noise,both,12330,2.0000,2479.7266,2488.0694,40.6516,3967.5625,19837.8125,5,20
+CSV  synthetic-Nwave-noise,both,12330,20.0000,2495.9109,2501.1013,72.3250,3993.4575,19967.2875,5,20
+PASS  ring_enhancer_bench

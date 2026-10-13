@@ -433,7 +433,7 @@ void DataProcessor::flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf) {
 }
 
 DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
-        const TriggerGroupPtr& group, bool save, bool frontend) {
+        const TriggerGroupPtr& group, bool save, bool frontend, bool imagingSubmit) {
     DeliveryResult result;
     if (!group) { result.exception = true; return result; }
     try {
@@ -473,8 +473,11 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
 
         if (!frontend) return result;
 
-        //  FramePublisher 仍在 frontend submit 之前消费 raw group
-        if (m_framePublisher) {
+        //  FramePublisher 仍在 frontend submit 之前消费 raw group。
+        //  imagingSubmit=false（计数边界 FrontendOnly 组，仅勾选模式可达）时跳过：
+        //  publisherAccepted 保持 false，stage-7 trace 呈现 1/3 组合
+        //  （frontendAccepted=true, publisherAccepted=false）。
+        if (m_framePublisher && imagingSubmit) {
             m_framePublisher->submit(group);
             result.publisherAccepted = true;
         }
@@ -483,7 +486,11 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
         //  deep copy、processFrontendSignal、全分辨率显示准备、DisplayBuffer 与
         //  Ring 分发全部发生在 FrontendPreprocessor worker。frontend queue 的
         //  拒绝不计入 UDP 丢包 / missingTriggerCount / saveQueueDiscards。
+        //  FrontendOnly 组在入队前打 frontendDisplayOnly 标记：stage worker 照常
+        //  刷新 DisplayBuffer（时域/频域持续刷新），但跳过 Ring 分发（实时成像
+        //  冻结）。标记随 deep copy 进入 frontend clone，raw save 路径不经此组。
         if (m_frontendSubmitSink) {
+            if (!imagingSubmit) group->frontendDisplayOnly = true;
             try {
                 result.frontendSubmit = m_frontendSubmitSink(group);
                 result.frontendAccepted = result.frontendSubmit == FrontendSubmitResult::Accepted;

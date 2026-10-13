@@ -1,0 +1,14 @@
+# frame manifest — 逐块帧（未入库；计数/体积 + 首帧 SHA256 抽样）
+# 块序号跨圈连续（r000:1-5, r001:6-10, ...）；svc_wl1/wl2 成对
+out_main: files=60 size_mb=2967 sha256(svc_wl1_r000_001.raw)=e2ebcd1abbbf9879aa2ac2338f4efb237389b7efc28e2c8269cd4e8adfb21203
+out_branch_off: files=60 size_mb=2967 sha256(svc_wl1_r000_001.raw)=e2ebcd1abbbf9879aa2ac2338f4efb237389b7efc28e2c8269cd4e8adfb21203
+out_branch_bipolar: files=60 size_mb=2967 sha256(svc_wl1_r000_001.raw)=7d6f615c54d00848349492affaedaa897278bb3b82e3c20a609b7df735c2bc0e
+out_branch_freq: files=60 size_mb=2967 sha256(svc_wl1_r000_001.raw)=e8c23ff6e1e56bf45e28e2399f7d8d17196c6a057d0f23f5409c59b56b57d4ec
+out_branch_both: files=60 size_mb=2967 sha256(svc_wl1_r000_001.raw)=07dda8e6993c7a279b7353174ffb340acb458b8c5248634399ee21979c515dcf
+rel_out_main: files=60 size_mb=2967 sha256(svc_wl1_r000_001.raw)=e2ebcd1abbbf9879aa2ac2338f4efb237389b7efc28e2c8269cd4e8adfb21203
+rel_out_branch_off: files=60 size_mb=2967 sha256(svc_wl1_r000_001.raw)=e2ebcd1abbbf9879aa2ac2338f4efb237389b7efc28e2c8269cd4e8adfb21203
+rel_out_branch_both: files=60 size_mb=2967 sha256(svc_wl1_r000_001.raw)=07dda8e6993c7a279b7353174ffb340acb458b8c5248634399ee21979c515dcf
+rel_out_main_b100: files=80 size_mb=3956 sha256(svc_wl1_r000_001.raw)=e29978da3f7f02498308e0c274adc80bf32c1e15abd05c9caad2d5c12e9dab75
+rel_out_both_b100: files=80 size_mb=3956 sha256(svc_wl1_r000_001.raw)=a3d32381096fa87ce7692be45268d2d1446ef3d792d91741a8c07638da4167c3
+rel_out_main_g20: files=40 size_mb=495 sha256(svc_wl1_r000_001.raw)=94e5c5ff16bf04a2777168dfe56d8d07921346418df3172cbe92ced3ec86b344
+rel_out_both_g20: files=40 size_mb=495 sha256(svc_wl1_r000_001.raw)=ce5f35446d348fb98043e90b6757269d0b97b6dd4fe1677b03456cd8d7642410

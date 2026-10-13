@@ -34,7 +34,8 @@ public:
     }
     void pushCard(Frame);
     unsigned cardDepth(int card){std::lock_guard<std::mutex> lock(cardMutex_);return cardQueue_.cardDepth(card);}
-    void pushSync(std::uint16_t,const std::vector<Frame>&,bool startupRelease);
+    void pushSync(std::uint16_t,const std::vector<Frame>&,bool startupRelease,
+                  bool beyondCountBoundary=false);
     int syncPriorityError() const {return syncPriorityError_.load();}
     // Source checks again after downstream computation at 13aece. The host
     // adapter must use this immediately before publishing converted sync data.

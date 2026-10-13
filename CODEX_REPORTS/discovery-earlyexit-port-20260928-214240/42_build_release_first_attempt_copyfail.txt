@@ -1,0 +1,113 @@
+[1/65] Automatic MOC and UIC for target ring_svc_selftest
+[2/65] Automatic MOC and UIC for target ring_udp_replay
+[3/65] Building CXX object CMakeFiles/ring_svc_selftest.dir/ring_svc_selftest_autogen/mocs_compilation.cpp.obj
+[4/65] Building CXX object CMakeFiles/ring_udp_replay.dir/ring_udp_replay_autogen/mocs_compilation.cpp.obj
+[5/65] Building CXX object CMakeFiles/ring_svc_selftest.dir/src/RingBlockAssembler.cpp.obj
+[6/65] Automatic MOC and UIC for target ImagingSvc
+[7/65] Building CXX object CMakeFiles/ring_udp_replay.dir/src/RingUdpReplay/ring_udp_replay.cpp.obj
+[8/65] Linking CXX executable bin\ring_udp_replay.exe
+[9/65] Building CXX object src/ImagingSvc/CMakeFiles/ImagingSvc.dir/__/RingRecon/ring_recon.cpp.obj
+[10/65] Building CXX object src/ImagingSvc/CMakeFiles/ImagingSvc.dir/__/RingSignalEnhancer.cpp.obj
+[11/65] Building CXX object src/ImagingSvc/CMakeFiles/ImagingSvc.dir/ImagingSvc_autogen/mocs_compilation.cpp.obj
+[12/65] Building CXX object CMakeFiles/ring_svc_selftest.dir/src/RingReconCuda/ring_svc_selftest.cpp.obj
+[13/65] Linking CXX executable bin\ring_svc_selftest.exe
+[14/65] Building CXX object src/ImagingSvc/CMakeFiles/ImagingSvc.dir/main.cpp.obj
+[15/65] Building CXX object src/ImagingSvc/CMakeFiles/ImagingSvc.dir/ProcessScheduling.cpp.obj
+[16/65] Automatic MOC and UIC for target MC410T_Receiver
+[17/65] Automatic RCC for resources.qrc
+[18/65] Building CXX object src/ImagingSvc/CMakeFiles/ImagingSvc.dir/ImagingSvc.cpp.obj
+[19/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/StartupPolicy.cpp.obj
+[20/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/RingRoundUiState.cpp.obj
+[21/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/FrontendFilter.cpp.obj
+[22/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/ControlState.cpp.obj
+[23/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/ImagingBypass.cpp.obj
+[24/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/RingBlockAssembler.cpp.obj
+[25/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/RingSignalEnhancer.cpp.obj
+[26/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/FrontendPreprocessor.cpp.obj
+[27/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/SourceCore.cpp.obj
+[28/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/MeasurementSession.cpp.obj
+[29/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/RingRoundPresentation.cpp.obj
+[30/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/MC410T_Receiver_autogen/EWIEGA46WW/qrc_resources.cpp.obj
+[31/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/TraceWriter.cpp.obj
+[32/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/FramePublisher.cpp.obj
+[33/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/RingColorBarWidget.cpp.obj
+[34/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/OutputQueues.cpp.obj
+[35/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/RingImageWidget.cpp.obj
+[36/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/FrameConverter.cpp.obj
+[37/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/FileSaver.cpp.obj
+[38/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/SocketTimestamp.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/SocketTimestamp.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[39/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp.obj
+[40/65] Linking CXX executable bin\ImagingSvc.exe
+FAILED: bin/ImagingSvc.exe 
+C:\WINDOWS\system32\cmd.exe /C "cd . && D:\Qt\Qt6.8.0\Tools\mingw1310_64\bin\g++.exe -O3 -DNDEBUG  src/ImagingSvc/CMakeFiles/ImagingSvc.dir/ImagingSvc_autogen/mocs_compilation.cpp.obj src/ImagingSvc/CMakeFiles/ImagingSvc.dir/main.cpp.obj src/ImagingSvc/CMakeFiles/ImagingSvc.dir/ProcessScheduling.cpp.obj src/ImagingSvc/CMakeFiles/ImagingSvc.dir/ImagingSvc.cpp.obj src/ImagingSvc/CMakeFiles/ImagingSvc.dir/__/RingRecon/ring_recon.cpp.obj src/ImagingSvc/CMakeFiles/ImagingSvc.dir/__/RingSignalEnhancer.cpp.obj -o bin\ImagingSvc.exe -Wl,--out-implib,src\ImagingSvc\libImagingSvc.dll.a -Wl,--major-image-version,0,--minor-image-version,0  D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/libQt6Core.a  -lws2_32  D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/third_party/zeromq/lib/libzmq.dll.a  D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/ImagingSvc/../../libs/imaging/pa_recon_core.lib  D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/ring_recon_cuda/libring_recon_cuda.dll.a  -lmpr  -luserenv  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 && C:\WINDOWS\system32\cmd.exe /C "cd /D D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_release\src\ImagingSvc && D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe -E copy_if_different D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/ImagingSvc/../../libs/imaging/pa_recon_core.dll D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin && D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe -E copy_if_different D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/ImagingSvc/../../libs/imaging/cufft64_12.dll D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin && D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe -E copy_if_different D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin && cd /D D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_release\src\ImagingSvc && D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe -E copy_if_different D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/ring_recon_cuda/ring_recon_cuda.dll D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin && D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe -E copy_if_different D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/ring_recon_cuda/cudart64_12.dll D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin""
+Error copying file (if different) from "D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/ring_recon_cuda/ring_recon_cuda.dll" to "D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin".
+[41/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/ControlSocket.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/ControlSocket.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[42/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp.obj
+[43/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/ImagingDisplayWindow.cpp.obj
+[44/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/DiagnosticExportDialog.cpp.obj
+[45/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/RingConfigDialog.cpp.obj
+[46/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/TimingWriter.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/TimingWriter.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[47/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/SocketReceiver.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/SocketReceiver.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[48/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/Backend.cpp.obj
+[49/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/DataProcessor.cpp.obj
+[50/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/MultiPortReceiver.cpp.obj
+[51/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/LoopLog.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/LoopLog.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[52/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/OutputWorkers.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/OutputWorkers.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[53/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/TraceBundle.cpp.obj
+[54/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/ImagingController.cpp.obj
+[55/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/HostOutput.cpp.obj
+[56/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/NetworkDiagnostics.cpp.obj
+[57/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/CardDiscovery.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp: In function 'paimage::DiscoveryResult paimage::{anonymous}::runDiscoveryCore(const paimage::DiscoveryOptions&, const std::atomic<bool>&, paimage::DiscoveryChannel&, const paimage::DiscoveryEnvironment&)':
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp:281:81: warning: narrowing conversion of '(qint64)startedNs' from 'qint64' {aka 'long long int'} to 'int' [-Wnarrowing]
+  281 |     DiscoverySession session{options, channel, environment, result, {}, {}, {}, startedNs};
+      |                                                                                 ^~~~~~~~~
+[58/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/main.cpp.obj
+[59/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/PaimageAcquisition/NetworkControllerPaimage.cpp.obj
+[60/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/DiagnosticRecorder.cpp.obj
+[61/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/NetworkController.cpp.obj
+[62/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/MC410T_Receiver_autogen/mocs_compilation.cpp.obj
+[63/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/src/MainWindow.cpp.obj
+[64/65] Building CXX object CMakeFiles/MC410T_Receiver.dir/qcustomplot/qcustomplot.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.cpp: In member function 'virtual QString QCPAxisTickerDateTime::getTickLabel(double, const QLocale&, QChar, int)':
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.cpp:6730:58: warning: 'QDateTime QDateTime::toTimeSpec(Qt::TimeSpec) const' is deprecated: Use toTimeZone instead [-Wdeprecated-declarations]
+ 6730 |     return locale.toString(keyToDateTime(tick).toTimeSpec(mDateTimeSpec), mDateTimeFormat);
+      |                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+In file included from D:/Qt/Qt6.8.0/6.8.0/mingw_64/include/QtCore/QDateTime:1,
+                 from D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.h:62,
+                 from D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.cpp:26:
+D:/Qt/Qt6.8.0/6.8.0/mingw_64/include/QtCore/qdatetime.h:436:15: note: declared here
+  436 |     QDateTime toTimeSpec(Qt::TimeSpec spec) const;
+      |               ^~~~~~~~~~
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.cpp: In static member function 'static double QCPAxisTickerDateTime::dateTimeToKey(const QDate&, Qt::TimeSpec)':
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.cpp:6835:25: warning: 'QDateTime QDate::startOfDay(Qt::TimeSpec, int) const' is deprecated: Pass QTimeZone instead [-Wdeprecated-declarations]
+ 6835 |   return date.startOfDay(timeSpec).toMSecsSinceEpoch()/1000.0;
+      |          ~~~~~~~~~~~~~~~^~~~~~~~~~
+D:/Qt/Qt6.8.0/6.8.0/mingw_64/include/QtCore/qdatetime.h:93:15: note: declared here
+   93 |     QDateTime startOfDay(Qt::TimeSpec spec, int offsetSeconds = 0) const;
+      |               ^~~~~~~~~~
+ninja: build stopped: subcommand failed.

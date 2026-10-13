@@ -67,10 +67,11 @@ tracked working tree clean
 
 2026-09-18 A/B/C/D 收尾后，默认正式构建对象是最新 `origin/main`，除非当前 task document 明确指定其他 reviewed commit。
 
-2026-10-13 复核：本次文档更新前远端 main 为 `29bb51e`，生产/测试源码仍与 `491aa34`
-一致。环形增强与 count-boundary 分支虽同指 `bd69785` 且已有部分实机验收，仍未进入
-main；其测试数字、候选二进制和 BuildIdentity 不能代表 main。本次仓库同步与文档核查
-没有执行 configure/build、CTest 或实机验证，不产生新的构建/验收结论。
+2026-10-13 接入更新：用户已确认将环形增强 bd69785 的生产/测试源码完整线性接入 main，
+当前源码参考身份为 bd69785（MC_410T_MultiCard tree=ff2e987a3f44565496ff57f8467e891ea04757d0）。
+原轻量包构建于 3c6323d，与当前源码相同，但 binary/BuildIdentity 仍属于旧构建提交。
+本次接入与磁盘清理不重新构建、不执行新的硬件验收；后续正式交付必须在新 main exact SHA
+重新 configure/build，不能将旧二进制重标为新 main 的交付身份。
 
 本轮接受链的追溯点：
 
@@ -80,7 +81,7 @@ Session D final traceability HEAD = 69a7606f95c97c839fd618115f4092a4291d8906
 ```
 
 上面两点是 Session D 验证时的 source identity，**不代表当前 `main`**。2026-09-24 前端链
-fast-forward 进入后，canonical `main` 的源码树已越过 `d9daa2d7`（当前源码树身份 `491aa34`，
+fast-forward 进入后，canonical `main` 的源码树已越过 `d9daa2d7`（2026-09-24 当时源码树身份 `491aa34`；当前已接入 bd69785，
 见 `PROJECT_STATUS.md` 第 2 节）。因此：
 
 - 不得用 `d9daa2d7` 的 source tree 或 binary/BuildIdentity 充当当前 `main` 的交付身份；

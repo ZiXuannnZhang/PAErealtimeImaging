@@ -1,0 +1,53 @@
+[1/2] Linking CXX executable bin\ImagingSvc.exe
+FAILED: bin/ImagingSvc.exe 
+C:\WINDOWS\system32\cmd.exe /C "cd . && D:\Qt\Qt6.8.0\Tools\mingw1310_64\bin\g++.exe -O3 -DNDEBUG  src/ImagingSvc/CMakeFiles/ImagingSvc.dir/ImagingSvc_autogen/mocs_compilation.cpp.obj src/ImagingSvc/CMakeFiles/ImagingSvc.dir/main.cpp.obj src/ImagingSvc/CMakeFiles/ImagingSvc.dir/ProcessScheduling.cpp.obj src/ImagingSvc/CMakeFiles/ImagingSvc.dir/ImagingSvc.cpp.obj src/ImagingSvc/CMakeFiles/ImagingSvc.dir/__/RingRecon/ring_recon.cpp.obj src/ImagingSvc/CMakeFiles/ImagingSvc.dir/__/RingSignalEnhancer.cpp.obj -o bin\ImagingSvc.exe -Wl,--out-implib,src\ImagingSvc\libImagingSvc.dll.a -Wl,--major-image-version,0,--minor-image-version,0  D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/libQt6Core.a  -lws2_32  D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/third_party/zeromq/lib/libzmq.dll.a  D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/ImagingSvc/../../libs/imaging/pa_recon_core.lib  D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/ring_recon_cuda/libring_recon_cuda.dll.a  -lmpr  -luserenv  -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 && C:\WINDOWS\system32\cmd.exe /C "cd /D D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_release\src\ImagingSvc && D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe -E copy_if_different D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/ImagingSvc/../../libs/imaging/pa_recon_core.dll D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin && D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe -E copy_if_different D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/ImagingSvc/../../libs/imaging/cufft64_12.dll D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin && D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe -E copy_if_different D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin && cd /D D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_release\src\ImagingSvc && D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe -E copy_if_different D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/ring_recon_cuda/ring_recon_cuda.dll D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin && D:\Qt\Qt6.8.0\Tools\CMake_64\bin\cmake.exe -E copy_if_different D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/ring_recon_cuda/cudart64_12.dll D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin""
+Error copying file (if different) from "D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/ring_recon_cuda/ring_recon_cuda.dll" to "D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin".
+[2/2] Linking CXX executable bin\PAimageReceiverDiagnostics.exe
+Warning: Translations will not be available due to the following error.
+Cannot open D:/Qt/Qt6.8.0/6.8.0/mingw_64/translations/catalogs.json
+D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_release\bin\PAimageReceiverDiagnostics.exe 64 bit, release executable
+Adding in plugin type generic for module: Qt6Gui
+Adding Qt6Network for qtuiotouchplugin.dll from plugin type: generic
+Adding in plugin type iconengines for module: Qt6Gui
+Adding Qt6Svg for qsvgicon.dll from plugin type: iconengines
+Adding in plugin type imageformats for module: Qt6Gui
+Adding in plugin type networkinformation for module: Qt6Network
+Adding in plugin type platforms for module: Qt6Gui
+Adding in plugin type styles for module: Qt6Widgets
+Adding in plugin type tls for module: Qt6Network
+Skipping plugin qopensslbackend.dll. Use -force_openssl or specify -openssl-root if you want to use it.
+Direct dependencies: Qt6Core Qt6Gui Qt6OpenGL Qt6PrintSupport Qt6Widgets
+All dependencies   : Qt6Core Qt6Gui Qt6OpenGL Qt6PrintSupport Qt6Widgets
+To be deployed     : Qt6Core Qt6Gui Qt6Network Qt6OpenGL Qt6PrintSupport Qt6Svg Qt6Widgets
+Warning: Cannot find any version of the dxcompiler.dll and dxil.dll.
+Warning: Runtime libraries not found in Qt binary folder, defaulting to looking in path
+Updating Qt6Core.dll.
+Updating Qt6Gui.dll.
+Updating Qt6Network.dll.
+Updating Qt6OpenGL.dll.
+Updating Qt6PrintSupport.dll.
+Updating Qt6Svg.dll.
+Updating Qt6Widgets.dll.
+Updating D3Dcompiler_47.dll.
+Updating libgcc_s_seh-1.dll.
+Updating libstdc++-6.dll.
+Updating libwinpthread-1.dll.
+Creating directory D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin/generic.
+Updating qtuiotouchplugin.dll.
+Creating directory D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin/iconengines.
+Updating qsvgicon.dll.
+Creating directory D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin/imageformats.
+Updating qgif.dll.
+Updating qico.dll.
+Updating qjpeg.dll.
+Updating qsvg.dll.
+Creating directory D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin/networkinformation.
+Updating qnetworklistmanager.dll.
+Creating directory D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin/platforms.
+Updating qwindows.dll.
+Creating directory D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin/styles.
+Updating qmodernwindowsstyle.dll.
+Creating directory D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_release/bin/tls.
+Updating qcertonlybackend.dll.
+Updating qschannelbackend.dll.
+ninja: build stopped: subcommand failed.

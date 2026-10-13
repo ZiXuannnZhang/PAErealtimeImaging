@@ -1,163 +1,92 @@
 # Repository Baseline and Branch Governance
 
-> Audited 2026-10-13 (UTC+8) against remote `main@29bb51e15243974a6812fd622e291e91550083f4`,
-> before this documentation update. Current production/test source remains at `491aa34`.
-> The complete 40-branch snapshot below uses that fixed base; later documentation commits advance HEAD.
+> Updated 2026-10-13 (UTC+8). The canonical source and next development baseline are latest origin/main.
 
-## Canonical baseline
+## Canonical integration
 
-`main` is the only canonical branch of `ZiXuannnZhang/PAErealtimeImaging`.
+The user explicitly accepted a linear content integration from
+bd697851d2a1b6f11c39c06baf7308f1cac372ce onto the previous main
+6ff0e02fac0d6fe0e5a4edd089c09c85d18ff5fa. The new integration commit has exactly one parent
+(the previous main), preserves current repository-level documentation, and imports the complete
+ring-branch implementation/tests/evidence. Main is updated with a normal fast-forward push.
 
-As of 2026-09-18, the accepted A/B/C/D source chain has been integrated back into canonical `main`. New work normally starts from latest `origin/main` unless a future task explicitly defines another reviewed baseline.
+The previous main and ring tip had diverged at c95917f (4 main-only / 17 ring-only commits).
+A direct fast-forward to that existing ring tip was impossible. The user approved this alternative;
+there is no merge commit, rebase, force push, or rewrite of existing commits.
 
-As of 2026-09-24, the field-validated frontend chain (full-resolution display crop, Frontend Preprocessing Stage, per-A-line zero-phase frontend filtering, the save/gate and write-fault fixes, and card-status/channel display naming) has been transferred into canonical `main` at `491aa34cfa9553954eea949a7703df7194eb7699` by a plain fast-forward: no merge commit, no force push, no history rewrite. Subsequent ring-imaging work starts from latest `origin/main`.
+The MC_410T_MultiCard subtree must equal ring tip tree
+ff2e987a3f44565496ff57f8467e891ea04757d0. Importing source content does not make bd69785 an
+ancestor of main. Original branch refs and accepted commit identities remain preserved remotely.
 
-As of 2026-09-25, canonical `main` has moved past `491aa34` by documentation-only commits (branch inventory and branch-role records). No production/test source changed after `491aa34`, so the canonical **source-tree identity** remains `491aa34cfa9553954eea949a7703df7194eb7699`, while the canonical **HEAD** advances with each documentation commit and must always be read from the latest `origin/main`.
+## Current branch roles
 
-At the original 2026-09-28 work-branch registration, both implementation branches forked from `c95917f` (documentation-only past `491aa34`). They were then pending acceptance and unmerged. Current tips and partial acceptance are recorded below; the historical registration state is not the current hardware verdict.
+| Branch | Role |
+|---|---|
+| main | Sole canonical source/docs and next development baseline |
+| codex/ring-reconstruction-enhancement-20260926-181824 | Content imported from bd69785; original implementation history retained |
+| codex/count-boundary-frontend-only-20260929-024946 | Same tip/source as ring branch; read-only traceability |
+| codex/discovery-early-exit-localbind-20260926-123437 | A scope imported through 6744787; B scope disposition remains pending |
+| codex/task-docs | Task specifications only; never an implementation baseline |
+| codex/ring-zero-phase-pa-inversion-20260919-025754 | Reference-only, no maintenance; Stage B1→B2 starting-point clause superseded |
+| codex/das-dual-wavelength-quality-b-tier-20260925 | Retired experiment; no further work or implicit integration |
+| Session A/B/C/D, START, PhysicalRound, other backups | Historical provenance; retain remote refs |
 
-2026-09-29 update: the ring work branch tip moved to `69af295` (the discovery early-exit **A scope** — early exit only — was transplanted into it verbatim at `6744787`; the B scope stays unique to the discovery branch), and a new implementation branch `codex/count-boundary-frontend-only-20260929-024946` (tip `3c6323d`) was forked linearly from that tip for the count-boundary frontend-only decoupling task, with the ring branch kept untouched at `69af295`. All three remain pending acceptance and unmerged; see PROJECT_STATUS §6.4.
+The ring-zero-phase Stage A numerical references (formula, time axis, filter ordering/endpoints,
+configuration rejection) remain closed references; do not re-derive them. Stage B1 source d8dd3da
+is not implicitly imported. The retired B-tier branch's source/tests/docs/conclusions must not be
+treated as canonical facts or directly merged into main.
 
-2026-10-01 update: the count-boundary branch **passed real-machine acceptance** and was fast-forwarded back into the ring work branch by the analysis agent (ring tip `69af295` → `bd69785`, where `bd69785` is the branch's own post-registration delivery-receipt evidence commit; no merge commit, no force push, no history rewrite; the count-boundary ref is kept for traceability). The transplanted discovery **A scope** also **passed real-machine acceptance** on the ring branch (user feedback). The bipolar-compensation tuning work was **shelved** by the user (real-machine verdict: no operator/filter combination compensates the inherent DAS low-pass effect). The ring work branch remains pending its overall merge decision; see PROJECT_STATUS §6.4.
+## Accepted provenance and evidence
 
-Formal project state is split by purpose:
+START-admission 6313540; PhysicalRound 52cf771; Session A eb283f6; B 676df4a;
+C accepted code d9daa2d7af6bb8341349e405433824e89e42bcd4;
+D traceability 69a7606f95c97c839fd618115f4092a4291d8906.
+The old frontend-chain source identity was 491aa34.
+The count-boundary implementation is aa9097e, lightweight package build 3c6323d, ring content tip bd69785.
 
-- `PROJECT_STATUS.md` — current project/validation status.
-- `REPOSITORY_BASELINE.md` — branch/history/merge governance.
-- `BUILD_STANDARD.md` — build, dependency, packaging and delivery governance.
-- `Codex-GitHub双端联动快速上手.md` — ChatGPT/Codex operating workflow.
-- `codex/task-docs:TASKS/<task>.md` — task-specific requirements and explicit overrides.
+Hardware acceptance remains scoped: A/B/C/D passed the current tested scope; discovery A and
+count-boundary passed on 2026-10-01. Bipolar effect tuning is shelved, Layer 2b T_arr not measured,
+and discovery B awaits a decision. Main integration does not create new hardware evidence.
+The existing count-boundary .log-to-.txt evidence gap remains separately recorded.
 
-Historical handoffs, receipts, reports and old branch notes are traceability material only.
+## Source of truth and development
 
-## Accepted A/B/C/D provenance
+PROJECT_STATUS.md owns current state; this file owns branch/history governance;
+BUILD_STANDARD.md owns toolchain, dependency and delivery rules; HANDOFF and the collaboration
+guide are entry points. Specific task requirements override conflicts.
 
-The accepted production/test source tree used for Session D validation is:
+Local main follows origin/main only by fast-forward. New implementation tasks normally branch
+from latest origin/main. If refs diverge, inventory and resolve the method explicitly; do not reset,
+force-push, or silently replay accepted histories. Keep old histories for provenance.
 
-```text
-candidate code SHA = d9daa2d7af6bb8341349e405433824e89e42bcd4
-Session D final traceability HEAD = 69a7606f95c97c839fd618115f4092a4291d8906
-```
+## Local cleanup authorized 2026-10-13
 
-This ancestry also contains the accepted START-admission software changes. Do not remove or replay only a subset of these ancestors merely to produce a cleaner-looking history; doing so would create a different source combination.
+The user requested only latest-main source/docs in the active workspace and reviewable disk cleanup.
+Before retiring local source copies, prove remote reachability or back up unique source/docs on a
+separate archival branch; never silently fold those local experiments into main.
+Regenerable build trees/test outputs and remotely backed-up old checkouts may be moved into
+_pending_delete/<task>/delete-candidates/ with original paths, byte counts, hashes and recovery refs.
+Unique raw data, calibration results, hardware captures and unverified evidence go to a separate
+protected-data/ area marked KEEP. Dependencies needed for reproducible builds are also identified
+separately. The user alone performs final deletion. Never delete, empty or rewrite old _pending_delete.
 
-These two points are the source identity at which Session D was validated. Canonical `main`'s source tree has since advanced (see Canonical baseline above): do not use `d9daa2d7` or its binaries to represent current `main`, and do not use a build made at `d9daa2d7` as the delivery identity of a later `main` SHA.
+Local branch refs may be retired only after remote containment is verified; remote historical branches
+are not deleted. Do not recreate the user-deleted codex/local-docs-sync-20260913.
+Do not mutate frozen _migration_pack provenance files. Source filenames and Git object identities
+must remain recoverable from the recorded refs after a move.
 
-Hardware status for this round:
+## Task and integration policy
 
-```text
-A/B/C/D functional validation in current tested scope = PASS
-exact FPGA/LabVIEW source of extra startup triggers   = NOT PROVEN
-7 / 4007                                              = field observation, not protocol constant
-```
+Task documents live on codex/task-docs under TASKS/<简要任务说明>_YYYYMMDD-HHMMSS.md
+(TASKS/README.md exempt). Software implementation and task specifications remain separate.
+Source review, automated tests, hardware acceptance, and hardware root-cause attribution are distinct.
+Future source integration requires an explicit scope and recorded method; this user-approved
+single-parent content import is the specific resolution for the 2026-10-13 divergence.
 
-## Branch roles
+## Historical branch inventory
 
-### `main`
-
-- Sole source-of-truth branch for formal source and repository-level governance.
-- Local `main` may follow `origin/main` only by fast-forward.
-- New implementation branches start from latest `origin/main` unless explicitly overridden by a reviewed task.
-- Do not force-push or routinely rewrite main history.
-
-### `codex/task-docs`
-
-- Task specification / communication branch.
-- `TASKS/` is authoritative for task-specific requirements.
-- It is not a production implementation baseline.
-
-### implementation / validation branches
-
-Session A/B/C/D, physical-round, START-admission and other historical `codex/*` branches are retained non-destructively for traceability.
-
-They are no longer implicit default development baselines after canonical integration.
-
-Important retained anchors include:
-
-```text
-codex/start-admission-fence-fix-20260913-003112
-  6313540f72544c0f68820c4815903abaa0b8c1e1
-
-codex/physical-round-normalizer-integrated-20260916
-  52cf7713d7e0e935cb14663ec3470f3a25bfeb90
-
-codex/session-a-round-policy-core-20260917-114452
-  eb283f64574d9043f4d4823338c31767c3b811fe
-
-codex/session-b-ui-observability-20260917
-  676df4a946fed56b903474354984bff44ab50875
-
-codex/session-c-timeout-variable-round-20260917-214638
-  d9daa2d7af6bb8341349e405433824e89e42bcd4
-
-codex/session-d-integration-validation-20260918-000458
-  69a7606f95c97c839fd618115f4092a4291d8906
-```
-
-The existence of these branch refs does not make them active baselines.
-
-### `codex/ring-zero-phase-pa-inversion-20260919-025754` — reference only
-
-Decided 2026-09-24. This branch holds ring-imaging Stage A (algorithm basis and numerical reference for the photoacoustic inversion formula, time axis, filter ordering/endpoints and configuration-rejection rules) and Stage B1 (ring high/low-pass zero-phase filtering).
-
-```text
-tip              = 3032550
-Stage B1 source  = d8dd3daf2f1bce3afdc01e0452e7ae487f3a1697
-```
-
-Rules:
-
-- Read-only reference. No further implementation or maintenance happens on this branch.
-- `CODEX_REPORTS/ring-zero-phase-pa-inversion-20260919/` stays the numerical reference for those closed conclusions; do not re-derive them.
-- The Stage B1 task clause "B1 通过后的 exact SHA 将作为 B2 起点" is **superseded**. Future ring-imaging work branches from latest `origin/main`, not from this branch.
-- This branch and canonical `main` share base `fb10721e` and have never been merged. Its Stage B1 artifacts (including `src/RingRecon/zero_phase_filter.cpp`) are **not** in canonical `main`. If a future task needs that filter behaviour it must be landed or explicitly migrated onto `main`; never assume `main` already has it.
-
-### `codex/ring-reconstruction-enhancement-20260926-181824` — active work branch (pending joint acceptance)
-
-Registered 2026-09-28. This branch carries the ring-DAS quality-enhancement workflow: the `RingSignalEnhancer` signal-domain operators (bipolar waveform compensation `g(t)=p−t·p′` with fixed λ(t)=t and no rectification, plus the user-requested low-frequency compensation `H(f)`), the FFT-path optimization (A1 boundary documentation, A2 allocation removal, A3 real-FFT pack trick; A4 mixed-radix gated out, A5 not dispatched), and the display-layer work (zero-value circular display mask + millimeter coordinate ticks). Configuration flows through a separate struct and the ring JSON `enhance` key — **no `RingReconCudaConfig` ABI change**.
-
-```text
-tip        = bd697851d2a1b6f11c39c06baf7308f1cac372ce (2026-10-01; past 1b7c4c2 it carries
-             the discovery early-exit A-scope transplant 6744787 + evidence, and the
-             count-boundary branch fast-forwarded in (aa9097e/e8eeba6/3c6323d/bd69785))
-fork point = c95917f (canonical main)
-status     = implemented, budget-tested and independently source-audited; partial contents
-             hardware-accepted on 2026-10-01 (discovery early-exit A scope, count-boundary
-             frontend-only decoupling); bipolar-compensation tuning shelved by the user;
-             overall merge decision pending; NOT merged into canonical main
-```
-
-Rules:
-
-- None of its content is part of canonical `main`. Do not describe branch capabilities as canonical-main capabilities, and do not start new tasks from this branch unless a task explicitly targets it.
-- The real-time verdict is **conditional**: the Layer 2b full-chain replay (T_arr measurement, user presence required) has not been executed; see `CODEX_REPORTS/ring-enhance-budget-20260927-151919/layer2b_blocked.md` on the branch.
-- Merge decision belongs to the user after real-hardware validation. Fast-forward requires the target main to be an ancestor of the work tip; that condition no longer holds at this audit. Preserve both histories and explicitly resolve the integration policy before any future merge; no force push or implicit history rewrite. Evidence: branch `CODEX_REPORTS/ring-enhance-budget-20260927-151919/`, `ring-enhance-opt-20260927-205601/`, `ring-display-20260928-022839/`; task documents on `codex/task-docs` @ `7d87eee`.
-
-### `codex/discovery-early-exit-localbind-20260926-123437` — unmerged implementation branch
-
-Registered 2026-09-28. Tip `6bca496` (parent `c95917f`), ahead 1 / behind 3 against the audited main: card discovery exits early once the expected card count is reached (`DiscoveryOptions::expectedCardCount`, default 4, 0 = legacy behaviour), the control-packet local bind IP defaults to `192.168.0.1` (INI-overridable), plus tooltip/comment corrections and 3 new test cases. Full CTest 46/46 recorded on the branch. The transplanted A scope was hardware-accepted on the ring branch; no full-branch hardware acceptance is recorded, B disposition remains pending, and the branch is not merged into main.
-
-2026-09-29 note: the early-exit **A scope** was transplanted verbatim into the ring work branch (`6744787`, see above). The **B scope** (local-bind default + registry→INI tooltip copy migration) remains unique to this branch; its disposition (transplant / accept here / drop) is the user's separate decision. The branch is not marked "no further work" until every scope it carries has a home.
-
-2026-10-01 note: the transplanted **A scope** passed real-machine acceptance on the ring work branch (user feedback). The **B scope** disposition is still the user's separate decision; the branch stays unmarked until B has a home.
-
-### `codex/count-boundary-frontend-only-20260929-024946` — merged into the ring work branch (read-only traceability)
-
-Registered 2026-09-29. Forked **linearly from the ring work branch tip `69af295`**. Implements the count-boundary frontend-only decoupling: with 「禁用计数重置」 checked and the received trigger count at or beyond the per-round design count, beyond-boundary sync groups keep refreshing the frontend signal windows (time/frequency displays) while both imaging feeds stay frozen (FramePublisher submit skipped and the frontend stage's Ring leg skipped via `TriggerGroup::frontendDisplayOnly`) — save and card-status counters unaffected; the unchecked mode is bit-identical to pre-change behaviour.
-
-```text
-tip        = bd697851d2a1b6f11c39c06baf7308f1cac372ce (3c6323d + delivery-receipt evidence bd69785)
-fork point = 69af295 (ring work branch tip at fork time, linear)
-status     = real-machine acceptance PASSED (2026-10-01, user feedback); fast-forwarded into
-             the ring work branch (69af295 → bd69785, no merge commit, no force push);
-             this ref is kept read-only for traceability and no longer evolves on its own
-```
-
-Rules:
-
-- None of its content is part of canonical `main`; the fork base is the ring work branch, not canonical main. Real-hardware acceptance items belong to the user (signal displays keep refreshing / imaging stays frozen / save and counters unchanged).
-- Known evidence gap remains after the recorded hardware acceptance: the evidence directory's README lists several `.log` transcripts (full CTest output, counter-proof red/green) excluded by `.gitignore` (`*.log`) and not archived as `.txt`. Preserve the acceptance record and separately request an evidence-only archive before future main integration; do not rewrite the hardware result as pending.
-- Consolidation record: real-machine acceptance passed on 2026-10-01; the branch was fast-forwarded into `codex/ring-reconstruction-enhancement-20260926-181824` (`69af295` → `bd69785`) by the analysis agent with the fast-forward discipline. Evidence: branch `CODEX_REPORTS/count-boundary-frontend-only-20260929-100554/` (including the `bd69785` delivery receipt); task document `codex/task-docs:TASKS/前端刷新闸门解耦_计数边界后时频持续刷新_20260929-023810.md` (revision 1, `cceb435`).
+The following is the fixed audit BEFORE this integration. Its ahead/behind counts use main@29bb51e,
+not the new main. It is retained as history, not a live capability/merge-status table.
 
 ## 2026-10-13 remote branch inventory
 
@@ -213,59 +142,3 @@ The ring-enhancement and count-boundary refs both point to `bd697851d2a1b6f11c39
 Direct `git merge --ff-only` of either work branch into current main is therefore impossible. The earlier fast-forward-only integration instruction was a precondition, not evidence that main can advance to those tips today. A future integration decision must explicitly reconcile the documentation and implementation histories while preserving their provenance; do not reset/rebase/force-push main or silently bypass the merge policy. This audit performs no implementation merge.
 
 `codex/task-docs@2b40dcb` has 56 unique commits and latest dispatch dated 2026-09-30 (postFilter harness). This is a specification update, not a production implementation or hardware-acceptance result. The reference-only and retired experimental branch roles above remain in force; their unique commit counts do not promote their content to canonical status.
-
-## START-admission status
-
-The START-admission software fix is included in the accepted canonical source ancestry and remains software-approved.
-
-Do not convert that fact into the stronger hardware claim that the historical FPGA/NIC startup-loss root cause has been uniquely proven. Dedicated hardware/root-cause attribution remains separate.
-
-## Local workspace synchronization rules
-
-When Codex organizes the local workspace from the remote repository:
-
-1. `git fetch --prune origin`.
-2. Treat latest `origin/main` as canonical.
-3. Local `main` may only fast-forward to `origin/main`.
-4. If local `main` diverges or local commits are not on remote, stop and inventory before destructive action.
-5. Do not reset/rebase away unique local work.
-6. Preserve ignored CUDA/runtime dependencies, `testdata/`, `artifacts/`, build evidence, hardware captures, logs and user data.
-7. Historical local branches/worktrees may be removed only after confirming they contain no unique unpushed work that needs preservation.
-8. Remote historical branches are not deleted as part of this canonical integration; remote cleanup is intentionally non-destructive.
-
-9. Agents must not delete files directly in the local workspace. Move every deletion candidate to the root `_pending_delete/` directory for user review; only the user may perform the final deletion.
-10. Group each task's deletion candidates in `_pending_delete/<YYYYMMDD-HHMMSS>/` and include a brief `README.md` listing the candidate paths and why they are pending deletion. Do not delete, empty, or rewrite `_pending_delete/` during synchronization. If a candidate cannot be moved, leave it in place and report it instead of deleting it.
-
-## Task document naming
-
-Single-task documents live under `TASKS/` on `codex/task-docs` and use:
-
-```text
-<简要任务说明>_YYYYMMDD-HHMMSS.md
-```
-
-`TASKS/README.md` is exempt.
-
-## Review and merge policy
-
-1. ChatGPT defines task scope and acceptance criteria.
-2. Codex implements on an isolated task branch.
-3. Codex pushes exact build/test evidence.
-4. ChatGPT independently reviews remote source/tests/receipt.
-5. Software approval and hardware/root-cause proof remain distinct claims.
-6. Merge into main is explicit and traceable.
-7. Approved validation histories must not be silently rebased/squashed/cherry-picked into materially different source combinations.
-8. After canonical integration, future tasks should normally use latest `origin/main`.
-
-## History policy
-
-- No force push to `main`.
-- No routine rewriting of shared history.
-- No destructive remote branch cleanup in this closeout.
-- No implicit squash/rebase of approved histories.
-- Historical branches may later be pruned only by a separate explicit cleanup decision after local/remote inventory.
-- Do not recreate the previously user-deleted `codex/local-docs-sync-20260913`.
-- Remote branch inventory 2026-09-24 (explicitly non-destructive — **no branch deleted**): 33 remote branches classified. 18 are fully contained in canonical `main` (zero unique commits: the 5 frontend-chain work branches plus 13 historical validation points). 15 retain unique commits and must be kept (`codex/task-docs`, `codex/ring-zero-phase-pa-inversion-20260919-025754`, and 13 historical/experiment branches). Deleting the zero-unique-commit set would lose no commits, but it was deliberately deferred to a separate cleanup decision.
-- Remote branch snapshot 2026-09-28: 39 branch refs (including `main`). Since the 2026-09-24 inventory, 5 refs were added: `codex/das-dual-wavelength-quality-b-tier-20260925` (see PROJECT_STATUS §6.3), `codex/b-tier-analysis-d1-d7-20260925` (B-tier D1–D7 analysis outputs), `codex/local-workspace-delete-rule-20260925-200656` (its single commit was fast-forwarded into main at `31a0cb7`; the ref is retained), `codex/discovery-early-exit-localbind-20260926-123437` and `codex/ring-reconstruction-enhancement-20260926-181824` (both pending acceptance, see Branch roles above). No branch was deleted. A full re-inventory is deferred to a separate decision.
-- Remote branch snapshot 2026-09-29: 40 branch refs (including `main`); one ref added since 2026-09-28 — `codex/count-boundary-frontend-only-20260929-024946` (pending acceptance, see Branch roles above). No branch was deleted.
-- 2026-10-01: no ref added or deleted (the count-boundary content was fast-forwarded into the ring work branch; its ref is kept for traceability). Still 40 refs.

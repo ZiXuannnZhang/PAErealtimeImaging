@@ -1,0 +1,80 @@
+# §8 CUDA 下沉判据 — 预注册公式代入过程
+（公式预注册于 TASKS/环形增强实时预算测试_20260927-141217.md §8，代入前未调整阈值）
+
+## 口径声明
+- 判据输入 median_process_us 使用 RingSHMObs 的 avg_process_us（svc 端会话累计均值，
+  每单元独立会话；逐块分布极差见 layer2a_summary.csv 的 round-wall 与 block-ms 列，
+  分布近似对称，均值≈中位）。Layer 2b 实测 T_arr 尚缺（见 layer2b_blocked.md），
+  T_arr 先按任务文档 §6 预注册的生产节拍默认值 40 Hz 由块到达周期公式给出：
+  T_arr = (block_alines_per_ch / 2 × 2 触发) / 40 Hz …
+  精确地：每块消费 perChBlock 个触发（每触发 1 根 A-line/通道），故
+  T_arr(block=200, 40 Hz) = 200 / 40 = 5.000 s = 5,000,000 µs
+  T_arr(block=100, 40 Hz) = 100 / 40 = 2.500 s = 2,500,000 µs
+- 主口径 mingw-debug；§8 规定的 msvc2022-release 复核在本机不可用（Qt 仅有 mingw_64 kit、
+  无 VS2022，见 README 偏差 1），以 MinGW-Release 同源替代口径复核，**不得与 Debug 数值跨口径比较**。
+
+## 主口径 mingw-debug（grid 10 µm, block 200）
+```text
+main median (avg_process_us)      =   464,644.5 µs
+branch-off                        =   461,360.6 µs
+branch-both                       = 2,258,816.2 µs
+
+余量判据: branch-both ≤ T_arr − main − 0.20×T_arr
+  RHS = 5,000,000 − 464,644.5 − 1,000,000 = 3,535,355.5 µs
+  2,258,816.2 ≤ 3,535,355.5                    → PASS（占天花板 63.9%）
+
+占比判据: (branch-both − branch-off) < 0.30×(T_arr − main)
+  净增 = 2,258,816.2 − 461,360.6 = 1,797,455.6 µs
+  阈值 = 0.30 × 4,535,355.5 = 1,360,606.7 µs
+  1,797,455.6 ≥ 1,360,606.7                    → FAIL
+```
+任一不满足 → 按 §8 进入 release 侧同口径复核。
+
+## 复核口径 mingw-release（替代 msvc2022-release，偏差见 README；grid 10 µm, block 200）
+```text
+main median (avg_process_us)      =   443,108.6 µs
+branch-off                        =   444,778.5 µs
+branch-both                       = 1,318,560.3 µs
+
+余量判据: RHS = 5,000,000 − 443,108.6 − 1,000,000 = 3,556,891.4 µs
+  1,318,560.3 ≤ 3,556,891.4                    → PASS（占天花板 37.1%）
+
+占比判据: 净增 = 1,318,560.3 − 444,778.5 = 873,781.8 µs
+  阈值 = 0.30 × 4,556,891.4 = 1,367,067.4 µs
+  873,781.8 < 1,367,067.4                      → PASS
+```
+两判据均满足 → §8 文字结论为「不下沉」方向。
+
+## 判据的敏感性（替代敏感性跑，mingw-release）
+```text
+block=100  (T_arr=2,500,000 µs):
+  main 225,356.0；branch-both 660,533.5；branch-off n/a（用 both−main 近似净增 435,177.5）
+  余量: 660,533.5 ≤ 2,500,000 − 225,356 − 500,000 = 1,774,644.0   → PASS
+  占比: 435,177.5 < 0.30 × 2,274,644.0 = 682,393.2                → PASS
+  （branch-off@b100 未跑；用 both−main 代替 both−off，分支全关路径≈main，偏差 <±0.4%，见 debug/off 对照）
+
+grid=20 µm (T_arr=5,000,000 µs):
+  main 132,410.6；branch-both 1,060,442.7；净增 928,032.1
+  余量: 1,060,442.7 ≤ 5,000,000 − 132,410.6 − 1,000,000 = 3,867,589.4 → PASS
+  占比: 928,032.1 < 0.30 × 4,867,589.4 = 1,460,276.8                  → PASS
+
+block=400 + alinesPerFrame=8000 + 8 通道：配置非法（8000/(8×400)=2.5 非整数块；
+  组包约束 K % (block/2) = 500 % 200 ≠ 0），按任务文档「冲突停止报告」条款以
+  block=100/250 替代采样并在 README 偏差 3 记录。
+```
+
+## 每 A-line 可用预算（§8 公式：0.70 × (T_arr − main_median) / 每块 A-line 数）
+```text
+mingw-release, block=200, T_arr=5.0 s : 0.70×4,556,891.4/1600 = 1,993.6 µs/A-line
+mingw-debug , block=200, T_arr=5.0 s : 0.70×4,535,355.5/1600 = 1,984.2 µs/A-line
+mingw-release, block=100, T_arr=2.5 s: 0.70×2,274,644.0/800  = 1,990.3 µs/A-line
+```
+（每 A-line 预算由节拍主导，对块大小不敏感；与实测算子成本对照：
+ release both ≈ 830–866 ms/块 ÷ 1600 = 519–541 µs/A-line，占预算 26–27%。）
+
+## 结论（含条件）
+- 在「MinGW-Release 替代口径 + 设计节拍 T_arr」下，§8 两判据均满足，方向为**不下沉**；
+  优化任务 A3（实 FFT 快速路径，预期 FFT 段 ≈4×）无需被 A5 下沉替代即可对齐预算。
+- 该结论为**条件性**：正式判定待 (a) Layer 2b 回放实测 T_arr（含 UDP 全链抖动）确认
+  设计节拍成立；(b) 若分析侧要求预注册 msvc2022-release 口径，需在具备 MSVC/Qt-msvc
+  工具链的机器上复核。判定前不得据此外推实机（现场硬件）结论。

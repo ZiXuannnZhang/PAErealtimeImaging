@@ -82,7 +82,19 @@ void HostOutput::card(Frame f){
 }
 void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
     std::lock_guard<std::mutex> lock(normalizationMutex_);
+    // Three-state group gate (count-boundary frontend-only, task 20260929):
+    //   Drop         -- startup control trigger or expired-round frame; the
+    //                   whole group is discarded exactly as before, in every
+    //                   mode, with the original precedence.
+    //   FrontendOnly -- disableCountBoundary && LogicalScan at or beyond the
+    //                   configured per-round count: the group still reaches
+    //                   the frontend signal path (time/frequency windows keep
+    //                   refreshing) while the imaging publisher stays frozen
+    //                   (consumeSync -> deliverAssembled(imagingSubmit=false)).
+    //   Pass         -- everything else keeps the verbatim previous behavior.
+    // Drop outranks FrontendOnly; one FrontendOnly frame marks the whole group.
     bool filter=false;
+    bool frontendOnly=false;
     if(normalizer_){
         for(const auto& f:frames){
             if(!f)continue;
@@ -96,11 +108,11 @@ void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,boo
                classification.decision==PhysicalTriggerDecision::LogicalScan &&
                classification.logicalTriggerIndex >= 0 &&
                static_cast<std::uint64_t>(classification.logicalTriggerIndex) >=
-                   normalizer_->configuredLogicalTriggersPerRound())filter=true;
+                   normalizer_->configuredLogicalTriggersPerRound())frontendOnly=true;
         }
         if(filter)return;
     }
-    const auto begin=SocketReceiver::now();const auto session=frames.empty()?0:frames.front()->measurementSession;workers_.pushSync(trigger,frames,startup);
+    const auto begin=SocketReceiver::now();const auto session=frames.empty()?0:frames.front()->measurementSession;workers_.pushSync(trigger,frames,startup,frontendOnly);
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.threadId=GetCurrentThreadId();r.card=-1;r.kind=std::uint16_t(TimingKind::SyncEnqueue);r.value0=std::uint32_t(frames.size());r.flags=startup?1:0;timing_->observe(r,end-begin>=500000);}
 }
 PhysicalRoundNormalizer::Snapshot HostOutput::normalizerSnapshot() const{
@@ -134,7 +146,11 @@ void HostOutput::consumeSync(const SyncFrame& sync){
     for(auto f:sync.cards)groups.push_back(converter_.convert(f));
     if(!workers_.isCurrentSession(sync.session)){for(auto f:sync.cards)observe(f,7,5);return;}
     for(std::size_t i=0;i<groups.size();++i){auto f=sync.cards[i];
-        auto result=processors_.at(f->card)->deliverAssembled(groups[i],false,true);
+        // beyondCountBoundary groups submit to the frontend signal path only:
+        // imagingSubmit=false freezes the imaging publisher for this group;
+        // every Pass group keeps the verbatim imagingSubmit=true behavior.
+        auto result=processors_.at(f->card)->deliverAssembled(groups[i],false,true,
+                                                              !sync.beyondCountBoundary);
         // reason 1/2 record the frontend enqueue outcome only.  The final Ring
         // Accepted/QueueFull/Busy/Disabled outcome stays with ImagingBypass/Ring.
         observe(f,7,1,result.frontendAccepted);

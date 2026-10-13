@@ -1,0 +1,8 @@
+# §1.2 对照一：A 范围文件与参考 6bca496 逐字节一致
+## CardDiscovery.h
+diff-exit=0 (空 diff 即逐字节一致)
+0
+## CardDiscovery.cpp
+0
+## discovery_checks.cpp
+0

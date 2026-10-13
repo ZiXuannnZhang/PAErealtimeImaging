@@ -1,0 +1,443 @@
+CASE  random/edge/const/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/const/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/const/both len=1 rejected-both (aligned)
+CASE  random/edge/const/bipolar len=1 rejected-both (aligned)
+CASE  random/edge/ramp/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/ramp/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/ramp/both len=1 rejected-both (aligned)
+CASE  random/edge/ramp/bipolar len=1 rejected-both (aligned)
+CASE  random/edge/pulse/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/pulse/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/pulse/both len=1 rejected-both (aligned)
+CASE  random/edge/pulse/bipolar len=1 rejected-both (aligned)
+CASE  random/edge/noise/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/noise/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/noise/both len=1 rejected-both (aligned)
+CASE  random/edge/noise/bipolar len=1 rejected-both (aligned)
+CASE  random/edge/const/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/const/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/const/both len=2 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/const/bipolar len=2 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/ramp/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/ramp/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/ramp/both len=2 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/ramp/bipolar len=2 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/pulse/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/pulse/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/pulse/both len=2 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/pulse/bipolar len=2 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/noise/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/noise/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/noise/both len=2 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/noise/bipolar len=2 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/const/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/const/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/const/both len=3 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/const/bipolar len=3 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/ramp/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/ramp/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/ramp/both len=3 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/ramp/bipolar len=3 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/pulse/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/pulse/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/pulse/both len=3 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/pulse/bipolar len=3 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/noise/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/noise/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/noise/both len=3 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/edge/noise/bipolar len=3 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/const/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/const/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/const/both len=511 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/const/bipolar len=511 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/ramp/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/ramp/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+DIFF  random/odd/ramp/both len=511 idx=31 ref=8.0002638628423606e-13 act=8.0002633207412743e-13 ulp=1 abs=5.42101e-20 class=A
+DIFF  random/odd/ramp/both len=511 idx=34 ref=2.5211486747562205e-14 act=2.5211483359430416e-14 ulp=2 abs=3.38813e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=35 ref=-2.6964046619825819e-15 act=-2.6964082618726078e-15 ulp=17 abs=3.59989e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=36 ref=-1.3691153415249391e-14 act=-1.3691150027117602e-14 ulp=4 abs=3.38813e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=37 ref=-1.861711841275298e-14 act=-1.8617094695830456e-14 ulp=14 abs=2.37169e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=38 ref=-2.1338498052943591e-14 act=-2.1338504829207169e-14 ulp=4 abs=6.77626e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=39 ref=-2.3167979104729737e-14 act=-2.3168001127586366e-14 ulp=13 abs=2.20229e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=41 ref=-2.55555210375508e-14 act=-2.5555517649419011e-14 ulp=2 abs=3.38813e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=42 ref=-2.6291506271354168e-14 act=-2.6291511353551851e-14 ulp=3 abs=5.0822e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=43 ref=-2.6756562934780563e-14 act=-2.675655785258288e-14 ulp=3 abs=5.0822e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=44 ref=-2.6958754781487848e-14 act=-2.6958746311158376e-14 ulp=5 abs=8.47033e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=45 ref=-2.6895217146048409e-14 act=-2.6895206981653041e-14 ulp=6 abs=1.01644e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=46 ref=-2.6550691576950405e-14 act=-2.655070851760935e-14 ulp=10 abs=1.69407e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=47 ref=-2.5898157723176427e-14 act=-2.5898178051967161e-14 ulp=12 abs=2.03288e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=48 ref=-2.490275001455159e-14 act=-2.4902744932353907e-14 ulp=3 abs=5.0822e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=49 ref=-2.3530480407034371e-14 act=-2.3530475324836687e-14 ulp=3 abs=5.0822e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=50 ref=-2.1759758030799256e-14 act=-2.1759747866403889e-14 ulp=6 abs=1.01644e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=51 ref=-1.9594834991241462e-14 act=-1.9594845155636829e-14 ulp=6 abs=1.01644e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=52 ref=-1.707882018317855e-14 act=-1.7078832041639812e-14 ulp=7 abs=1.18585e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=53 ref=-1.4302994959204327e-14 act=-1.430296616008412e-14 ulp=17 abs=2.87991e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=54 ref=-1.1409801461926758e-14 act=-1.1409796379729074e-14 ulp=6 abs=5.0822e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=55 ref=-8.5867973498234169e-15 act=-8.586814290482362e-15 ulp=20 abs=1.69407e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=56 ref=-6.0511199424394171e-15 act=-6.0511258716700479e-15 ulp=14 abs=5.92923e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=57 ref=-4.0256223376479439e-15 act=-4.0256219141314702e-15 ulp=1 abs=4.23516e-22 class=A
+DIFF  random/odd/ramp/both len=511 idx=58 ref=-2.7099258489196023e-15 act=-2.7099199196889715e-15 ulp=28 abs=5.92923e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=60 ref=-1.6935508984766701e-14 act=-1.6935515761030279e-14 ulp=4 abs=6.77626e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=61 ref=-4.1145785848015377e-15 act=-4.1145650322743817e-15 ulp=32 abs=1.35525e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=62 ref=-2.0532703751759314e-14 act=-2.0532718998352364e-14 ulp=9 abs=1.52466e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=63 ref=-9.1744781259908703e-15 act=-9.1745035369792879e-15 ulp=30 abs=2.5411e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=64 ref=-2.6662527031042285e-14 act=-2.6662493149724395e-14 ulp=20 abs=3.38813e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=65 ref=-1.5912574399421994e-14 act=-1.591255407063126e-14 ulp=12 abs=2.03288e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=66 ref=-3.3534166518937522e-14 act=-3.3534200400255412e-14 ulp=10 abs=3.38813e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=67 ref=-2.2477835294031773e-14 act=-2.2477848846558929e-14 ulp=8 abs=1.35525e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=68 ref=-3.9420212021934811e-14 act=-3.9420184916880499e-14 ulp=8 abs=2.71051e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=69 ref=-2.7390794100630271e-14 act=-2.739077885403722e-14 ulp=9 abs=1.52466e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=70 ref=-4.3137026475804571e-14 act=-4.3137056968990672e-14 ulp=9 abs=3.04932e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=71 ref=-2.973651801684539e-14 act=-2.9736534957504335e-14 ulp=5 abs=1.69407e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=72 ref=-4.3955206092743601e-14 act=-4.3955182375821078e-14 ulp=7 abs=2.37169e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=73 ref=-2.8862071695286151e-14 act=-2.8862061530890784e-14 ulp=3 abs=1.01644e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=74 ref=-4.1199777422139261e-14 act=-4.1199760481480316e-14 ulp=5 abs=1.69407e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=76 ref=-3.407076527915491e-14 act=-3.4070775443550277e-14 ulp=3 abs=1.01644e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=77 ref=-1.4466897528563928e-14 act=-1.4466889058234456e-14 ulp=5 abs=8.47033e-21 class=B
+DIFF  random/odd/ramp/both len=511 idx=78 ref=-2.208645863855524e-14 act=-2.2086484049543657e-14 ulp=15 abs=2.5411e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=79 ref=-2.3947050786977562e-16 act=-2.3948660149577345e-16 ulp=608 abs=1.60936e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=80 ref=-6.0640562531263584e-15 act=-6.0640223718084682e-15 ulp=80 abs=3.38813e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=81 ref=1.6842142237056754e-14 act=1.6842159177715699e-14 ulp=10 abs=1.69407e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=82 ref=1.1069105328783291e-14 act=1.1069078223728979e-14 ulp=32 abs=2.71051e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=83 ref=3.2816875302280057e-14 act=3.2816848197225745e-14 ulp=8 abs=2.71051e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=84 ref=2.4593765947920378e-14 act=2.459379305297469e-14 ulp=16 abs=2.71051e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=85 ref=4.2673713006183625e-14 act=4.2673740111237937e-14 ulp=8 abs=2.71051e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=86 ref=1.2519375727076953e-12 act=1.2519374642874781e-12 ulp=1 abs=1.0842e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=87 ref=1.4219599483349457e-14 act=1.4219618118074297e-14 ulp=11 abs=1.86347e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=88 ref=2.4408104796211708e-14 act=2.4408057362366661e-14 ulp=28 abs=4.74338e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=89 ref=3.8363299556943946e-15 act=3.8362748985528231e-15 ulp=130 abs=5.50571e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=90 ref=9.8567801056631543e-15 act=9.8568563386284072e-15 ulp=90 abs=7.6233e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=91 ref=-1.3738915909079167e-14 act=-1.373888710995896e-14 ulp=34 abs=2.87991e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=92 ref=-9.4329849581963575e-15 act=-9.4330247687448784e-15 ulp=47 abs=3.98105e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=93 ref=-3.3437625091741266e-14 act=-3.3437604762950532e-14 ulp=6 abs=2.03288e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=95 ref=-5.074923703387961e-14 act=-5.0749267527065711e-14 ulp=9 abs=3.04932e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=96 ref=-4.3466935644364754e-14 act=-4.346691531557402e-14 ulp=6 abs=2.03288e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=97 ref=-6.3314716696512979e-14 act=-6.3314689591458667e-14 ulp=4 abs=2.71051e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=98 ref=-5.3496408827314115e-14 act=-5.3496398662918748e-14 ulp=3 abs=1.01644e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=99 ref=-7.0979199351828975e-14 act=-7.0979240009410444e-14 ulp=6 abs=4.06576e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=100 ref=-5.9080981751856443e-14 act=-5.9081015633174333e-14 ulp=5 abs=3.38813e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=101 ref=-7.4809956677763384e-14 act=-7.480990246765476e-14 ulp=8 abs=5.42101e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=102 ref=-6.146613166363446e-14 act=-6.1466124887370882e-14 ulp=1 abs=6.77626e-21 class=A
+DIFF  random/odd/ramp/both len=511 idx=103 ref=-7.6000898554130086e-14 act=-7.6000959540502289e-14 ulp=9 abs=6.09864e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=104 ref=-6.1638912832347181e-14 act=-6.1638872174765713e-14 ulp=6 abs=4.06576e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=105 ref=-7.5255882255043094e-14 act=-7.5255855149988782e-14 ulp=4 abs=2.71051e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=106 ref=-6.0017319076805659e-14 act=-6.0017332629332815e-14 ulp=2 abs=1.35525e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=107 ref=-7.2769942198805393e-14 act=-7.2769921870014659e-14 ulp=3 abs=2.03288e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=108 ref=-5.6689214818694475e-14 act=-5.6689252088144154e-14 ulp=11 abs=3.72694e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=109 ref=-6.8673595998193504e-14 act=-6.867360955072066e-14 ulp=2 abs=1.35525e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=111 ref=-6.3631791621856365e-14 act=-6.3631778069329209e-14 ulp=2 abs=1.35525e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=112 ref=-4.6971432819675751e-14 act=-4.6971398938357861e-14 ulp=10 abs=3.38813e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=113 ref=-5.9061886241093542e-14 act=-5.906185913603923e-14 ulp=4 abs=2.71051e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=114 ref=-4.3232775080162197e-14 act=-4.3232812349611877e-14 ulp=11 abs=3.72694e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=115 ref=-5.639982093006736e-14 act=-5.6399919185889241e-14 ulp=29 abs=9.82558e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=117 ref=-5.5504930621293191e-14 act=-5.5504869634920989e-14 ulp=18 abs=6.09864e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=118 ref=-4.070121382938538e-14 act=-4.0701240934439692e-14 ulp=8 abs=2.71051e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=120 ref=-6.4729959673576198e-14 act=-6.4729939344785464e-14 ulp=3 abs=2.03288e-20 class=B
+DIFF  random/odd/ramp/both len=511 idx=122 ref=-1.7576889379741778e-12 act=-1.7576888295539606e-12 ulp=1 abs=1.0842e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=124 ref=1.730992953141719e-12 act=1.7309928447215017e-12 ulp=1 abs=1.0842e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=136 ref=-1.9766499635004431e-12 act=-1.9766497466600086e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=140 ref=-2.0760314040774164e-12 act=-2.0760316209178509e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=147 ref=1.9689831362579291e-12 act=1.9689829194174946e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=153 ref=-2.2661844189392211e-12 act=-2.2661842020987866e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=174 ref=2.4954955636646847e-12 act=2.4954957805051192e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=175 ref=-2.4630087466087636e-12 act=-2.4630089634491981e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=180 ref=-2.6128346448245354e-12 act=-2.6128348616649699e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=181 ref=2.5157458581615e-12 act=2.5157460750019345e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=199 ref=-2.9598469942354599e-12 act=-2.9598472110758944e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=207 ref=-3.0030867115976578e-12 act=-3.0030869284380923e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=239 ref=3.2554391040523489e-12 act=3.2554388872119144e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=241 ref=-3.56923691990918e-12 act=-3.5692371367496145e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=244 ref=-3.651666208998039e-12 act=-3.65166577531717e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=257 ref=-3.5017665850345381e-12 act=-3.5017668018749726e-12 ulp=1 abs=2.1684e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=262 ref=-3.742167600101487e-12 act=-3.742167166420618e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=264 ref=-3.8099562567339706e-12 act=-3.8099566904148396e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=265 ref=-3.7849679987433937e-12 act=-3.7849684324242627e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=266 ref=1.1250400784590386e-11 act=1.1250401651952124e-11 ulp=1 abs=8.67362e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=267 ref=-3.9503999030299219e-12 act=-3.9503994693490529e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=272 ref=-4.063711173118989e-12 act=-4.063711606799858e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=273 ref=-4.0099711745567035e-12 act=-4.0099716082375725e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=292 ref=-4.2297935987090085e-12 act=-4.2297931650281395e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=295 ref=-4.1941081684038206e-12 act=-4.1941077347229516e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=303 ref=-4.1682872431447748e-12 act=-4.1682868094639058e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=307 ref=-4.4256317360824582e-12 act=-4.4256313024015892e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=329 ref=-4.9327954915190375e-12 act=-4.9327959251999065e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=351 ref=-5.0267125531466839e-12 act=-5.0267121194658149e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=352 ref=1.4888069943541637e-11 act=1.4888068208818162e-11 ulp=1 abs=1.73472e-18 class=A
+DIFF  random/odd/ramp/both len=511 idx=358 ref=-5.3402698929616577e-12 act=-5.3402694592807887e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=359 ref=-5.2875095794824301e-12 act=-5.2875091458015611e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=372 ref=-5.5715649108223353e-12 act=-5.5715644771414663e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=373 ref=-5.510476189934943e-12 act=-5.510475756254074e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=383 ref=-5.3269394104105139e-12 act=-5.3269389767296449e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=397 ref=-5.8093317482910134e-12 act=-5.8093313146101444e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=405 ref=-5.9884714374847103e-12 act=-5.9884718711655793e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=410 ref=-6.0464810242022438e-12 act=-6.0464814578831128e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=412 ref=-6.1589847805132436e-12 act=-6.1589843468323746e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=414 ref=1.7376869040908183e-11 act=1.7376870775631659e-11 ulp=1 abs=1.73472e-18 class=A
+DIFF  random/odd/ramp/both len=511 idx=416 ref=-6.1487546824945394e-12 act=-6.1487551161754084e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=420 ref=-6.2041201169538152e-12 act=-6.2041196832729462e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=421 ref=-6.1175296599269569e-12 act=-6.1175300936078258e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=422 ref=1.7850903047400557e-11 act=1.7850904782124033e-11 ulp=1 abs=1.73472e-18 class=A
+DIFF  random/odd/ramp/both len=511 idx=424 ref=-6.0411948880900734e-12 act=-6.0411953217709424e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=439 ref=-6.4673800169445794e-12 act=-6.4673795832637104e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=442 ref=-6.5965557669023234e-12 act=-6.5965562005831924e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=444 ref=-6.6168281791234573e-12 act=-6.6168277454425883e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=456 ref=-6.7423536372068771e-12 act=-6.7423540708877461e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=464 ref=-6.8110885854955061e-12 act=-6.8110890191763751e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=467 ref=-6.7648087652416589e-12 act=-6.7648091989225279e-12 ulp=1 abs=4.33681e-19 class=A
+DIFF  random/odd/ramp/both len=511 idx=474 ref=-6.3818143478111544e-12 act=-6.3818147814920234e-12 ulp=1 abs=4.33681e-19 class=A
+CASE  random/odd/ramp/both len=511 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=133 max_ulp=608 max_abs=1.73e-18 classB=77 classB_max_abs=9.83e-20 classC=0
+CASE  random/odd/ramp/bipolar len=511 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+DIFF  random/odd/pulse/freq len=511 idx=449 ref=-1.5848399925744161e-08 act=-1.5848398149387322e-08 ulp=1 abs=1.77636e-15 class=A
+DIFF  random/odd/pulse/freq len=511 idx=451 ref=-1.2345359401422229e-08 act=-1.2345358513243809e-08 ulp=1 abs=8.88178e-16 class=A
+DIFF  random/odd/pulse/freq len=511 idx=453 ref=-9.6010017713865636e-09 act=-9.6010026595649833e-09 ulp=1 abs=8.88178e-16 class=A
+DIFF  random/odd/pulse/freq len=511 idx=454 ref=-8.4617157725119796e-09 act=-8.4617166606903993e-09 ulp=1 abs=8.88178e-16 class=A
+DIFF  random/odd/pulse/freq len=511 idx=457 ref=-5.7786526674874494e-09 act=-5.7786522233982396e-09 ulp=1 abs=4.44089e-16 class=A
+DIFF  random/odd/pulse/freq len=511 idx=459 ref=-4.4722310299505352e-09 act=-4.4722305858613254e-09 ulp=1 abs=4.44089e-16 class=A
+DIFF  random/odd/pulse/freq len=511 idx=461 ref=-3.455550512398986e-09 act=-3.4555500683097762e-09 ulp=2 abs=4.44089e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=462 ref=-3.0356346325532968e-09 act=-3.0356348545979017e-09 ulp=1 abs=2.22045e-16 class=A
+DIFF  random/odd/pulse/freq len=511 idx=463 ref=-2.6656663543178638e-09 act=-2.6656661322732589e-09 ulp=1 abs=2.22045e-16 class=A
+DIFF  random/odd/pulse/freq len=511 idx=466 ref=-1.8006042212803663e-09 act=-1.8006044433249713e-09 ulp=2 abs=2.22045e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=467 ref=-1.5785940332690984e-09 act=-1.5785935891798886e-09 ulp=4 abs=4.44089e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=469 ref=-1.2118430703367267e-09 act=-1.2118429593144242e-09 ulp=1 abs=1.11022e-16 class=A
+DIFF  random/odd/pulse/freq len=511 idx=470 ref=-1.0611292955431395e-09 act=-1.0611290734985346e-09 ulp=2 abs=2.22045e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=471 ref=-9.2876678570164017e-10 act=-9.2876661916818648e-10 ulp=3 abs=1.66533e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=472 ref=-8.1252621297878136e-10 act=-8.125259354230252e-10 ulp=5 abs=2.77556e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=473 ref=-7.1034089721422333e-10 act=-7.1034061965846718e-10 ulp=5 abs=2.77556e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=474 ref=-6.2006694223626369e-10 act=-6.2006688672511245e-10 ulp=1 abs=5.55112e-17 class=A
+DIFF  random/odd/pulse/freq len=511 idx=475 ref=-5.388145485341056e-10 act=-5.388143820006519e-10 ulp=3 abs=1.66533e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=476 ref=-4.6099668526977666e-10 act=-4.6099679629207913e-10 ulp=4 abs=1.11022e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=477 ref=-3.7276148834308742e-10 act=-3.7276121078733127e-10 ulp=10 abs=2.77556e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=479 ref=5.0547899199671065e-11 act=5.0548176755427221e-11 ulp=80 abs=2.77556e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=480 ref=7.6420919592479208e-10 act=7.6420914041364085e-10 ulp=1 abs=5.55112e-17 class=A
+DIFF  random/odd/pulse/freq len=511 idx=481 ref=2.6225490667997065e-09 act=2.6225492888443114e-09 ulp=1 abs=2.22045e-16 class=A
+CASE  random/odd/pulse/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=23 max_ulp=80 max_abs=1.78e-15 classB=11 classB_max_abs=4.44e-16 classC=0
+DIFF  random/odd/pulse/freq len=511 idx=447 ref=-2.2460170612248476e-07 act=-2.2460169191163004e-07 ulp=1 abs=1.42109e-14 class=A
+DIFF  random/odd/pulse/freq len=511 idx=450 ref=-1.549967123537499e-07 act=-1.5499672656460461e-07 ulp=1 abs=1.42109e-14 class=A
+DIFF  random/odd/pulse/freq len=511 idx=454 ref=-9.3988440141856699e-08 act=-9.3988447247284057e-08 ulp=1 abs=7.10543e-15 class=A
+DIFF  random/odd/pulse/freq len=511 idx=459 ref=-4.983817092352183e-08 act=-4.9838167370808151e-08 ulp=1 abs=3.55271e-15 class=A
+DIFF  random/odd/pulse/freq len=511 idx=461 ref=-3.8559210935318333e-08 act=-3.8559207382604654e-08 ulp=1 abs=3.55271e-15 class=A
+DIFF  random/odd/pulse/freq len=511 idx=462 ref=-3.3895954487661584e-08 act=-3.3895958040375262e-08 ulp=1 abs=3.55271e-15 class=A
+DIFF  random/odd/pulse/freq len=511 idx=463 ref=-2.9784631649931725e-08 act=-2.9784629873574886e-08 ulp=1 abs=1.77636e-15 class=A
+DIFF  random/odd/pulse/freq len=511 idx=465 ref=-2.2969658175497898e-08 act=-2.2969656399141059e-08 ulp=1 abs=1.77636e-15 class=A
+DIFF  random/odd/pulse/freq len=511 idx=466 ref=-2.0159163227617682e-08 act=-2.0159166780331361e-08 ulp=2 abs=3.55271e-15 class=B
+DIFF  random/odd/pulse/freq len=511 idx=467 ref=-1.7685410469425733e-08 act=-1.7685405140355215e-08 ulp=3 abs=5.32907e-15 class=B
+DIFF  random/odd/pulse/freq len=511 idx=469 ref=-1.3594815939654836e-08 act=-1.3594815051476417e-08 ulp=1 abs=8.88178e-16 class=A
+DIFF  random/odd/pulse/freq len=511 idx=470 ref=-1.1912029584948414e-08 act=-1.1912034025840512e-08 ulp=5 abs=4.44089e-15 class=B
+DIFF  random/odd/pulse/freq len=511 idx=472 ref=-9.1328260509726533e-09 act=-9.1328251627942336e-09 ulp=1 abs=8.88178e-16 class=A
+DIFF  random/odd/pulse/freq len=511 idx=473 ref=-7.9875412950514146e-09 act=-7.9875377423377358e-09 ulp=4 abs=3.55271e-15 class=B
+DIFF  random/odd/pulse/freq len=511 idx=474 ref=-6.9699908067377692e-09 act=-6.9699921390053987e-09 ulp=3 abs=1.33227e-15 class=B
+DIFF  random/odd/pulse/freq len=511 idx=475 ref=-6.0372120636031923e-09 act=-6.0372133958708218e-09 ulp=3 abs=1.33227e-15 class=B
+DIFF  random/odd/pulse/freq len=511 idx=476 ref=-5.0935944351238049e-09 act=-5.0935931028561754e-09 ulp=3 abs=1.33227e-15 class=B
+DIFF  random/odd/pulse/freq len=511 idx=477 ref=-3.8852183692483777e-09 act=-3.885217481069958e-09 ulp=2 abs=8.88178e-16 class=B
+DIFF  random/odd/pulse/freq len=511 idx=478 ref=-1.7061783097460648e-09 act=-1.7061800861029042e-09 ulp=16 abs=1.77636e-15 class=B
+DIFF  random/odd/pulse/freq len=511 idx=483 ref=3.742276533102995e-07 act=3.7422768173200893e-07 ulp=1 abs=2.84217e-14 class=A
+CASE  random/odd/pulse/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=20 max_ulp=16 max_abs=2.84e-14 classB=9 classB_max_abs=5.33e-15 classC=0
+DIFF  random/odd/pulse/both len=511 idx=418 ref=-2.9572718631243333e-05 act=-2.957271681225393e-05 ulp=1 abs=1.81899e-12 class=A
+DIFF  random/odd/pulse/both len=511 idx=435 ref=-4.5930842134112027e-06 act=-4.5930837586638518e-06 ulp=1 abs=4.54747e-13 class=A
+DIFF  random/odd/pulse/both len=511 idx=439 ref=-2.9110833565937355e-06 act=-2.9110831292200601e-06 ulp=1 abs=2.27374e-13 class=A
+DIFF  random/odd/pulse/both len=511 idx=441 ref=-2.3116738248063484e-06 act=-2.3116740521800239e-06 ulp=1 abs=2.27374e-13 class=A
+DIFF  random/odd/pulse/both len=511 idx=443 ref=-1.8325850987821468e-06 act=-1.8325849850953091e-06 ulp=1 abs=1.13687e-13 class=A
+DIFF  random/odd/pulse/both len=511 idx=444 ref=-1.6306378256558673e-06 act=-1.6306379393427051e-06 ulp=1 abs=1.13687e-13 class=A
+DIFF  random/odd/pulse/both len=511 idx=446 ref=-1.2894195151602617e-06 act=-1.2894196288470994e-06 ulp=1 abs=1.13687e-13 class=A
+DIFF  random/odd/pulse/both len=511 idx=447 ref=-1.1458760127425194e-06 act=-1.1458758990556817e-06 ulp=1 abs=1.13687e-13 class=A
+DIFF  random/odd/pulse/both len=511 idx=449 ref=-9.0380541450940655e-07 act=-9.0380535766598769e-07 ulp=1 abs=5.68434e-14 class=A
+DIFF  random/odd/pulse/both len=511 idx=450 ref=-8.0217449749397929e-07 act=-8.0217455433739815e-07 ulp=1 abs=5.68434e-14 class=A
+DIFF  random/odd/pulse/both len=511 idx=451 ref=-7.1167175974551355e-07 act=-7.1167187343235128e-07 ulp=2 abs=1.13687e-13 class=B
+DIFF  random/odd/pulse/both len=511 idx=452 ref=-6.3111394865700277e-07 act=-6.3111383497016504e-07 ulp=2 abs=1.13687e-13 class=B
+DIFF  random/odd/pulse/both len=511 idx=453 ref=-5.5943945653780247e-07 act=-5.5943928600754589e-07 ulp=3 abs=1.7053e-13 class=B
+DIFF  random/odd/pulse/both len=511 idx=454 ref=-4.9569598559173755e-07 act=-4.9569604243515641e-07 ulp=1 abs=5.68434e-14 class=A
+DIFF  random/odd/pulse/both len=511 idx=455 ref=-4.3903065716222045e-07 act=-4.3903071400563931e-07 ulp=2 abs=5.68434e-14 class=B
+DIFF  random/odd/pulse/both len=511 idx=457 ref=-3.4395876014059468e-07 act=-3.4395873171888525e-07 ulp=1 abs=2.84217e-14 class=A
+DIFF  random/odd/pulse/both len=511 idx=458 ref=-3.0425522368204838e-07 act=-3.0425528052546724e-07 ulp=2 abs=5.68434e-14 class=B
+DIFF  random/odd/pulse/both len=511 idx=459 ref=-2.6902165473075002e-07 act=-2.6902171157416888e-07 ulp=2 abs=5.68434e-14 class=B
+DIFF  random/odd/pulse/both len=511 idx=460 ref=-2.3776844670919672e-07 act=-2.3776846092005144e-07 ulp=1 abs=1.42109e-14 class=A
+DIFF  random/odd/pulse/both len=511 idx=461 ref=-2.1005787687045085e-07 act=-2.1005779160532256e-07 ulp=6 abs=8.52651e-14 class=B
+DIFF  random/odd/pulse/both len=511 idx=462 ref=-1.8549886249275005e-07 act=-1.854988198601859e-07 ulp=3 abs=4.26326e-14 class=B
+DIFF  random/odd/pulse/both len=511 idx=463 ref=-1.6374232814087009e-07 act=-1.6374242761685309e-07 ulp=7 abs=9.9476e-14 class=B
+DIFF  random/odd/pulse/both len=511 idx=464 ref=-1.444771129399669e-07 act=-1.4447708451825747e-07 ulp=2 abs=2.84217e-14 class=B
+DIFF  random/odd/pulse/both len=511 idx=465 ref=-1.2742511046326399e-07 act=-1.274250251981357e-07 ulp=6 abs=8.52651e-14 class=B
+CASE  random/odd/pulse/both len=511 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=37 max_ulp=15 max_abs=1.82e-12 classB=23 classB_max_abs=1.71e-13 classC=0
+CASE  random/odd/pulse/bipolar len=511 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/noise/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/noise/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/noise/both len=511 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/noise/bipolar len=511 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/const/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/const/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/const/both len=512 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/const/bipolar len=512 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/ramp/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/ramp/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/ramp/both len=512 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=144 max_ulp=296 max_abs=1.73e-18 classB=67 classB_max_abs=8.13e-20 classC=0
+CASE  random/pow2/ramp/bipolar len=512 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/pulse/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=19 max_ulp=4135424 max_abs=3.55e-15 classB=11 classB_max_abs=3.33e-16 classC=0
+CASE  random/pow2/pulse/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=20 max_ulp=826816 max_abs=1.14e-13 classB=8 classB_max_abs=7.11e-15 classC=0
+CASE  random/pow2/pulse/both len=512 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=33 max_ulp=19 max_abs=9.09e-13 classB=20 classB_max_abs=1.14e-13 classC=0
+CASE  random/pow2/pulse/bipolar len=512 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/noise/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/noise/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/noise/both len=512 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/noise/bipolar len=512 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/const/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/const/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/const/both len=513 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/const/bipolar len=513 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/ramp/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/ramp/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/ramp/both len=513 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=131 max_ulp=1852 max_abs=1.73e-18 classB=77 classB_max_abs=5.76e-20 classC=0
+CASE  random/odd/ramp/bipolar len=513 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/pulse/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=47 max_ulp=768 max_abs=7.11e-15 classB=42 classB_max_abs=4.44e-16 classC=0
+CASE  random/odd/pulse/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=45 max_ulp=384 max_abs=2.84e-14 classB=35 classB_max_abs=3.55e-15 classC=0
+CASE  random/odd/pulse/both len=513 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=64 max_ulp=8701 max_abs=9.09e-13 classB=54 classB_max_abs=2.27e-13 classC=0
+CASE  random/odd/pulse/bipolar len=513 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/noise/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/noise/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/noise/both len=513 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/odd/noise/bipolar len=513 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/const/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/const/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/const/both len=1000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/const/bipolar len=1000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/ramp/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/ramp/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/ramp/both len=1000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=281 max_ulp=1284 max_abs=6.94e-18 classB=81 classB_max_abs=8.67e-19 classC=0
+CASE  random/round/ramp/bipolar len=1000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/pulse/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=355 max_ulp=1266679808 max_abs=8.88e-16 classB=340 classB_max_abs=6.66e-16 classC=0
+CASE  random/round/pulse/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=367 max_ulp=1310720000 max_abs=1.14e-13 classB=352 classB_max_abs=5.33e-15 classC=0
+CASE  random/round/pulse/both len=1000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=413 max_ulp=1411170304 max_abs=4.55e-13 classB=395 classB_max_abs=2.75e-13 classC=0
+CASE  random/round/pulse/bipolar len=1000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/noise/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/noise/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/noise/both len=1000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/noise/bipolar len=1000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/const/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/const/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/const/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/const/bipolar len=3830 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/ramp/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/ramp/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=4 max_ulp=1 max_abs=2.91e-11 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/ramp/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=1943 max_ulp=7392 max_abs=1.11e-16 classB=562 classB_max_abs=2.78e-17 classC=0
+CASE  random/default/ramp/bipolar len=3830 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/pulse/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=3080 max_ulp=1258291200 max_abs=4.44e-16 classB=3064 classB_max_abs=4.44e-16 classC=0
+CASE  random/default/pulse/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=3093 max_ulp=1308622848 max_abs=7.11e-15 classB=3067 classB_max_abs=4.44e-15 classC=0
+CASE  random/default/pulse/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=3159 max_ulp=1439506432 max_abs=8.45e-13 classB=3141 classB_max_abs=8.45e-13 classC=0
+CASE  random/default/pulse/bipolar len=3830 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/noise/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/noise/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/noise/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/default/noise/bipolar len=3830 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/const/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/const/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/const/both len=4000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/const/bipolar len=4000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/ramp/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/ramp/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=2 max_ulp=1 max_abs=2.91e-11 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/ramp/both len=4000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=2020 max_ulp=12644 max_abs=2.22e-16 classB=528 classB_max_abs=6.94e-17 classC=0
+CASE  random/full-col/ramp/bipolar len=4000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/pulse/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=3241 max_ulp=1258291200 max_abs=4.44e-16 classB=3227 classB_max_abs=4.44e-16 classC=0
+CASE  random/full-col/pulse/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=3252 max_ulp=1304428544 max_abs=1.14e-13 classB=3230 classB_max_abs=3.55e-15 classC=0
+CASE  random/full-col/pulse/both len=4000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=3327 max_ulp=1439976448 max_abs=8.64e-13 classB=3306 classB_max_abs=8.64e-13 classC=0
+CASE  random/full-col/pulse/bipolar len=4000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/noise/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/noise/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/noise/both len=4000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/full-col/noise/bipolar len=4000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/const/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/const/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/const/both len=4096 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/const/bipolar len=4096 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/ramp/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/ramp/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=5 max_ulp=1 max_abs=2.91e-11 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/ramp/both len=4096 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=2053 max_ulp=10052 max_abs=4.44e-16 classB=587 classB_max_abs=5.55e-17 classC=0
+CASE  random/pow2/ramp/bipolar len=4096 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/pulse/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=3361 max_ulp=1262485504 max_abs=8.88e-16 classB=3335 classB_max_abs=5.55e-16 classC=0
+CASE  random/pow2/pulse/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=3357 max_ulp=1308622848 max_abs=1.42e-14 classB=3336 classB_max_abs=3.55e-15 classC=0
+CASE  random/pow2/pulse/both len=4096 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=3433 max_ulp=1434963968 max_abs=6.96e-13 classB=3407 classB_max_abs=6.96e-13 classC=0
+CASE  random/pow2/pulse/bipolar len=4096 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/noise/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/noise/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/noise/both len=4096 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/pow2/noise/bipolar len=4096 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/const/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/const/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/const/both len=8000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/const/bipolar len=8000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/ramp/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/ramp/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=17 max_ulp=1 max_abs=5.82e-11 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/ramp/both len=8000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=5206 max_ulp=20352 max_abs=4.44e-16 classB=2604 classB_max_abs=1.67e-16 classC=0
+CASE  random/round/ramp/bipolar len=8000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/pulse/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=7244 max_ulp=1249902592 max_abs=4.44e-16 classB=7221 classB_max_abs=3.33e-16 classC=0
+CASE  random/round/pulse/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=7238 max_ulp=1308622848 max_abs=1.42e-14 classB=7215 classB_max_abs=3.55e-15 classC=0
+CASE  random/round/pulse/both len=8000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=7325 max_ulp=1450895360 max_abs=1.35e-12 classB=7304 classB_max_abs=1.35e-12 classC=0
+CASE  random/round/pulse/bipolar len=8000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/noise/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/noise/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/noise/both len=8000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/round/noise/bipolar len=8000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/const/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/const/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/const/both len=12330 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/const/bipolar len=12330 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/ramp/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/ramp/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=19 max_ulp=1 max_abs=5.82e-11 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/ramp/both len=12330 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=9178 max_ulp=20480 max_abs=7.11e-15 classB=6358 classB_max_abs=5.55e-16 classC=0
+CASE  random/large/ramp/bipolar len=12330 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/pulse/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=11553 max_ulp=1249902592 max_abs=3.33e-16 classB=11542 classB_max_abs=3.33e-16 classC=0
+CASE  random/large/pulse/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=11550 max_ulp=1308622848 max_abs=3.55e-15 classB=11527 classB_max_abs=3.55e-15 classC=0
+CASE  random/large/pulse/both len=12330 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=11643 max_ulp=1462981120 max_abs=2.5e-12 classB=11624 classB_max_abs=2.5e-12 classC=0
+CASE  random/large/pulse/bipolar len=12330 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/noise/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/noise/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/noise/both len=12330 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  random/large/noise/bipolar len=12330 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0 max_abs=0 classB=0 classB_max_abs=0 classC=0
+SUMMARY  total_diff_samples=108435 max_ulp=1462981120 policy(max_ulp<=1)=OK
+CLASSES  zero_residue_B=97787 unexplained_C_cases=0
+PASS  ring_enhancer_parity_test

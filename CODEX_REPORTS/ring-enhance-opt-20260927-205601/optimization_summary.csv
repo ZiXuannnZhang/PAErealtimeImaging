@@ -1,0 +1,25 @@
+stage,preset,src,switch,length,hmax_or_note,median_us,mean_us,range_us,speedup_vs_task1
+task1-baseline,mingw-release,real-14dat-cols,off,3830,hmax n/a,0.0210,0.0214,0.0031,1.00x
+task1-baseline,mingw-release,real-14dat-cols,bipolar,3830,hmax=2,4.2672,4.3584,0.4047,1.00x
+task1-baseline,mingw-release,real-14dat-cols,freq,3830,hmax=2,537.4859,535.1219,8.9016,1.00x
+task1-baseline,mingw-release,real-14dat-cols,both,3830,hmax=2,529.2734,528.7837,15.0859,1.00x
+task1-baseline,mingw-release,synthetic,freq,12330,hmax=2,2512.1125,2516.3169,25.8703,1.00x
+task1-baseline,mingw-release,synthetic,both,12330,hmax=2,2511.4156,2512.2663,10.1937,1.00x
+A2,mingw-release,real-14dat-cols,off,3830,hmax=2,0.0203,0.0231,0.0109,1.00x (neutral)
+A2,mingw-release,real-14dat-cols,bipolar,3830,hmax=2,4.4812,4.4778,0.3734,0.96x (neutral, within noise)
+A2,mingw-release,real-14dat-cols,freq,3830,hmax=2,524.8703,527.3891,20.2031,1.02x (neutral, within noise)
+A2,mingw-release,real-14dat-cols,both,3830,hmax=2,536.5984,533.9547,15.4281,0.99x (neutral, within noise)
+A3,mingw-release,real-14dat-cols,off,3830,hmax=2,0.0266,0.0259,0.0125,1.00x
+A3,mingw-release,real-14dat-cols,bipolar,3830,hmax=2,4.0984,4.0947,0.0469,1.04x (path untouched)
+A3,mingw-release,real-14dat-cols,freq,3830,hmax=2,264.5719,268.9284,17.7406,2.03x
+A3,mingw-release,real-14dat-cols,freq,3830,hmax=20,257.8859,257.2553,7.8469,2.08x
+A3,mingw-release,real-14dat-cols,both,3830,hmax=2,269.6656,273.6300,18.1500,1.96x
+A3,mingw-release,real-14dat-cols,both,3830,hmax=20,291.4156,289.5469,11.0859,1.82x
+A3,mingw-release,synthetic,freq,12330,hmax=2,1339.5781,1349.3369,195.5609,1.88x
+A3,mingw-release,synthetic,freq,12330,hmax=20,1294.8063,1304.0753,50.1141,1.93x
+A3,mingw-release,synthetic,both,12330,hmax=2,1306.2094,1300.1659,54.1859,1.92x
+task1-baseline,mingw-debug,real-14dat-cols,freq,3830,hmax=2,949.5563,955.9797,81.5859,1.00x
+A2,mingw-debug,real-14dat-cols,freq,3830,hmax=2,915.0125,914.8797,77.8531,1.04x (quiet window)
+A3,mingw-debug,real-14dat-cols,freq,3830,hmax=2,534.8734,536.0628,5.1656,1.78x (debug window noisy)
+task1-baseline,mingw-debug,real-14dat-cols,both,3830,hmax=2,972.3891,977.7306,40.9266,1.00x
+A3,mingw-debug,real-14dat-cols,both,3830,hmax=2,3067.3312,3110.8019,385.4859,LOAD-NOISE (see run2/log)

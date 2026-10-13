@@ -4,42 +4,18 @@ Windows 多卡实时光声采集与成像项目。当前正式源码与开发基
 
 ## Current status
 
-截至 2026-10-13（按远端分支与提交历史复核）：
+截至 2026-10-13：main 是下一步开发基准。用户已确认把环形增强 bd69785 的完整源码、
+测试与证据线性接入旧 main 6ff0e02，使用普通单父提交与普通快进推送，保留原分支历史。
+main 的生产/测试源码与 bd69785 完全一致；旧 tip 不因此成为 main 的祖先。
 
-```text
-canonical source                         = main
-canonical source identity                = 491aa34cfa9553954eea949a7703df7194eb7699
-remote main audited before this update   = 29bb51e15243974a6812fd622e291e91550083f4
-Session A/B/C software review            = APPROVE
-Session D integration review             = APPROVE
-A/B/C/D functional hardware validation   = PASS_FOR_CURRENT_SCOPE
-exact FPGA/LabVIEW extra-trigger source  = NOT_PROVEN
-7 / 4007                                 = field observation, not protocol constant
-pending work branch (unmerged)           = codex/ring-reconstruction-enhancement-20260926-181824 @ bd69785（含 2026-09-29 早退移植 + 2026-10-01 count-boundary 并回；发现早退 A 范围与 count-boundary 已实机验收通过）
-pending work branch (unmerged)           = codex/discovery-early-exit-localbind-20260926-123437（A 范围已移植并实机验收通过；B 范围留原分支待用户决策）
-merged into ring branch (not main)       = codex/count-boundary-frontend-only-20260929-024946（实机验收通过，与环形增强分支同指 bd69785；ref 保留追溯）
-```
+当前 main 已含前端链、环形信号增强、FFT 优化、圆形显示掩膜与毫米坐标、发现早退 A 范围、
+count-boundary 前端刷新解耦。A/B/C/D 当前范围实机通过；发现早退 A 与 count-boundary
+于 2026-10-01 实机通过。双极补偿效果调优搁置，Layer 2b T_arr 未执行，discovery B 待决定。
+7 / 4007 是现场观察而非协议常量，额外 trigger 精确 FPGA/LabVIEW 来源仍未证明。
 
-本轮 START-admission、PhysicalRoundNormalizer、RoundIdentity、variable-length timeout、
-realtime imaging cap、AutoSave binding、Ring/CUDA reset/stale barrier 已进入 canonical source。
-
-2026-09-24 另有前端链经实机验收后以 fast-forward 进入 canonical source：全分辨率显示裁切、
-Frontend Preprocessing Stage、逐 A-line 零相位前端滤波、保存/闸门与写盘故障修复、
-卡片状态/通道显示命名。自该时点起 main 的源码树身份为上表 `491aa34`，其后 main 仅因
-文档提交而移动 HEAD。
-
-“当前验证范围通过”表示已执行的实机场景未发现与预期不一致，不表示已经证明额外 startup trigger
-的底层 FPGA/LabVIEW 精确产生机制。
-
-当前仍有两条实现分支**未合入 main**，其内容不属于 canonical source：
-`codex/ring-reconstruction-enhancement-20260926-181824`（环形 DAS 质量增强工作流：双极波形
-补偿、低频补偿 H(f)、FFT 路径优化、显示层零值掩膜与毫米坐标）与
-`codex/discovery-early-exit-localbind-20260926-123437`（发现链早退 + 控制包本地绑定默认 IP）。
-2026-10-01 已接受环形增强分支上的发现早退 A 范围与 count-boundary 前端刷新解耦；
-双极波形补偿效果调优已搁置，discovery B 范围归宿待决定。实时性正式结论仍依赖
-Layer 2b T_arr 实测，分支整体合并未获决定。环形分支与 main 已分叉，当前不能直接
-fast-forward；完整 40 条分支的 tip、领先/落后数量与关系见 `REPOSITORY_BASELINE.md`
-「2026-10-13 remote branch inventory」，验收边界见 `PROJECT_STATUS.md` §6.4。
+已有轻量包实际构建于 3c6323d，其源码与 aa9097e、bd69785 相同；本次接入不产生新二进制。
+构建身份、验收边界与追溯点见 PROJECT_STATUS.md。
+旧副本与可再生产物按用户授权移入 _pending_delete 待审核；最终删除仅由用户执行。
 
 ## Canonical documentation
 

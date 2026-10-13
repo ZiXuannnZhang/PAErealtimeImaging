@@ -292,9 +292,11 @@ void ImagingController::configure(const GeneralParams &general,
 // 环形扫描并行分支：配置 / 块输入 / 共享内存
 // =====================================================================
 void ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
+                                      const RingEnhanceConfig &enhanceCfg,
                                       const int (*sysDelayCh)[2])
 {
     m_ringConfig = ringCfg;
+    m_ringEnhanceConfig = enhanceCfg;
     if (sysDelayCh) {
         for (int c = 0; c < 8; ++c)
             for (int w = 0; w < 2; ++w)
@@ -943,6 +945,15 @@ void ImagingController::sendConfigureAndStart()
         ring["sectorCcw"] = m_ringConfig.sectorCcw;
         ring["triggerWlOdd"] = m_ringConfig.triggerWlOdd;
         ring["timeoutResetSec"] = m_ringConfig.timeoutResetSec;
+        QJsonObject enhance;
+        enhance["enableBipolarCompensation"] =
+            m_ringEnhanceConfig.enableBipolarCompensation;
+        enhance["enableFreqCompensation"] =
+            m_ringEnhanceConfig.enableFreqCompensation;
+        enhance["freqCompFcMhz"] = m_ringEnhanceConfig.freqCompFcMhz;
+        enhance["freqCompHmax"] = m_ringEnhanceConfig.freqCompHmax;
+        enhance["freqCompOrder"] = m_ringEnhanceConfig.freqCompOrder;
+        ring["enhance"] = enhance;
 
                 QJsonObject params;
         params["imagingMode"] = "ring";

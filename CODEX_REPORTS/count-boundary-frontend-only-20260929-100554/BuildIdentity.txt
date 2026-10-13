@@ -1,0 +1,34 @@
+BuildIdentity — 双口径（均在实现 commit aa9097e 上重新 configure + build，BUILD_STANDARD §2.3）
+================================================================================================
+
+MinGW-Debug（正式口径）— build/mingw_debug/generated/PaimageAcquisition/BuildIdentity.h
+----------------------------------------------------------------------------------------
+#pragma once
+#define PAIMAGE_GIT_SHA "aa9097ef126ab3ea4a2a1ce2c5786ecaba7cd184"
+#define PAIMAGE_TRACKED_DIRTY false
+#define PAIMAGE_BUILD_TYPE "Debug"
+#define PAIMAGE_COMPILER "GNU 13.1.0"
+#define PAIMAGE_PRODUCT_BASELINE "e66a29bfbbaa6534911a23d48e8624fb8d552bec"
+#define PAIMAGE_SOURCE_SHA256 "2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec"
+
+MinGW-Release（参考口径）— build/mingw_release/generated/PaimageAcquisition/BuildIdentity.h
+--------------------------------------------------------------------------------------------
+#pragma once
+#define PAIMAGE_GIT_SHA "aa9097ef126ab3ea4a2a1ce2c5786ecaba7cd184"
+#define PAIMAGE_TRACKED_DIRTY false
+#define PAIMAGE_BUILD_TYPE "Release"
+#define PAIMAGE_COMPILER "GNU 13.1.0"
+#define PAIMAGE_PRODUCT_BASELINE "e66a29bfbbaa6534911a23d48e8624fb8d552bec"
+#define PAIMAGE_SOURCE_SHA256 "2b2f4a8b82ff49fc35c2d3d96fe3f999a0dcc403144f39ef520c5af5cea9a6ec"
+
+字段口径
+--------
+- 两口径均在 aa9097e（tracked tree clean）上重新 cmake configure + ninja build；
+  PAIMAGE_TRACKED_DIRTY=false 由 CMake 在该 commit 的 tracked tree 上实测。
+- MinGW-Release 无仓库 preset（CMakePresets.json 仅 mingw-debug / mingw-asan /
+  msvc2022-release），沿 build/mingw_release 既有缓存（Ninja, Release, GNU 13.1.0）
+  手工口径，与 discovery-earlyexit-port 任务（45_BuildIdentity_release.h）先例一致。
+- Debug 构建 exit 0（build_mingw_debug.cmd 完整 configure+build+关键 exe 检查+
+  windeployqt）；Release 构建 exit 0（configure+ninja+windeployqt）。
+- 测试套件（build/tests_all_mingw_debug）同样在 aa9097e 上 cmake+ninja 重建后执行
+  最终全量 CTest（见 ctest_final_debug_51of51_aa9097e.log）。

@@ -1,0 +1,510 @@
+commit aa9097ef126ab3ea4a2a1ce2c5786ecaba7cd184
+Author: Codex <codex@local>
+Date:   Tue Sep 29 10:13:21 2026 +0800
+
+    feat(frontend): count-boundary frontend-only delivery keeps time/freq displays live
+    
+    任务文档: codex/task-docs TASKS/前端刷新闸门解耦_计数边界后时频持续刷新_20260929-023810.md (修订 1)
+    
+    行为声明: 仅「禁用计数重置」勾选模式行为变化——达到每圈设计触发数后
+    时域/频域信号窗口持续刷新、实时成像保持冻结不重置、保存与计数照常;
+    不勾选模式全链路逐位不变。
+    
+    三态组闸门 (HostOutput::sync): Drop (启动控制/过期轮次, 语义与优先级
+    逐字保留) / FrontendOnly (新增, 超界组进前端信号路径并跳过成像发布器:
+    deliverAssembled(imagingSubmit=false) 跳过 FramePublisher submit 并打
+    frontendDisplayOnly, FrontendPreprocessor::dispatch 跳过 Ring 腿) /
+    Pass (逐字保留)。SyncFrame.beyondCountBoundary 经 OutputQueues/
+    OutputWorkers 透传; 新增尾参一律带默认值, 既有调用点零改动。
+    
+    实现落点说明: 任务文档 §0 事实 2 将 m_framePublisher->submit 标注为
+    成像路径; 分叉点实测其为准默认关闭 (enablePublisher=false) 的 ZeroMQ
+    汇聚支路, 成像主链为 FrontendPreprocessor::dispatch 的 Ring 腿
+    (MainWindow::ringFeedSink -> ImagingBypass)。故 FrontendOnly 在按
+    §1.2 跳过 m_framePublisher->submit 之外, 须经 frontendDisplayOnly
+    标记在 frontend stage 内跳过 Ring 腿方能满足 §1.1 「跳过成像发布器
+    (实时成像保持冻结)」与实机验收项; 其余落点与 §1.2 一致。
+    
+    测试: paimage_host_output_test 新增 FO1-FO6 契约断言 (含 FramePublisher
+    提交计数与前端 Ring 腿到达数双口径), G1/G2 超界组前端零到达断言按新
+    契约修订, 其余既有断言逐字保留; 判别性反证 (FrontendOnly 临时改回整组
+    丢弃 -> FO3 转红 -> 还原复绿) 全程留痕。
+    
+    docs/环形重建增强.md 增补第 7 节 (计数边界前端放行, 验收 8)。
+
+diff --git "a/MC_410T_MultiCard/delivery/docs/\347\216\257\345\275\242\351\207\215\345\273\272\345\242\236\345\274\272.md" "b/MC_410T_MultiCard/delivery/docs/\347\216\257\345\275\242\351\207\215\345\273\272\345\242\236\345\274\272.md"
+index 5c8ed52..22566c5 100644
+--- "a/MC_410T_MultiCard/delivery/docs/\347\216\257\345\275\242\351\207\215\345\273\272\345\242\236\345\274\272.md"
++++ "b/MC_410T_MultiCard/delivery/docs/\347\216\257\345\275\242\351\207\215\345\273\272\345\242\236\345\274\272.md"
+@@ -103,3 +103,16 @@ H(f) 以 FFT/IFFT 实现时，先把 DelayCut 后的保留段填充到 2 的幂
+ - 边界：不触碰环形增强 / FFT 优化 / 显示层的任何文件与行为；不改 `RingReconCudaConfig`、ring JSON 键集、ImagingSvc、SHM 布局；不改发现轮次 / ACK 窗口 / 宽限常量与 `sanitizeDiscoveryOptions` 其他参数语义。
+ - 实机验收（用户侧）：NCards=现场卡数时开始监听日志出现「⚡ 已确认满期望卡数…」且耗时较 ~10.5 s 明显缩短；现场卡数少于 NCards 时回落全预算；（如适用）确认满期望后迟到的多余卡不被误纳。软件 / 单测 PASS ≠ 实机 PASS。
+ 
++## 7. 计数边界前端放行（显示解耦）
++
++- 来源：新建实现分支 `codex/count-boundary-frontend-only-20260929-024946`，自 `codex/ring-reconstruction-enhancement-20260926-181824` tip `69af29528b91f0b606e3771827df91cedc0b9993`（分叉点）线性分叉；原环形增强分支保持 `69af295` 不动，本分支不合 main。任务文档：`codex/task-docs:TASKS/前端刷新闸门解耦_计数边界后时频持续刷新_20260929-023810.md`（2026-09-29 修订 1）。
++- 三态语义（`HostOutput::sync` 组级闸门，任一帧命中按整组定态，Drop 优先级最高）：
++  - **Drop**（逐字保留）：`OperationalStartupControl` 启动控制触发；或过期轮次帧（`measurementSession==timeoutSession_ && roundGeneration<timeoutGeneration_`）——任何模式下整组不进前端/成像；
++  - **FrontendOnly**（新增，仅勾选模式可达）：`disableCountBoundary()==true && LogicalScan && logicalTriggerIndex>=0 && logicalTriggerIndex>=configuredLogicalTriggersPerRound()`——整组继续进前端信号路径（时域/频域持续刷新），但跳过成像发布器（实时成像保持冻结）：`deliverAssembled` 以 `imagingSubmit=false` 跳过 `m_framePublisher->submit` 并给组打 `frontendDisplayOnly` 标记，`FrontendPreprocessor::dispatch` 对该组只刷新 DisplayBuffer、跳过 Ring 腿（ImagingBypass 收不到、统计不变动）；
++  - **Pass**（逐字保留）：其余照常。
++- 勾选模式下默认行为变化：「禁用计数重置」勾选且接收触发数达到每圈设计触发数（单圈总Aline数/启用通道数推导）后，**时域/频域信号窗口不再冻结**（此前与实时成像一起冻结的副作用解除）；实时成像窗口保持冻结、不重置；保存与卡片状态计数照常。**不勾选模式全链路逐位不变**（FrontendOnly 路径不可达，CountBoundary 产生与 roundGeneration 推进照旧）。
++- 边界：两个 Drop 条件语义与优先级逐字保留；`PhysicalRoundNormalizer` 分类/事件种类/轮次语义零改动（超界帧仍携带同一停滞 roundGeneration，TimeoutBoundary 后新一轮重新武装启动过滤的既有准入语义不变）；保存路径（card 直存、save queue、FileSaver）、AutoSaveRoundCoordinator 绑定不动；Ring 重建、RingSignalEnhancer、ImagingSvc、SHM 布局、`RingReconCudaConfig`、ring JSON 键集不动；卡片状态计数器口径与 UDP 丢包/丢弃计数不动；RingConfigDialog 与任何 UI 不动。
++- 诊断口径：超界组在 stage-7 trace 自然呈现 `frontendAccepted=true, publisherAccepted=false`（observe(7,1/2/3) 未改动）；frontend stage 的 `downstreamRingAttempts` 不因超界组增加，可作为「成像腿未尝试」的旁证。
++- 测试：`paimage_host_output_test` 新增 FO1–FO6 契约断言（勾选模式 N+N..k：displayUpdates 递增且 FramePublisher 提交数与前端 Ring 腿到达数停在 N；启动控制/过期轮次 Drop 零到达；不勾选模式同输入恒等）；既有 G1/G2「超界组前端零到达」断言按新契约修订（前端到达 5→12、9→16，并新增 imagingArrivals 停留断言）；其余既有断言逐字保留。判别性反证：FrontendOnly 临时改回整组丢弃 → FO3「display keeps refreshing」转红，还原复绿，全程留痕于 `CODEX_REPORTS/count-boundary-frontend-only-20260929-100554/`。
++- 实机验收口径（用户侧；执行代理不得代为声明）：勾选「禁用计数重置」+ 接收触发数达到每圈设计触发数后——时域/频域窗口持续刷新；实时成像窗口保持冻结、不重置；保存与卡片状态计数照常。软件/单测 PASS ≠ 实机 PASS。
++
+diff --git a/MC_410T_MultiCard/delivery/include/DataProcessor.h b/MC_410T_MultiCard/delivery/include/DataProcessor.h
+index a8bb7ad..0a64ebe 100644
+--- a/MC_410T_MultiCard/delivery/include/DataProcessor.h
++++ b/MC_410T_MultiCard/delivery/include/DataProcessor.h
+@@ -62,6 +62,11 @@ public:
+     // enqueue（deep copy 在 FrontendPreprocessor worker 内完成）。任一侧失败都
+     // 不改写另一侧的结果，也不会计入 UDP 丢包 / missingTriggerCount /
+     // saveQueueDiscards。
++    //
++    // imagingSubmit（默认 true，既有调用点零改动）：计数边界 FrontendOnly 组置
++    // false——跳过 m_framePublisher->submit，并在 frontend submit 前把 group 标
++    // 记为 frontendDisplayOnly，使 FrontendPreprocessor 只刷新显示、跳过 Ring
++    // 分发（实时成像冻结）。仅「禁用计数重置」勾选模式下可达。
+     struct DeliveryResult {
+         enum Save { NotRequested, Disabled, Queued, QueueFull, QueueFailure, Consumed, ConsumerFailure } save=NotRequested;
+         bool saveAccepted=false;
+@@ -71,7 +76,8 @@ public:
+         FrontendSubmitResult frontendSubmit=FrontendSubmitResult::Stopping;
+         bool publisherAccepted=false, exception=false;
+     };
+-    DeliveryResult deliverAssembled(const TriggerGroupPtr&,bool save,bool frontend);
++    DeliveryResult deliverAssembled(const TriggerGroupPtr&,bool save,bool frontend,
++                                    bool imagingSubmit=true);
+     // Set before starting source workers. No second saving queue in this path.
+     void setDirectSaveSink(std::function<bool(const TriggerGroupPtr&)> sink) { m_directSaveSink=std::move(sink); }
+     std::uint64_t captureSaveSessionGen()const{return m_sessionGenReader?m_sessionGenReader():0;}
+diff --git a/MC_410T_MultiCard/delivery/include/DataTypes.h b/MC_410T_MultiCard/delivery/include/DataTypes.h
+index aa45dcc..83e4c63 100644
+--- a/MC_410T_MultiCard/delivery/include/DataTypes.h
++++ b/MC_410T_MultiCard/delivery/include/DataTypes.h
+@@ -51,6 +51,15 @@ struct TriggerGroup {
+     // marker from this field, never from the one-shot pulse.
+     bool isFinalLogicalTrigger = false;
+     bool sourceTimedOut = false;
++    // Count-boundary FrontendOnly delivery (任务文档 20260929-023810): set by
++    // DataProcessor::deliverAssembled when a beyond-count-boundary group may
++    // refresh the frontend signal windows but must not reach the imaging
++    // publisher. FrontendPreprocessor::dispatch skips only its Ring leg for
++    // such groups; DisplayBuffer still receives the same frontend clone. The
++    // deep copy in the stage worker carries this flag, the raw save path never
++    // sees a sync-path group, and the flag is unreachable while
++    // disableCountBoundary is false.
++    bool frontendDisplayOnly = false;
+ 
+     // The normalized Ring path consumes this pair as one immutable identity.
+     // Keeping the legacy scalar fields preserves the existing save contract
+@@ -128,6 +137,7 @@ struct TriggerGroup {
+         roundComplete = false;
+         isFinalLogicalTrigger = false;
+         sourceTimedOut = false;
++        frontendDisplayOnly = false;
+         freqA.clear(); freqB.clear();
+         phaseA_display.clear(); phaseB_display.clear();
+         freqA_display.clear();  freqB_display.clear();
+diff --git a/MC_410T_MultiCard/delivery/include/PaimageAcquisition/OutputQueues.h b/MC_410T_MultiCard/delivery/include/PaimageAcquisition/OutputQueues.h
+index 01e2012..26f1a8b 100644
+--- a/MC_410T_MultiCard/delivery/include/PaimageAcquisition/OutputQueues.h
++++ b/MC_410T_MultiCard/delivery/include/PaimageAcquisition/OutputQueues.h
+@@ -12,6 +12,10 @@ struct SyncFrame {
+     std::uint16_t trigger=0;
+     std::uint64_t session=0,block=0,index=0;
+     std::vector<Frame> cards;
++    // Count-boundary FrontendOnly group: refreshes the frontend signal windows
++    // while the imaging publisher stays frozen. Only reachable when
++    // disableCountBoundary is true; every other group keeps this false.
++    bool beyondCountBoundary=false;
+ };
+ class OutputQueues {
+ public:
+@@ -20,7 +24,8 @@ public:
+     Frame popCard();
+     // Returns exact discarded objects. Source cumulative 0x790 counts one
+     // eviction event, not this number; diagnostics keep both units separate.
+-    std::vector<SyncFrame> pushSync(std::uint16_t,const std::vector<Frame>&,bool startup);
++    std::vector<SyncFrame> pushSync(std::uint16_t,const std::vector<Frame>&,bool startup,
++                                    bool beyondCountBoundary=false);
+     std::optional<SyncFrame> popSync();
+     void beginSession(std::uint64_t);
+     void clearCards();
+diff --git a/MC_410T_MultiCard/delivery/include/PaimageAcquisition/OutputWorkers.h b/MC_410T_MultiCard/delivery/include/PaimageAcquisition/OutputWorkers.h
+index dc8f8f9..8ab7937 100644
+--- a/MC_410T_MultiCard/delivery/include/PaimageAcquisition/OutputWorkers.h
++++ b/MC_410T_MultiCard/delivery/include/PaimageAcquisition/OutputWorkers.h
+@@ -34,7 +34,8 @@ public:
+     }
+     void pushCard(Frame);
+     unsigned cardDepth(int card){std::lock_guard<std::mutex> lock(cardMutex_);return cardQueue_.cardDepth(card);}
+-    void pushSync(std::uint16_t,const std::vector<Frame>&,bool startupRelease);
++    void pushSync(std::uint16_t,const std::vector<Frame>&,bool startupRelease,
++                  bool beyondCountBoundary=false);
+     int syncPriorityError() const {return syncPriorityError_.load();}
+     // Source checks again after downstream computation at 13aece. The host
+     // adapter must use this immediately before publishing converted sync data.
+diff --git a/MC_410T_MultiCard/delivery/src/DataProcessor.cpp b/MC_410T_MultiCard/delivery/src/DataProcessor.cpp
+index b27ec81..ccc8d09 100644
+--- a/MC_410T_MultiCard/delivery/src/DataProcessor.cpp
++++ b/MC_410T_MultiCard/delivery/src/DataProcessor.cpp
+@@ -433,7 +433,7 @@ void DataProcessor::flushAssemblyBuf(PacketAssemblyBuffer& assemblyBuf) {
+ }
+ 
+ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
+-        const TriggerGroupPtr& group, bool save, bool frontend) {
++        const TriggerGroupPtr& group, bool save, bool frontend, bool imagingSubmit) {
+     DeliveryResult result;
+     if (!group) { result.exception = true; return result; }
+     try {
+@@ -473,8 +473,11 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
+ 
+         if (!frontend) return result;
+ 
+-        //  FramePublisher 仍在 frontend submit 之前消费 raw group
+-        if (m_framePublisher) {
++        //  FramePublisher 仍在 frontend submit 之前消费 raw group。
++        //  imagingSubmit=false（计数边界 FrontendOnly 组，仅勾选模式可达）时跳过：
++        //  publisherAccepted 保持 false，stage-7 trace 呈现 1/3 组合
++        //  （frontendAccepted=true, publisherAccepted=false）。
++        if (m_framePublisher && imagingSubmit) {
+             m_framePublisher->submit(group);
+             result.publisherAccepted = true;
+         }
+@@ -483,7 +486,11 @@ DataProcessor::DeliveryResult DataProcessor::deliverAssembled(
+         //  deep copy、processFrontendSignal、全分辨率显示准备、DisplayBuffer 与
+         //  Ring 分发全部发生在 FrontendPreprocessor worker。frontend queue 的
+         //  拒绝不计入 UDP 丢包 / missingTriggerCount / saveQueueDiscards。
++        //  FrontendOnly 组在入队前打 frontendDisplayOnly 标记：stage worker 照常
++        //  刷新 DisplayBuffer（时域/频域持续刷新），但跳过 Ring 分发（实时成像
++        //  冻结）。标记随 deep copy 进入 frontend clone，raw save 路径不经此组。
+         if (m_frontendSubmitSink) {
++            if (!imagingSubmit) group->frontendDisplayOnly = true;
+             try {
+                 result.frontendSubmit = m_frontendSubmitSink(group);
+                 result.frontendAccepted = result.frontendSubmit == FrontendSubmitResult::Accepted;
+diff --git a/MC_410T_MultiCard/delivery/src/FrontendPreprocessor.cpp b/MC_410T_MultiCard/delivery/src/FrontendPreprocessor.cpp
+index 71c9327..ddf25d8 100644
+--- a/MC_410T_MultiCard/delivery/src/FrontendPreprocessor.cpp
++++ b/MC_410T_MultiCard/delivery/src/FrontendPreprocessor.cpp
+@@ -319,7 +319,13 @@ void FrontendPreprocessor::dispatch(TriggerGroupPtr& frontend) {
+         displayBuffer_->updateFullRes(frontend);
+         displayUpdates_.fetch_add(1, std::memory_order_relaxed);
+     }
+-    if (ring) {
++    // Count-boundary FrontendOnly groups (frontendDisplayOnly, set by
++    // DataProcessor::deliverAssembled when imagingSubmit=false) refresh the
++    // display above but never reach the imaging publisher: the Ring leg is
++    // skipped without counting a downstream attempt, so ImagingBypass/Ring
++    // statistics stay untouched and the realtime image stays frozen. Only
++    // reachable while disableCountBoundary is checked.
++    if (ring && !frontend->frontendDisplayOnly) {
+         downstreamRingAttempts_.fetch_add(1, std::memory_order_relaxed);
+         if (observer) observer("ring", frontend.get());
+         try {
+diff --git a/MC_410T_MultiCard/delivery/src/PaimageAcquisition/HostOutput.cpp b/MC_410T_MultiCard/delivery/src/PaimageAcquisition/HostOutput.cpp
+index bd1dbc3..ea1234a 100644
+--- a/MC_410T_MultiCard/delivery/src/PaimageAcquisition/HostOutput.cpp
++++ b/MC_410T_MultiCard/delivery/src/PaimageAcquisition/HostOutput.cpp
+@@ -82,7 +82,19 @@ void HostOutput::card(Frame f){
+ }
+ void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
+     std::lock_guard<std::mutex> lock(normalizationMutex_);
++    // Three-state group gate (count-boundary frontend-only, task 20260929):
++    //   Drop         -- startup control trigger or expired-round frame; the
++    //                   whole group is discarded exactly as before, in every
++    //                   mode, with the original precedence.
++    //   FrontendOnly -- disableCountBoundary && LogicalScan at or beyond the
++    //                   configured per-round count: the group still reaches
++    //                   the frontend signal path (time/frequency windows keep
++    //                   refreshing) while the imaging publisher stays frozen
++    //                   (consumeSync -> deliverAssembled(imagingSubmit=false)).
++    //   Pass         -- everything else keeps the verbatim previous behavior.
++    // Drop outranks FrontendOnly; one FrontendOnly frame marks the whole group.
+     bool filter=false;
++    bool frontendOnly=false;
+     if(normalizer_){
+         for(const auto& f:frames){
+             if(!f)continue;
+@@ -96,11 +108,11 @@ void HostOutput::sync(std::uint16_t trigger,const std::vector<Frame>& frames,boo
+                classification.decision==PhysicalTriggerDecision::LogicalScan &&
+                classification.logicalTriggerIndex >= 0 &&
+                static_cast<std::uint64_t>(classification.logicalTriggerIndex) >=
+-                   normalizer_->configuredLogicalTriggersPerRound())filter=true;
++                   normalizer_->configuredLogicalTriggersPerRound())frontendOnly=true;
+         }
+         if(filter)return;
+     }
+-    const auto begin=SocketReceiver::now();const auto session=frames.empty()?0:frames.front()->measurementSession;workers_.pushSync(trigger,frames,startup);
++    const auto begin=SocketReceiver::now();const auto session=frames.empty()?0:frames.front()->measurementSession;workers_.pushSync(trigger,frames,startup,frontendOnly);
+     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.threadId=GetCurrentThreadId();r.card=-1;r.kind=std::uint16_t(TimingKind::SyncEnqueue);r.value0=std::uint32_t(frames.size());r.flags=startup?1:0;timing_->observe(r,end-begin>=500000);}
+ }
+ PhysicalRoundNormalizer::Snapshot HostOutput::normalizerSnapshot() const{
+@@ -134,7 +146,11 @@ void HostOutput::consumeSync(const SyncFrame& sync){
+     for(auto f:sync.cards)groups.push_back(converter_.convert(f));
+     if(!workers_.isCurrentSession(sync.session)){for(auto f:sync.cards)observe(f,7,5);return;}
+     for(std::size_t i=0;i<groups.size();++i){auto f=sync.cards[i];
+-        auto result=processors_.at(f->card)->deliverAssembled(groups[i],false,true);
++        // beyondCountBoundary groups submit to the frontend signal path only:
++        // imagingSubmit=false freezes the imaging publisher for this group;
++        // every Pass group keeps the verbatim imagingSubmit=true behavior.
++        auto result=processors_.at(f->card)->deliverAssembled(groups[i],false,true,
++                                                              !sync.beyondCountBoundary);
+         // reason 1/2 record the frontend enqueue outcome only.  The final Ring
+         // Accepted/QueueFull/Busy/Disabled outcome stays with ImagingBypass/Ring.
+         observe(f,7,1,result.frontendAccepted);
+diff --git a/MC_410T_MultiCard/delivery/src/PaimageAcquisition/OutputQueues.cpp b/MC_410T_MultiCard/delivery/src/PaimageAcquisition/OutputQueues.cpp
+index 9f218c4..b5d5104 100644
+--- a/MC_410T_MultiCard/delivery/src/PaimageAcquisition/OutputQueues.cpp
++++ b/MC_410T_MultiCard/delivery/src/PaimageAcquisition/OutputQueues.cpp
+@@ -14,8 +14,10 @@ Frame OutputQueues::popCard(){
+     if(cards_.empty())return {};
+     auto f=std::move(cards_.front());cards_.pop_front();--perCard_[f->card];return f;
+ }
+-std::vector<SyncFrame> OutputQueues::pushSync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
+-    SyncFrame f{trigger,session_,index_/unsigned(blockSize_)+1,index_%unsigned(blockSize_),frames};++index_;
++std::vector<SyncFrame> OutputQueues::pushSync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup,
++                                              bool beyondCountBoundary){
++    SyncFrame f{trigger,session_,index_/unsigned(blockSize_)+1,index_%unsigned(blockSize_),frames,
++                beyondCountBoundary};++index_;
+     std::vector<SyncFrame> evicted;
+     if(!startup&&normal_.size()>=std::size_t(blockSize_)*2){
+         const auto oldest=normal_.front().block;
+diff --git a/MC_410T_MultiCard/delivery/src/PaimageAcquisition/OutputWorkers.cpp b/MC_410T_MultiCard/delivery/src/PaimageAcquisition/OutputWorkers.cpp
+index a6c95a3..1726393 100644
+--- a/MC_410T_MultiCard/delivery/src/PaimageAcquisition/OutputWorkers.cpp
++++ b/MC_410T_MultiCard/delivery/src/PaimageAcquisition/OutputWorkers.cpp
+@@ -55,10 +55,11 @@ void OutputWorkers::pushCard(Frame f){
+     saveEnqueued_.fetch_add(1);const auto depth=saveDepth_.fetch_add(1)+1;updateMax(savePeakDepth_,depth);
+     event(Result::CardQueued,f);cardReady_.notify_one();
+ }
+-void OutputWorkers::pushSync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
++void OutputWorkers::pushSync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup,
++                             bool beyondCountBoundary){
+     std::lock_guard<std::mutex> lock(syncMutex_);
+     if(stopping_){for(auto f:frames)event(Result::ListenerDiscard,f);return;}
+-    auto evicted=syncQueue_.pushSync(trigger,frames,startup);
++    auto evicted=syncQueue_.pushSync(trigger,frames,startup,beyondCountBoundary);
+     for(auto& x:evicted)for(auto f:x.cards)event(Result::SyncEvicted,f);
+     for(auto f:frames)event(Result::SyncQueued,f);
+     syncReady_.notify_one();
+diff --git a/MC_410T_MultiCard/delivery/tests/paimage_host_output_test.cpp b/MC_410T_MultiCard/delivery/tests/paimage_host_output_test.cpp
+index 059ad38..d41736b 100644
+--- a/MC_410T_MultiCard/delivery/tests/paimage_host_output_test.cpp
++++ b/MC_410T_MultiCard/delivery/tests/paimage_host_output_test.cpp
+@@ -1,6 +1,7 @@
+ #include "PaimageAcquisition/HostOutput.h"
+ #include "FrontendPreprocessor.h"
+ #include "AcqConfig.h"
++#include "FramePublisher.h"
+ #include <QCoreApplication>
+ #include <QTemporaryDir>
+ #include <QDir>
+@@ -464,8 +465,14 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
+         AcqConfig config;
+         config.acqTimeNs = 64;
+         std::atomic<int> frontends{0};
++        std::atomic<int> imagingArrivals{0}, frontendOnlyArrivals{0};
+         DataProcessor processor(0, nullptr, nullptr, config,
+-            [&](const TriggerGroupPtr&) {
++            [&](const TriggerGroupPtr& group) {
++                // The count-boundary FrontendOnly stamp is visible at the
++                // frontend sink: it is what separates "frontend signal path
++                // refresh" from "imaging publisher arrival" below.
++                if (group->frontendDisplayOnly) ++frontendOnlyArrivals;
++                else ++imagingArrivals;
+                 ++frontends;
+                 return FrontendSubmitResult::Accepted;
+             });
+@@ -495,8 +502,10 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
+         }
+         require(until([&] { return saver.savedCount() == 12; }),
+                 "G1 raw save is untouched by the frontend gate");
+-        require(until([&] { return frontends.load() == 5; }),
+-                "G1 only the designed five logical triggers reach the frontend");
++        require(until([&] { return frontends.load() == 12; }),
++                "G1 every trigger keeps reaching the frontend signal path beyond the count boundary");
++        require(imagingArrivals.load() == 5 && frontendOnlyArrivals.load() == 7,
++                "G1 imaging arrivals stop at the designed five; the rest arrive frontend-only");
+         // Live threshold update: the gate must follow immediately, with no
+         // round boundary, no session boundary and no service restart.
+         output.setConfiguredLogicalTriggersPerRound(20);
+@@ -505,12 +514,174 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
+             output.card(f);
+             output.sync(100 + i, {f}, false);
+         }
+-        require(until([&] { return frontends.load() == 9; }),
+-                "G2 the gate follows a live threshold update");
++        require(until([&] { return frontends.load() == 16; }),
++                "G2 the frontend signal path continues across the live threshold update");
++        require(until([&] { return imagingArrivals.load() == 9; }),
++                "G2 imaging arrivals follow the live threshold update");
+         require(until([&] { return saver.savedCount() == 16; }),
+                 "G2 raw save stays complete across the update");
+         output.stop();
+     }
++    // Count-boundary FrontendOnly contract (任务文档
++    // 前端刷新闸门解耦_计数边界后时频持续刷新_20260929-023810, 勾选「禁用计数
++    // 重置」): triggers at or beyond the designed per-round count keep
++    // refreshing the frontend signal windows (displayUpdates increments) while
++    // both imaging publishers stay frozen at N -- the FramePublisher submit
++    // and the frontend stage's Ring dispatch (the ImagingBypass feed that
++    // drives the realtime image). Save continues throughout. The two Drop
++    // conditions (startup control trigger, expired-round frame) must reach
++    // neither frontend nor publisher in any mode, and the unchecked mode must
++    // pass the same input through bit-identically to the pre-change behavior.
++    {
++        QTemporaryDir root(QDir::currentPath()+"/frontend-only-XXXXXX");
++        require(root.isValid(), "frontend-only temp dir");
++        FileSaver saver(0);
++        AcqConfig config;config.acqTimeNs=64;
++        DisplayBuffer display;
++        std::atomic<int> ringArrivals{0},ringFinals{0};
++        std::vector<std::unique_ptr<FrontendPreprocessor>> frontends;
++        frontends.push_back(makeFrontend(0,&display,
++            [&](const TriggerGroupConstPtr& frame){
++                if(frame&&frame->roundComplete)++ringFinals;
++                ++ringArrivals;
++                return ImagingSubmitResult::Accepted;
++            }));
++        FramePublisher publisher;
++        publisher.configure(true,1,16);
++        std::atomic<int> publisherFrames{0};
++        QObject::connect(&publisher,&FramePublisher::framePublished,
++            qApp,[&](int,int){++publisherFrames;},Qt::DirectConnection);
++        publisher.start();
++        DataProcessor processor(0,nullptr,&publisher,config,
++            [stage=frontends.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
++        // Designed N=4 triggers/round, 「禁用计数重置」 checked, one startup
++        // control identity (Drop), and a 1s physical idle timeout so the
++        // expired-round Drop can be exercised deterministically.
++        HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,4,
++            {},1.0,1,true);
++        wireFrontends(output,frontends);
++        output.beginSession(9100);output.start();
++        const auto save=output.startSaving(root.path(),100,"frontend-only");
++        require(until([&]{return output.savingApplied(save);}),
++                "FO save configuration");
++        auto make=[&](std::uint64_t session,std::uint16_t trigger,std::int64_t time){
++            auto frame=std::make_shared<CardFrame>();frame->card=0;frame->trigger=trigger;
++            frame->measurementSession=session;frame->first=time;frame->closed=time;
++            frame->complete=true;frame->reason=Decision::Complete;frame->bytes.resize(16*8);
++            for(int i=0;i<16;++i){const std::int32_t b=-static_cast<std::int32_t>(trigger);
++                const std::int32_t a=static_cast<std::int32_t>(trigger);
++                std::memcpy(frame->bytes.data()+i*8,&b,4);
++                std::memcpy(frame->bytes.data()+i*8+4,&a,4);}
++            return frame;
++        };
++        auto send=[&](std::uint16_t trigger,std::int64_t time){
++            auto frame=make(9100,trigger,time);output.card(frame);output.sync(trigger,{frame},false);
++        };
++        // FO1 Drop invariance (startup control): the first distinct identity
++        // is classified OperationalStartupControl and reaches neither the
++        // frontend nor any publisher nor save. The gate decision is taken
++        // synchronously before any enqueue, so the zero counts are stable.
++        send(100,1000000000LL);
++        require(frontends[0]->snapshot().displayUpdates==0&&ringArrivals.load()==0&&
++                publisherFrames.load()==0&&saver.savedCount()==0,
++                "FO1 startup control trigger reaches neither frontend nor publisher");
++        // FO2 the N designed logical triggers: display, both imaging
++        // publishers and save each receive exactly N.
++        for(std::uint16_t trigger=101;trigger<=104;++trigger)
++            send(trigger,1000000000LL+trigger);
++        require(until([&]{return frontends[0]->snapshot().displayUpdates==4&&
++                                  ringArrivals.load()==4&&publisherFrames.load()==4&&
++                                  saver.savedCount()==4;}),
++                "FO2 N designed triggers reach display, imaging publishers and save");
++        // FO3 beyond the count boundary (N+1..N+k): the frontend keeps
++        // refreshing (time/frequency windows) while both imaging publishers
++        // stay frozen at N and raw save continues.
++        for(std::uint16_t trigger=105;trigger<=106;++trigger)
++            send(trigger,1000000000LL+trigger);
++        require(until([&]{return frontends[0]->snapshot().displayUpdates==6&&
++                                  saver.savedCount()==6;}),
++                "FO3 display keeps refreshing and save continues beyond the boundary");
++        require(ringArrivals.load()==4,
++                "FO3 imaging frozen at N: frontend Ring leg skipped");
++        require(publisherFrames.load()==4,
++                "FO3 imaging frozen at N: FramePublisher submit skipped");
++        require(ringFinals.load()==0,
++                "FO3 no synthetic final beyond the boundary");
++        // FO4 Drop invariance (expired round): force the physical idle
++        // timeout, then a late old-round sync reaches neither frontend nor
++        // publisher.
++        require(output.pollPhysicalRoundTimeout(4000000000LL),
++                "FO4 physical idle timeout fired");
++        output.sync(104,{make(9100,104,1000000000LL+104)},false);
++        require(frontends[0]->snapshot().displayUpdates==6&&ringArrivals.load()==4&&
++                publisherFrames.load()==4,
++                "FO4 expired-round late sync reaches neither frontend nor publisher");
++        // FO5 the gate reopens for the next physical round: the round reset
++        // re-arms the startup filter (same admission semantics C8 relies on),
++        // so the first new identity is a control Drop again and the second
++        // one is the first logical Pass (logical index 0) of the new round.
++        send(200,4000000000LL+1);
++        send(201,4000000000LL+2);
++        require(until([&]{return frontends[0]->snapshot().displayUpdates==7&&
++                                  ringArrivals.load()==5&&publisherFrames.load()==5&&
++                                  saver.savedCount()==7;}),
++                "FO5 new round passes again after the timeout boundary");
++        const auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));
++        output.stop();stopFrontends(frontends);
++        publisher.requestInterruption();publisher.wait();
++        // FO6 unchecked identity: with 「禁用计数重置」 unchecked, the same
++        // input passes through bit-identically to the pre-change behavior --
++        // every logical trigger reaches display, both imaging publishers and
++        // save, and the Nth trigger still produces the one-shot CountBoundary.
++        FileSaver saver2(0);
++        DisplayBuffer display2;
++        std::atomic<int> ringArrivals2{0},ringFinals2{0};
++        std::vector<std::unique_ptr<FrontendPreprocessor>> frontends2;
++        frontends2.push_back(makeFrontend(0,&display2,
++            [&](const TriggerGroupConstPtr& frame){
++                if(frame&&frame->roundComplete)++ringFinals2;
++                ++ringArrivals2;
++                return ImagingSubmitResult::Accepted;
++            }));
++        FramePublisher publisher2;
++        publisher2.configure(true,1,16);
++        std::atomic<int> publisherFrames2{0};
++        QObject::connect(&publisher2,&FramePublisher::framePublished,
++            qApp,[&](int,int){++publisherFrames2;},Qt::DirectConnection);
++        publisher2.start();
++        DataProcessor processor2(0,nullptr,&publisher2,config,
++            [stage=frontends2.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
++        HostOutput output2(32,50,{&processor2},{&saver2},nullptr,nullptr,4,
++            {},0.0,1,false);
++        wireFrontends(output2,frontends2);
++        output2.beginSession(9200);output2.start();
++        const auto save2=output2.startSaving(root.path(),100,"identity");
++        require(until([&]{return output2.savingApplied(save2);}),
++                "FO6 save configuration");
++        auto send2=[&](std::uint16_t trigger,std::int64_t time){
++            auto frame=make(9200,trigger,time);output2.card(frame);output2.sync(trigger,{frame},false);
++        };
++        send2(100,1000000000LL);
++        for(std::uint16_t trigger=101;trigger<=106;++trigger)
++            send2(trigger,1000000000LL+trigger);
++        // Unchecked-mode identity: exactly five groups pass through (the Nth
++        // trigger closes the round, and the first identity of the next
++        // generation is re-admitted as a startup control by the UNCHANGED
++        // normalizer admission semantics -- identical to the pre-change
++        // behavior for this input), the Nth carries the one-shot final and
++        // the generation advances.
++        require(until([&]{return frontends2[0]->snapshot().displayUpdates==5&&
++                                  ringArrivals2.load()==5&&publisherFrames2.load()==5&&
++                                  saver2.savedCount()==5;}),
++                "FO6 unchecked mode: identical pass-through for the same input");
++        require(ringFinals2.load()==1,
++                "FO6 unchecked mode: exactly one CountBoundary final at N");
++        require(output2.normalizerSnapshot().roundGeneration==1,
++                "FO6 unchecked mode: generation advanced at the count boundary");
++        const auto stopped2=output2.stopSaving();require(until([&]{return output2.savingApplied(stopped2);}));
++        output2.stop();stopFrontends(frontends2);
++        publisher2.requestInterruption();publisher2.wait();
++    }
+     // ringLogicalTriggersPerRound is the single derivation of that threshold.
+     {
+         require(ringLogicalTriggersPerRound(8000, 2) == 4000,

@@ -12,6 +12,10 @@ struct SyncFrame {
     std::uint16_t trigger=0;
     std::uint64_t session=0,block=0,index=0;
     std::vector<Frame> cards;
+    // Count-boundary FrontendOnly group: refreshes the frontend signal windows
+    // while the imaging publisher stays frozen. Only reachable when
+    // disableCountBoundary is true; every other group keeps this false.
+    bool beyondCountBoundary=false;
 };
 class OutputQueues {
 public:
@@ -20,7 +24,8 @@ public:
     Frame popCard();
     // Returns exact discarded objects. Source cumulative 0x790 counts one
     // eviction event, not this number; diagnostics keep both units separate.
-    std::vector<SyncFrame> pushSync(std::uint16_t,const std::vector<Frame>&,bool startup);
+    std::vector<SyncFrame> pushSync(std::uint16_t,const std::vector<Frame>&,bool startup,
+                                    bool beyondCountBoundary=false);
     std::optional<SyncFrame> popSync();
     void beginSession(std::uint64_t);
     void clearCards();

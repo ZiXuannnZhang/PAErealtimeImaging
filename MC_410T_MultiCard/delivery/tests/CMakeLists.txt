@@ -5,6 +5,67 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 find_package(Python3 COMPONENTS Interpreter QUIET)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
+
+add_executable(ring_signal_enhancer_test
+    ring_signal_enhancer_test.cpp
+    ../src/RingSignalEnhancer.cpp)
+target_include_directories(ring_signal_enhancer_test PRIVATE ../include)
+target_compile_features(ring_signal_enhancer_test PRIVATE cxx_std_17)
+add_test(NAME ring_signal_enhancer_test COMMAND ring_signal_enhancer_test)
+
+# 预算测试 Layer 1 微基准（TASKS/环形增强实时预算测试_20260927-141217.md §4）。
+# CTest 入口跑无参模式（内置语义断言 + 合成矩阵）；实录数据矩阵用
+# --data <14.dat> 手动复跑，不进 CTest。
+add_executable(ring_enhancer_bench
+    ring_enhancer_bench.cpp
+    ../src/RingSignalEnhancer.cpp)
+target_include_directories(ring_enhancer_bench PRIVATE ../include)
+target_compile_features(ring_enhancer_bench PRIVATE cxx_std_17)
+add_test(NAME ring_enhancer_bench COMMAND ring_enhancer_bench)
+
+# 优化任务 A2/A3 对拍（TASKS/环形增强FFT性能优化_20260927-141217.md §3/§5）。
+# 内嵌参考实现 = 预算任务 1 时的算法逐字转录；CTest 默认 --max-ulp 1（A3 政策），
+# A2 验收以 --max-ulp 0 手动复跑（要求逐位一致）。
+add_executable(ring_enhancer_parity_test
+    ring_enhancer_parity_test.cpp
+    ../src/RingSignalEnhancer.cpp)
+target_include_directories(ring_enhancer_parity_test PRIVATE ../include)
+target_compile_features(ring_enhancer_parity_test PRIVATE cxx_std_17)
+add_test(NAME ring_enhancer_parity_test COMMAND ring_enhancer_parity_test)
+
+# 显示层几何纯函数（TASKS/环形显示层优化_显示掩膜与毫米坐标_20260928-003123.md
+# §验收 1）：映射往返/边界 + 掩膜行区间 LUT + LUT↔单像素判定一致性（纯 std，无 Qt）。
+add_executable(ring_display_mapping_test
+    ring_display_mapping_test.cpp)
+target_include_directories(ring_display_mapping_test PRIVATE ../include)
+target_compile_features(ring_display_mapping_test PRIVATE cxx_std_17)
+add_test(NAME ring_display_mapping_test COMMAND ring_display_mapping_test)
+
+# 显示渲染掩膜断言 + 默认恒等 + PNG 写入器掩膜行为（工作一/二渲染路径）。
+# 内嵌基线 = fb6370b renderFrame/capturePngWriter render lambda 逐字转录；
+# offscreen 平台先例同 diagnostic_dialog_test。
+add_executable(ring_display_render_test
+    ring_display_render_test.cpp
+    ../src/ImagingDisplayWindow.cpp
+    ../src/RingImageWidget.cpp
+    ../src/RingColorBarWidget.cpp
+    # 头文件显式列出（沿主工程 add_executable 先例）：AUTOMOC 需要
+    ../include/ImagingDisplayWindow.h
+    ../include/RingImageWidget.h
+    ../include/RingColorBarWidget.h)
+target_include_directories(ring_display_render_test PRIVATE ../include)
+target_compile_features(ring_display_render_test PRIVATE cxx_std_17)
+target_link_libraries(ring_display_render_test PRIVATE Qt6::Widgets)
+add_test(NAME ring_display_render_test COMMAND ring_display_render_test)
+set_tests_properties(ring_display_render_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+if(WIN32 AND TARGET Qt6::QOffscreenIntegrationPlugin)
+    add_custom_command(TARGET ring_display_render_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ring_display_render_test>/platforms"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>"
+            "$<TARGET_FILE_DIR:ring_display_render_test>/platforms/")
+endif()
 
 add_executable(ring_block_assembler_test
     ring_block_assembler_test.cpp

@@ -169,6 +169,7 @@ ring_udp_replay.exe
 - `docs/README.md` — 当前模块文档索引；
 - `docs/诊断日志导出.md` — 诊断 ZIP 的使用与判读；
 - `docs/ZeroMQ依赖说明.md` — 当前 ZeroMQ runtime/import-library 约束；
+- `docs/环形重建增强.md` — 未验收的环形 H(f)/双极补偿实现边界与验证要求；
 - `tools/paimage-trace-schema.md` — PAimage trace schema；
 - `tools/startup-looplog-schema.md` — startup loop log schema；
 - `src/RingRecon/README.md` — CPU reference/verify 工具；

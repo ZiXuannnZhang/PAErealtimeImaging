@@ -1,0 +1,3 @@
+rel_main: n=25 median=543.90 mean=544.13 min=533.11 max=554.87
+rel_branch_off: n=25 median=548.76 mean=549.37 min=541.80 max=559.68
+rel_branch_both: n=25 median=1406.69 mean=1426.95 min=1391.54 max=1505.81

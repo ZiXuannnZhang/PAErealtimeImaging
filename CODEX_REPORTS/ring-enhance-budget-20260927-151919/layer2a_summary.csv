@@ -1,0 +1,13 @@
+unit,preset,svc_build,enhance_arg,grid_mm,block_alines_per_ch,rounds_total,rounds_measured,svc_avg_process_us,driver_block_ms_median,driver_block_ms_mean,round_wall_ms_median,round_wall_ms_min,round_wall_ms_max,block_copy_rejected,anomalies
+main,mingw-debug,c95917f178967ced841699ba47a1c78a1372bb65,<no enhance key>,0.01,200,6,5,464644.5,675.93,677.64,3850.43,3834.09,3881.52,0,none
+branch-off,mingw-debug,162b712eaac9494f9c430b7c49918d7405b94bfc,off,0.01,200,6,5,461360.6,677.88,679.19,3849.12,3826.05,3884.01,0,none
+branch-bipolar,mingw-debug,162b712eaac9494f9c430b7c49918d7405b94bfc,bipolar,0.01,200,6,5,510158.5,731.32,731.64,4126.25,4116.60,4163.49,0,none
+branch-freq,mingw-debug,162b712eaac9494f9c430b7c49918d7405b94bfc,freq,0.01,200,6,5,2169147.0,2399.53,2398.10,12445.54,12382.52,12508.84,0,none
+branch-both,mingw-debug,162b712eaac9494f9c430b7c49918d7405b94bfc,both,0.01,200,6,5,2258816.2,2489.00,2510.47,13007.80,12924.59,13315.77,0,none
+main,mingw-release,c95917f178967ced841699ba47a1c78a1372bb65,<no enhance key>,0.01,200,6,5,443108.6,543.90,544.13,3212.75,3176.84,3225.72,0,none
+branch-off,mingw-release,162b712eaac9494f9c430b7c49918d7405b94bfc,off,0.01,200,6,5,444778.5,548.76,549.37,3256.26,3209.76,3272.72,0,none
+branch-both,mingw-release,162b712eaac9494f9c430b7c49918d7405b94bfc,both,0.01,200,6,5,1318560.3,1406.69,1426.95,7537.91,7487.14,7971.42,0,none
+main,mingw-release,c95917f178967ced841699ba47a1c78a1372bb65,<no enhance key>,0.01,100,4,3,225356.0,328.08,328.08,n/a,n/a,n/a,0,none
+branch-both,mingw-release,162b712eaac9494f9c430b7c49918d7405b94bfc,both,0.01,100,4,3,660533.5,770.85,770.85,n/a,n/a,n/a,0,none
+main,mingw-release,c95917f178967ced841699ba47a1c78a1372bb65,<no enhance key>,0.02,200,4,3,132410.6,164.62,164.62,n/a,n/a,n/a,0,none
+branch-both,mingw-release,162b712eaac9494f9c430b7c49918d7405b94bfc,both,0.02,200,4,3,1060442.7,1093.96,1093.96,n/a,n/a,n/a,0,none

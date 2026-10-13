@@ -1,0 +1,36 @@
+# 反证临时改动（21 号）——已还原，此处为操作留痕
+
+## 临时改动一（4→0，所有反证运行共用）
+
+文件：tests/paimage_core/discovery_checks.cpp（6bca496 移植版第 1 个新增测试块，行 350）
+
+```diff
+         DiscoveryOptions options = baseOptions(5);
+         options.finalGraceMs = 500;
+-        options.expectedCardCount = 4;
++        options.expectedCardCount = 0; // COUNTER-PROOF TEMP EDIT (4 -> 0), reverted after run
+         const qint64 start = f.channel.now;
+```
+
+## 临时改动二（逐条取证的中性化，`true ||` 前缀 + NEUTER 注释）
+
+pass A（取证 closed in round 1）：
+
+```diff
+-        require(result.verifiedIPs.size() == 4, "expected four cards close discovery");
+-        require(result.expectedCountReached, "early exit flagged");
++        require(true || result.verifiedIPs.size() == 4, "expected four cards close discovery"); // COUNTER-PROOF NEUTER
++        require(true || result.expectedCountReached, "early exit flagged"); // COUNTER-PROOF NEUTER
+```
+
+pass B（取证 one CONFIG per candidate, no re-sends）：在 pass A 基础上再中性化
+`require(result.roundsUsed == 1, "closed in round 1")`。
+（操作瑕疵：该步编辑误在 new_string 多带一行 sends 断言造成重复，见 29 号说明。）
+
+pass C（取证 late fifth card not admitted）：再中性化 sends 断言与
+`require(c.attemptsSent == 1, ...)` 循环断言。
+
+## 还原
+
+`git checkout -- tests/paimage_core/discovery_checks.cpp`（恢复 index 中的 6bca496 移植版）；
+还原后 vs 6bca496 diff = 0 行（逐字节一致），重建复跑绿色（27 号文件）。

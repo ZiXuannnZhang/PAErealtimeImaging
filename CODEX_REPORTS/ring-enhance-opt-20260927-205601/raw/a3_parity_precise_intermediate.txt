@@ -1,0 +1,442 @@
+CASE  random/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=1 rejected-both (aligned)
+CASE  random/bipolar len=1 rejected-both (aligned)
+CASE  random/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=1 rejected-both (aligned)
+CASE  random/bipolar len=1 rejected-both (aligned)
+CASE  random/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=1 rejected-both (aligned)
+CASE  random/bipolar len=1 rejected-both (aligned)
+CASE  random/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=1 rejected-both (aligned)
+CASE  random/bipolar len=1 rejected-both (aligned)
+CASE  random/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=2 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=2 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=2 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=2 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=2 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=2 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=2 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=2 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=2 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=3 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=3 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=3 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=3 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=3 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=3 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=3 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=3 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=511 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=511 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+DIFF  random/both len=511 idx=31 ref=8.00026386e-13 act=8.00026332e-13 ulp=1
+DIFF  random/both len=511 idx=34 ref=2.52114867e-14 act=2.52114834e-14 ulp=2
+DIFF  random/both len=511 idx=35 ref=-2.69640466e-15 act=-2.69640826e-15 ulp=17
+DIFF  random/both len=511 idx=36 ref=-1.36911534e-14 act=-1.369115e-14 ulp=4
+DIFF  random/both len=511 idx=37 ref=-1.86171184e-14 act=-1.86170947e-14 ulp=14
+DIFF  random/both len=511 idx=38 ref=-2.13384981e-14 act=-2.13385048e-14 ulp=4
+DIFF  random/both len=511 idx=39 ref=-2.31679791e-14 act=-2.31680011e-14 ulp=13
+DIFF  random/both len=511 idx=41 ref=-2.5555521e-14 act=-2.55555176e-14 ulp=2
+DIFF  random/both len=511 idx=42 ref=-2.62915063e-14 act=-2.62915114e-14 ulp=3
+DIFF  random/both len=511 idx=43 ref=-2.67565629e-14 act=-2.67565579e-14 ulp=3
+DIFF  random/both len=511 idx=44 ref=-2.69587548e-14 act=-2.69587463e-14 ulp=5
+DIFF  random/both len=511 idx=45 ref=-2.68952171e-14 act=-2.6895207e-14 ulp=6
+DIFF  random/both len=511 idx=46 ref=-2.65506916e-14 act=-2.65507085e-14 ulp=10
+DIFF  random/both len=511 idx=47 ref=-2.58981577e-14 act=-2.58981781e-14 ulp=12
+DIFF  random/both len=511 idx=48 ref=-2.490275e-14 act=-2.49027449e-14 ulp=3
+DIFF  random/both len=511 idx=49 ref=-2.35304804e-14 act=-2.35304753e-14 ulp=3
+DIFF  random/both len=511 idx=50 ref=-2.1759758e-14 act=-2.17597479e-14 ulp=6
+DIFF  random/both len=511 idx=51 ref=-1.9594835e-14 act=-1.95948452e-14 ulp=6
+DIFF  random/both len=511 idx=52 ref=-1.70788202e-14 act=-1.7078832e-14 ulp=7
+DIFF  random/both len=511 idx=53 ref=-1.4302995e-14 act=-1.43029662e-14 ulp=17
+DIFF  random/both len=511 idx=54 ref=-1.14098015e-14 act=-1.14097964e-14 ulp=6
+DIFF  random/both len=511 idx=55 ref=-8.58679735e-15 act=-8.58681429e-15 ulp=20
+DIFF  random/both len=511 idx=56 ref=-6.05111994e-15 act=-6.05112587e-15 ulp=14
+DIFF  random/both len=511 idx=57 ref=-4.02562234e-15 act=-4.02562191e-15 ulp=1
+DIFF  random/both len=511 idx=58 ref=-2.70992585e-15 act=-2.70991992e-15 ulp=28
+DIFF  random/both len=511 idx=60 ref=-1.6935509e-14 act=-1.69355158e-14 ulp=4
+DIFF  random/both len=511 idx=61 ref=-4.11457858e-15 act=-4.11456503e-15 ulp=32
+DIFF  random/both len=511 idx=62 ref=-2.05327038e-14 act=-2.0532719e-14 ulp=9
+DIFF  random/both len=511 idx=63 ref=-9.17447813e-15 act=-9.17450354e-15 ulp=30
+DIFF  random/both len=511 idx=64 ref=-2.6662527e-14 act=-2.66624931e-14 ulp=20
+DIFF  random/both len=511 idx=65 ref=-1.59125744e-14 act=-1.59125541e-14 ulp=12
+DIFF  random/both len=511 idx=66 ref=-3.35341665e-14 act=-3.35342004e-14 ulp=10
+DIFF  random/both len=511 idx=67 ref=-2.24778353e-14 act=-2.24778488e-14 ulp=8
+DIFF  random/both len=511 idx=68 ref=-3.9420212e-14 act=-3.94201849e-14 ulp=8
+DIFF  random/both len=511 idx=69 ref=-2.73907941e-14 act=-2.73907789e-14 ulp=9
+DIFF  random/both len=511 idx=70 ref=-4.31370265e-14 act=-4.3137057e-14 ulp=9
+DIFF  random/both len=511 idx=71 ref=-2.9736518e-14 act=-2.9736535e-14 ulp=5
+DIFF  random/both len=511 idx=72 ref=-4.39552061e-14 act=-4.39551824e-14 ulp=7
+DIFF  random/both len=511 idx=73 ref=-2.88620717e-14 act=-2.88620615e-14 ulp=3
+DIFF  random/both len=511 idx=74 ref=-4.11997774e-14 act=-4.11997605e-14 ulp=5
+DIFF  random/both len=511 idx=76 ref=-3.40707653e-14 act=-3.40707754e-14 ulp=3
+DIFF  random/both len=511 idx=77 ref=-1.44668975e-14 act=-1.44668891e-14 ulp=5
+DIFF  random/both len=511 idx=78 ref=-2.20864586e-14 act=-2.2086484e-14 ulp=15
+DIFF  random/both len=511 idx=79 ref=-2.39470508e-16 act=-2.39486601e-16 ulp=608
+DIFF  random/both len=511 idx=80 ref=-6.06405625e-15 act=-6.06402237e-15 ulp=80
+DIFF  random/both len=511 idx=81 ref=1.68421422e-14 act=1.68421592e-14 ulp=10
+DIFF  random/both len=511 idx=82 ref=1.10691053e-14 act=1.10690782e-14 ulp=32
+DIFF  random/both len=511 idx=83 ref=3.28168753e-14 act=3.28168482e-14 ulp=8
+DIFF  random/both len=511 idx=84 ref=2.45937659e-14 act=2.45937931e-14 ulp=16
+DIFF  random/both len=511 idx=85 ref=4.2673713e-14 act=4.26737401e-14 ulp=8
+DIFF  random/both len=511 idx=86 ref=1.25193757e-12 act=1.25193746e-12 ulp=1
+DIFF  random/both len=511 idx=87 ref=1.42195995e-14 act=1.42196181e-14 ulp=11
+DIFF  random/both len=511 idx=88 ref=2.44081048e-14 act=2.44080574e-14 ulp=28
+DIFF  random/both len=511 idx=89 ref=3.83632996e-15 act=3.8362749e-15 ulp=130
+DIFF  random/both len=511 idx=90 ref=9.85678011e-15 act=9.85685634e-15 ulp=90
+DIFF  random/both len=511 idx=91 ref=-1.37389159e-14 act=-1.37388871e-14 ulp=34
+DIFF  random/both len=511 idx=92 ref=-9.43298496e-15 act=-9.43302477e-15 ulp=47
+DIFF  random/both len=511 idx=93 ref=-3.34376251e-14 act=-3.34376048e-14 ulp=6
+DIFF  random/both len=511 idx=95 ref=-5.0749237e-14 act=-5.07492675e-14 ulp=9
+DIFF  random/both len=511 idx=96 ref=-4.34669356e-14 act=-4.34669153e-14 ulp=6
+DIFF  random/both len=511 idx=97 ref=-6.33147167e-14 act=-6.33146896e-14 ulp=4
+DIFF  random/both len=511 idx=98 ref=-5.34964088e-14 act=-5.34963987e-14 ulp=3
+DIFF  random/both len=511 idx=99 ref=-7.09791994e-14 act=-7.097924e-14 ulp=6
+DIFF  random/both len=511 idx=100 ref=-5.90809818e-14 act=-5.90810156e-14 ulp=5
+DIFF  random/both len=511 idx=101 ref=-7.48099567e-14 act=-7.48099025e-14 ulp=8
+DIFF  random/both len=511 idx=102 ref=-6.14661317e-14 act=-6.14661249e-14 ulp=1
+DIFF  random/both len=511 idx=103 ref=-7.60008986e-14 act=-7.60009595e-14 ulp=9
+DIFF  random/both len=511 idx=104 ref=-6.16389128e-14 act=-6.16388722e-14 ulp=6
+DIFF  random/both len=511 idx=105 ref=-7.52558823e-14 act=-7.52558551e-14 ulp=4
+DIFF  random/both len=511 idx=106 ref=-6.00173191e-14 act=-6.00173326e-14 ulp=2
+DIFF  random/both len=511 idx=107 ref=-7.27699422e-14 act=-7.27699219e-14 ulp=3
+DIFF  random/both len=511 idx=108 ref=-5.66892148e-14 act=-5.66892521e-14 ulp=11
+DIFF  random/both len=511 idx=109 ref=-6.8673596e-14 act=-6.86736096e-14 ulp=2
+DIFF  random/both len=511 idx=111 ref=-6.36317916e-14 act=-6.36317781e-14 ulp=2
+DIFF  random/both len=511 idx=112 ref=-4.69714328e-14 act=-4.69713989e-14 ulp=10
+DIFF  random/both len=511 idx=113 ref=-5.90618862e-14 act=-5.90618591e-14 ulp=4
+DIFF  random/both len=511 idx=114 ref=-4.32327751e-14 act=-4.32328123e-14 ulp=11
+DIFF  random/both len=511 idx=115 ref=-5.63998209e-14 act=-5.63999192e-14 ulp=29
+DIFF  random/both len=511 idx=117 ref=-5.55049306e-14 act=-5.55048696e-14 ulp=18
+DIFF  random/both len=511 idx=118 ref=-4.07012138e-14 act=-4.07012409e-14 ulp=8
+DIFF  random/both len=511 idx=120 ref=-6.47299597e-14 act=-6.47299393e-14 ulp=3
+DIFF  random/both len=511 idx=122 ref=-1.75768894e-12 act=-1.75768883e-12 ulp=1
+DIFF  random/both len=511 idx=124 ref=1.73099295e-12 act=1.73099284e-12 ulp=1
+DIFF  random/both len=511 idx=136 ref=-1.97664996e-12 act=-1.97664975e-12 ulp=1
+DIFF  random/both len=511 idx=140 ref=-2.0760314e-12 act=-2.07603162e-12 ulp=1
+DIFF  random/both len=511 idx=147 ref=1.96898314e-12 act=1.96898292e-12 ulp=1
+DIFF  random/both len=511 idx=153 ref=-2.26618442e-12 act=-2.2661842e-12 ulp=1
+DIFF  random/both len=511 idx=174 ref=2.49549556e-12 act=2.49549578e-12 ulp=1
+DIFF  random/both len=511 idx=175 ref=-2.46300875e-12 act=-2.46300896e-12 ulp=1
+DIFF  random/both len=511 idx=180 ref=-2.61283464e-12 act=-2.61283486e-12 ulp=1
+DIFF  random/both len=511 idx=181 ref=2.51574586e-12 act=2.51574608e-12 ulp=1
+DIFF  random/both len=511 idx=199 ref=-2.95984699e-12 act=-2.95984721e-12 ulp=1
+DIFF  random/both len=511 idx=207 ref=-3.00308671e-12 act=-3.00308693e-12 ulp=1
+DIFF  random/both len=511 idx=239 ref=3.2554391e-12 act=3.25543889e-12 ulp=1
+DIFF  random/both len=511 idx=241 ref=-3.56923692e-12 act=-3.56923714e-12 ulp=1
+DIFF  random/both len=511 idx=244 ref=-3.65166621e-12 act=-3.65166578e-12 ulp=1
+DIFF  random/both len=511 idx=257 ref=-3.50176659e-12 act=-3.5017668e-12 ulp=1
+DIFF  random/both len=511 idx=262 ref=-3.7421676e-12 act=-3.74216717e-12 ulp=1
+DIFF  random/both len=511 idx=264 ref=-3.80995626e-12 act=-3.80995669e-12 ulp=1
+DIFF  random/both len=511 idx=265 ref=-3.784968e-12 act=-3.78496843e-12 ulp=1
+DIFF  random/both len=511 idx=266 ref=1.12504008e-11 act=1.12504017e-11 ulp=1
+DIFF  random/both len=511 idx=267 ref=-3.9503999e-12 act=-3.95039947e-12 ulp=1
+DIFF  random/both len=511 idx=272 ref=-4.06371117e-12 act=-4.06371161e-12 ulp=1
+DIFF  random/both len=511 idx=273 ref=-4.00997117e-12 act=-4.00997161e-12 ulp=1
+DIFF  random/both len=511 idx=292 ref=-4.2297936e-12 act=-4.22979317e-12 ulp=1
+DIFF  random/both len=511 idx=295 ref=-4.19410817e-12 act=-4.19410773e-12 ulp=1
+DIFF  random/both len=511 idx=303 ref=-4.16828724e-12 act=-4.16828681e-12 ulp=1
+DIFF  random/both len=511 idx=307 ref=-4.42563174e-12 act=-4.4256313e-12 ulp=1
+DIFF  random/both len=511 idx=329 ref=-4.93279549e-12 act=-4.93279593e-12 ulp=1
+DIFF  random/both len=511 idx=351 ref=-5.02671255e-12 act=-5.02671212e-12 ulp=1
+DIFF  random/both len=511 idx=352 ref=1.48880699e-11 act=1.48880682e-11 ulp=1
+DIFF  random/both len=511 idx=358 ref=-5.34026989e-12 act=-5.34026946e-12 ulp=1
+DIFF  random/both len=511 idx=359 ref=-5.28750958e-12 act=-5.28750915e-12 ulp=1
+DIFF  random/both len=511 idx=372 ref=-5.57156491e-12 act=-5.57156448e-12 ulp=1
+DIFF  random/both len=511 idx=373 ref=-5.51047619e-12 act=-5.51047576e-12 ulp=1
+DIFF  random/both len=511 idx=383 ref=-5.32693941e-12 act=-5.32693898e-12 ulp=1
+DIFF  random/both len=511 idx=397 ref=-5.80933175e-12 act=-5.80933131e-12 ulp=1
+DIFF  random/both len=511 idx=405 ref=-5.98847144e-12 act=-5.98847187e-12 ulp=1
+DIFF  random/both len=511 idx=410 ref=-6.04648102e-12 act=-6.04648146e-12 ulp=1
+DIFF  random/both len=511 idx=412 ref=-6.15898478e-12 act=-6.15898435e-12 ulp=1
+DIFF  random/both len=511 idx=414 ref=1.7376869e-11 act=1.73768708e-11 ulp=1
+DIFF  random/both len=511 idx=416 ref=-6.14875468e-12 act=-6.14875512e-12 ulp=1
+DIFF  random/both len=511 idx=420 ref=-6.20412012e-12 act=-6.20411968e-12 ulp=1
+DIFF  random/both len=511 idx=421 ref=-6.11752966e-12 act=-6.11753009e-12 ulp=1
+DIFF  random/both len=511 idx=422 ref=1.7850903e-11 act=1.78509048e-11 ulp=1
+DIFF  random/both len=511 idx=424 ref=-6.04119489e-12 act=-6.04119532e-12 ulp=1
+DIFF  random/both len=511 idx=439 ref=-6.46738002e-12 act=-6.46737958e-12 ulp=1
+DIFF  random/both len=511 idx=442 ref=-6.59655577e-12 act=-6.5965562e-12 ulp=1
+DIFF  random/both len=511 idx=444 ref=-6.61682818e-12 act=-6.61682775e-12 ulp=1
+DIFF  random/both len=511 idx=456 ref=-6.74235364e-12 act=-6.74235407e-12 ulp=1
+DIFF  random/both len=511 idx=464 ref=-6.81108859e-12 act=-6.81108902e-12 ulp=1
+DIFF  random/both len=511 idx=467 ref=-6.76480877e-12 act=-6.7648092e-12 ulp=1
+DIFF  random/both len=511 idx=474 ref=-6.38181435e-12 act=-6.38181478e-12 ulp=1
+CASE  random/both len=511 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=133 max_ulp=608
+CASE  random/bipolar len=511 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+DIFF  random/freq len=511 idx=449 ref=-1.58483999e-08 act=-1.58483981e-08 ulp=1
+DIFF  random/freq len=511 idx=451 ref=-1.23453594e-08 act=-1.23453585e-08 ulp=1
+DIFF  random/freq len=511 idx=453 ref=-9.60100177e-09 act=-9.60100266e-09 ulp=1
+DIFF  random/freq len=511 idx=454 ref=-8.46171577e-09 act=-8.46171666e-09 ulp=1
+DIFF  random/freq len=511 idx=457 ref=-5.77865267e-09 act=-5.77865222e-09 ulp=1
+DIFF  random/freq len=511 idx=459 ref=-4.47223103e-09 act=-4.47223059e-09 ulp=1
+DIFF  random/freq len=511 idx=461 ref=-3.45555051e-09 act=-3.45555007e-09 ulp=2
+DIFF  random/freq len=511 idx=462 ref=-3.03563463e-09 act=-3.03563485e-09 ulp=1
+DIFF  random/freq len=511 idx=463 ref=-2.66566635e-09 act=-2.66566613e-09 ulp=1
+DIFF  random/freq len=511 idx=466 ref=-1.80060422e-09 act=-1.80060444e-09 ulp=2
+DIFF  random/freq len=511 idx=467 ref=-1.57859403e-09 act=-1.57859359e-09 ulp=4
+DIFF  random/freq len=511 idx=469 ref=-1.21184307e-09 act=-1.21184296e-09 ulp=1
+DIFF  random/freq len=511 idx=470 ref=-1.0611293e-09 act=-1.06112907e-09 ulp=2
+DIFF  random/freq len=511 idx=471 ref=-9.28766786e-10 act=-9.28766619e-10 ulp=3
+DIFF  random/freq len=511 idx=472 ref=-8.12526213e-10 act=-8.12525935e-10 ulp=5
+DIFF  random/freq len=511 idx=473 ref=-7.10340897e-10 act=-7.1034062e-10 ulp=5
+DIFF  random/freq len=511 idx=474 ref=-6.20066942e-10 act=-6.20066887e-10 ulp=1
+DIFF  random/freq len=511 idx=475 ref=-5.38814549e-10 act=-5.38814382e-10 ulp=3
+DIFF  random/freq len=511 idx=476 ref=-4.60996685e-10 act=-4.60996796e-10 ulp=4
+DIFF  random/freq len=511 idx=477 ref=-3.72761488e-10 act=-3.72761211e-10 ulp=10
+DIFF  random/freq len=511 idx=479 ref=5.05478992e-11 act=5.05481768e-11 ulp=80
+DIFF  random/freq len=511 idx=480 ref=7.64209196e-10 act=7.6420914e-10 ulp=1
+DIFF  random/freq len=511 idx=481 ref=2.62254907e-09 act=2.62254929e-09 ulp=1
+CASE  random/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=23 max_ulp=80
+DIFF  random/freq len=511 idx=447 ref=-2.24601706e-07 act=-2.24601692e-07 ulp=1
+DIFF  random/freq len=511 idx=450 ref=-1.54996712e-07 act=-1.54996727e-07 ulp=1
+DIFF  random/freq len=511 idx=454 ref=-9.39884401e-08 act=-9.39884472e-08 ulp=1
+DIFF  random/freq len=511 idx=459 ref=-4.98381709e-08 act=-4.98381674e-08 ulp=1
+DIFF  random/freq len=511 idx=461 ref=-3.85592109e-08 act=-3.85592074e-08 ulp=1
+DIFF  random/freq len=511 idx=462 ref=-3.38959545e-08 act=-3.3895958e-08 ulp=1
+DIFF  random/freq len=511 idx=463 ref=-2.97846316e-08 act=-2.97846299e-08 ulp=1
+DIFF  random/freq len=511 idx=465 ref=-2.29696582e-08 act=-2.29696564e-08 ulp=1
+DIFF  random/freq len=511 idx=466 ref=-2.01591632e-08 act=-2.01591668e-08 ulp=2
+DIFF  random/freq len=511 idx=467 ref=-1.76854105e-08 act=-1.76854051e-08 ulp=3
+DIFF  random/freq len=511 idx=469 ref=-1.35948159e-08 act=-1.35948151e-08 ulp=1
+DIFF  random/freq len=511 idx=470 ref=-1.19120296e-08 act=-1.1912034e-08 ulp=5
+DIFF  random/freq len=511 idx=472 ref=-9.13282605e-09 act=-9.13282516e-09 ulp=1
+DIFF  random/freq len=511 idx=473 ref=-7.9875413e-09 act=-7.98753774e-09 ulp=4
+DIFF  random/freq len=511 idx=474 ref=-6.96999081e-09 act=-6.96999214e-09 ulp=3
+DIFF  random/freq len=511 idx=475 ref=-6.03721206e-09 act=-6.0372134e-09 ulp=3
+DIFF  random/freq len=511 idx=476 ref=-5.09359444e-09 act=-5.0935931e-09 ulp=3
+DIFF  random/freq len=511 idx=477 ref=-3.88521837e-09 act=-3.88521748e-09 ulp=2
+DIFF  random/freq len=511 idx=478 ref=-1.70617831e-09 act=-1.70618009e-09 ulp=16
+DIFF  random/freq len=511 idx=483 ref=3.74227653e-07 act=3.74227682e-07 ulp=1
+CASE  random/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=20 max_ulp=16
+DIFF  random/both len=511 idx=418 ref=-2.95727186e-05 act=-2.95727168e-05 ulp=1
+DIFF  random/both len=511 idx=435 ref=-4.59308421e-06 act=-4.59308376e-06 ulp=1
+DIFF  random/both len=511 idx=439 ref=-2.91108336e-06 act=-2.91108313e-06 ulp=1
+DIFF  random/both len=511 idx=441 ref=-2.31167382e-06 act=-2.31167405e-06 ulp=1
+DIFF  random/both len=511 idx=443 ref=-1.8325851e-06 act=-1.83258499e-06 ulp=1
+DIFF  random/both len=511 idx=444 ref=-1.63063783e-06 act=-1.63063794e-06 ulp=1
+DIFF  random/both len=511 idx=446 ref=-1.28941952e-06 act=-1.28941963e-06 ulp=1
+DIFF  random/both len=511 idx=447 ref=-1.14587601e-06 act=-1.1458759e-06 ulp=1
+DIFF  random/both len=511 idx=449 ref=-9.03805415e-07 act=-9.03805358e-07 ulp=1
+DIFF  random/both len=511 idx=450 ref=-8.02174497e-07 act=-8.02174554e-07 ulp=1
+DIFF  random/both len=511 idx=451 ref=-7.1167176e-07 act=-7.11671873e-07 ulp=2
+DIFF  random/both len=511 idx=452 ref=-6.31113949e-07 act=-6.31113835e-07 ulp=2
+DIFF  random/both len=511 idx=453 ref=-5.59439457e-07 act=-5.59439286e-07 ulp=3
+DIFF  random/both len=511 idx=454 ref=-4.95695986e-07 act=-4.95696042e-07 ulp=1
+DIFF  random/both len=511 idx=455 ref=-4.39030657e-07 act=-4.39030714e-07 ulp=2
+DIFF  random/both len=511 idx=457 ref=-3.4395876e-07 act=-3.43958732e-07 ulp=1
+DIFF  random/both len=511 idx=458 ref=-3.04255224e-07 act=-3.04255281e-07 ulp=2
+DIFF  random/both len=511 idx=459 ref=-2.69021655e-07 act=-2.69021712e-07 ulp=2
+DIFF  random/both len=511 idx=460 ref=-2.37768447e-07 act=-2.37768461e-07 ulp=1
+DIFF  random/both len=511 idx=461 ref=-2.10057877e-07 act=-2.10057792e-07 ulp=6
+DIFF  random/both len=511 idx=462 ref=-1.85498862e-07 act=-1.8549882e-07 ulp=3
+DIFF  random/both len=511 idx=463 ref=-1.63742328e-07 act=-1.63742428e-07 ulp=7
+DIFF  random/both len=511 idx=464 ref=-1.44477113e-07 act=-1.44477085e-07 ulp=2
+DIFF  random/both len=511 idx=465 ref=-1.2742511e-07 act=-1.27425025e-07 ulp=6
+CASE  random/both len=511 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=37 max_ulp=15
+CASE  random/bipolar len=511 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=511 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=511 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=511 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=512 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=512 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=512 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=144 max_ulp=296
+CASE  random/bipolar len=512 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=19 max_ulp=4135424
+CASE  random/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=20 max_ulp=826816
+CASE  random/both len=512 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=33 max_ulp=19
+CASE  random/bipolar len=512 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=512 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=512 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=512 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=513 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=513 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=513 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=131 max_ulp=1852
+CASE  random/bipolar len=513 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=47 max_ulp=768
+CASE  random/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=45 max_ulp=384
+CASE  random/both len=513 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=64 max_ulp=8701
+CASE  random/bipolar len=513 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=513 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=513 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=513 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=1000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=1000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=1000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=281 max_ulp=1284
+CASE  random/bipolar len=1000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=355 max_ulp=1266679808
+CASE  random/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=367 max_ulp=1310720000
+CASE  random/both len=1000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=413 max_ulp=1411170304
+CASE  random/bipolar len=1000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=1000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=1000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=1000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=3830 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=4 max_ulp=1
+CASE  random/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=1943 max_ulp=7392
+CASE  random/bipolar len=3830 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=3080 max_ulp=1258291200
+CASE  random/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=3093 max_ulp=1308622848
+CASE  random/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=3159 max_ulp=1439506432
+CASE  random/bipolar len=3830 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=3830 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=4000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=4000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=2 max_ulp=1
+CASE  random/both len=4000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=2020 max_ulp=12644
+CASE  random/bipolar len=4000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=3241 max_ulp=1258291200
+CASE  random/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=3252 max_ulp=1304428544
+CASE  random/both len=4000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=3327 max_ulp=1439976448
+CASE  random/bipolar len=4000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=4000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=4000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=4096 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=4096 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=5 max_ulp=1
+CASE  random/both len=4096 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=2053 max_ulp=10052
+CASE  random/bipolar len=4096 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=3361 max_ulp=1262485504
+CASE  random/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=3357 max_ulp=1308622848
+CASE  random/both len=4096 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=3433 max_ulp=1434963968
+CASE  random/bipolar len=4096 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=4096 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=4096 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=4096 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=8000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=8000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=17 max_ulp=1
+CASE  random/both len=8000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=5206 max_ulp=20352
+CASE  random/bipolar len=8000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=7244 max_ulp=1249902592
+CASE  random/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=7238 max_ulp=1308622848
+CASE  random/both len=8000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=7325 max_ulp=1450895360
+CASE  random/bipolar len=8000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=8000 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=8000 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=8000 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=12330 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=12330 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=19 max_ulp=1
+CASE  random/both len=12330 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=9178 max_ulp=20480
+CASE  random/bipolar len=12330 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=11553 max_ulp=1249902592
+CASE  random/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=11550 max_ulp=1308622848
+CASE  random/both len=12330 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=11643 max_ulp=1462981120
+CASE  random/bipolar len=12330 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/freq len=12330 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  random/both len=12330 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  random/bipolar len=12330 fs=2.5e+08 bipolar=1 freq=0 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=2 diffs=0 max_ulp=0
+CASE  real14/freq len=3830 fs=2.5e+08 bipolar=0 freq=1 hmax=20 diffs=0 max_ulp=0
+CASE  real14/both len=3830 fs=2.5e+08 bipolar=1 freq=1 hmax=2 diffs=0 max_ulp=0
+SUMMARY  total_diff_samples=108435 max_ulp=1462981120 policy(max_ulp<=1)=VIOLATED
+FAIL  all diffs within ULP policy

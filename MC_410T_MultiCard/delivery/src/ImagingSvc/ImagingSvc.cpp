@@ -491,8 +491,30 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
         return;
     }
 
+    const QJsonObject enhanceJson = ring["enhance"].toObject();
+    RingEnhanceConfig enhanceCfg;
+    enhanceCfg.enableBipolarCompensation =
+        enhanceJson[QStringLiteral("enableBipolarCompensation")].toBool(false);
+    enhanceCfg.enableFreqCompensation =
+        enhanceJson[QStringLiteral("enableFreqCompensation")].toBool(false);
+    enhanceCfg.freqCompFcMhz =
+        enhanceJson[QStringLiteral("freqCompFcMhz")].toDouble(enhanceCfg.freqCompFcMhz);
+    enhanceCfg.freqCompHmax =
+        enhanceJson[QStringLiteral("freqCompHmax")].toDouble(enhanceCfg.freqCompHmax);
+    enhanceCfg.freqCompOrder =
+        enhanceJson[QStringLiteral("freqCompOrder")].toDouble(enhanceCfg.freqCompOrder);
+    const char *enhanceError = nullptr;
+    if (!ring_enhance::validate(enhanceCfg, &enhanceError)) {
+        sendError(QString("重建增强参数无效: %1")
+                      .arg(QString::fromUtf8(enhanceError ? enhanceError : "unknown")),
+                  2012);
+        return;
+    }
+
     m_ringConfig = cfg;
-    m_ringMode   = true;
+    m_ringEnhanceConfig = enhanceCfg;
+    m_ringEnhancer.setConfig(enhanceCfg, cfg.daqHz);
+    m_ringMode = true;
     m_ringChannelCount = cnt;
     for (int i = 0; i < 8; ++i) m_ringChannels[i] = cfg.enabledChannels[i];
     m_ringAlineCount = cnt * cfg.alinesPerChannelPerBlock;
@@ -689,7 +711,13 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
             pp.signalImpair = m_ringConfig.singalImpair != 0;
             pp.imValue = m_ringConfig.imValue[w];
 
-            lists[w].push_back(ringrecon::preprocessBlock(d, sampDepth, 1, pp));
+            auto processed = ringrecon::preprocessBlock(d, sampDepth, 1, pp);
+            if (!m_ringEnhancer.apply(processed.data(),
+                                      static_cast<int>(processed.size()))) {
+                sendError("重建增强处理失败", 2013);
+                return;
+            }
+            lists[w].push_back(std::move(processed));
             angs[w].push_back(ang[pos]);
             rads[w].push_back(static_cast<float>(
                 m_ringConfig.radiusPerChannel[(phCh >= 0 && phCh < 8) ? phCh : 0]));

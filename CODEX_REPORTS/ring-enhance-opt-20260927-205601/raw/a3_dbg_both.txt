@@ -1,0 +1,73 @@
+[IngressProtection] requestedPriority=BELOW_NORMAL priorityApply=ok effectivePriority=BELOW_NORMAL originalProcessMask=0xFFFFFFFF requestedProcessMask=0xFFFFFFFA affinityApply=ok effectiveProcessMask=0xFFFFFFFA reservedLogicalCpus=0,2
+ImagingSvc: linear shared memory not present (ring mode?)
+QProcess: Destroyed while process (".\\ImagingSvc.exe") is still running.
+[selftest] enhance=both rounds=6 grid_mm=0.0100 block=200 channels=0xFF
+block   1/5: 883.52 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block   2/5: 646.81 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block   3/5: 666.00 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block   4/5: 679.32 ms
+[round-wall] generation=0 wall_ms=4025.78 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block   5/5: 684.53 ms
+  diff vs prev: wl1=4980.86 wl2=3932.4
+block   6/5: 682.49 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block   7/5: 675.47 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block   8/5: 682.61 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block   9/5: 702.85 ms
+[round-wall] generation=1 wall_ms=3888.20 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block  10/5: 674.15 ms
+  diff vs prev: wl1=4980.86 wl2=3932.4
+block  11/5: 689.00 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block  12/5: 680.05 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block  13/5: 697.32 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block  14/5: 693.57 ms
+[round-wall] generation=2 wall_ms=3946.51 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block  15/5: 695.90 ms
+  diff vs prev: wl1=4980.86 wl2=3932.4
+block  16/5: 697.37 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block  17/5: 719.60 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block  18/5: 700.19 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block  19/5: 703.93 ms
+[round-wall] generation=3 wall_ms=4025.94 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block  20/5: 697.02 ms
+  diff vs prev: wl1=4980.86 wl2=3932.4
+block  21/5: 691.26 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block  22/5: 676.21 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block  23/5: 690.74 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block  24/5: 682.19 ms
+[round-wall] generation=4 wall_ms=3912.08 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block  25/5: 688.92 ms
+  diff vs prev: wl1=4980.86 wl2=3932.4
+block  26/5: 697.37 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block  27/5: 709.73 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block  28/5: 679.23 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block  29/5: 688.90 ms
+[round-wall] generation=5 wall_ms=3980.07 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block  30/5: 681.92 ms
+done: channels=8 K=500 rounds=6 blocks=30 total=20838.2 ms avg=694.61 ms
+[RingSHMObs] kinds: final=1 round_barrier_reset=6
+[RingSHMObs] service kind=final session=3 epoch=0 submitted=0 notifications=30 consumed=30 mismatch=0 ready_zero=0 duplicate=0 gap=0 avg_queue_us=17297.7 avg_copy_us=12989.7 avg_process_us=475158.9
+[RingSHMObs] producer session=1 submitted=30 slot_busy=0 last_seq=29 last_interval_us=864083

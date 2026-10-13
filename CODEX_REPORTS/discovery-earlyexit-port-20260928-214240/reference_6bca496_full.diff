@@ -1,0 +1,332 @@
+diff --git a/MC_410T_MultiCard/delivery/include/Constants.h b/MC_410T_MultiCard/delivery/include/Constants.h
+index 2b70812..9896a24 100644
+--- a/MC_410T_MultiCard/delivery/include/Constants.h
++++ b/MC_410T_MultiCard/delivery/include/Constants.h
+@@ -71,4 +71,8 @@ constexpr int    CONFIG_ACK_MAX_RETRY  = 3;      // 每卡最大重发次数（
+ //  网段扫描自动识别（采集卡 IP 固定从 base 起递增，最多 32 张）
+ constexpr char   DEFAULT_SCAN_BASE_IP[] = "192.168.0.2";  // 默认扫描起始 IP
+ constexpr int    DEFAULT_SCAN_IP_COUNT  = 32;               // 默认扫描 IP 数量
+-constexpr int    SCAN_ICMP_TIMEOUT_MS   = 150;              // 扫描 ICMP 探测超时（ms）
+\ No newline at end of file
++constexpr int    SCAN_ICMP_TIMEOUT_MS   = 150;              // 扫描 ICMP 探测超时（ms）
++
++//  控制包 socket 本地绑定 IP：与采集卡通信（CONFIG/START/STOP → 卡端口 8080）
++//  的本机网卡地址。INI NetworkParams/LocalBindIP 可覆盖为本机其他网卡 IP。
++constexpr char   DEFAULT_LOCAL_BIND_IP[] = "192.168.0.1";
+\ No newline at end of file
+diff --git a/MC_410T_MultiCard/delivery/include/PaimageAcquisition/CardDiscovery.h b/MC_410T_MultiCard/delivery/include/PaimageAcquisition/CardDiscovery.h
+index b1a1014..cbbf967 100644
+--- a/MC_410T_MultiCard/delivery/include/PaimageAcquisition/CardDiscovery.h
++++ b/MC_410T_MultiCard/delivery/include/PaimageAcquisition/CardDiscovery.h
+@@ -34,6 +34,12 @@ struct DiscoveryOptions {
+     int maxAttempts = 5;
+     int finalGraceMs = 500;
+     int icmpTimeoutMs = 150;
++    // Expected card count (INI AcquisitionParams/NCards). Once this many
++    // candidates carry a verified 60-byte CONFIG ACK, remaining ack windows
++    // and the final grace are skipped: late rounds cannot add targets, so
++    // waiting longer would only delay a complete result. 0 (the default)
++    // disables the early exit and keeps the full-budget fallback.
++    int expectedCardCount = 0;
+     QString discoveryId;
+ };
+ 
+@@ -96,6 +102,8 @@ struct DiscoveryResult {
+     QString error;
+     bool cancelled = false;
+     qint64 totalDurationNs = 0;
++    bool expectedCountReached = false;  // closed early on verified >= expectedCardCount
++    int roundsUsed = 0;
+ };
+ 
+ // Transport seam. The production implementation owns the WinSock reference,
+diff --git a/MC_410T_MultiCard/delivery/src/MainWindow.cpp b/MC_410T_MultiCard/delivery/src/MainWindow.cpp
+index 9d8bdab..7d5d683 100644
+--- a/MC_410T_MultiCard/delivery/src/MainWindow.cpp
++++ b/MC_410T_MultiCard/delivery/src/MainWindow.cpp
+@@ -2055,6 +2055,7 @@ void MainWindow::onStartListenClicked()
+         options.baseIP = m_scanBaseIP;
+         options.candidateCount = m_scanIPCount;
+         options.localBindIP = m_localBindIP;
++        options.expectedCardCount = m_nCards;
+         options.configDurationNs = ui->edtDataTime->text().toInt();
+         options.delayANs = ui->edtADelay->text().toInt();
+         options.delayBNs = ui->edtBDelay->text().toInt();
+@@ -2070,11 +2071,13 @@ void MainWindow::onStartListenClicked()
+         options = paimage::sanitizeDiscoveryOptions(options, &normalizationNote);
+         if (!normalizationNote.isEmpty())
+             logMessage(QString("发现参数已规范化：%1").arg(normalizationNote));
+-        logMessage(QString("发现参数：ACK 窗口 %1ms × 最多 %2 轮，末轮宽限 %3ms（总等待上限约 %4 s）")
+-                   .arg(options.ackWindowMs).arg(options.maxAttempts)
+-                   .arg(options.finalGraceMs)
+-                   .arg((options.ackWindowMs * options.maxAttempts + options.finalGraceMs) / 1000.0,
+-                        0, 'f', 1));
++        logMessage(QString("发现参数：ACK 窗口 %1ms × 最多 %2 轮，末轮宽限 %3ms"
++                           "（总等待上限约 %4 s，确认满 %5 张卡即提前结束）")
++                       .arg(options.ackWindowMs).arg(options.maxAttempts)
++                       .arg(options.finalGraceMs)
++                       .arg((options.ackWindowMs * options.maxAttempts + options.finalGraceMs) / 1000.0,
++                            0, 'f', 1)
++                       .arg(options.expectedCardCount));
+ 
+         // 后台发现只接收值快照与取消标志；完成后由 QFutureWatcher 回到 UI。
+         // QPointer 使窗口在发现完成前关闭时直接丢弃回调，避免访问悬空 this。
+@@ -2138,6 +2141,12 @@ void MainWindow::onStartListenClicked()
+                             .arg(result.verifiedIPs.size())
+                             .arg(timedOut)
+                             .arg(sendFailed));
++                    if (result.expectedCountReached)
++                        window->logMessage(
++                            QString("⚡ 已确认满期望卡数 %1 张，第 %2 轮提前结束发现（用时 %3 ms）")
++                                .arg(result.verifiedIPs.size())
++                                .arg(result.roundsUsed)
++                                .arg(result.totalDurationNs / 1000000));
+                     if (result.verifiedIPs.isEmpty()) {
+                         window->logMessage("❌ 未发现任何返回 60 字节 CONFIG 确认的采集卡，"
+                                            "请检查网线/交换机/采集卡上电状态");
+@@ -3679,15 +3688,17 @@ void MainWindow::loadSettings()
+     ui->cmbDisplayType->blockSignals(true);
+     ui->cmbImagingMode->blockSignals(true);
+ 
+-    // ── 注册表专属配置（无 UI 接口）────────────────────────────────────
++    // ── INI 专属配置（无 UI 接口）────────────────────────────────────
+     // 采集卡数量：AcquisitionParams/NCards（默认4，有效范围1~MAX_CARDS）
+-    // 修改方式：regedit → HKCU\Software\MC410T\MC410T_Receiver
++    // 修改方式：编辑本 exe 同目录 PAimageReceiverDiagnostics.ini
+     int savedNCards = settings.value("AcquisitionParams/NCards", 4).toInt();
+     m_nCards = qBound(1, savedNCards, MAX_CARDS);
+-    // 控制 socket 本地绑定 IP：NetworkParams/LocalBindIP（默认空，即 INADDR_ANY）
+-    // 双口网卡（如 ConnectX-5 MCX512A-ACAT）只接一个口时必须填写已连接口的本地IP
+-    // 修改方式：reg add "HKCU\Software\MC410T\MC410T_Receiver\NetworkParams" /v LocalBindIP /t REG_SZ /d "192.168.0.100" /f
+-    m_localBindIP = settings.value("NetworkParams/LocalBindIP", "").toString();
++    // 控制 socket 本地绑定 IP：NetworkParams/LocalBindIP（默认 DEFAULT_LOCAL_BIND_IP，
++    // 即与采集卡通信的控制包源地址；该 IP 必须已配置在本机网卡上）
++    // 修改方式：编辑本 exe 同目录 PAimageReceiverDiagnostics.ini；留空按默认值处理
++    m_localBindIP = settings.value("NetworkParams/LocalBindIP",
++                                   QString(DEFAULT_LOCAL_BIND_IP)).toString().trimmed();
++    if (m_localBindIP.isEmpty()) m_localBindIP = QString(DEFAULT_LOCAL_BIND_IP);
+     // 网段扫描范围（自动识别采集卡用）：ScanBaseIP 默认 192.168.0.2，ScanIPCount 默认 32
+     m_scanBaseIP  = settings.value("NetworkParams/ScanBaseIP", QString(DEFAULT_SCAN_BASE_IP)).toString();
+     m_scanIPCount = qBound(1, settings.value("NetworkParams/ScanIPCount", DEFAULT_SCAN_IP_COUNT).toInt(), MAX_CARDS);
+@@ -4239,20 +4250,23 @@ void MainWindow::updateNetworkInfoLabels()
+         portText = QString("数据端口: %1-%2").arg(portStart).arg(portEnd);
+     ui->lblDataPorts->setText(portText);
+ 
+-    // tooltip 提示管理员如何修改（注册表）
++    // tooltip 提示如何修改（exe 同目录 INI 文件）
+     QString bindIPInfo = m_localBindIP.isEmpty()
+-        ? QString("未设置（INADDR_ANY）— 双口网卡请必须设置!")
++        ? QString("未设置（启动时按最佳路由自动选择本机网卡 IP）")
+         : m_localBindIP;
+     ui->lblTargetIPs->setToolTip(
+         QString("采集卡数量: %1\n"
+-                "  注册表键: HKCU\\Software\\MC410T\\MC410T_Receiver\\AcquisitionParams\\NCards\n"
++                "  INI 键: PAimageReceiverDiagnostics.ini → AcquisitionParams/NCards\n"
+                 "控制包本地绑定IP: %2\n"
+-                "  注册表键: ...\\NetworkParams\\LocalBindIP\n"
+-                "  双口网卡只接一口时必须填已连接口的本地IP（如 192.168.0.100）\n"
++                "  含义: 与采集卡通信（CONFIG/START/STOP → 卡端口 8080）的控制包源地址，\n"
++                "  即控制 socket 绑定的本机网卡 IP；该 IP 必须已配置在本机网卡上\n"
++                "  INI 键: PAimageReceiverDiagnostics.ini → NetworkParams/LocalBindIP\n"
++                "  默认 %3；双口网卡只接一口时必须填已连接口的本地IP，\n"
+                 "  否则控制包可能从错误网口发出，采集卡收不到指令\n"
+-                "接收路线: WinSock")
++                "接收路线: %4")
+         .arg(m_nCards)
+         .arg(bindIPInfo)
++        .arg(DEFAULT_LOCAL_BIND_IP)
+         .arg("路线A WinSock")
+     );
+     updateNetworkInfoIndicator();
+@@ -4274,12 +4288,12 @@ void MainWindow::updateNetworkInfoIndicator()
+     info += ui->lblDataPorts->text();
+     info += "\n──────────\n";
+     const QString bindIPInfo = m_localBindIP.isEmpty()
+-        ? QString("未设置（INADDR_ANY）— 双口网卡请必须设置!")
++        ? QString("未设置（启动时按最佳路由自动选择本机网卡 IP）")
+         : m_localBindIP;
+     info += QString("采集卡数量: %1\n").arg(m_nCards);
+     info += QString("控制包本地绑定IP: %2\n").arg(bindIPInfo);
+     info += "接收路线: WinSock\n";
+-    info += "注册表键: HKCU\\Software\\MC410T\\MC410T_Receiver";
++    info += "INI 键: PAimageReceiverDiagnostics.ini（exe 同目录）";
+     ind->setToolTip(info);
+ }
+ 
+diff --git a/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp b/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp
+index 8128550..757be86 100644
+--- a/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp
++++ b/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp
+@@ -79,6 +79,9 @@ DiscoveryOptions sanitizeDiscoveryOptions(const DiscoveryOptions& options,
+     clamp(normalized.finalGraceMs, 0, 2000, 500, "FinalGraceMs");
+     clamp(normalized.icmpTimeoutMs, 50, 1000, 150, "IcmpTimeoutMs");
+     clamp(normalized.candidateCount, 1, 254, 32, "CandidateCount");
++    // 0 keeps the full-budget fallback; anything outside 0..64 would never be
++    // a trustworthy expectation, so it falls back to the disabled default.
++    clamp(normalized.expectedCardCount, 0, 64, 0, "ExpectedCardCount");
+     if (normalized.configDurationNs <= 0) {
+         notes << QStringLiteral("ConfigDurationNs %1->20000").arg(normalized.configDurationNs);
+         normalized.configDurationNs = 20000;
+@@ -249,14 +252,18 @@ void processDatagram(DiscoverySession& session, const DiscoveryDatagram& dgram)
+ 
+ // Drains the feedback socket until the absolute deadline; short select
+ // timeouts inside the channel are polling only and never fail a candidate.
++// earlyStop, when provided, closes the drain as soon as it returns true
++// (evaluated after each processed batch); it never marks a candidate failed.
+ void drainUntil(DiscoverySession& session,
+                 qint64 deadlineNs,
+-                const std::atomic<bool>& cancel)
++                const std::atomic<bool>& cancel,
++                const std::function<bool()>& earlyStop = {})
+ {
+     while (!cancel.load()) {
+         std::vector<DiscoveryDatagram> dgrams =
+             session.channel.waitAndReceive(deadlineNs, cancel);
+         for (const DiscoveryDatagram& dgram : dgrams) processDatagram(session, dgram);
++        if (earlyStop && earlyStop()) return;
+         if (session.channel.nowNs() >= deadlineNs) return;
+     }
+ }
+@@ -454,8 +461,22 @@ DiscoveryResult runDiscoveryCore(const DiscoveryOptions& rawOptions,
+                                          options.delayBNs);
+ 
+     // 6. Bounded multi-round CONFIG probing; only unverified candidates with
+-    // remaining send budget are re-sent each round.
++    // remaining send budget are re-sent each round. When expectedCardCount is
++    // set and that many 60-byte confirmations have arrived, the remaining
++    // rounds cannot add targets, so discovery closes early instead of
++    // draining the leftover ack windows and the final grace.
++    const int expectedCount = options.expectedCardCount;
++    auto verifiedCount = [&session]() {
++        int count = 0;
++        for (const DiscoveryCandidateEvidence& c : session.candidates)
++            if (c.state == DiscoveryCandidateState::Verified) ++count;
++        return count;
++    };
++    auto expectationMet = [&expectedCount, &verifiedCount]() {
++        return expectedCount > 0 && verifiedCount() >= expectedCount;
++    };
+     bool cancelled = false;
++    bool expectationMetFlag = false;
+     for (session.round = 1; session.round <= options.maxAttempts; ++session.round) {
+         if (cancel.load()) { cancelled = true; break; }
+         for (std::size_t i = 0; i < session.candidates.size(); ++i) {
+@@ -486,12 +507,17 @@ DiscoveryResult runDiscoveryCore(const DiscoveryOptions& rawOptions,
+                                         : QStringLiteral("CONFIG 发送失败"),
+                                fields);
+         }
+-        drainUntil(session, channel.nowNs() + qint64(options.ackWindowMs) * 1000000, cancel);
++        drainUntil(session, channel.nowNs() + qint64(options.ackWindowMs) * 1000000, cancel,
++                   expectationMet);
++        if (expectationMet()) { expectationMetFlag = true; break; }
+         if (cancel.load()) { cancelled = true; break; }
+     }
+-    // 7. Final grace window keeps accepting late 60-byte confirmations.
+-    if (!cancelled && !cancel.load()) {
+-        drainUntil(session, channel.nowNs() + qint64(options.finalGraceMs) * 1000000, cancel);
++    // 7. Final grace window keeps accepting late 60-byte confirmations; it is
++    // pointless once the expected card count has already been confirmed.
++    if (!cancelled && !expectationMetFlag && !cancel.load()) {
++        drainUntil(session, channel.nowNs() + qint64(options.finalGraceMs) * 1000000, cancel,
++                   expectationMet);
++        if (expectationMet()) expectationMetFlag = true;
+         if (cancel.load()) cancelled = true;
+     }
+ 
+@@ -530,6 +556,9 @@ DiscoveryResult runDiscoveryCore(const DiscoveryOptions& rawOptions,
+     for (const DiscoveryCandidateEvidence& c : session.candidates)
+         result.candidates.append(c);
+     result.cancelled = cancelled;
++    result.expectedCountReached = expectationMetFlag;
++    result.roundsUsed = expectationMetFlag ? session.round
++                                           : qMin(session.round, options.maxAttempts);
+     result.totalDurationNs = channel.nowNs() - startedNs;
+     emitComplete(session, QString(), cancelled);
+     return result;
+diff --git a/MC_410T_MultiCard/delivery/tests/paimage_core/discovery_checks.cpp b/MC_410T_MultiCard/delivery/tests/paimage_core/discovery_checks.cpp
+index 241c28d..d58ac9b 100644
+--- a/MC_410T_MultiCard/delivery/tests/paimage_core/discovery_checks.cpp
++++ b/MC_410T_MultiCard/delivery/tests/paimage_core/discovery_checks.cpp
+@@ -340,6 +340,58 @@ int main()
+         require(f.channel.closeCount >= 1, "channel closed after mid-wait cancel");
+     }
+ 
++    // Expected-count early exit: once four cards carry a verified 60-byte ACK,
++    // discovery closes in round 1 — later rounds never re-send CONFIG and the
++    // final grace never admits a later fifth card (documented trade-off).
++    {
++        Fixture f;
++        DiscoveryOptions options = baseOptions(5);
++        options.finalGraceMs = 500;
++        options.expectedCardCount = 4;
++        const qint64 start = f.channel.now;
++        f.channel.addArrival(start + 100000000, QStringLiteral("192.168.0.2"), 60);
++        f.channel.addArrival(start + 120000000, QStringLiteral("192.168.0.3"), 60);
++        f.channel.addArrival(start + 140000000, QStringLiteral("192.168.0.4"), 60);
++        f.channel.addArrival(start + 160000000, QStringLiteral("192.168.0.5"), 60);
++        // A fifth card answers late, inside the would-be final grace window.
++        f.channel.addArrival(start + 5 * qint64(500) * 1000000 + 100000000,
++                             QStringLiteral("192.168.0.6"), 60);
++        const DiscoveryResult result = runDiscovery(options, f.cancel, f.channel, f.environment());
++        require(result.verifiedIPs.size() == 4, "expected four cards close discovery");
++        require(result.expectedCountReached, "early exit flagged");
++        require(result.roundsUsed == 1, "closed in round 1");
++        require(f.channel.sends.size() == 5, "one CONFIG per candidate, no re-sends");
++        for (const auto& c : result.candidates)
++            require(c.attemptsSent == 1, "later rounds skipped after expectation met");
++        requireState(result, QStringLiteral("192.168.0.6"),
++                     DiscoveryCandidateState::TimedOut, "late fifth card not admitted");
++    }
++
++    // Expected count not reached: one ACK against expected=2 keeps the full
++    // multi-round budget and returns the fallback result.
++    {
++        Fixture f;
++        DiscoveryOptions options = baseOptions();
++        options.expectedCardCount = 2;
++        f.channel.addArrival(f.channel.now + 100000000, QStringLiteral("192.168.0.2"), 60);
++        const DiscoveryResult result = runDiscovery(options, f.cancel, f.channel, f.environment());
++        require(result.verifiedIPs.size() == 1, "single card still accepted");
++        require(!result.expectedCountReached, "expectation not flagged");
++        require(result.roundsUsed == options.maxAttempts, "full budget used");
++        requireState(result, QStringLiteral("192.168.0.2"),
++                     DiscoveryCandidateState::Verified, "verified state");
++    }
++
++    // expectedCardCount=0 keeps the historical full-budget behaviour.
++    {
++        Fixture f;
++        DiscoveryOptions options = baseOptions();
++        const DiscoveryResult result = runDiscovery(options, f.cancel, f.channel, f.environment());
++        require(!result.expectedCountReached, "early exit disabled");
++        require(result.roundsUsed == options.maxAttempts, "full budget used");
++        require(result.verifiedIPs.isEmpty(), "no cards without ACK");
++    }
++
+     // 14. Stale discovery results cannot override the active session.
+     {
+         DiscoveryResult stale;
+@@ -367,13 +419,22 @@ int main()
+         options.ackWindowMs = 10;
+         options.maxAttempts = 99;
+         options.finalGraceMs = 99999;
++        options.expectedCardCount = 99;
+         QString note;
+         const DiscoveryOptions normalized = sanitizeDiscoveryOptions(options, &note);
+         require(normalized.ackWindowMs == 2000 && normalized.maxAttempts == 5 &&
+                     normalized.finalGraceMs == 500,
+                 "defaults restored");
+-        require(note.contains(QStringLiteral("AckWindowMs")) && note.contains(QStringLiteral("MaxAttempts")),
++        require(normalized.expectedCardCount == 0,
++                "untrustworthy expectation falls back to disabled");
++        require(note.contains(QStringLiteral("AckWindowMs")) && note.contains(QStringLiteral("MaxAttempts")) &&
++                    note.contains(QStringLiteral("ExpectedCardCount")),
+                 "normalization note recorded");
++        DiscoveryOptions valid = baseOptions();
++        valid.expectedCardCount = 4;
++        QString validNote;
++        const DiscoveryOptions kept = sanitizeDiscoveryOptions(valid, &validNote);
++        require(kept.expectedCardCount == 4, "valid expectation preserved");
+     }
+ 
+     std::cout << "PASS discovery policy: local exclusion, 60-byte-only admission, slow retries, ordering, cancel, stale sessions" << std::endl;

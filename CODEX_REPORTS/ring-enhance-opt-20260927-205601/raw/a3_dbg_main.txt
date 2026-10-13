@@ -1,0 +1,81 @@
+[IngressProtection] requestedPriority=BELOW_NORMAL priorityApply=ok effectivePriority=BELOW_NORMAL originalProcessMask=0xFFFFFFFF requestedProcessMask=0xFFFFFFFA affinityApply=ok effectiveProcessMask=0xFFFFFFFA reservedLogicalCpus=0,2
+ImagingSvc: linear shared memory not present (ring mode?)
+ImagingSvc ring mode: channels= 8 perChannelBlock= 200 blockSize= 6400000 frameSize= 12960000 nx= 3600
+[RingSHMObs] {"avg_copy_lock_us":15509,"avg_process_us":0,"avg_queue_delay_us":17637,"cmd":"ring_shm_observation","component":"consumer","consumed":1,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":15509,"last_notify_seq":0,"last_process_us":0,"last_queue_delay_us":17637,"last_shm_seq":0,"last_submit_index":1,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":1,"notify_shm_mismatch":0,"old_generation":"0","old_session":"0","ready_zero_before_copy":0,"round_generation":"0","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"0"}
+[RingSHMObs] {"avg_copy_lock_us":12728,"avg_process_us":484661.4,"avg_queue_delay_us":16879.833333333332,"cmd":"ring_shm_observation","component":"consumer","consumed":6,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":12012,"last_notify_seq":5,"last_process_us":493585,"last_queue_delay_us":16721,"last_shm_seq":5,"last_submit_index":6,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":6,"notify_shm_mismatch":0,"old_generation":"0","old_session":"1","ready_zero_before_copy":0,"round_generation":"1","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"1"}
+[RingSHMObs] {"avg_copy_lock_us":12455.90909090909,"avg_process_us":475239.9,"avg_queue_delay_us":16837.636363636364,"cmd":"ring_shm_observation","component":"consumer","consumed":11,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":12731,"last_notify_seq":10,"last_process_us":464768,"last_queue_delay_us":14914,"last_shm_seq":10,"last_submit_index":11,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":11,"notify_shm_mismatch":0,"old_generation":"1","old_session":"1","ready_zero_before_copy":0,"round_generation":"2","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"2"}
+[RingSHMObs] {"avg_copy_lock_us":12484.4375,"avg_process_us":475970.5333333333,"avg_queue_delay_us":16690.375,"cmd":"ring_shm_observation","component":"consumer","consumed":16,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":12506,"last_notify_seq":15,"last_process_us":493640,"last_queue_delay_us":15710,"last_shm_seq":15,"last_submit_index":16,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":16,"notify_shm_mismatch":0,"old_generation":"2","old_session":"1","ready_zero_before_copy":0,"round_generation":"3","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"3"}
+[RingSHMObs] {"avg_copy_lock_us":12447.095238095239,"avg_process_us":474073.9,"avg_queue_delay_us":16617.04761904762,"cmd":"ring_shm_observation","component":"consumer","consumed":21,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":13129,"last_notify_seq":20,"last_process_us":465207,"last_queue_delay_us":19449,"last_shm_seq":20,"last_submit_index":21,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":21,"notify_shm_mismatch":0,"old_generation":"3","old_session":"1","ready_zero_before_copy":0,"round_generation":"4","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"4"}
+[RingSHMObs] {"avg_copy_lock_us":12447.346153846154,"avg_process_us":473079.68,"avg_queue_delay_us":16688.96153846154,"cmd":"ring_shm_observation","component":"consumer","consumed":26,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"round_barrier_reset","last_copy_lock_us":12710,"last_notify_seq":25,"last_process_us":468827,"last_queue_delay_us":15871,"last_shm_seq":25,"last_submit_index":26,"last_submit_interval_us":0,"last_submitted_seq":0,"measurement_session":"1","notifications":26,"notify_shm_mismatch":0,"old_generation":"4","old_session":"1","ready_zero_before_copy":0,"round_generation":"5","session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"stale_drops":"0","submitted":0,"transitions":"5"}
+[RingSHMObs] {"avg_copy_lock_us":12460.4,"avg_process_us":473350.73333333334,"avg_queue_delay_us":16727.766666666666,"cmd":"ring_shm_observation","component":"consumer","consumed":30,"duplicate_shm_seq":0,"epoch":0,"has_last_notify_seq":true,"has_last_shm_seq":true,"has_last_submitted_seq":false,"kind":"final","last_copy_lock_us":12302,"last_notify_seq":29,"last_process_us":471858,"last_queue_delay_us":16301,"last_shm_seq":29,"last_submit_index":30,"last_submit_interval_us":0,"last_submitted_seq":0,"notifications":30,"notify_shm_mismatch":0,"ready_zero_before_copy":0,"session":1,"shm_seq_gap":0,"slot_busy_before_submit":0,"submitted":0}
+QProcess: Destroyed while process ("D:\\ChatGPT\\PAERealtimeImaging\\_task_work\\main-baseline-c95917f\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ImagingSvc.exe") is still running.
+[selftest] enhance=unset rounds=6 grid_mm=0.0100 block=200 channels=0xFF
+block   1/5: 662.56 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block   2/5: 679.96 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block   3/5: 684.39 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block   4/5: 685.14 ms
+[round-wall] generation=0 wall_ms=3890.68 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block   5/5: 713.26 ms
+  diff vs prev: wl1=4980.86 wl2=3932.4
+block   6/5: 686.10 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block   7/5: 670.63 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block   8/5: 687.75 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block   9/5: 665.90 ms
+[round-wall] generation=1 wall_ms=3851.34 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block  10/5: 693.94 ms
+  diff vs prev: wl1=4980.86 wl2=3932.4
+block  11/5: 679.63 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block  12/5: 689.52 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block  13/5: 685.93 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block  14/5: 708.80 ms
+[round-wall] generation=2 wall_ms=3981.77 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block  15/5: 725.93 ms
+  diff vs prev: wl1=4980.86 wl2=3932.4
+block  16/5: 684.03 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block  17/5: 705.45 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block  18/5: 680.21 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block  19/5: 689.72 ms
+[round-wall] generation=3 wall_ms=3921.97 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block  20/5: 692.94 ms
+  diff vs prev: wl1=4980.86 wl2=3932.4
+block  21/5: 696.10 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block  22/5: 681.55 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block  23/5: 687.67 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block  24/5: 685.35 ms
+[round-wall] generation=4 wall_ms=3923.18 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block  25/5: 690.66 ms
+  diff vs prev: wl1=4980.86 wl2=3932.4
+block  26/5: 697.24 ms
+  diff vs prev: wl1=6078.79 wl2=4581.66
+block  27/5: 681.74 ms
+  diff vs prev: wl1=5644.98 wl2=4142.09
+block  28/5: 709.24 ms
+  diff vs prev: wl1=5347.42 wl2=3965.01
+block  29/5: 701.51 ms
+[round-wall] generation=5 wall_ms=3944.30 blocks=5
+  diff vs prev: wl1=4835.11 wl2=3940.81
+block  30/5: 692.60 ms
+done: channels=8 K=500 rounds=6 blocks=30 total=20695.4 ms avg=689.85 ms
+[RingSHMObs] kinds: final=1 round_barrier_reset=6
+[RingSHMObs] service kind=final session=1 epoch=0 submitted=0 notifications=30 consumed=30 mismatch=0 ready_zero=0 duplicate=0 gap=0 avg_queue_us=16727.8 avg_copy_us=12460.4 avg_process_us=473350.7
+[RingSHMObs] producer session=1 submitted=30 slot_busy=0 last_seq=29 last_interval_us=866133

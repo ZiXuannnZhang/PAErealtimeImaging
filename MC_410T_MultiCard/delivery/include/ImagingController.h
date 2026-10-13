@@ -14,6 +14,7 @@
 #include <QTimer>
 #include <vector>
 #include "ImagingParams.h"
+#include "RingEnhanceConfig.h"
 #include "RingShmObservability.h"
 #include "RoundIdentity.h"
 #include "ring_recon_cuda.h"
@@ -51,9 +52,11 @@ public:
     // 环形扫描模式配置（与线性 pa_recon 分支并行；调用后 startSvc 走环形链路）
     // sysDelayCh 为每通道双波长延时截断（nullptr=回退为 cfg.sysDelay 广播到所有通道）
     void configureRing(const RingReconCudaConfig &ringCfg,
+                       const RingEnhanceConfig &enhanceCfg,
                        const int (*sysDelayCh)[2] = nullptr);
     bool isRingMode() const { return m_ringMode; }
     const RingReconCudaConfig &ringConfig() const { return m_ringConfig; }
+    const RingEnhanceConfig &ringEnhanceConfig() const { return m_ringEnhanceConfig; }
 
     // 环形扫描：提交一个原始 A-line 块（float32，sampDepth x alinesPerBlock，列主序）
     // sourceRoundComplete 表示该块所属物理轮的最后逻辑触发已被上游观察到
@@ -151,6 +154,7 @@ private:
 
     // 环形扫描并行分支
     RingReconCudaConfig m_ringConfig;
+    RingEnhanceConfig   m_ringEnhanceConfig;
     int                 m_ringSysDelayCh[8][2] = {
         {358, 371}, {358, 371}, {358, 371}, {358, 371},
         {358, 371}, {358, 371}, {358, 371}, {358, 371}};   // 每通道双波长延时截断（独立于 CUDA 结构体，避免 ABI 变更）

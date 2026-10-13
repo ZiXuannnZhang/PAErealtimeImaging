@@ -14,8 +14,10 @@ Frame OutputQueues::popCard(){
     if(cards_.empty())return {};
     auto f=std::move(cards_.front());cards_.pop_front();--perCard_[f->card];return f;
 }
-std::vector<SyncFrame> OutputQueues::pushSync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup){
-    SyncFrame f{trigger,session_,index_/unsigned(blockSize_)+1,index_%unsigned(blockSize_),frames};++index_;
+std::vector<SyncFrame> OutputQueues::pushSync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup,
+                                              bool beyondCountBoundary){
+    SyncFrame f{trigger,session_,index_/unsigned(blockSize_)+1,index_%unsigned(blockSize_),frames,
+                beyondCountBoundary};++index_;
     std::vector<SyncFrame> evicted;
     if(!startup&&normal_.size()>=std::size_t(blockSize_)*2){
         const auto oldest=normal_.front().block;

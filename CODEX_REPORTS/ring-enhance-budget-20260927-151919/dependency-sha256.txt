@@ -1,0 +1,22 @@
+# Dependency SHA256 (SHA256  label path)
+# recorded 2026-09-27T15:46:35+08:00
+bf40472d5a46363a35dd1084a01a8c15f13ef203f3ed5b4bb5edf767eeec14b5 */d/ChatGPT/PAERealtimeImaging/_task_work/ring-enhance-branch-20260926181824/MC_410T_MultiCard/delivery/build/mingw_debug/bin/ring_recon_cuda.dll
+bf40472d5a46363a35dd1084a01a8c15f13ef203f3ed5b4bb5edf767eeec14b5 */d/ChatGPT/PAERealtimeImaging/_task_work/main-baseline-c95917f/MC_410T_MultiCard/delivery/build/mingw_debug/bin/ring_recon_cuda.dll
+bf40472d5a46363a35dd1084a01a8c15f13ef203f3ed5b4bb5edf767eeec14b5 */d/ChatGPT/PAERealtimeImaging/_task_work/relb/bin/ring_recon_cuda.dll
+bf40472d5a46363a35dd1084a01a8c15f13ef203f3ed5b4bb5edf767eeec14b5 */d/ChatGPT/PAERealtimeImaging/_task_work/main-rlb/bin/ring_recon_cuda.dll
+c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344 */d/ChatGPT/PAERealtimeImaging/_task_work/ring-enhance-branch-20260926181824/MC_410T_MultiCard/delivery/build/mingw_debug/bin/cudart64_12.dll
+c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344 */d/ChatGPT/PAERealtimeImaging/_task_work/main-baseline-c95917f/MC_410T_MultiCard/delivery/build/mingw_debug/bin/cudart64_12.dll
+c1a37e73147c1b8250f96ccdc1fcfc08ca28cecbf1cb3c046d4ab426f2ea0893 */d/ChatGPT/PAERealtimeImaging/_task_work/ring-enhance-branch-20260926181824/MC_410T_MultiCard/delivery/build/mingw_debug/bin/pa_recon_core.dll
+c1a37e73147c1b8250f96ccdc1fcfc08ca28cecbf1cb3c046d4ab426f2ea0893 */d/ChatGPT/PAERealtimeImaging/_task_work/main-baseline-c95917f/MC_410T_MultiCard/delivery/build/mingw_debug/bin/pa_recon_core.dll
+2480d8ab849d7e9a375275f6c0278b8764c14ac0c1a3bdacaf256ae4a93c5590 */d/ChatGPT/PAERealtimeImaging/_task_work/ring-enhance-branch-20260926181824/MC_410T_MultiCard/delivery/build/mingw_debug/bin/cufft64_12.dll
+2480d8ab849d7e9a375275f6c0278b8764c14ac0c1a3bdacaf256ae4a93c5590 */d/ChatGPT/PAERealtimeImaging/_task_work/main-baseline-c95917f/MC_410T_MultiCard/delivery/build/mingw_debug/bin/cufft64_12.dll
+37610023d91951bc4177db1f96b54b28911976ac70b221a852887709a02a9ad3 */d/ChatGPT/PAERealtimeImaging/_task_work/ring-enhance-branch-20260926181824/MC_410T_MultiCard/delivery/build/mingw_debug/bin/libzmq-v141-mt-4_3_5.dll
+37610023d91951bc4177db1f96b54b28911976ac70b221a852887709a02a9ad3 */d/ChatGPT/PAERealtimeImaging/_task_work/main-baseline-c95917f/MC_410T_MultiCard/delivery/build/mingw_debug/bin/libzmq-v141-mt-4_3_5.dll
+f85d20372499df9e89ad3909fc0530d9d99362cf4103f377ab4a3cdbfe0b31b5 */d/ChatGPT/PAERealtimeImaging/_task_work/ring-enhance-branch-20260926181824/MC_410T_MultiCard/delivery/build/mingw_debug/bin/ImagingSvc.exe
+65ed3a16abb2030bce303114ae3496de856d56547ae46290249e78e92aabf820 */d/ChatGPT/PAERealtimeImaging/_task_work/main-baseline-c95917f/MC_410T_MultiCard/delivery/build/mingw_debug/bin/ImagingSvc.exe
+1da1869a7a4b26c8d1972e248d5a7389bc779a652737d0f57047584b4aeda853 */d/ChatGPT/PAERealtimeImaging/_task_work/ring-enhance-branch-20260926181824/MC_410T_MultiCard/delivery/build/mingw_debug/bin/ring_svc_selftest.exe
+72e521703892da066bd72596e49523e2313ccab27964860b4cc788e985e17345 */d/ChatGPT/PAERealtimeImaging/_task_work/relb/bin/ImagingSvc.exe
+33754a61f32a6594804d7a3001b5551a6a29967c1d94d67235e36b3ba98029bc */d/ChatGPT/PAERealtimeImaging/_task_work/main-rlb/bin/ImagingSvc.exe
+c2db6f8d738264fafaa47ff33e7421fed8c20b10cd5c378d4b477fdd91415da3 */d/ChatGPT/PAERealtimeImaging/_task_work/relb/bin/ring_svc_selftest.exe
+# data
+fbcbc105343d8caf8d1b231a93cf00cdbf4710f94a19b93b9f1a86f812e9e056 */d/ChatGPT/PAERealtimeImaging/testdata/14.dat

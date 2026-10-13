@@ -1,0 +1,4 @@
+# §1.2 对照二：Constants.h 与移植前（1b7c4c2 = c95917f 树）逐字节一致（B 未引入）
+0
+diff 行数 0 = 逐字节一致；DEFAULT_LOCAL_BIND_IP 检索：
+0

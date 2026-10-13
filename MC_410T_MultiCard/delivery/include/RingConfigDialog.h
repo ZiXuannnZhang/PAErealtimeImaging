@@ -3,6 +3,7 @@
 #include <QDialog>
 #include "Constants.h"
 #include "FrontendFilter.h"
+#include "RingEnhanceConfig.h"
 #include "ring_recon_cuda.h"
 
 class ImagingController;
@@ -29,6 +30,7 @@ public:
     void setAcquisitionParams(double sampleIntervalNs, int acqTimeNs);
 
     RingReconCudaConfig config() const;   // 当前控件值（含换算后的每通道每波长每圈A线数）
+    RingEnhanceConfig enhanceConfig() const; // 环形重建增强配置（独立于 CUDA ABI）
     void sysDelayPerChannel(int out[8][2]) const;   // 每通道双波长延时截断（[通道][波长]）
     bool applyConfig();                   // 校验并下发配置（应用/确定共用）
 
@@ -57,6 +59,10 @@ signals:
     // NetworkController::setLogicalTriggersPerRound。这是前端刷新闸门阈值的
     // 唯一来源：改参数即生效，不依赖实时成像是否已开启。
     void ringRoundTriggersChanged(quint64 logicalTriggersPerRound);
+    // applyConfig 成功后发出显示掩膜参数（工作一）。仅显示层：不写
+    // RingReconCudaConfig / 不进 ring JSON / ImagingSvc；MainWindow 持有最新值
+    // 并转发给 ImagingDisplayWindow::setDisplayMask（窗口未创建则缓存）。
+    void displayMaskChanged(bool enabled, double radiusMm);
 
 protected:
     void showEvent(QShowEvent *event) override;   // 每次显示时套用记忆的大小
@@ -110,7 +116,17 @@ private:
     QComboBox       *m_cmbApod;
     QDoubleSpinBox  *m_spnDistWeight;
     QDoubleSpinBox  *m_spnMinDistMm;
+    QCheckBox       *m_chkEnhanceBipolar;
+    QCheckBox       *m_chkEnhanceFreq;
+    QDoubleSpinBox  *m_spnFreqCompFcMhz;
+    QDoubleSpinBox  *m_spnFreqCompHmax;
+    QDoubleSpinBox  *m_spnFreqCompOrder;
     QCheckBox       *m_chkMaskOob;
+    // 显示掩膜（工作一）：仅显示层参数，不入 RingReconCudaConfig/JSON/ImagingSvc；
+    // 持久化于 RingConfigDialog/Defaults（displayMaskEnabled / displayMaskRadiusMm），
+    // Apply/OK 成功后经 displayMaskChanged 下发（MainWindow → 显示窗口）。
+    QDoubleSpinBox  *m_spnDisplayMaskRadiusMm;   // 显示掩膜半径(mm)，默认 6.57（环阵半径）
+    QCheckBox       *m_chkDisplayMask;           // 启用显示掩膜（默认不勾=与现状一致）
     QLineEdit       *m_edtSosRadii;    // 分层声速边界 [mm]（空/0=单一声速，多个用逗号分隔）
     QLineEdit       *m_edtSosSpeeds;   // 各层声速 [m/s]（元素数=边界数+1，逗号分隔）
     QSpinBox        *m_spnMaskLen;

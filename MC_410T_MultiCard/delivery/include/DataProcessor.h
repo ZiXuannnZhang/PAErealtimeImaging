@@ -62,6 +62,11 @@ public:
     // enqueue（deep copy 在 FrontendPreprocessor worker 内完成）。任一侧失败都
     // 不改写另一侧的结果，也不会计入 UDP 丢包 / missingTriggerCount /
     // saveQueueDiscards。
+    //
+    // imagingSubmit（默认 true，既有调用点零改动）：计数边界 FrontendOnly 组置
+    // false——跳过 m_framePublisher->submit，并在 frontend submit 前把 group 标
+    // 记为 frontendDisplayOnly，使 FrontendPreprocessor 只刷新显示、跳过 Ring
+    // 分发（实时成像冻结）。仅「禁用计数重置」勾选模式下可达。
     struct DeliveryResult {
         enum Save { NotRequested, Disabled, Queued, QueueFull, QueueFailure, Consumed, ConsumerFailure } save=NotRequested;
         bool saveAccepted=false;
@@ -71,7 +76,8 @@ public:
         FrontendSubmitResult frontendSubmit=FrontendSubmitResult::Stopping;
         bool publisherAccepted=false, exception=false;
     };
-    DeliveryResult deliverAssembled(const TriggerGroupPtr&,bool save,bool frontend);
+    DeliveryResult deliverAssembled(const TriggerGroupPtr&,bool save,bool frontend,
+                                    bool imagingSubmit=true);
     // Set before starting source workers. No second saving queue in this path.
     void setDirectSaveSink(std::function<bool(const TriggerGroupPtr&)> sink) { m_directSaveSink=std::move(sink); }
     std::uint64_t captureSaveSessionGen()const{return m_sessionGenReader?m_sessionGenReader():0;}
