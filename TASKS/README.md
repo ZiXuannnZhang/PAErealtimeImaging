@@ -1,5 +1,10 @@
 # Codex Task Channel
 
+## 当前派发（2026-10-16）
+
+- [Ring 旧重建增强移除与 STFT 时变低通接入](./环形旧增强移除与时变低通接入_20261016-132206.md)：从 main@a8c15cf 新建实现分支；仅影响 Ring 重建，默认 45 MHz / 1 MHz / 780 / 2000。详见任务内的精确基线、实现设计及验收要求。
+- 本索引下方的历史候选状态仅保留原记录语境。当前项目状态以最新 origin/main 的治理文档为准；HANDOFF.md 是当前接力入口，不能替代前三份治理文档。本任务不继承历史 START 候选未合并或旧 postFilter harness 的范围限制。
+
 本目录只存在于 `codex/task-docs` 任务文档分支，用于 ChatGPT 向 Codex Desktop 发布实施任务。
 
 ## 开始任何任务前
