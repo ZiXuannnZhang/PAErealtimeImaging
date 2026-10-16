@@ -109,3 +109,11 @@ git switch -c codex/<task-name>-<timestamp>
 
 除非 task document 明确指定 reviewed baseline，否则不要从 Session A/B/C/D、START、
 physical-round 或 integration historical branches 开始新开发。
+
+## 2026-10-16 实现候选（尚未合入 main）
+
+`codex/ring-timevar-lowpass-20261016` 从批准基线 a8c15cff 移除旧双极/低频增强，接入仅 Ring 服务消费的 STFT 时变低通。
+默认关闭，45/1 MHz、780/2000；执行位置在完整 A-line 的 DBR/限幅/DelayCut 前。
+新配置、主/高级草稿、默认保存和启动恢复已接线；独立 MATLAB 数值与软件回执见
+`CODEX_REPORTS/ring-timevar-lowpass-20261016/`，模块说明见 `MC_410T_MultiCard/delivery/docs/环形重建增强.md`。
+这是实现分支候选，不更改 canonical main 接受状态；硬件/视觉验收与真实 T_arr 仍未验证。

@@ -102,12 +102,12 @@ int main(int argc, char** argv) {
     const bool splice = argInt(args, "--splice", 0) != 0;          // 1=拼接模式（需配准模式）
     const double spliceBlendDeg = argDouble(args, "--splice-blend", 0.0);  // 拼接羽化宽度（°）
     const std::string sysDelayPerCh = argStr(args, "--sys-delay-per-ch");   // 空=各通道统一默认
-    // 预算测试扩展：--enhance 注入 ring.enhance（字段名与 ImagingSvc.cpp 解析端一致）；
-    // 不传 --enhance 则完全不注入该字段（main 构建口径）。
-    const std::string enhanceMode = argStr(args, "--enhance");
+    const std::string timevarMode = argStr(args, "--timevar-lowpass");
     const int roundsArg = argInt(args, "--rounds", 2);
 
-    if (dataPath.empty() || svcPath.empty()) {
+    const bool synthetic = argInt(args,"--synthetic",0) != 0;
+    const bool noSave = argInt(args,"--no-save",0) != 0;
+    if ((!synthetic && dataPath.empty()) || svcPath.empty()) {
         std::fprintf(stderr,
             "usage: ring_svc_selftest --data <11.dat> --svc <ImagingSvc.exe> "
             "[--id 11] [--grid-mm 0.1] [--block 200] [--channels 255] "
@@ -116,13 +116,11 @@ int main(int argc, char** argv) {
             "[--sos-radii-mm 3] [--sos 1490,1540] "
             "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...] "
             "[--identity-jump-at N] [--drop-block N] "
-            "[--enhance off|bipolar|freq|both] [--rounds N]\n");
+            "[--timevar-lowpass off|on|high] [--rounds N] [--synthetic 1] [--samples N] [--no-save 1]\n");
         return 2;
     }
-    if (!enhanceMode.empty() && enhanceMode != "off" && enhanceMode != "bipolar" &&
-        enhanceMode != "freq" && enhanceMode != "both") {
-        std::fprintf(stderr, "--enhance must be off|bipolar|freq|both\n");
-        return 2;
+    if (!timevarMode.empty() && timevarMode != "off" && timevarMode != "on" && timevarMode != "high") {
+        std::fprintf(stderr,"--timevar-lowpass must be off|on|high\n"); return 2;
     }
     if (roundsArg < 1) {
         std::fprintf(stderr, "--rounds must be >= 1\n");
@@ -159,7 +157,8 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    const int sampDepth = 4000;
+    const int sampDepth = argInt(args,"--samples",4000);
+    if (sampDepth < 400 || sampDepth > 1048576) return 2;
     const int wlOffset = (id == 11) ? 151 : 301;
     const int alinesPerFrame = (id == 11) ? 4000 : 8000;      // 双波长合计
     const int sysDelay1 = (id == 11) ? 171 : 358;
@@ -355,17 +354,14 @@ int main(int argc, char** argv) {
     ring["sectorCcw"] = 1;
     ring["triggerWlOdd"] = 1;
 
-    if (!enhanceMode.empty()) {
-        QJsonObject enhance;
-        enhance["enableBipolarCompensation"] =
-            (enhanceMode == "bipolar" || enhanceMode == "both");
-        enhance["enableFreqCompensation"] =
-            (enhanceMode == "freq" || enhanceMode == "both");
-        enhance["freqCompFcMhz"] = 10.0;
-        enhance["freqCompHmax"] = 2.0;
-        enhance["freqCompOrder"] = 2.0;
-        ring["enhance"] = enhance;
+    QJsonObject timevar;
+    timevar["enabled"] = timevarMode == "on" || timevarMode == "high";
+    if (timevarMode == "high") {
+        timevar["windowLength"] = 256;
+        timevar["overlapRatio"] = 0.75;
+        timevar["fftLength"] = 256;
     }
+    ring["timevarLowpass"] = timevar;
 
     QJsonObject params;
     params["imagingMode"] = "ring";
@@ -401,8 +397,8 @@ int main(int argc, char** argv) {
     std::map<std::string, int> obsKindCounts;
     ring_shm_obs::Tracker producerObs;
     producerObs.beginSession();
-    std::printf("[selftest] enhance=%s rounds=%d grid_mm=%.4f block=%d channels=0x%X\n",
-                enhanceMode.empty() ? "unset" : enhanceMode.c_str(),
+    std::printf("[selftest] timevar=%s rounds=%d grid_mm=%.4f block=%d channels=0x%X\n",
+                timevarMode.empty() ? "unset" : timevarMode.c_str(),
                 roundsArg, gridMm, perChBlock, chMask);
     QJsonObject lastObservation;
     QJsonObject mismatchObservation;
@@ -460,6 +456,7 @@ int main(int argc, char** argv) {
             !(dropBlock >= 0 && blockSeq / nBlocks == 0);
         bool got = false;
         bool identityMatch = false;
+        double serviceMs=0;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kTimeoutMs);
         while (std::chrono::steady_clock::now() < deadline) {
             zmq::message_t msg;
@@ -483,6 +480,7 @@ int main(int argc, char** argv) {
                         snapshotIdentity.identity == round &&
                         obj.value(QStringLiteral("round_complete")).isBool() &&
                         obj.value(QStringLiteral("round_complete")).toBool() == expectedComplete;
+                    serviceMs=obj["process_us"].toDouble()/1000.0;
                     got = true;
                     break;
                 }
@@ -494,6 +492,9 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "timeout at block %d\n", blockSeq);
             std::exit(2);
         }
+        const double snapshotMs = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();
+        std::printf("[block-timing] submit=%llu roundtrip_ms=%.9f service_ms=%.9f\n",
+                    static_cast<unsigned long long>(producerEvent.submitIndex),snapshotMs,serviceMs);
         if (expectedComplete) {
             // 整圈 wall：首块 submitWallUs → round_complete 快照到达
             const double wallMs =
@@ -557,14 +558,14 @@ int main(int argc, char** argv) {
         std::snprintf(nm, sizeof(nm), "svc_wl1_r%03llu_%03d.raw",
                       static_cast<unsigned long long>(round.roundGeneration),
                       blockSeq + 1);
-        if (!saveRaw(outDir + "/" + nm, wl1)) {
+        if (!noSave && !saveRaw(outDir + "/" + nm, wl1)) {
             std::fprintf(stderr, "write %s failed\n", nm);
             std::exit(2);
         }
         std::snprintf(nm, sizeof(nm), "svc_wl2_r%03llu_%03d.raw",
                       static_cast<unsigned long long>(round.roundGeneration),
                       blockSeq + 1);
-        if (!saveRaw(outDir + "/" + nm, wl2)) {
+        if (!noSave && !saveRaw(outDir + "/" + nm, wl2)) {
             std::fprintf(stderr, "write %s failed\n", nm);
             std::exit(2);
         }
@@ -615,7 +616,11 @@ int main(int argc, char** argv) {
                 const int wlIdx = s * K + kRound;            // 每波长在全帧内行号
                 const int col0 = wlOffset - 1 + 2 * wlIdx + (t % 2);
                 std::vector<double> col;
-                if (!readColumn(dataPath, sampDepth, col0, col)) {
+                if (synthetic) {
+                    col.resize(sampDepth);
+                    for (int i=0;i<sampDepth;++i)
+                        col[i]=std::sin(i*.071+col0*.013)+.4*std::cos(i*1.7+col0*.01);
+                } else if (!readColumn(dataPath, sampDepth, col0, col)) {
                     std::fprintf(stderr, "read col %d failed\n", col0);
                     return 2;
                 }

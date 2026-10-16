@@ -52,3 +52,11 @@ RadiusCalibration 仍需真实全孔径校准数据，不对 raw Bscan 做 circs
 当前 main 是唯一活跃源码/文档基准。旧副本、可再生构建和测试结果按本轮授权移入
 _pending_delete；源码先核实远端备份，未备份的原始数据与证据单独保护。
 只有用户执行最终删除。不要清空旧 _pending_delete，不用 reset --hard / clean 强制同步。
+
+## 2026-10-16 实现候选（尚未合入 main）
+
+`codex/ring-timevar-lowpass-20261016` 从批准基线 a8c15cff 移除旧双极/低频增强，接入仅 Ring 服务消费的 STFT 时变低通。
+默认关闭，45/1 MHz、780/2000；执行位置在完整 A-line 的 DBR/限幅/DelayCut 前。
+新配置、主/高级草稿、默认保存和启动恢复已接线；独立 MATLAB 数值与软件回执见
+`CODEX_REPORTS/ring-timevar-lowpass-20261016/`，模块说明见 `MC_410T_MultiCard/delivery/docs/环形重建增强.md`。
+这是实现分支候选，不更改 canonical main 接受状态；硬件/视觉验收与真实 T_arr 仍未验证。

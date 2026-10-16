@@ -7,32 +7,56 @@ set(CMAKE_AUTOMOC ON)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
-add_executable(ring_signal_enhancer_test
-    ring_signal_enhancer_test.cpp
-    ../src/RingSignalEnhancer.cpp)
-target_include_directories(ring_signal_enhancer_test PRIVATE ../include)
-target_compile_features(ring_signal_enhancer_test PRIVATE cxx_std_17)
-add_test(NAME ring_signal_enhancer_test COMMAND ring_signal_enhancer_test)
+add_executable(ring_timevar_lowpass_test ring_timevar_lowpass_test.cpp
+    ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/RingRecon/ring_recon.cpp)
+target_include_directories(ring_timevar_lowpass_test PRIVATE ../include ../src/RingRecon)
+target_link_libraries(ring_timevar_lowpass_test PRIVATE Qt6::Core)
+target_compile_definitions(ring_timevar_lowpass_test PRIVATE TIMEVAR_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/reference/fixtures")
+add_test(NAME ring_timevar_lowpass_test COMMAND ring_timevar_lowpass_test)
 
-# 预算测试 Layer 1 微基准（TASKS/环形增强实时预算测试_20260927-141217.md §4）。
-# CTest 入口跑无参模式（内置语义断言 + 合成矩阵）；实录数据矩阵用
-# --data <14.dat> 手动复跑，不进 CTest。
-add_executable(ring_enhancer_bench
-    ring_enhancer_bench.cpp
-    ../src/RingSignalEnhancer.cpp)
-target_include_directories(ring_enhancer_bench PRIVATE ../include)
-target_compile_features(ring_enhancer_bench PRIVATE cxx_std_17)
-add_test(NAME ring_enhancer_bench COMMAND ring_enhancer_bench)
+add_executable(ring_timevar_bench ring_timevar_bench.cpp ../src/RingTimevarLowpass.cpp ../src/RingRecon/ring_recon.cpp)
+target_include_directories(ring_timevar_bench PRIVATE ../include ../src/RingRecon)
 
-# 优化任务 A2/A3 对拍（TASKS/环形增强FFT性能优化_20260927-141217.md §3/§5）。
-# 内嵌参考实现 = 预算任务 1 时的算法逐字转录；CTest 默认 --max-ulp 1（A3 政策），
-# A2 验收以 --max-ulp 0 手动复跑（要求逐位一致）。
-add_executable(ring_enhancer_parity_test
-    ring_enhancer_parity_test.cpp
-    ../src/RingSignalEnhancer.cpp)
-target_include_directories(ring_enhancer_parity_test PRIVATE ../include)
-target_compile_features(ring_enhancer_parity_test PRIVATE cxx_std_17)
-add_test(NAME ring_enhancer_parity_test COMMAND ring_enhancer_parity_test)
+if(WIN32)
+    add_executable(ring_timevar_service_test ring_timevar_service_test.cpp
+        ../src/ImagingSvc/ImagingSvc.cpp ../src/ImagingSvc/ImagingSvc.h ../src/ImagingSvc/ProcessScheduling.cpp
+        ../src/RingRecon/ring_recon.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp)
+    target_include_directories(ring_timevar_service_test PRIVATE ../include ../src/RingRecon ../src/ImagingSvc
+        ../libs/imaging ../third_party/zeromq/include)
+    target_compile_definitions(ring_timevar_service_test PRIVATE RING_TIMEVAR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(ring_timevar_service_test PRIVATE Qt6::Core ws2_32
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/libring_recon_cuda.dll.a"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.lib")
+    add_custom_command(TARGET ring_timevar_service_test POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/ring_recon_cuda.dll"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/cudart64_12.dll"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.dll"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/cufft64_12.dll"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
+        "$<TARGET_FILE_DIR:ring_timevar_service_test>")
+    add_test(NAME ring_timevar_service_test COMMAND ring_timevar_service_test)
+    set_tests_properties(ring_timevar_service_test PROPERTIES RUN_SERIAL TRUE)
+    add_executable(ring_timevar_ui_test ring_timevar_ui_test.cpp
+        ../src/RingConfigDialog.cpp ../include/RingConfigDialog.h
+        ../src/ImagingController.cpp ../include/ImagingController.h
+        ../src/FrontendFilter.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp)
+    target_include_directories(ring_timevar_ui_test PRIVATE ../include ../src/RingRecon
+        ../third_party/zeromq/include)
+    target_compile_definitions(ring_timevar_ui_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(ring_timevar_ui_test PRIVATE Qt6::Widgets
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/libring_recon_cuda.dll.a"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a")
+    set_target_properties(ring_timevar_ui_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ui-isolated")
+    add_test(NAME ring_timevar_ui_test COMMAND ring_timevar_ui_test)
+    set_tests_properties(ring_timevar_ui_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_custom_command(TARGET ring_timevar_ui_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/ring_recon_cuda.dll"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/cudart64_12.dll"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
+            "$<TARGET_FILE_DIR:ring_timevar_ui_test>")
+endif()
 
 # 显示层几何纯函数（TASKS/环形显示层优化_显示掩膜与毫米坐标_20260928-003123.md
 # §验收 1）：映射往返/边界 + 掩膜行区间 LUT + LUT↔单像素判定一致性（纯 std，无 Qt）。
@@ -387,4 +411,9 @@ if(WIN32 AND Python3_Interpreter_FOUND)
     set_tests_properties(paimage_start_race_analyzer PROPERTIES
         DEPENDS paimage_start_race
         RUN_SERIAL TRUE)
+endif()
+
+# Keep the CPU DSP kernel optimized in Debug too; preserve symbols and no fast-math.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../src/RingTimevarLowpass.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 endif()

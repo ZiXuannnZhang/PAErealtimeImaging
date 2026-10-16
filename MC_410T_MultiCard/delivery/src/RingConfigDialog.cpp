@@ -1,5 +1,9 @@
 #include "PaimageAcquisition/SettingsPath.h"
 #include "RingConfigDialog.h"
+#include "RingTimevarLowpassSettings.h"
+#include <QDialogButtonBox>
+#include <QTimer>
+#include <QSignalBlocker>
 #include "AcqConfig.h"
 #include "ChannelNaming.h"
 #include "ImagingController.h"
@@ -119,6 +123,7 @@ RingConfigDialog::RingConfigDialog(ImagingController *controller, QWidget *paren
     // “设为默认”保存的默认值在构造时即加载：下次启动程序即为上次设为默认的值；
     // 未保存过时回退到出厂硬编码默认值
     restoreDefaults();
+    m_timevarAccepted = timevarConfig();
 
     // 记忆上次关闭前的大小
     QSettings s(paimageSettingsPath(), QSettings::IniFormat);
@@ -346,39 +351,41 @@ void RingConfigDialog::buildUi()
 
     auto *grpEnhance = new QGroupBox("重建增强");
     auto *fEnhance = new QFormLayout(grpEnhance);
-    m_chkEnhanceBipolar = new QCheckBox("启用双极波形补偿");
-    m_chkEnhanceBipolar->setChecked(false);
-    m_chkEnhanceBipolar->setToolTip("g(t) = p(t) - t*d(p(t))/dt；不进行正整流。");
-    m_chkEnhanceFreq = new QCheckBox("启用低频补偿");
-    m_chkEnhanceFreq->setChecked(false);
-    m_spnFreqCompFcMhz = new QDoubleSpinBox;
-    m_spnFreqCompFcMhz->setRange(0.001, 124.999);
-    m_spnFreqCompFcMhz->setDecimals(3);
-    m_spnFreqCompFcMhz->setSuffix(" MHz");
-    m_spnFreqCompFcMhz->setValue(10.0);
-    m_spnFreqCompHmax = new QDoubleSpinBox;
-    m_spnFreqCompHmax->setRange(1.0, 20.0);
-    m_spnFreqCompHmax->setDecimals(3);
-    m_spnFreqCompHmax->setValue(2.0);
-    m_spnFreqCompOrder = new QDoubleSpinBox;
-    m_spnFreqCompOrder->setRange(0.1, 10.0);
-    m_spnFreqCompOrder->setDecimals(2);
-    m_spnFreqCompOrder->setValue(2.0);
-    m_spnFreqCompFcMhz->setToolTip("低频补偿转折频率。");
-    m_spnFreqCompHmax->setToolTip("零频最大增益，必须不小于 1。");
-    m_spnFreqCompOrder->setToolTip("H(f) 曲线衰减阶数。");
-    fEnhance->addRow("", m_chkEnhanceBipolar);
-    fEnhance->addRow("", m_chkEnhanceFreq);
-    fEnhance->addRow("fc(MHz)", m_spnFreqCompFcMhz);
-    fEnhance->addRow("Hmax", m_spnFreqCompHmax);
-    fEnhance->addRow("curve order", m_spnFreqCompOrder);
-    reconLayout->addWidget(grpEnhance);
-    connect(m_chkEnhanceFreq, &QCheckBox::toggled, this, [this](bool enabled) {
-        m_spnFreqCompFcMhz->setEnabled(enabled);
-        m_spnFreqCompHmax->setEnabled(enabled);
-        m_spnFreqCompOrder->setEnabled(enabled);
+    m_chkTimevar = new QCheckBox("启用时变低通滤波");
+    m_chkTimevar->setObjectName("timevarEnabled");
+    m_btnTimevarAdvanced = new QPushButton("高级参数");
+    m_btnTimevarAdvanced->setObjectName("timevarAdvanced");
+    auto *enableRow = new QHBoxLayout;
+    enableRow->addWidget(m_chkTimevar); enableRow->addWidget(m_btnTimevarAdvanced);
+    fEnhance->addRow(enableRow);
+    auto cutoff=[](const char* name) {
+        auto *w=new QDoubleSpinBox;
+        w->setObjectName(name); w->setDecimals(9); w->setRange(0.000000001, 1e9);
+        w->setSuffix(" MHz"); return w;
+    };
+    m_spnTimevarMax=cutoff("timevarFcMaxMhz");
+    m_spnTimevarMin=cutoff("timevarFcMinMhz");
+    m_spnTimevarP1=new QSpinBox; m_spnTimevarP1->setRange(1,2147483647);
+    m_spnTimevarP2=new QSpinBox; m_spnTimevarP2->setRange(1,2147483647);
+    m_spnTimevarP1->setObjectName("timevarP1"); m_spnTimevarP2->setObjectName("timevarP2");
+    connect(m_spnTimevarMax,qOverload<double>(&QDoubleSpinBox::valueChanged),this,
+            [this](double v){m_timevarDraft.fcMaxMhz=v;});
+    connect(m_spnTimevarMin,qOverload<double>(&QDoubleSpinBox::valueChanged),this,
+            [this](double v){m_timevarDraft.fcMinMhz=v;});
+    connect(m_spnTimevarP1,qOverload<int>(&QSpinBox::valueChanged),this,
+            [this](int v){m_timevarDraft.p1=v;});
+    connect(m_spnTimevarP2,qOverload<int>(&QSpinBox::valueChanged),this,
+            [this](int v){m_timevarDraft.p2=v;});
+    fEnhance->addRow("fcMax",m_spnTimevarMax); fEnhance->addRow("fcMin",m_spnTimevarMin);
+    fEnhance->addRow("p1（采样点）",m_spnTimevarP1); fEnhance->addRow("p2（采样点）",m_spnTimevarP2);
+    grpEnhance->setToolTip("只影响 Ring 实时成像；p1/p2 是裁切前完整 A-line 的 MATLAB 1-based 采样点。\n不改变前端时域/频域显示、raw 保存或发布。");
+    connect(m_chkTimevar,&QCheckBox::toggled,this,[this](bool on) {
+        m_spnTimevarMax->setEnabled(on); m_spnTimevarMin->setEnabled(on);
+        m_spnTimevarP1->setEnabled(on); m_spnTimevarP2->setEnabled(on);
     });
-
+    connect(m_btnTimevarAdvanced,&QPushButton::clicked,this,&RingConfigDialog::editTimevarAdvanced);
+    setTimevarDraft(RingTimevarLowpassConfig{});
+    reconLayout->addWidget(grpEnhance);
 
     auto *grpSos = new QGroupBox("声速模型（双声速，与 Ringscan_DAS_loop_realtime_dual 一致）");
     auto *fSos = new QFormLayout(grpSos);
@@ -494,11 +501,24 @@ void RingConfigDialog::buildUi()
 void RingConfigDialog::setAcquisitionParams(double sampleIntervalNs, int acqTimeNs)
 {
     if (sampleIntervalNs <= 0.0) return;
+    const bool firstAcquisition = !m_acquisitionKnown;
     m_daqHz = 1e9 / sampleIntervalNs;
     m_lblDaqHz->setText(QString::number(m_daqHz, 'f', 0));
     if (acqTimeNs > 0) {
         m_sampDepth = std::max(1, static_cast<int>(acqTimeNs / sampleIntervalNs));
         m_lblSampDepth->setText(QString::number(m_sampDepth));
+    }
+    m_acquisitionKnown = true;
+    if(firstAcquisition) {
+        std::string e;
+        if(!ring_timevar::validate(timevarConfig(),m_daqHz,m_sampDepth,&e)) {
+            setTimevarDraft(RingTimevarLowpassConfig{});
+            m_timevarAccepted=timevarConfig();
+            const auto message=QString::fromStdString(e);
+            QTimer::singleShot(0,this,[this,message] {
+                QMessageBox::warning(this,"默认参数无效","时变低通默认值不适用于当前采集，使用完整关闭的出厂配置，原记录未改写："+message);
+            });
+        }
     }
 }
 
@@ -540,14 +560,15 @@ void RingConfigDialog::restoreDefaults()
     m_cmbApod->setCurrentIndex(val("apod", 0).toInt());
     m_spnDistWeight->setValue(val("distWeight", 1).toInt());
     m_spnMinDistMm->setValue(val("minDistMm", 0).toDouble());
-    m_chkEnhanceBipolar->setChecked(val("enhanceBipolar", false).toBool());
-    m_chkEnhanceFreq->setChecked(val("enhanceFreq", false).toBool());
-    m_spnFreqCompFcMhz->setValue(val("enhanceFreqFcMhz", 10.0).toDouble());
-    m_spnFreqCompHmax->setValue(val("enhanceFreqHmax", 2.0).toDouble());
-    m_spnFreqCompOrder->setValue(val("enhanceFreqOrder", 2.0).toDouble());
-    m_spnFreqCompFcMhz->setEnabled(m_chkEnhanceFreq->isChecked());
-    m_spnFreqCompHmax->setEnabled(m_chkEnhanceFreq->isChecked());
-    m_spnFreqCompOrder->setEnabled(m_chkEnhanceFreq->isChecked());
+    RingTimevarLowpassConfig restored;
+    QString timevarError;
+    if (!ring_timevar::loadSettings(s,m_daqHz,m_sampDepth,restored,&timevarError,m_acquisitionKnown)) {
+        restored=RingTimevarLowpassConfig{};
+        QTimer::singleShot(0,this,[this,timevarError] {
+            QMessageBox::warning(this,"默认参数无效","时变低通默认值无效，使用完整关闭的出厂配置，原记录未改写："+timevarError);
+        });
+    }
+    setTimevarDraft(restored);
     m_chkMaskOob->setChecked(val("maskOob", true).toBool());
     // 显示掩膜（工作一）：与既有键同一 Defaults group、同一读写路径；
     // 无历史键时回退出厂默认（不启用、6.57mm）。
@@ -584,6 +605,10 @@ void RingConfigDialog::restoreDefaults()
 
 void RingConfigDialog::saveDefaults()
 {
+    QString draftError;
+    if (!validateDraft(&draftError)) {
+        QMessageBox::warning(this,"参数错误",draftError); return;
+    }
     QSettings s(paimageSettingsPath(), QSettings::IniFormat);
     s.beginGroup("RingConfigDialog/Defaults");
     s.setValue("block", m_spnBlock->value());
@@ -605,11 +630,7 @@ void RingConfigDialog::saveDefaults()
     s.setValue("apod", m_cmbApod->currentIndex());
     s.setValue("distWeight", m_spnDistWeight->value());
     s.setValue("minDistMm", m_spnMinDistMm->value());
-    s.setValue("enhanceBipolar", m_chkEnhanceBipolar->isChecked());
-    s.setValue("enhanceFreq", m_chkEnhanceFreq->isChecked());
-    s.setValue("enhanceFreqFcMhz", m_spnFreqCompFcMhz->value());
-    s.setValue("enhanceFreqHmax", m_spnFreqCompHmax->value());
-    s.setValue("enhanceFreqOrder", m_spnFreqCompOrder->value());
+    ring_timevar::saveSettings(s,timevarConfig());
     s.setValue("maskOob", m_chkMaskOob->isChecked());
     // 显示掩膜（工作一）与其他默认参数同一次“设为默认”落盘（同一 Defaults group）
     s.setValue("displayMaskEnabled", m_chkDisplayMask->isChecked());
@@ -708,15 +729,88 @@ RingReconCudaConfig RingConfigDialog::config() const
     return cfg;
 }
 
-RingEnhanceConfig RingConfigDialog::enhanceConfig() const
+RingTimevarLowpassConfig RingConfigDialog::timevarConfig() const
 {
-    RingEnhanceConfig cfg;
-    cfg.enableBipolarCompensation = m_chkEnhanceBipolar->isChecked();
-    cfg.enableFreqCompensation = m_chkEnhanceFreq->isChecked();
-    cfg.freqCompFcMhz = m_spnFreqCompFcMhz->value();
-    cfg.freqCompHmax = m_spnFreqCompHmax->value();
-    cfg.freqCompOrder = m_spnFreqCompOrder->value();
-    return cfg;
+    auto c=m_timevarDraft;
+    c.enabled=m_chkTimevar->isChecked();
+    return c;
+}
+void RingConfigDialog::setTimevarDraft(const RingTimevarLowpassConfig& c)
+{
+    m_timevarDraft=c;
+    // Keep exact loaded doubles until the user edits a field; spinbox display
+    // precision must not silently quantize a saved runtime configuration.
+    const QSignalBlocker maxBlock(m_spnTimevarMax),minBlock(m_spnTimevarMin);
+    const QSignalBlocker p1Block(m_spnTimevarP1),p2Block(m_spnTimevarP2);
+    m_chkTimevar->setChecked(c.enabled);
+    m_spnTimevarMax->setValue(c.fcMaxMhz); m_spnTimevarMin->setValue(c.fcMinMhz);
+    m_spnTimevarP1->setValue(c.p1); m_spnTimevarP2->setValue(c.p2);
+    m_spnTimevarMax->setEnabled(c.enabled); m_spnTimevarMin->setEnabled(c.enabled);
+    m_spnTimevarP1->setEnabled(c.enabled); m_spnTimevarP2->setEnabled(c.enabled);
+}
+void RingConfigDialog::reject()
+{
+    setTimevarDraft(m_timevarAccepted);
+    QDialog::reject();
+}
+void RingConfigDialog::editTimevarAdvanced()
+{
+    QDialog dlg(this); dlg.setWindowTitle("时变低通高级参数");
+    dlg.setObjectName("timevarAdvancedDialog");
+    auto *layout=new QFormLayout(&dlg);
+    auto *window=new QSpinBox; window->setRange(2,ring_timevar::maxFftLength);
+    window->setObjectName("timevarWindowLength"); window->setValue(m_timevarDraft.windowLength);
+    auto *overlap=new QDoubleSpinBox; overlap->setDecimals(12); overlap->setRange(0,0.999999999999);
+    overlap->setObjectName("timevarOverlapRatio"); overlap->setValue(m_timevarDraft.overlapRatio);
+    const double displayedOverlap=overlap->value();
+    auto *automatic=new QCheckBox("自动"); automatic->setObjectName("timevarFftAuto");
+    automatic->setChecked(m_timevarDraft.fftLength==0);
+    auto *fft=new QSpinBox; fft->setRange(2,ring_timevar::maxFftLength);
+    fft->setObjectName("timevarFftLength");
+    fft->setValue(m_timevarDraft.fftLength?m_timevarDraft.fftLength:ring_timevar::fftLength(m_timevarDraft));
+    fft->setEnabled(!automatic->isChecked());
+    connect(automatic,&QCheckBox::toggled,fft,[fft](bool on){fft->setEnabled(!on);});
+    auto *fftRow=new QHBoxLayout; fftRow->addWidget(automatic); fftRow->addWidget(fft);
+    auto *order=new QDoubleSpinBox; order->setDecimals(9); order->setRange(.000000001,1e9);
+    order->setObjectName("timevarFilterOrder"); order->setValue(m_timevarDraft.filterOrder);
+    const double displayedOrder=order->value();
+    auto *transition=new QComboBox; transition->addItems({"smoothstep","linear"});
+    transition->setObjectName("timevarTransition"); transition->setCurrentText(QString::fromStdString(m_timevarDraft.transition));
+    layout->addRow("WindowLength",window); layout->addRow("OverlapRatio",overlap);
+    layout->addRow("FFTLength",fftRow); layout->addRow("FilterOrder",order); layout->addRow("Transition",transition);
+    auto *buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel);
+    layout->addRow(buttons);
+    connect(buttons,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
+    connect(buttons,&QDialogButtonBox::accepted,&dlg,[&] {
+        auto c=timevarConfig(); c.windowLength=window->value();
+        if(overlap->value()!=displayedOverlap)c.overlapRatio=overlap->value();
+        c.fftLength=automatic->isChecked()?0:fft->value();
+        if(order->value()!=displayedOrder)c.filterOrder=order->value();
+        c.transition=transition->currentText().toStdString();
+        std::string e;
+        if(!ring_timevar::validate(c,m_daqHz,m_sampDepth,&e)) {
+            QMessageBox::warning(&dlg,"参数错误",QString::fromStdString(e)); return;
+        }
+        m_timevarDraft=c; dlg.accept();
+    });
+    dlg.exec();
+}
+
+bool RingConfigDialog::validateDraft(QString* error) const
+{
+    auto fail=[&](const QString& e){if(error)*error=e;return false;};
+    int cnt=0; for(int c=0;c<8;++c)if(m_chkCh[c]->isChecked())++cnt;
+    if(!cnt)return fail("请至少勾选一个通道");
+    const int total=m_spnTotalAlines->value(), block=m_spnBlock->value()/2;
+    if(total%(cnt*2)||total/(cnt*2)<2||block<1||total/(cnt*2)%block)
+        return fail("单圈 A-line 数与通道、波长或块数不匹配");
+    double radii[8],speeds[8]; int nr,ns;
+    if(!parseSoundSpeedModel(m_edtSosRadii->text(),m_edtSosSpeeds->text(),radii,&nr,speeds,&ns,error))return false;
+    const auto fe=frontend_filter::validate(frontendFilterConfig());
+    if(fe!=frontend_filter::Validation::Ok)return fail(QString::fromUtf8(frontend_filter::validationMessage(fe)));
+    std::string e;
+    if(!ring_timevar::validate(timevarConfig(),m_daqHz,m_sampDepth,&e))return fail(QString::fromStdString(e));
+    return true;
 }
 
 void RingConfigDialog::sysDelayPerChannel(int out[8][2]) const
@@ -788,15 +882,13 @@ bool RingConfigDialog::applyConfig()
     int sysDelayCh[8][2] = {{0}};
     sysDelayPerChannel(sysDelayCh);
     const RingReconCudaConfig applied = config();
-    const RingEnhanceConfig enhance = enhanceConfig();
-    const char *enhanceError = nullptr;
-    if (!ring_enhance::validate(enhance, &enhanceError)) {
-        QMessageBox::warning(this, "参数错误",
-            QString("重建增强参数无效：%1")
-                .arg(QString::fromUtf8(enhanceError ? enhanceError : "unknown")));
-        return false;
+    const auto timevar=timevarConfig();
+    std::string timevarError;
+    if (!ring_timevar::validate(timevar,m_daqHz,m_sampDepth,&timevarError)) {
+        QMessageBox::warning(this,"参数错误",QString::fromStdString(timevarError)); return false;
     }
-    m_controller->configureRing(applied, enhance, sysDelayCh);
+    if (!m_controller->configureRing(applied,timevar,sysDelayCh)) return false;
+    m_timevarAccepted=timevar;
     // 应用成功后将物理轮次启动策略同步给当前 NetworkController（MainWindow 转发）
     emit roundPolicyChanged(startupFilterTriggerCount(), disableCountBoundary());
     // 前端滤波参数经独立接线下发到 Frontend Preprocessing 配置（MainWindow 转发），

@@ -1,4 +1,7 @@
+#include <array>
 #include "ImagingSvc.h"
+#include "RingTimevarLowpassSettings.h"
+#include "RingTimevarPreprocess.h"
 #include "ImagingSharedMemory.h"
 #include "RingReconCompletion.h"
 #include "RingRoundIdentity.h"
@@ -380,6 +383,7 @@ void ImagingSvc::processConfigure(const QJsonObject &params)
 // =====================================================================
 void ImagingSvc::processRingConfigure(const QJsonObject &ring)
 {
+    int nextSysDelayCh[8][2];
     RingReconCudaConfig cfg;
     ring_recon_cuda_set_defaults(&cfg);
 
@@ -447,16 +451,16 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     // 每通道双波长延时截断：优先新协议 sysDelayPerChannel[8][2]；
     // 未提供/字段不完整时回退为 cfg.sysDelay（旧全局值）广播到所有通道，保持旧客户端行为不变。
     for (int c = 0; c < 8; ++c) {
-        m_ringSysDelayCh[c][0] = cfg.sysDelay[0];
-        m_ringSysDelayCh[c][1] = cfg.sysDelay[1];
+        nextSysDelayCh[c][0] = cfg.sysDelay[0];
+        nextSysDelayCh[c][1] = cfg.sysDelay[1];
     }
     const QJsonArray sdCh = ring["sysDelayPerChannel"].toArray();
     if (sdCh.size() >= 8 && sdCh[0].isArray()) {
         for (int c = 0; c < 8; ++c) {
             const QJsonArray pair = sdCh[c].toArray();
             if (pair.size() >= 2) {
-                m_ringSysDelayCh[c][0] = pair[0].toInt();
-                m_ringSysDelayCh[c][1] = pair[1].toInt();
+                nextSysDelayCh[c][0] = pair[0].toInt();
+                nextSysDelayCh[c][1] = pair[1].toInt();
             }
         }
     }
@@ -491,29 +495,23 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
         return;
     }
 
-    const QJsonObject enhanceJson = ring["enhance"].toObject();
-    RingEnhanceConfig enhanceCfg;
-    enhanceCfg.enableBipolarCompensation =
-        enhanceJson[QStringLiteral("enableBipolarCompensation")].toBool(false);
-    enhanceCfg.enableFreqCompensation =
-        enhanceJson[QStringLiteral("enableFreqCompensation")].toBool(false);
-    enhanceCfg.freqCompFcMhz =
-        enhanceJson[QStringLiteral("freqCompFcMhz")].toDouble(enhanceCfg.freqCompFcMhz);
-    enhanceCfg.freqCompHmax =
-        enhanceJson[QStringLiteral("freqCompHmax")].toDouble(enhanceCfg.freqCompHmax);
-    enhanceCfg.freqCompOrder =
-        enhanceJson[QStringLiteral("freqCompOrder")].toDouble(enhanceCfg.freqCompOrder);
-    const char *enhanceError = nullptr;
-    if (!ring_enhance::validate(enhanceCfg, &enhanceError)) {
-        sendError(QString("重建增强参数无效: %1")
-                      .arg(QString::fromUtf8(enhanceError ? enhanceError : "unknown")),
-                  2012);
+    RingTimevarLowpassConfig timevarCfg;
+    QString timevarError;
+    if (!ring_timevar::fromJson(ring["timevarLowpass"], cfg.daqHz, cfg.sampDepth,
+                                timevarCfg, &timevarError)) {
+        sendError("时变低通配置无效: " + timevarError, 2012);
         return;
     }
-
+    RingTimevarLowpass prepared;
+    std::string planError;
+    if (!prepared.configure(timevarCfg, cfg.daqHz, cfg.sampDepth, &planError)) {
+        sendError("时变低通准备失败: " + QString::fromStdString(planError), 2012);
+        return;
+    }
     m_ringConfig = cfg;
-    m_ringEnhanceConfig = enhanceCfg;
-    m_ringEnhancer.setConfig(enhanceCfg, cfg.daqHz);
+    m_ringTimevarConfig = timevarCfg;
+    m_ringTimevar = std::move(prepared);
+    for(int c=0;c<8;++c)for(int w=0;w<2;++w)m_ringSysDelayCh[c][w]=nextSysDelayCh[c][w];
     m_ringMode = true;
     m_ringChannelCount = cnt;
     for (int i = 0; i < 8; ++i) m_ringChannels[i] = cfg.enabledChannels[i];
@@ -676,6 +674,12 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
     for (int c = 0; c < 8; ++c)
         if (m_ringChannels[c]) selIdx[c] = si++;
 
+    std::array<std::vector<float>, 8> nextPrevWL2;
+    std::copy(std::begin(m_ringPrevWL2), std::end(m_ringPrevWL2), nextPrevWL2.begin());
+    std::array<float, 8> nextPrevAngle;
+    std::copy(std::begin(m_ringPrevAngle), std::end(m_ringPrevAngle), nextPrevAngle.begin());
+    std::array<float, 8> nextPrevRadius;
+    std::copy(std::begin(m_ringPrevRadius), std::end(m_ringPrevRadius), nextPrevRadius.begin());
     // 每波长：所有选中通道的预处理后 A-line（各自独立长度 nt）
     std::vector<std::vector<float>> wlData[2];
     std::vector<float> wlAng[2];
@@ -711,12 +715,13 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
             pp.signalImpair = m_ringConfig.singalImpair != 0;
             pp.imValue = m_ringConfig.imValue[w];
 
-            auto processed = ringrecon::preprocessBlock(d, sampDepth, 1, pp);
-            if (!m_ringEnhancer.apply(processed.data(),
-                                      static_cast<int>(processed.size()))) {
-                sendError("重建增强处理失败", 2013);
-                return;
+            std::string filterError;
+            std::vector<float> processed;
+            if (!ringTimevarPreprocess(m_ringTimevar, d, pp, processed, &filterError)) {
+                sendError("时变低通处理失败: " + QString::fromStdString(filterError), 2013);
+                return; // All lines are prepared before any CUDA submission.
             }
+
             lists[w].push_back(std::move(processed));
             angs[w].push_back(ang[pos]);
             rads[w].push_back(static_cast<float>(
@@ -725,20 +730,20 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
         }
 
         // wl2 通道内跨块对齐：首块不偏移，后续块前插上一块末根
-        if (m_ringConfig.shiftWL2 && m_ringBlockIndex > 0 && !m_ringPrevWL2[c].empty()) {
-            lists[1].insert(lists[1].begin(), m_ringPrevWL2[c]);
+        if (m_ringConfig.shiftWL2 && m_ringBlockIndex > 0 && !nextPrevWL2[c].empty()) {
+            lists[1].insert(lists[1].begin(), nextPrevWL2[c]);
             lists[1].pop_back();
-            angs[1].insert(angs[1].begin(), m_ringPrevAngle[c]);
+            angs[1].insert(angs[1].begin(), nextPrevAngle[c]);
             angs[1].pop_back();
-            rads[1].insert(rads[1].begin(), m_ringPrevRadius[c]);
+            rads[1].insert(rads[1].begin(), nextPrevRadius[c]);
             rads[1].pop_back();
             secs[1].insert(secs[1].begin(), static_cast<float>(chSectorStartDeg));
             secs[1].pop_back();
         }
         if (!lists[1].empty()) {
-            m_ringPrevWL2[c] = lists[1].back();
-            m_ringPrevAngle[c] = angs[1].back();
-            m_ringPrevRadius[c] = rads[1].back();
+            nextPrevWL2[c] = lists[1].back();
+            nextPrevAngle[c] = angs[1].back();
+            nextPrevRadius[c] = rads[1].back();
         }
 
         for (int w = 0; w < 2; ++w) {
@@ -751,6 +756,9 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
         }
     }
 
+    std::move(nextPrevWL2.begin(), nextPrevWL2.end(), std::begin(m_ringPrevWL2));
+    std::copy(nextPrevAngle.begin(), nextPrevAngle.end(), std::begin(m_ringPrevAngle));
+    std::copy(nextPrevRadius.begin(), nextPrevRadius.end(), std::begin(m_ringPrevRadius));
     // 展平并送入 CUDA（每根 A-line 独立角度 + 独立重建半径）
     std::vector<float> flat[2];
     int nd[2] = {0, 0};
@@ -810,7 +818,8 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
     const uint32_t snapshotSeq = ++h->frame_seq;
     m_ringSharedMemory->unlock();
 
-    sendRingSnapshotToHost(snapshotSeq, submitIndex, round, completion.reconstructionComplete);     // 新链路：方案A 显示快照
+    sendRingSnapshotToHost(snapshotSeq, submitIndex, round, completion.reconstructionComplete,
+                           ring_shm_obs::steadyNowUs() - processStartUs);
 
     m_ringObs.recordProcessDuration(ring_shm_obs::steadyNowUs() - processStartUs);
     if (observation.periodicDue)
@@ -867,12 +876,14 @@ void ImagingSvc::resetRingRecon()
 }
 
 void ImagingSvc::sendRingSnapshotToHost(uint32_t seq, uint64_t submitIndex,
-                                        const paimage::RoundIdentity &round, bool reconstructionComplete)
+                                        const paimage::RoundIdentity &round, bool reconstructionComplete,
+                                        uint64_t processUs)
 {
     // The outbound round_complete is exclusively the reconstruction completion
     // fact: source round end AND exactly the configured block count consumed.
     QJsonObject msg = ring_round_identity::makeSnapshotReady(
         seq, submitIndex, round, reconstructionComplete);
+    msg["process_us"] = static_cast<qint64>(processUs);
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
     zmq::message_t zmsg(static_cast<size_t>(data.size()));

@@ -49,7 +49,8 @@ set(SOURCES
     src/ImagingController.cpp
     src/ImagingBypass.cpp
     src/RingConfigDialog.cpp
-    src/RingSignalEnhancer.cpp
+    src/RingTimevarLowpass.cpp
+    src/RingTimevarLowpassSettings.cpp
     src/ImagingDisplayWindow.cpp
     src/RingImageWidget.cpp
     src/RingColorBarWidget.cpp
@@ -86,8 +87,8 @@ set(HEADERS
     include/ImagingController.h
     include/ImagingBypass.h
     include/RingConfigDialog.h
-    include/RingEnhanceConfig.h
-    include/RingSignalEnhancer.h
+    include/RingTimevarLowpassConfig.h
+    include/RingTimevarLowpass.h
     include/ImagingDisplayWindow.h
     include/RingImageWidget.h
     include/RingColorBarWidget.h
@@ -313,4 +314,9 @@ if(WIN32 AND Qt6_FOUND)
             COMMENT "Running windeployqt..."
         )
     endif()
+endif()
+
+# Keep the CPU DSP kernel optimized in Debug too; preserve symbols and no fast-math.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(src/RingTimevarLowpass.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 endif()

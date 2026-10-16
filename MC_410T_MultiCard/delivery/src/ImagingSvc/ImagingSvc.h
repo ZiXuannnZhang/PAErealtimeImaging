@@ -9,9 +9,9 @@
 #include "ImagingParams.h"
 #include "RingShmObservability.h"
 #include "RoundIdentity.h"
-#include "RingEnhanceConfig.h"
+#include "RingTimevarLowpassConfig.h"
 #include "RingReconRoundState.h"
-#include "RingSignalEnhancer.h"
+#include "RingTimevarLowpass.h"
 #include "ring_recon_cuda.h"
 
 namespace zmq { class context_t; class socket_t; }
@@ -41,6 +41,9 @@ private slots:
     void pollControlMessages();
 
 private:
+#ifdef RING_TIMEVAR_TEST_SEAM
+    friend struct RingTimevarServiceTest;
+#endif
     void processMessage(const QJsonObject &msg);
     void processConfigure(const QJsonObject &params);
     void processRingConfigure(const QJsonObject &ring);
@@ -54,7 +57,8 @@ private:
                              const QJsonObject &extra = QJsonObject());
     void sendFrameToHost();
     void sendRingSnapshotToHost(uint32_t seq, uint64_t submitIndex,
-                                const paimage::RoundIdentity &round, bool reconstructionComplete);
+                                const paimage::RoundIdentity &round, bool reconstructionComplete,
+                                uint64_t processUs);
     void sendStatus(float fps);
     void sendError(const QString &errMsg, int code);
 
@@ -73,8 +77,8 @@ private:
 
     // 环形扫描并行分支
     RingReconCudaConfig m_ringConfig;
-    RingEnhanceConfig   m_ringEnhanceConfig;
-    RingSignalEnhancer  m_ringEnhancer;
+    RingTimevarLowpassConfig   m_ringTimevarConfig;
+    RingTimevarLowpass  m_ringTimevar;
     int                 m_ringSysDelayCh[8][2] = {
         {358, 371}, {358, 371}, {358, 371}, {358, 371},
         {358, 371}, {358, 371}, {358, 371}, {358, 371}};   // 每通道双波长延时截断（实时预处理使用）

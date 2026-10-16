@@ -1,4 +1,5 @@
 #include "ImagingController.h"
+#include "RingTimevarLowpassSettings.h"
 #include "ImagingSharedMemory.h"
 #include "RingSnapshotCopy.h"
 #ifdef _WIN32
@@ -291,12 +292,17 @@ void ImagingController::configure(const GeneralParams &general,
 // =====================================================================
 // 环形扫描并行分支：配置 / 块输入 / 共享内存
 // =====================================================================
-void ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
-                                      const RingEnhanceConfig &enhanceCfg,
+bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
+                                      const RingTimevarLowpassConfig &timevarCfg,
                                       const int (*sysDelayCh)[2])
 {
+    std::string timevarError;
+    if (!ring_timevar::validate(timevarCfg, ringCfg.daqHz, ringCfg.sampDepth, &timevarError)) {
+        emit svcError(QString::fromStdString(timevarError));
+        return false;
+    }
     m_ringConfig = ringCfg;
-    m_ringEnhanceConfig = enhanceCfg;
+    m_ringTimevarConfig = timevarCfg;
     if (sysDelayCh) {
         for (int c = 0; c < 8; ++c)
             for (int w = 0; w < 2; ++w)
@@ -322,6 +328,7 @@ void ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
     // 运行中变更通道数/块尺寸时，共享内存与子进程仍按旧尺寸工作，
     // 通知主窗口自动重启成像服务，避免提交块大小不匹配导致成像错误。
     if (m_running) emit ringConfigChangedWhileRunning();
+    return true;
 }
 
 bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
@@ -945,15 +952,7 @@ void ImagingController::sendConfigureAndStart()
         ring["sectorCcw"] = m_ringConfig.sectorCcw;
         ring["triggerWlOdd"] = m_ringConfig.triggerWlOdd;
         ring["timeoutResetSec"] = m_ringConfig.timeoutResetSec;
-        QJsonObject enhance;
-        enhance["enableBipolarCompensation"] =
-            m_ringEnhanceConfig.enableBipolarCompensation;
-        enhance["enableFreqCompensation"] =
-            m_ringEnhanceConfig.enableFreqCompensation;
-        enhance["freqCompFcMhz"] = m_ringEnhanceConfig.freqCompFcMhz;
-        enhance["freqCompHmax"] = m_ringEnhanceConfig.freqCompHmax;
-        enhance["freqCompOrder"] = m_ringEnhanceConfig.freqCompOrder;
-        ring["enhance"] = enhance;
+        ring["timevarLowpass"] = ring_timevar::toJson(m_ringTimevarConfig);
 
                 QJsonObject params;
         params["imagingMode"] = "ring";
