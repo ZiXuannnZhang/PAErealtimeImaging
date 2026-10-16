@@ -92,3 +92,6 @@ tests/reference 下的工具可重导 MATLAB oracle、构建 exact old baseline�
   这描述模拟发送器的时间模型，不改生产timeout owner，也不把它当真实采集链路的预算证据；原失败和重跑命令/日志均保留。
 
 证据文件在evidence/；最终HEAD与交付包的BuildIdentity、remote相等证明及文件hash见包内git-receipt.txt、build-manifest.txt。
+
+独立审核 P2「主窗口忽略配置拒绝仍启动」的追加修复、真实入口集成测试与新交付入口见
+[start-rejection-fix/README.md](start-rejection-fix/README.md)。以上原始执行证据保留，不能作为本次修复后的新构建身份。

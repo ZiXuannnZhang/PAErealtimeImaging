@@ -112,6 +112,11 @@ private slots:
     void onSystemCaptureStatusTick();
 
 private:
+#ifdef MAINWINDOW_START_TEST_SEAM
+    friend class MainWindowStartIntegrationTest;
+    int m_testAssemblerConfigs = 0;
+    int m_testFeedStarts = 0;
+#endif
     using AutoSaveCommit = paimage::AutoSaveRoundCoordinator::CommitResult;
 
     void setupUI();

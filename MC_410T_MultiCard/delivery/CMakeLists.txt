@@ -316,6 +316,11 @@ if(WIN32 AND Qt6_FOUND)
     endif()
 endif()
 
+option(BUILD_MAINWINDOW_START_TEST "Build the real MainWindow startup integration test" OFF)
+if(BUILD_MAINWINDOW_START_TEST)
+    include(tests/mainwindow_start_integration.cmake)
+endif()
+
 # Keep the CPU DSP kernel optimized in Debug too; preserve symbols and no fast-math.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(src/RingTimevarLowpass.cpp PROPERTIES COMPILE_OPTIONS "-O2")

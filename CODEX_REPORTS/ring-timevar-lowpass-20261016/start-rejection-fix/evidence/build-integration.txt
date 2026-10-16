@@ -1,0 +1,3 @@
+[1/4] Automatic MOC and UIC for target mainwindow_start_integration_test
+[2/3] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/tests/mainwindow_start_integration_test.cpp.obj
+[3/3] Linking CXX executable startup-isolated\mainwindow_start_integration_test.exe

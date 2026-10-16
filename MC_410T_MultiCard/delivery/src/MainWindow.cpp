@@ -3015,7 +3015,16 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
             ensureRingConfigDialog();
             m_ringConfigDialog->setAcquisitionParams(
                 m_sampleIntervalNs, ui->edtDataTime->text().toInt());
-            m_ringConfigDialog->applyConfig();
+            if (!m_ringConfigDialog->applyConfig()) {
+                // 校验拒绝只撤销本次 UI 请求；不能走停止回调，影响已有服务。
+                QSignalBlocker blocker(m_chkRealtimeImaging);
+                m_chkRealtimeImaging->setChecked(false);
+                m_chkRealtimeImaging->setEnabled(true);
+                setImagingParamControlsEnabled(true);
+                recordDiagnosticAction(QStringLiteral("imaging_start_rejected"),
+                    {{"reason", QStringLiteral("ring_config_invalid")}});
+                return;
+            }
             // 请求成像即打开旁路门控；服务连接完成前帧明确记为 ServiceNotReady。
             configureRingAssembler();
             startRingFeedWorker();
@@ -5341,6 +5350,9 @@ void MainWindow::feedImagingPulse()
 // =====================================================================
 void MainWindow::startRingFeedWorker()
 {
+#ifdef MAINWINDOW_START_TEST_SEAM
+    ++m_testFeedStarts;
+#endif
     if (!m_imagingBypass) return;
     const auto beginNs = paimage::SocketReceiver::now();
     m_imagingBypass->clear(ImagingSubmitResult::StaleSession);
@@ -5376,6 +5388,9 @@ ImagingSubmitResult MainWindow::ringFeedSink(const TriggerGroupConstPtr& frame)
 
 void MainWindow::configureRingAssembler()
 {
+#ifdef MAINWINDOW_START_TEST_SEAM
+    ++m_testAssemblerConfigs;
+#endif
     if (!m_imagingController || !m_ringAssembler) return;
     const auto configureBeginNs = paimage::SocketReceiver::now();
     const RingReconCudaConfig &cfg = m_imagingController->ringConfig();

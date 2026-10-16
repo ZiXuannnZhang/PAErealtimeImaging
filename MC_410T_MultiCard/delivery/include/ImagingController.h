@@ -140,6 +140,11 @@ private:
     void finishStopSvc();              // 异步停止的收尾清理
 
     QProcess      *m_svcProcess;
+#ifdef MAINWINDOW_START_TEST_SEAM
+    friend class MainWindowStartIntegrationTest;
+    int m_testSvcStarts = 0;
+    int m_testSvcStops = 0;
+#endif
     QSharedMemory *m_sharedMemory;
 
     zmq::context_t *m_zmqCtx;

@@ -1,0 +1,6 @@
+[1/6] Automatic MOC for target ring_timevar_ui_test
+[2/6] Building CXX object CMakeFiles/ring_timevar_ui_test.dir/ring_timevar_ui_test_autogen/mocs_compilation.cpp.obj
+[3/6] Building CXX object CMakeFiles/ring_timevar_ui_test.dir/ring_timevar_ui_test.cpp.obj
+[4/6] Building CXX object CMakeFiles/ring_timevar_ui_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/RingConfigDialog.cpp.obj
+[5/6] Building CXX object CMakeFiles/ring_timevar_ui_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/ImagingController.cpp.obj
+[6/6] Linking CXX executable ui-isolated\ring_timevar_ui_test.exe

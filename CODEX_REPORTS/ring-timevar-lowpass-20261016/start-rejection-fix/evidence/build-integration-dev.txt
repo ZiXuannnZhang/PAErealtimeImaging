@@ -1,0 +1,94 @@
+[1/49] Automatic MOC and UIC for target mainwindow_start_integration_test
+[2/49] Automatic RCC for resources.qrc
+[3/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/FrontendFilter.cpp.obj
+[4/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/FrontendPreprocessor.cpp.obj
+[5/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/MeasurementSession.cpp.obj
+[6/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/DiagnosticExportDialog.cpp.obj
+[7/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/FramePublisher.cpp.obj
+[8/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/FileSaver.cpp.obj
+[9/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/DataProcessor.cpp.obj
+[10/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/MultiPortReceiver.cpp.obj
+[11/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/ImagingBypass.cpp.obj
+[12/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/NetworkDiagnostics.cpp.obj
+[13/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/DiagnosticRecorder.cpp.obj
+[14/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/RingTimevarLowpass.cpp.obj
+[15/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/RingTimevarLowpassSettings.cpp.obj
+[16/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/ImagingController.cpp.obj
+[17/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/RingConfigDialog.cpp.obj
+[18/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/ImagingDisplayWindow.cpp.obj
+[19/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/RingImageWidget.cpp.obj
+[20/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/RingRoundUiState.cpp.obj
+[21/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/RingBlockAssembler.cpp.obj
+[22/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/RingColorBarWidget.cpp.obj
+[23/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/StartupPolicy.cpp.obj
+[24/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/RingRoundPresentation.cpp.obj
+[25/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/SourceCore.cpp.obj
+[26/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp.obj
+[27/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/ControlState.cpp.obj
+[28/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/NetworkController.cpp.obj
+[29/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/SocketTimestamp.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/SocketTimestamp.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[30/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/ControlSocket.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/ControlSocket.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[31/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/TraceWriter.cpp.obj
+[32/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/SocketReceiver.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/SocketReceiver.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[33/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/OutputQueues.cpp.obj
+[34/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/TimingWriter.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/TimingWriter.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[35/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/LoopLog.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/LoopLog.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[36/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/CardDiscovery.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp: In function 'paimage::DiscoveryResult paimage::{anonymous}::runDiscoveryCore(const paimage::DiscoveryOptions&, const std::atomic<bool>&, paimage::DiscoveryChannel&, const paimage::DiscoveryEnvironment&)':
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp:281:81: warning: narrowing conversion of '(qint64)startedNs' from 'qint64' {aka 'long long int'} to 'int' [-Wnarrowing]
+  281 |     DiscoverySession session{options, channel, environment, result, {}, {}, {}, startedNs};
+      |                                                                                 ^~~~~~~~~
+[37/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/TraceBundle.cpp.obj
+[38/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/mainwindow_start_integration_test_autogen/mocs_compilation.cpp.obj
+[39/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/FrameConverter.cpp.obj
+[40/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp.obj
+[41/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/mainwindow_start_integration_test_autogen/EWIEGA46WW/qrc_resources.cpp.obj
+[42/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/OutputWorkers.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/OutputWorkers.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[43/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/Backend.cpp.obj
+[44/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/MainWindow.cpp.obj
+[45/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/HostOutput.cpp.obj
+[46/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/src/PaimageAcquisition/NetworkControllerPaimage.cpp.obj
+[47/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/tests/mainwindow_start_integration_test.cpp.obj
+[48/49] Building CXX object CMakeFiles/mainwindow_start_integration_test.dir/qcustomplot/qcustomplot.cpp.obj
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.cpp: In member function 'virtual QString QCPAxisTickerDateTime::getTickLabel(double, const QLocale&, QChar, int)':
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.cpp:6730:58: warning: 'QDateTime QDateTime::toTimeSpec(Qt::TimeSpec) const' is deprecated: Use toTimeZone instead [-Wdeprecated-declarations]
+ 6730 |     return locale.toString(keyToDateTime(tick).toTimeSpec(mDateTimeSpec), mDateTimeFormat);
+      |                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~
+In file included from D:/Qt/Qt6.8.0/6.8.0/mingw_64/include/QtCore/QDateTime:1,
+                 from D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.h:62,
+                 from D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.cpp:26:
+D:/Qt/Qt6.8.0/6.8.0/mingw_64/include/QtCore/qdatetime.h:436:15: note: declared here
+  436 |     QDateTime toTimeSpec(Qt::TimeSpec spec) const;
+      |               ^~~~~~~~~~
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.cpp: In static member function 'static double QCPAxisTickerDateTime::dateTimeToKey(const QDate&, Qt::TimeSpec)':
+D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/qcustomplot/qcustomplot.cpp:6835:25: warning: 'QDateTime QDate::startOfDay(Qt::TimeSpec, int) const' is deprecated: Pass QTimeZone instead [-Wdeprecated-declarations]
+ 6835 |   return date.startOfDay(timeSpec).toMSecsSinceEpoch()/1000.0;
+      |          ~~~~~~~~~~~~~~~^~~~~~~~~~
+D:/Qt/Qt6.8.0/6.8.0/mingw_64/include/QtCore/qdatetime.h:93:15: note: declared here
+   93 |     QDateTime startOfDay(Qt::TimeSpec spec, int offsetSeconds = 0) const;
+      |               ^~~~~~~~~~
+[49/49] Linking CXX executable startup-isolated\mainwindow_start_integration_test.exe

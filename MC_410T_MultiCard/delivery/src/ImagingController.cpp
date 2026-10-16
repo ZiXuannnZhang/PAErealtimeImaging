@@ -65,6 +65,9 @@ ImagingController::~ImagingController()
 // =====================================================================
 bool ImagingController::startSvc()
 {
+#ifdef MAINWINDOW_START_TEST_SEAM
+    ++m_testSvcStarts;
+#endif
     if (m_running) return true;
 
     // 允许新一轮成像重新启动常驻工作线程
@@ -196,6 +199,9 @@ bool ImagingController::startSvc()
 
 void ImagingController::stopSvc()
 {
+#ifdef MAINWINDOW_START_TEST_SEAM
+    ++m_testSvcStops;
+#endif
     if (!m_running) return;
 
     // 主动停止（含运行中修改参数后的自动重启）：终止/强杀子进程会触发

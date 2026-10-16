@@ -1,0 +1,17 @@
+Preset CMake variables:
+
+  CMAKE_BUILD_TYPE="Debug"
+  CMAKE_CXX_COMPILER="D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe"
+  CMAKE_C_COMPILER="D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/gcc.exe"
+  CMAKE_EXPORT_COMPILE_COMMANDS="ON"
+  CMAKE_MAKE_PROGRAM="D:/Qt/Qt6.8.0/Tools/Ninja/ninja.exe"
+  IMAGING_ZMQ_DIR="D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/third_party/zeromq"
+  Qt6_DIR="D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/cmake/Qt6"
+  USE_ZEROMQ="ON"
+  ZMQ_INSTALL="D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/third_party/zeromq"
+
+-- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR) 
+-- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR) 
+-- Configuring done (0.6s)
+-- Generating done (0.6s)
+-- Build files have been written to: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_debug
