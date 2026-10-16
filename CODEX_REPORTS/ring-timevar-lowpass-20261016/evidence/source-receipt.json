@@ -1,0 +1,6 @@
+{
+  "source_sha": "bac25da503022ba2e70e5405a3a3631efd9f5727",
+  "branch": "codex/ring-timevar-lowpass-20261016",
+  "tracked_status": "",
+  "test_result": "51/51 PASS before commit; source/config files identical to committed source"
+}

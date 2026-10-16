@@ -1,0 +1,19 @@
+{
+  "implementation_source": "bac25da503022ba2e70e5405a3a3631efd9f5727",
+  "software": "PASS_FOR_EXECUTED_SCOPE",
+  "ctest": "51/51",
+  "matlab_configs": 36,
+  "independent_columns": 327,
+  "baseline_off_fingerprints": 128,
+  "off_image_files_bitwise": 20,
+  "service_cells": 12,
+  "actual_geometry_cells": 3,
+  "identity_barrier": "PASS",
+  "incomplete_round": "PASS",
+  "timeout_2s": "PASS",
+  "hardware_visual": "UNVERIFIED",
+  "T_arr": "UNVERIFIED",
+  "realtime": "CONDITIONAL",
+  "initial_baseline_wait": "timeout then formal sender retry PASS; cause not independently attributed",
+  "timeout_0_2s_model": "synchronous sender callback exceeds mock idle interval; actual saved 2s + deliberate pause PASS"
+}

@@ -1,0 +1,31 @@
+{
+  "command": [
+    "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+    "--synthetic",
+    "1",
+    "--samples",
+    "5000",
+    "--id",
+    "14",
+    "--channels",
+    "15",
+    "--block",
+    "200",
+    "--rounds",
+    "2",
+    "--grid-mm",
+    "0.1",
+    "--timevar-lowpass",
+    "on",
+    "--no-save",
+    "1",
+    "--svc",
+    "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ImagingSvc.exe",
+    "--out",
+    "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\ring-timevar-lowpass-20261016\\timeout-round-retry",
+    "--timeout-reset",
+    "2"
+  ],
+  "exit": 0,
+  "seconds": 24.889999999999418
+}

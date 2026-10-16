@@ -1,0 +1,18 @@
+[
+  {
+    "name": "cufft",
+    "deployed_source": "MC_410T_MultiCard/delivery/libs/imaging/cufft64_12.dll",
+    "toolkit_source": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8/bin/cufft64_11.dll",
+    "source_sha256": "2480d8ab849d7e9a375275f6c0278b8764c14ac0c1a3bdacaf256ae4a93c5590",
+    "toolkit_sha256": "f4fea9227b14843894ad5436725f9638b172171142c95291fc6ae7a493248221",
+    "equal": false
+  },
+  {
+    "name": "cudart",
+    "deployed_source": "_migration_pack/prebuilt_cuda/bin/cudart64_12.dll",
+    "toolkit_source": "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.8/bin/cudart64_12.dll",
+    "source_sha256": "c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344",
+    "toolkit_sha256": "c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344",
+    "equal": true
+  }
+]

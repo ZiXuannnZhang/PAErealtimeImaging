@@ -1,0 +1,22 @@
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+Test project D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+    Start  5: ring_display_render_test
+1/8 Test  #5: ring_display_render_test ...........   Passed    0.50 sec
+    Start 12: diagnostic_recorder_test
+2/8 Test #12: diagnostic_recorder_test ...........   Passed    0.69 sec
+    Start 15: diagnostic_time_window_test
+3/8 Test #15: diagnostic_time_window_test ........   Passed    0.20 sec
+    Start 19: network_diagnostics_test
+4/8 Test #19: network_diagnostics_test ...........   Passed    4.41 sec
+    Start 25: round_policy_settings_test
+5/8 Test #25: round_policy_settings_test .........   Passed    0.10 sec
+    Start 31: paimage_host_output_test
+6/8 Test #31: paimage_host_output_test ...........   Passed    0.90 sec
+    Start 35: auto_save_round_coordinator_test
+7/8 Test #35: auto_save_round_coordinator_test ...   Passed    0.09 sec
+    Start 36: count_boundary_save_binding_test
+8/8 Test #36: count_boundary_save_binding_test ...   Passed    0.40 sec
+
+100% tests passed, 0 tests failed out of 8
+
+Total Test time (real) =   7.31 sec

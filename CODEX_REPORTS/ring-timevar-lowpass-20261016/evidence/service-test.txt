@@ -1,0 +1,8 @@
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+Test project D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+    Start 2: ring_timevar_service_test
+1/1 Test #2: ring_timevar_service_test ........   Passed    0.39 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   0.40 sec

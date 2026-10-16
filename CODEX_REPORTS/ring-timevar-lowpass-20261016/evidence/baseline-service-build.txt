@@ -1,0 +1,12 @@
+-- Configuring done (0.3s)
+-- Generating done (0.3s)
+-- Build files have been written to: D:/ChatGPT/PAERealtimeImaging/artifacts/ring-timevar-lowpass-20261016/baseline-service-tool/build
+[1/8] Automatic MOC for target ImagingSvc
+[2/8] Building CXX object CMakeFiles/ImagingSvc.dir/ImagingSvc_autogen/mocs_compilation.cpp.obj
+[3/8] Building CXX object CMakeFiles/ImagingSvc.dir/main.cpp.obj
+[4/8] Building CXX object CMakeFiles/ImagingSvc.dir/ProcessScheduling.cpp.obj
+[5/8] Building CXX object CMakeFiles/ImagingSvc.dir/RingSignalEnhancer.cpp.obj
+[6/8] Building CXX object CMakeFiles/ImagingSvc.dir/ring_recon.cpp.obj
+[7/8] Building CXX object CMakeFiles/ImagingSvc.dir/ImagingSvc.cpp.obj
+[8/8] Linking CXX executable ImagingSvc.exe
+EXACT BASELINE a8c15cff203da959bd935120605e69dc32ff7145 production service sources unmodified

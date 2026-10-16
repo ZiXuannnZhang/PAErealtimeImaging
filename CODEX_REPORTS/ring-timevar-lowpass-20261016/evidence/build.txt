@@ -1,0 +1,13 @@
+[1/17] Automatic MOC for target ring_timevar_lowpass_test
+[2/16] Automatic MOC for target ring_timevar_bench
+[3/15] Automatic MOC for target ring_timevar_service_test
+[4/14] Automatic MOC for target ring_timevar_ui_test
+[5/13] Building CXX object CMakeFiles/ring_timevar_bench.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/RingTimevarLowpass.cpp.obj
+[6/13] Building CXX object CMakeFiles/ring_timevar_lowpass_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/RingTimevarLowpass.cpp.obj
+[7/13] Linking CXX executable ring_timevar_bench.exe
+[8/13] Building CXX object CMakeFiles/ring_timevar_service_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/RingTimevarLowpass.cpp.obj
+[9/13] Building CXX object CMakeFiles/ring_timevar_ui_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/RingTimevarLowpass.cpp.obj
+[10/13] Building CXX object CMakeFiles/ring_timevar_lowpass_test.dir/ring_timevar_lowpass_test.cpp.obj
+[11/13] Linking CXX executable ui-isolated\ring_timevar_ui_test.exe
+[12/13] Linking CXX executable ring_timevar_lowpass_test.exe
+[13/13] Linking CXX executable ring_timevar_service_test.exe

@@ -1,0 +1,5 @@
+[selftest] timevar=on rounds=2 grid_mm=0.1000 block=200 channels=0xF
+[block-timing] submit=1 roundtrip_ms=609.058000000 service_ms=606.701000000
+block   1/10: 609.81 ms
+[selftest] timeout reset fired
+timeout at block 0

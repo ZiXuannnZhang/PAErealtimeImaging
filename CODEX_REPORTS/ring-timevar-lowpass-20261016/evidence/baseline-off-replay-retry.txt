@@ -1,0 +1,35 @@
+[selftest] timevar=off rounds=1 grid_mm=0.1000 block=200 channels=0xF
+[block-timing] submit=1 roundtrip_ms=38.593700000 service_ms=0.000000000
+block   1/10: 40.66 ms
+[block-timing] submit=2 roundtrip_ms=42.918500000 service_ms=0.000000000
+  diff vs prev: wl1=0.755476 wl2=0.774059
+block   2/10: 45.66 ms
+[block-timing] submit=3 roundtrip_ms=39.865500000 service_ms=0.000000000
+  diff vs prev: wl1=0.614927 wl2=0.645912
+block   3/10: 42.58 ms
+[block-timing] submit=4 roundtrip_ms=38.854700000 service_ms=0.000000000
+  diff vs prev: wl1=0.59312 wl2=0.548144
+block   4/10: 41.70 ms
+[block-timing] submit=5 roundtrip_ms=43.542800000 service_ms=0.000000000
+  diff vs prev: wl1=0.514995 wl2=0.511168
+block   5/10: 46.34 ms
+[block-timing] submit=6 roundtrip_ms=44.718400000 service_ms=0.000000000
+  diff vs prev: wl1=0.480283 wl2=0.476098
+block   6/10: 47.51 ms
+[block-timing] submit=7 roundtrip_ms=42.908200000 service_ms=0.000000000
+  diff vs prev: wl1=0.45747 wl2=0.456113
+block   7/10: 45.73 ms
+[block-timing] submit=8 roundtrip_ms=45.700300000 service_ms=0.000000000
+  diff vs prev: wl1=0.4501 wl2=0.432004
+block   8/10: 49.63 ms
+[block-timing] submit=9 roundtrip_ms=47.546000000 service_ms=0.000000000
+  diff vs prev: wl1=0.43983 wl2=0.395422
+block   9/10: 50.24 ms
+[block-timing] submit=10 roundtrip_ms=46.976800000 service_ms=0.000000000
+[round-wall] generation=0 wall_ms=2811.78 blocks=10
+  diff vs prev: wl1=0.405345 wl2=0.413841
+block  10/10: 52.58 ms
+done: channels=4 K=1000 rounds=1 blocks=10 total=462.6 ms avg=46.26 ms
+[RingSHMObs] kinds: final=1 round_barrier_reset=1
+[RingSHMObs] service kind=final session=1 epoch=0 submitted=0 notifications=10 consumed=10 mismatch=0 ready_zero=0 duplicate=0 gap=0 avg_queue_us=8946.8 avg_copy_us=4594.4 avg_process_us=30233.1
+[RingSHMObs] producer session=1 submitted=10 slot_busy=0 last_seq=9 last_interval_us=339626

@@ -1,0 +1,79 @@
+{
+  "source_sha": "bac25da503022ba2e70e5405a3a3631efd9f5727",
+  "steps": [
+    {
+      "name": "microbench-final",
+      "command": [
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\timevar_tests\\ring_timevar_bench.exe"
+      ],
+      "exit": 0,
+      "seconds": 339.25
+    },
+    {
+      "name": "service-matrix-final",
+      "command": [
+        "C:/Users/yyps/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\tests\\run_timevar_service_matrix.py",
+        "--bin",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin",
+        "--out",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\ring-timevar-lowpass-20261016\\service-matrix"
+      ],
+      "exit": 0,
+      "seconds": 662.0
+    },
+    {
+      "name": "actual-geometry-final",
+      "command": [
+        "C:/Users/yyps/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\tests\\run_timevar_service_matrix.py",
+        "--bin",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin",
+        "--out",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\ring-timevar-lowpass-20261016\\actual-geometry",
+        "--samples",
+        "7500",
+        "--channels",
+        "2",
+        "--rounds",
+        "2",
+        "--grid-mm",
+        "0.01",
+        "--radius-per-ch",
+        "6.48,6.48,6.57,6.57,6.57,6.57,6.57,6.57",
+        "--sys-delay-per-ch",
+        "448,464,448,464,358,371,358,371,358,371,358,371,358,371,358,371"
+      ],
+      "exit": 0,
+      "seconds": 106.0
+    },
+    {
+      "name": "baseline-off-replay",
+      "command": [
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+        "--synthetic",
+        "1",
+        "--samples",
+        "5000",
+        "--id",
+        "14",
+        "--channels",
+        "15",
+        "--block",
+        "200",
+        "--rounds",
+        "1",
+        "--grid-mm",
+        "0.1",
+        "--timevar-lowpass",
+        "off",
+        "--svc",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\ring-timevar-lowpass-20261016\\baseline-runtime\\ImagingSvc.exe",
+        "--out",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\ring-timevar-lowpass-20261016\\off-compare\\baseline"
+      ],
+      "exit": 2,
+      "seconds": 21.468999999997322
+    }
+  ]
+}

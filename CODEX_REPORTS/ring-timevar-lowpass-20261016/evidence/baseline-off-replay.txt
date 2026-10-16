@@ -1,0 +1,2 @@
+[selftest] timevar=off rounds=1 grid_mm=0.1000 block=200 channels=0xF
+timeout at block 0

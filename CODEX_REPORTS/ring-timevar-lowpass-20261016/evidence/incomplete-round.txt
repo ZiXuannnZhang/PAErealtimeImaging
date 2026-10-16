@@ -1,0 +1,65 @@
+[selftest] timevar=on rounds=2 grid_mm=0.1000 block=200 channels=0xF
+[block-timing] submit=1 roundtrip_ms=620.662600000 service_ms=608.108000000
+block   1/10: 621.30 ms
+[selftest] deterministically dropping block 1 before submit
+[block-timing] submit=2 roundtrip_ms=620.261300000 service_ms=601.802000000
+  diff vs prev: wl1=1.59714 wl2=1.80115
+block   3/10: 621.58 ms
+[block-timing] submit=3 roundtrip_ms=616.438300000 service_ms=601.945000000
+  diff vs prev: wl1=4.92026 wl2=3.01064
+block   4/10: 617.95 ms
+[block-timing] submit=4 roundtrip_ms=617.270300000 service_ms=612.447000000
+  diff vs prev: wl1=3.45903 wl2=2.81969
+block   5/10: 618.70 ms
+[block-timing] submit=5 roundtrip_ms=642.787700000 service_ms=624.254000000
+  diff vs prev: wl1=2.98757 wl2=2.43882
+block   6/10: 644.81 ms
+[block-timing] submit=6 roundtrip_ms=619.059600000 service_ms=610.026000000
+  diff vs prev: wl1=2.52293 wl2=1.36486
+block   7/10: 620.44 ms
+[block-timing] submit=7 roundtrip_ms=627.563400000 service_ms=619.050000000
+  diff vs prev: wl1=0.560213 wl2=0.558531
+block   8/10: 628.71 ms
+[block-timing] submit=8 roundtrip_ms=643.532000000 service_ms=631.248000000
+  diff vs prev: wl1=0.407363 wl2=0.397468
+block   9/10: 646.47 ms
+[block-timing] submit=9 roundtrip_ms=656.941700000 service_ms=637.180000000
+  diff vs prev: wl1=0.382648 wl2=0.38215
+block  10/10: 658.25 ms
+[block-timing] submit=10 roundtrip_ms=662.822900000 service_ms=644.135000000
+  diff vs prev: wl1=1.74425 wl2=1.81227
+[completion-test] post-incomplete-round max_pixel_difference=0
+block  11/10: 665.29 ms
+[block-timing] submit=11 roundtrip_ms=650.515600000 service_ms=642.608000000
+  diff vs prev: wl1=0.786354 wl2=0.786394
+block  12/10: 651.87 ms
+[block-timing] submit=12 roundtrip_ms=660.180100000 service_ms=648.154000000
+  diff vs prev: wl1=1.08629 wl2=1.2067
+block  13/10: 661.58 ms
+[block-timing] submit=13 roundtrip_ms=651.158900000 service_ms=640.467000000
+  diff vs prev: wl1=3.73513 wl2=2.30805
+block  14/10: 652.58 ms
+[block-timing] submit=14 roundtrip_ms=667.334400000 service_ms=660.049000000
+  diff vs prev: wl1=2.79188 wl2=2.29373
+block  15/10: 668.84 ms
+[block-timing] submit=15 roundtrip_ms=652.485500000 service_ms=639.198000000
+  diff vs prev: wl1=2.50091 wl2=2.05399
+block  16/10: 653.80 ms
+[block-timing] submit=16 roundtrip_ms=647.395700000 service_ms=637.523000000
+  diff vs prev: wl1=2.17114 wl2=1.21226
+block  17/10: 648.74 ms
+[block-timing] submit=17 roundtrip_ms=651.085400000 service_ms=640.438000000
+  diff vs prev: wl1=0.483042 wl2=0.483083
+block  18/10: 652.52 ms
+[block-timing] submit=18 roundtrip_ms=649.267600000 service_ms=638.934000000
+  diff vs prev: wl1=0.386136 wl2=0.376421
+block  19/10: 650.70 ms
+[block-timing] submit=19 roundtrip_ms=661.223900000 service_ms=650.880000000
+[round-wall] generation=1 wall_ms=8851.03 blocks=10
+  diff vs prev: wl1=0.364843 wl2=0.365617
+block  20/10: 662.70 ms
+[completion-test] round_block_count_mismatch fields verified (blocks_consumed=9 expected_blocks=10)
+done: channels=4 K=1000 rounds=2 blocks=20 total=12246.8 ms avg=612.34 ms
+[RingSHMObs] kinds: anomaly=1 final=1 round_barrier_reset=2 round_block_count_mismatch=1
+[RingSHMObs] service kind=final session=1 epoch=0 submitted=0 notifications=19 consumed=19 mismatch=0 ready_zero=0 duplicate=0 gap=1 avg_queue_us=8562.6 avg_copy_us=4350.5 avg_process_us=631014.5
+[RingSHMObs] producer session=1 submitted=19 slot_busy=0 last_seq=19 last_interval_us=904115

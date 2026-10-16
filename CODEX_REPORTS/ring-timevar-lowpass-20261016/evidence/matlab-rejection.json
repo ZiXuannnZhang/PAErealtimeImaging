@@ -1,0 +1,1 @@
+{"matlab":"9.14.0.2206163 (R2023a)","signal":{"Name":"Signal Processing Toolbox","Version":"9.2","Release":"(R2023a)","Date":"19-Nov-2022"},"N":2030,"fcMinMhz":1E-30,"p1":780,"p2":1000,"rejected":true,"identifier":"MATLAB:istft:expectedFinite","error":"S 应为 有限。"}

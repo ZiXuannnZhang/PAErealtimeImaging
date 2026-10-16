@@ -1,0 +1,1 @@
+Confirmed MATLAB nonfinite cutoff-cancellation case; production rejects before commit.

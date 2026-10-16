@@ -1,0 +1,219 @@
+[
+  {
+    "pid": 35560,
+    "parent": 12924,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 268460032,
+    "peak_pagefile": 659775488
+  },
+  {
+    "pid": 5204,
+    "parent": 18740,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 268402688,
+    "peak_pagefile": 659628032
+  },
+  {
+    "pid": 35240,
+    "parent": 8748,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 236498944,
+    "peak_pagefile": 622497792
+  },
+  {
+    "pid": 42716,
+    "parent": 27764,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 236634112,
+    "peak_pagefile": 622997504
+  },
+  {
+    "pid": 6764,
+    "parent": 39940,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 236732416,
+    "peak_pagefile": 623738880
+  },
+  {
+    "pid": 43892,
+    "parent": 19364,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 335347712,
+    "peak_pagefile": 729477120
+  },
+  {
+    "pid": 27060,
+    "parent": 26044,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 335577088,
+    "peak_pagefile": 729276416
+  },
+  {
+    "pid": 31576,
+    "parent": 20288,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 335572992,
+    "peak_pagefile": 731090944
+  },
+  {
+    "pid": 19552,
+    "parent": 29160,
+    "exe": "ring_timevar_bench.exe",
+    "peak_working_set": 6094848,
+    "peak_pagefile": 1511424
+  },
+  {
+    "pid": 42096,
+    "parent": 32528,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 203157504,
+    "peak_pagefile": 586194944
+  },
+  {
+    "pid": 27512,
+    "parent": 31304,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 203276288,
+    "peak_pagefile": 585441280
+  },
+  {
+    "pid": 43756,
+    "parent": 36520,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 203317248,
+    "peak_pagefile": 586305536
+  },
+  {
+    "pid": 44296,
+    "parent": 6828,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 268353536,
+    "peak_pagefile": 659197952
+  },
+  {
+    "pid": 18852,
+    "parent": 32736,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 268550144,
+    "peak_pagefile": 658452480
+  },
+  {
+    "pid": 43152,
+    "parent": 14132,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 268447744,
+    "peak_pagefile": 657866752
+  },
+  {
+    "pid": 41960,
+    "parent": 43992,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 236429312,
+    "peak_pagefile": 622702592
+  },
+  {
+    "pid": 28212,
+    "parent": 44552,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 236703744,
+    "peak_pagefile": 623550464
+  },
+  {
+    "pid": 18020,
+    "parent": 2720,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 236810240,
+    "peak_pagefile": 622592000
+  },
+  {
+    "pid": 6636,
+    "parent": 32668,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 335392768,
+    "peak_pagefile": 728928256
+  },
+  {
+    "pid": 26592,
+    "parent": 5808,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 335659008,
+    "peak_pagefile": 729550848
+  },
+  {
+    "pid": 40264,
+    "parent": 38164,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 335708160,
+    "peak_pagefile": 730120192
+  },
+  {
+    "pid": 20716,
+    "parent": 42456,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 392826880,
+    "peak_pagefile": 983613440
+  },
+  {
+    "pid": 32284,
+    "parent": 41932,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 393084928,
+    "peak_pagefile": 985509888
+  },
+  {
+    "pid": 36188,
+    "parent": 44868,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 393068544,
+    "peak_pagefile": 984481792
+  },
+  {
+    "pid": 31628,
+    "parent": 23384,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 25452544,
+    "peak_pagefile": 306135040
+  },
+  {
+    "pid": 44180,
+    "parent": 21164,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 25182208,
+    "peak_pagefile": 305979392
+  },
+  {
+    "pid": 44092,
+    "parent": 16572,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 202838016,
+    "peak_pagefile": 584658944
+  },
+  {
+    "pid": 6416,
+    "parent": 5032,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 202870784,
+    "peak_pagefile": 585658368
+  },
+  {
+    "pid": 27968,
+    "parent": 25544,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 203362304,
+    "peak_pagefile": 585445376
+  },
+  {
+    "pid": 31872,
+    "parent": 40568,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 203276288,
+    "peak_pagefile": 586670080
+  },
+  {
+    "pid": 44344,
+    "parent": 36780,
+    "exe": "ImagingSvc.exe",
+    "peak_working_set": 202010624,
+    "peak_pagefile": 581763072
+  }
+]
