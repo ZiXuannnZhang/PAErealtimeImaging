@@ -138,7 +138,11 @@ PhysicalRoundClassification PhysicalRoundNormalizer::classify(
         // prior decisions for late cards after a count/timeout boundary. The
         // stored generation remains available for diagnostics; identities
         // outside the bounded cache are treated as new observations.
-        for (auto it = recentDecisions_.rbegin(); it != recentDecisions_.rend(); ++it) {
+        // Traverse newest first with the deque iterator directly. MinGW 13.1
+        // reverse_iterator traversal intermittently left its cursor outside
+        // the current deque node in the 4000-trigger contract regression.
+        for (auto it = recentDecisions_.end(); it != recentDecisions_.begin();) {
+            --it;
             if (it->measurementSession == measurementSession_ &&
                 it->triggerSeq == triggerSeq) {
                 auto cached = it->classification;
