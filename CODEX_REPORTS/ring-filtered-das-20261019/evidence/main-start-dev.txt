@@ -1,0 +1,32 @@
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_debug
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_debug/DartConfiguration.tcl
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_debug/DartConfiguration.tcl
+Test project D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_debug
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 1
+    Start 1: mainwindow_start_integration_test
+
+1: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\startup-isolated\mainwindow_start_integration_test.exe
+1: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/mingw_debug
+1: Environment variables: 
+1:  QT_QPA_PLATFORM=offscreen
+1: Test timeout computed to be: 90
+1: PASS valid enabled startup -> stop
+1: PASS shorter depth rejected; no assembler/feed/service/SHM startup; UI/config retained
+1: PASS corrected parameters -> normal startup/stop
+1: PASS resident real ImagingSvc PID/SHM/running/ready state unchanged
+1: PASS valid restart/start/stop regression
+1: PASS FilteredDAS real rejection inactive/resident, correction/restart, four-combination starts
+1/1 Test #1: mainwindow_start_integration_test ...   Passed   47.63 sec
+
+The following tests passed:
+	mainwindow_start_integration_test
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =  47.67 sec

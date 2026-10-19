@@ -15,6 +15,7 @@
 #include <vector>
 #include "ImagingParams.h"
 #include "RingTimevarLowpassConfig.h"
+#include "FilteredDasConfig.h"
 #include "RingShmObservability.h"
 #include "RoundIdentity.h"
 #include "ring_recon_cuda.h"
@@ -53,9 +54,11 @@ public:
     // sysDelayCh 为每通道双波长延时截断（nullptr=回退为 cfg.sysDelay 广播到所有通道）
     bool configureRing(const RingReconCudaConfig &ringCfg,
                        const RingTimevarLowpassConfig &timevarCfg,
-                       const int (*sysDelayCh)[2] = nullptr);
+                       const int (*sysDelayCh)[2] = nullptr,
+                       const FilteredDasConfig &filteredDasCfg = FilteredDasConfig{});
     bool isRingMode() const { return m_ringMode; }
     const RingReconCudaConfig &ringConfig() const { return m_ringConfig; }
+    const FilteredDasConfig &filteredDasConfig() const { return m_filteredDasConfig; }
     const RingTimevarLowpassConfig &ringTimevarConfig() const { return m_ringTimevarConfig; }
 
     // 环形扫描：提交一个原始 A-line 块（float32，sampDepth x alinesPerBlock，列主序）
@@ -160,6 +163,7 @@ private:
     // 环形扫描并行分支
     RingReconCudaConfig m_ringConfig;
     RingTimevarLowpassConfig   m_ringTimevarConfig;
+    FilteredDasConfig m_filteredDasConfig;
     int                 m_ringSysDelayCh[8][2] = {
         {358, 371}, {358, 371}, {358, 371}, {358, 371},
         {358, 371}, {358, 371}, {358, 371}, {358, 371}};   // 每通道双波长延时截断（独立于 CUDA 结构体，避免 ABI 变更）

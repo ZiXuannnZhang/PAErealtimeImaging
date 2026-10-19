@@ -1,0 +1,29 @@
+--- original
++++ frame-timeout-option
+@@ -107,6 +107,8 @@
+     const std::string timevarMode = argStr(args, "--timevar-lowpass");
+     const int roundsArg = argInt(args, "--rounds", 2);
+     const int benchmarkBlocks = argInt(args,"--benchmark-blocks",0);
++    const int frameTimeoutMs = argInt(args,"--frame-timeout-ms",kTimeoutMs);
++    if(frameTimeoutMs<1) { std::fprintf(stderr,"--frame-timeout-ms must be positive\n"); return 2; }
+ 
+     const bool synthetic = argInt(args,"--synthetic",0) != 0;
+     const bool noSave = argInt(args,"--no-save",0) != 0;
+@@ -123,7 +125,7 @@
+             "[--sos-radii-mm 3] [--sos 1490,1540] "
+             "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...] "
+             "[--identity-jump-at N] [--drop-block N] "
+-            "[--filtered-das off|on|high] [--filtered-batch N] [--mask-length N] [--benchmark-blocks N] [--timevar-lowpass off|on|high] [--rounds N] [--synthetic 1] [--samples N] [--no-save 1]\n");
++            "[--filtered-das off|on|high] [--filtered-batch N] [--mask-length N] [--benchmark-blocks N] [--frame-timeout-ms 20000] [--timevar-lowpass off|on|high] [--rounds N] [--synthetic 1] [--samples N] [--no-save 1]\n");
+         return 2;
+     }
+     if (!timevarMode.empty() && timevarMode != "off" && timevarMode != "on" && timevarMode != "high") {
+@@ -470,7 +472,7 @@
+         bool got = false;
+         bool identityMatch = false;
+         double serviceMs=0;
+-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kTimeoutMs);
++        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(frameTimeoutMs);
+         while (std::chrono::steady_clock::now() < deadline) {
+             zmq::message_t msg;
+             while (sock.recv(msg, zmq::recv_flags::dontwait)) {

@@ -1,0 +1,101 @@
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/DartConfiguration.tcl
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/DartConfiguration.tcl
+Test project D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 48
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.19 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.20 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.18 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.18 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.18 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.19 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.20 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.19 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.20 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.21 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+48: PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+    Test #48: physical_round_normalizer_test ...   Passed    0.20 sec
+    Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\filtered_das_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests/paimage_core
+48: Test timeout computed to be: 10000000
+    Test #48: physical_round_normalizer_test ...***Exception: SegFault  0.12 sec
+
+0% tests passed, 1 tests failed out of 1
+
+Total Test time (real) =   2.25 sec
+
+The following tests FAILED:
+	 48 - physical_round_normalizer_test (SEGFAULT)

@@ -1,5 +1,7 @@
 #include "ImagingController.h"
 #include "RingTimevarLowpassSettings.h"
+#include "FilteredDasSettings.h"
+#include "FilteredDasPrefilter.h"
 #include "ImagingSharedMemory.h"
 #include "RingSnapshotCopy.h"
 #ifdef _WIN32
@@ -300,13 +302,26 @@ void ImagingController::configure(const GeneralParams &general,
 // =====================================================================
 bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
                                       const RingTimevarLowpassConfig &timevarCfg,
-                                      const int (*sysDelayCh)[2])
+                                      const int (*sysDelayCh)[2],
+                                      const FilteredDasConfig &filteredDasCfg)
 {
     std::string timevarError;
     if (!ring_timevar::validate(timevarCfg, ringCfg.daqHz, ringCfg.sampDepth, &timevarError)) {
         emit svcError(QString::fromStdString(timevarError));
         return false;
     }
+    std::vector<int> lengths;
+    int delays[8][2];
+    for(int c=0;c<8;++c)for(int w=0;w<2;++w) delays[c][w]=sysDelayCh?sysDelayCh[c][w]:ringCfg.sysDelay[w];
+    if(filteredDasCfg.enabled && !filtered_das::inputLengths(ringCfg.sampDepth,ringCfg.delayCut!=0,
+            delays,ringCfg.enabledChannels,lengths,&timevarError)) {
+        emit svcError(QString::fromStdString(timevarError)); return false;
+    }
+    FilteredDasPrefilter preparedFiltered;
+    if(!preparedFiltered.configure(filteredDasCfg,ringCfg.daqHz,lengths,&timevarError)) {
+        emit svcError(QString::fromStdString(timevarError)); return false;
+    }
+    m_filteredDasConfig=filteredDasCfg;
     m_ringConfig = ringCfg;
     m_ringTimevarConfig = timevarCfg;
     if (sysDelayCh) {
@@ -959,6 +974,7 @@ void ImagingController::sendConfigureAndStart()
         ring["triggerWlOdd"] = m_ringConfig.triggerWlOdd;
         ring["timeoutResetSec"] = m_ringConfig.timeoutResetSec;
         ring["timevarLowpass"] = ring_timevar::toJson(m_ringTimevarConfig);
+        ring["filteredDas"] = filtered_das::toJson(m_filteredDasConfig);
 
                 QJsonObject params;
         params["imagingMode"] = "ring";

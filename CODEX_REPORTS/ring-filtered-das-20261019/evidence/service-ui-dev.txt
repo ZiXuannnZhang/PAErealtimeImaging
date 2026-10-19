@@ -1,0 +1,46 @@
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/DartConfiguration.tcl
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/DartConfiguration.tcl
+Test project D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 41
+    Start 41: filtered_das_service_test
+
+41: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\filtered_das_service_test.exe
+41: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+41: Test timeout computed to be: 60
+41: PASS channels=4 timevar=0 filtered=0
+41: PASS channels=4 timevar=0 filtered=1
+41: PASS channels=4 timevar=1 filtered=0
+41: PASS channels=4 timevar=1 filtered=1
+41: PASS channels=8 timevar=0 filtered=0
+41: PASS channels=8 timevar=0 filtered=1
+41: PASS channels=8 timevar=1 filtered=0
+41: PASS channels=8 timevar=1 filtered=1
+41: PASS production four combinations, MATLAB pre-DAS/DAS, actual nt, WL2 once, late failure, atomic configuration worstNormalizedAbs=2.08616e-07
+1/2 Test #41: filtered_das_service_test ........   Passed    1.92 sec
+test 42
+    Start 42: filtered_das_ui_test
+
+42: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\filtered-ui-isolated\filtered_das_ui_test.exe
+42: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+42: Environment variables: 
+42:  QT_QPA_PLATFORM=offscreen
+42: Test timeout computed to be: 60
+42: FAIL spatial sampling advisory absent
+2/2 Test #42: filtered_das_ui_test .............***Failed    1.10 sec
+
+The following tests passed:
+	filtered_das_service_test
+
+50% tests passed, 1 tests failed out of 2
+
+Total Test time (real) =   3.05 sec
+
+The following tests FAILED:
+	 42 - filtered_das_ui_test (Failed)

@@ -1,0 +1,22 @@
+command=["D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\cmake.exe", "--build", "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\filtered_das_tests", "-j", "8"]
+cwd=D:\ChatGPT\PAERealtimeImaging
+[1/26] Automatic MOC for target filtered_das_test
+[2/25] Automatic MOC for target ring_timevar_service_test
+[3/24] Automatic MOC for target filtered_das_off_test
+[4/23] Automatic MOC for target filtered_das_service_test
+[5/22] Automatic MOC for target ring_timevar_ui_test
+[6/21] Automatic MOC for target filtered_das_ui_test
+[7/20] Building CXX object CMakeFiles/filtered_das_off_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/FilteredDasPrefilter.cpp.obj
+[8/20] Building CXX object CMakeFiles/filtered_das_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/FilteredDasPrefilter.cpp.obj
+[9/20] Building CXX object CMakeFiles/ring_timevar_service_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/FilteredDasPrefilter.cpp.obj
+[10/20] Linking CXX executable filtered_das_off_test.exe
+[11/20] Building CXX object CMakeFiles/filtered_das_service_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/FilteredDasPrefilter.cpp.obj
+[12/20] Building CXX object CMakeFiles/ring_timevar_ui_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/FilteredDasPrefilter.cpp.obj
+[13/20] Building CXX object CMakeFiles/filtered_das_ui_test.dir/D_/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/FilteredDasPrefilter.cpp.obj
+[14/20] Building CXX object CMakeFiles/filtered_das_test.dir/filtered_das_test.cpp.obj
+[15/20] Linking CXX executable ui-isolated\ring_timevar_ui_test.exe
+[16/20] Linking CXX executable filtered-ui-isolated\filtered_das_ui_test.exe
+[17/20] Building CXX object CMakeFiles/filtered_das_service_test.dir/filtered_das_service_test.cpp.obj
+[18/20] Linking CXX executable ring_timevar_service_test.exe
+[19/20] Linking CXX executable filtered_das_test.exe
+[20/20] Linking CXX executable filtered_das_service_test.exe

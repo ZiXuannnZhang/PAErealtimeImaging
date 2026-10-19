@@ -1,0 +1,18 @@
+[New Thread 31428.0x9ba8]
+[New Thread 31428.0xa644]
+[New Thread 31428.0x805c]
+[New Thread 31428.0x9ec4]
+[New Thread 31428.0xa048]
+[New Thread 31428.0x9ed0]
+[New Thread 31428.0xb280]
+[New Thread 31428.0xc1e4]
+[Switching to thread 1 (Thread 31428.0xc7f8)]
+#0  0x00007ffdb777af04 in win32u!NtUserMsgWaitForMultipleObjectsEx () from C:\WINDOWS\System32\win32u.dll
+#4  0x00007ff7dd07178f in main (argc=1, argv=0x17f8a4c7f60) at D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/ImagingSvc/main.cpp:28
+28	    return app.exec();
+$1 = 2
+$2 = {static kPeriodicEvery = 32, m_mutex = {<std::__mutex_base> = {_M_mutex = 1647292769248}, <No data fields>}, m_state = {session = 1, epoch = 0, submitted = 0, slotBusyBeforeSubmit = 0, notifications = 12, consumed = 12, notifyShmMismatch = 0, readyZeroBeforeCopy = 0, duplicateShmSeq = 0, shmSeqGap = 0, lastSubmitIndex = 12, lastSubmitIntervalUs = 0, lastSubmittedSeq = 0, lastNotifySeq = 11, lastShmSeq = 11, hasLastSubmittedSeq = false, hasLastNotifySeq = true, hasLastShmSeq = true, lastQueueDelayUs = 78847, lastCopyLockUs = 58753, lastProcessUs = 22003342, totalQueueDelayUs = 306653, totalCopyLockUs = 215282, totalProcessUs = 61999643, processSamples = 12}, m_haveLastSubmit = false, m_lastSubmitWallUs = 0, m_haveLastConsumed = true, m_lastConsumedSeq = 11}
+$3 = {active_ = {measurementSession = 1, roundGeneration = 2}, closed_ = false, transitions_ = 2, staleDrops_ = 0}
+artifacts/filtered-das/performance-timeout-gdb-state.txt:7: Error in sourced command file:
+Could not find operator->.
+[Inferior 1 (process 31428) detached]

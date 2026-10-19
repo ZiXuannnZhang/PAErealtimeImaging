@@ -1,0 +1,96 @@
+[New Thread 31428.0x9ba8]
+[New Thread 31428.0xa644]
+[New Thread 31428.0x805c]
+[New Thread 31428.0x9ec4]
+[New Thread 31428.0xa048]
+[New Thread 31428.0x9ed0]
+[New Thread 31428.0xb280]
+[New Thread 31428.0x23f4]
+
+Thread 9 (Thread 31428.0x23f4):
+#0  0x00007ffdb9c63f41 in ntdll!DbgBreakPoint () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#1  0x00007ffdb9c7648e in ntdll!DbgUiRemoteBreakin () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#2  0x00007ffdb840dda7 in KERNEL32!BaseThreadInitThunk () from C:\WINDOWS\System32\kernel32.dll
+#3  0x00007ffdb9bbee4c in ntdll!RtlUserThreadStart () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#4  0x0000000000000000 in ?? ()
+Backtrace stopped: previous frame inner to this frame (corrupt stack?)
+
+Thread 8 (Thread 31428.0xb280):
+#0  0x00007ffdb9ca5a24 in ntdll!ZwWaitForWorkViaWorkerFactory () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#1  0x00007ffdb9b64d0e in ntdll!TpCallbackMayRunLong () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#2  0x00007ffdb840dda7 in KERNEL32!BaseThreadInitThunk () from C:\WINDOWS\System32\kernel32.dll
+#3  0x00007ffdb9bbee4c in ntdll!RtlUserThreadStart () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#4  0x0000000000000000 in ?? ()
+Backtrace stopped: previous frame inner to this frame (corrupt stack?)
+
+Thread 7 (Thread 31428.0x9ed0):
+#0  0x00007ffdb9ca28a4 in ntdll!ZwWaitForMultipleObjects () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#1  0x00007ffdb6d52773 in WaitForMultipleObjectsEx () from C:\WINDOWS\System32\KernelBase.dll
+#2  0x00007ffdb6d52641 in WaitForMultipleObjects () from C:\WINDOWS\System32\KernelBase.dll
+#3  0x00007ffd7d7f5a34 in ?? () from C:\WINDOWS\system32\DriverStore\FileRepository\nvltsi.inf_amd64_50df25cae2d5bc8c\nvcuda64.dll
+#4  0x00007ffd7d8d4535 in nvcuda!cuProfilerStop () from C:\WINDOWS\system32\DriverStore\FileRepository\nvltsi.inf_amd64_50df25cae2d5bc8c\nvcuda64.dll
+#5  0x00007ffd7d7f5447 in ?? () from C:\WINDOWS\system32\DriverStore\FileRepository\nvltsi.inf_amd64_50df25cae2d5bc8c\nvcuda64.dll
+#6  0x00007ffd7da8019a in nvcuda!cuProfilerStop () from C:\WINDOWS\system32\DriverStore\FileRepository\nvltsi.inf_amd64_50df25cae2d5bc8c\nvcuda64.dll
+#7  0x00007ffdb840dda7 in KERNEL32!BaseThreadInitThunk () from C:\WINDOWS\System32\kernel32.dll
+#8  0x00007ffdb9bbee4c in ntdll!RtlUserThreadStart () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#9  0x0000000000000000 in ?? ()
+Backtrace stopped: previous frame inner to this frame (corrupt stack?)
+
+Thread 6 (Thread 31428.0xa048):
+#0  0x00007ffdb9ca1dd4 in ntdll!ZwWaitForSingleObject () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#1  0x00007ffdb6d4be9f in WaitForSingleObjectEx () from C:\WINDOWS\System32\KernelBase.dll
+#2  0x00007ffd7d9b4289 in nvcuda!cuProfilerStop () from C:\WINDOWS\system32\DriverStore\FileRepository\nvltsi.inf_amd64_50df25cae2d5bc8c\nvcuda64.dll
+#3  0x00007ffd7d7f5447 in ?? () from C:\WINDOWS\system32\DriverStore\FileRepository\nvltsi.inf_amd64_50df25cae2d5bc8c\nvcuda64.dll
+#4  0x00007ffd7da8019a in nvcuda!cuProfilerStop () from C:\WINDOWS\system32\DriverStore\FileRepository\nvltsi.inf_amd64_50df25cae2d5bc8c\nvcuda64.dll
+#5  0x00007ffdb840dda7 in KERNEL32!BaseThreadInitThunk () from C:\WINDOWS\System32\kernel32.dll
+#6  0x00007ffdb9bbee4c in ntdll!RtlUserThreadStart () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#7  0x0000000000000000 in ?? ()
+Backtrace stopped: previous frame inner to this frame (corrupt stack?)
+
+Thread 5 (Thread 31428.0x9ec4):
+#0  0x00007ffdb9ca1e74 in ntdll!ZwRemoveIoCompletion () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#1  0x00007ffdb60c6b1f in Tcpip6_WSHGetSockaddrType () from C:\WINDOWS\system32\mswsock.dll
+#2  0x00007ffdb840dda7 in KERNEL32!BaseThreadInitThunk () from C:\WINDOWS\System32\kernel32.dll
+#3  0x00007ffdb9bbee4c in ntdll!RtlUserThreadStart () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#4  0x0000000000000000 in ?? ()
+Backtrace stopped: previous frame inner to this frame (corrupt stack?)
+
+Thread 4 (Thread 31428.0x805c):
+#0  0x00007ffdb9ca28a4 in ntdll!ZwWaitForMultipleObjects () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#1  0x00007ffdad570006 in joySetThreshold () from C:\WINDOWS\SYSTEM32\winmm.dll
+#2  0x00007ffdb840dda7 in KERNEL32!BaseThreadInitThunk () from C:\WINDOWS\System32\kernel32.dll
+#3  0x00007ffdb9bbee4c in ntdll!RtlUserThreadStart () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#4  0x0000000000000000 in ?? ()
+Backtrace stopped: previous frame inner to this frame (corrupt stack?)
+
+Thread 3 (Thread 31428.0xa644):
+#0  0x00007ffdb9ca4d44 in ntdll!ZwRemoveIoCompletionEx () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#1  0x00007ffdb6df133f in KERNELBASE!GetQueuedCompletionStatusEx () from C:\WINDOWS\System32\KernelBase.dll
+#2  0x00007ffd4bbc1fcc in ?? () from D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin\libzmq-v141-mt-4_3_5.dll
+#3  0x00007ffd4bbcdd33 in ?? () from D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin\libzmq-v141-mt-4_3_5.dll
+#4  0x00007ffd4bbf8824 in zmq_msg_set () from D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin\libzmq-v141-mt-4_3_5.dll
+#5  0x00007ffdb722cd30 in wcsrchr () from C:\WINDOWS\System32\ucrtbase.dll
+#6  0x00007ffdb840dda7 in KERNEL32!BaseThreadInitThunk () from C:\WINDOWS\System32\kernel32.dll
+#7  0x00007ffdb9bbee4c in ntdll!RtlUserThreadStart () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#8  0x0000000000000000 in ?? ()
+Backtrace stopped: previous frame inner to this frame (corrupt stack?)
+
+Thread 2 (Thread 31428.0x9ba8):
+#0  0x00007ffdb9ca4d44 in ntdll!ZwRemoveIoCompletionEx () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#1  0x00007ffdb6df133f in KERNELBASE!GetQueuedCompletionStatusEx () from C:\WINDOWS\System32\KernelBase.dll
+#2  0x00007ffd4bbc1fcc in ?? () from D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin\libzmq-v141-mt-4_3_5.dll
+#3  0x00007ffd4bbcdd33 in ?? () from D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin\libzmq-v141-mt-4_3_5.dll
+#4  0x00007ffd4bbf8824 in zmq_msg_set () from D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin\libzmq-v141-mt-4_3_5.dll
+#5  0x00007ffdb722cd30 in wcsrchr () from C:\WINDOWS\System32\ucrtbase.dll
+#6  0x00007ffdb840dda7 in KERNEL32!BaseThreadInitThunk () from C:\WINDOWS\System32\kernel32.dll
+#7  0x00007ffdb9bbee4c in ntdll!RtlUserThreadStart () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#8  0x0000000000000000 in ?? ()
+Backtrace stopped: previous frame inner to this frame (corrupt stack?)
+
+Thread 1 (Thread 31428.0xc7f8):
+#0  0x00007ffdb777af04 in win32u!NtUserMsgWaitForMultipleObjectsEx () from C:\WINDOWS\System32\win32u.dll
+#1  0x00007ffc2df3d744 in QEventDispatcherWin32::processEvents(QFlags<QEventLoop::ProcessEventsFlag>) () from D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin\Qt6Core.dll
+#2  0x00007ffc2dd9d4d2 in QEventLoop::exec(QFlags<QEventLoop::ProcessEventsFlag>) () from D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin\Qt6Core.dll
+#3  0x00007ffc2dd9b27c in QCoreApplication::exec() () from D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin\Qt6Core.dll
+#4  0x00007ff7dd07178f in main (argc=1, argv=0x17f8a4c7f60) at D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/ImagingSvc/main.cpp:28
+[Inferior 1 (process 31428) detached]

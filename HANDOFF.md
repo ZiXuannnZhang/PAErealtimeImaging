@@ -1,5 +1,11 @@
 # HANDOFF — PAERealtimeImaging 当前接力入口
 
+> 2026-10-19 联合候选：本实现分支 `codex/ring-timevar-lowpass-20261016` 在已审核
+> `eed98f0` 上新增 FilteredDAS，保留时变低通及启动拒绝修复，旧双极/低频补偿已移除。
+> 未合并 main；两增强的实机视觉、真实采集与 T_arr 待用户联合验收。
+> 任务、测试、性能和 exact-SHA 联合包入口见 `CODEX_REPORTS/ring-filtered-das-20261019/README.md`。
+
+
 > 更新时间：2026-10-13（UTC+8）。当前基准始终取 latest origin/main。
 
 用户已确认将环形增强 bd69785 的完整源码/测试内容线性接入旧 main 6ff0e02，

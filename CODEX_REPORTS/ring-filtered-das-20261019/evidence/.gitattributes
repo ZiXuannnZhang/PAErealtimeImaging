@@ -1,0 +1,2 @@
+# Preserve generated audit bytes, including CRLF and trailing console spaces.
+* -text

@@ -1,0 +1,238 @@
+{
+  "sha": "eed98f0aea78ea4180e9284ee51a5e71fdf11988",
+  "branch": "codex/ring-timevar-lowpass-20261016",
+  "tracked_clean": false,
+  "commands": [
+    {
+      "name": "baseline-off",
+      "command": [
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+        "--synthetic",
+        "1",
+        "--samples",
+        "5000",
+        "--id",
+        "14",
+        "--channels",
+        "15",
+        "--block",
+        "200",
+        "--rounds",
+        "1",
+        "--grid-mm",
+        ".1",
+        "--svc",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\baseline\\bin\\ImagingSvc.exe",
+        "--timevar-lowpass",
+        "off",
+        "--filtered-das",
+        "off",
+        "--out",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\native-dev-off-baseline-off"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "exit_code": 0,
+      "seconds": 10.561999999990803,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\native-dev-replay-baseline-off.txt"
+    },
+    {
+      "name": "candidate-off",
+      "command": [
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+        "--synthetic",
+        "1",
+        "--samples",
+        "5000",
+        "--id",
+        "14",
+        "--channels",
+        "15",
+        "--block",
+        "200",
+        "--rounds",
+        "1",
+        "--grid-mm",
+        ".1",
+        "--svc",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ImagingSvc.exe",
+        "--timevar-lowpass",
+        "off",
+        "--filtered-das",
+        "off",
+        "--out",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\native-dev-off-candidate-off"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "exit_code": 0,
+      "seconds": 13.125,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\native-dev-replay-candidate-off.txt"
+    },
+    {
+      "name": "baseline-on",
+      "command": [
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+        "--synthetic",
+        "1",
+        "--samples",
+        "5000",
+        "--id",
+        "14",
+        "--channels",
+        "15",
+        "--block",
+        "200",
+        "--rounds",
+        "1",
+        "--grid-mm",
+        ".1",
+        "--svc",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\baseline\\bin\\ImagingSvc.exe",
+        "--timevar-lowpass",
+        "on",
+        "--filtered-das",
+        "off",
+        "--out",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\native-dev-off-baseline-on"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "exit_code": 0,
+      "seconds": 39.937999999994645,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\native-dev-replay-baseline-on.txt"
+    },
+    {
+      "name": "candidate-on",
+      "command": [
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+        "--synthetic",
+        "1",
+        "--samples",
+        "5000",
+        "--id",
+        "14",
+        "--channels",
+        "15",
+        "--block",
+        "200",
+        "--rounds",
+        "1",
+        "--grid-mm",
+        ".1",
+        "--svc",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ImagingSvc.exe",
+        "--timevar-lowpass",
+        "on",
+        "--filtered-das",
+        "off",
+        "--out",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\native-dev-off-candidate-on"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "exit_code": 0,
+      "seconds": 40.78100000000268,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\native-dev-replay-candidate-on.txt"
+    }
+  ],
+  "baseline_service_sha256": "229a1274fc1746fc4b429b49f4e57efffa74da46d17b4e6805a98406adb7bf32",
+  "off_off": [
+    {
+      "name": "svc_wl1_r000_001.raw",
+      "baseline": "23933d0cc089475a49a18a0f16356022d506257cc8a0689207f9685e1bbb1773",
+      "candidate": "23933d0cc089475a49a18a0f16356022d506257cc8a0689207f9685e1bbb1773"
+    },
+    {
+      "name": "svc_wl1_r000_002.raw",
+      "baseline": "c7fbca80c01829915092cfbb3c48a609cc03f24cc7e147d2c42ef69233bf0a5d",
+      "candidate": "c7fbca80c01829915092cfbb3c48a609cc03f24cc7e147d2c42ef69233bf0a5d"
+    },
+    {
+      "name": "svc_wl1_r000_003.raw",
+      "baseline": "f39ab6db72212837f7eb7b869d86c043f78564b4cd17c9879686b5a0de395e3d",
+      "candidate": "f39ab6db72212837f7eb7b869d86c043f78564b4cd17c9879686b5a0de395e3d"
+    },
+    {
+      "name": "svc_wl1_r000_004.raw",
+      "baseline": "70da4e9196fdc8ea3a6115582d3b0fd2dd81c05f8b7dc1487e4ee8af1b897992",
+      "candidate": "70da4e9196fdc8ea3a6115582d3b0fd2dd81c05f8b7dc1487e4ee8af1b897992"
+    },
+    {
+      "name": "svc_wl1_r000_005.raw",
+      "baseline": "cd645892d20d7ae00c8e903df357c84ee6cadf9a519256ef7ae98a1581859b93",
+      "candidate": "cd645892d20d7ae00c8e903df357c84ee6cadf9a519256ef7ae98a1581859b93"
+    },
+    {
+      "name": "svc_wl1_r000_006.raw",
+      "baseline": "9347bef20cd2ff65da8b4709de5d538fec2028543c6c0473f8f64a811f40f320",
+      "candidate": "9347bef20cd2ff65da8b4709de5d538fec2028543c6c0473f8f64a811f40f320"
+    },
+    {
+      "name": "svc_wl1_r000_007.raw",
+      "baseline": "9ccdc40e7f2c4b20631765de24c8fffef19c91d54bcf221541d73d94403ef8e1",
+      "candidate": "9ccdc40e7f2c4b20631765de24c8fffef19c91d54bcf221541d73d94403ef8e1"
+    },
+    {
+      "name": "svc_wl1_r000_008.raw",
+      "baseline": "efdd2e0516e9ef524db05825b0d8cc64d5b116eda8ed4d2136095d09ce49c203",
+      "candidate": "efdd2e0516e9ef524db05825b0d8cc64d5b116eda8ed4d2136095d09ce49c203"
+    },
+    {
+      "name": "svc_wl1_r000_009.raw",
+      "baseline": "e393f88a3aad8afcf72a2cb59f6dbe75e29eb01b53033bb83c69bcb6bb6a5b86",
+      "candidate": "e393f88a3aad8afcf72a2cb59f6dbe75e29eb01b53033bb83c69bcb6bb6a5b86"
+    },
+    {
+      "name": "svc_wl1_r000_010.raw",
+      "baseline": "5035b9230ff3c14f8e710012d21c07c5b0df42c4248667bd983a562ede72963d",
+      "candidate": "5035b9230ff3c14f8e710012d21c07c5b0df42c4248667bd983a562ede72963d"
+    },
+    {
+      "name": "svc_wl2_r000_001.raw",
+      "baseline": "5663ddd0dbd704a34fe07fe944f41f7182a9fea4e648879cf8158e98b20bc09a",
+      "candidate": "5663ddd0dbd704a34fe07fe944f41f7182a9fea4e648879cf8158e98b20bc09a"
+    },
+    {
+      "name": "svc_wl2_r000_002.raw",
+      "baseline": "42a5ae812c9a7658b496d6618c442d9e55d4353fab9b32f2e6e32cf97a385950",
+      "candidate": "42a5ae812c9a7658b496d6618c442d9e55d4353fab9b32f2e6e32cf97a385950"
+    },
+    {
+      "name": "svc_wl2_r000_003.raw",
+      "baseline": "7af502b1da21f80eaaf48f0cae9ebed0bfadd9cf1d6b3dc3b8a26d51ee7244c9",
+      "candidate": "7af502b1da21f80eaaf48f0cae9ebed0bfadd9cf1d6b3dc3b8a26d51ee7244c9"
+    },
+    {
+      "name": "svc_wl2_r000_004.raw",
+      "baseline": "77fb795a598caa22aeb7c7f0db47e6472e2c89ca9c04bae62add4867275d0317",
+      "candidate": "77fb795a598caa22aeb7c7f0db47e6472e2c89ca9c04bae62add4867275d0317"
+    },
+    {
+      "name": "svc_wl2_r000_005.raw",
+      "baseline": "ef95b053a0b6f8661a51fd83af501289d826c2bf29a64dc17e241e66656468f8",
+      "candidate": "ef95b053a0b6f8661a51fd83af501289d826c2bf29a64dc17e241e66656468f8"
+    },
+    {
+      "name": "svc_wl2_r000_006.raw",
+      "baseline": "5213b93ea33a559ce479cd56f7dbf78bc12c3c7115296fa5a6b6bbea410740ba",
+      "candidate": "5213b93ea33a559ce479cd56f7dbf78bc12c3c7115296fa5a6b6bbea410740ba"
+    },
+    {
+      "name": "svc_wl2_r000_007.raw",
+      "baseline": "8a260d82164f41e5934422048a06af505b5ed185d5e39a545f5f1b78d99eea18",
+      "candidate": "8a260d82164f41e5934422048a06af505b5ed185d5e39a545f5f1b78d99eea18"
+    },
+    {
+      "name": "svc_wl2_r000_008.raw",
+      "baseline": "aaab1bfd9b2528fcec75bb7e64172dd54174691aa9a93fc55701858f5c19b3f2",
+      "candidate": "aaab1bfd9b2528fcec75bb7e64172dd54174691aa9a93fc55701858f5c19b3f2"
+    },
+    {
+      "name": "svc_wl2_r000_009.raw",
+      "baseline": "fa7c39520d9ba14d78c6c3347de472661ad77b75d5cdcb92e18088b3956f8083",
+      "candidate": "fa7c39520d9ba14d78c6c3347de472661ad77b75d5cdcb92e18088b3956f8083"
+    },
+    {
+      "name": "svc_wl2_r000_010.raw",
+      "baseline": "9d48b0f24460c9a04211876041ebab39e892db1e3cefa857f1aed9ce3c26bdd5",
+      "candidate": "9d48b0f24460c9a04211876041ebab39e892db1e3cefa857f1aed9ce3c26bdd5"
+    }
+  ]
+}

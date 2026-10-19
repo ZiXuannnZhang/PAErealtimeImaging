@@ -12,6 +12,7 @@
 #include "RingTimevarLowpassConfig.h"
 #include "RingReconRoundState.h"
 #include "RingTimevarLowpass.h"
+#include "FilteredDasPrefilter.h"
 #include "ring_recon_cuda.h"
 
 namespace zmq { class context_t; class socket_t; }
@@ -43,6 +44,8 @@ private slots:
 private:
 #ifdef RING_TIMEVAR_TEST_SEAM
     friend struct RingTimevarServiceTest;
+    // Test-only observation of actual post-filter, pre-WL2 lines. Absent in production.
+    void (*m_testFilteredLines)(int, int, const std::vector<std::vector<float>>&) = nullptr;
 #endif
     void processMessage(const QJsonObject &msg);
     void processConfigure(const QJsonObject &params);
@@ -79,6 +82,9 @@ private:
     RingReconCudaConfig m_ringConfig;
     RingTimevarLowpassConfig   m_ringTimevarConfig;
     RingTimevarLowpass  m_ringTimevar;
+    FilteredDasConfig m_filteredDasConfig;
+    FilteredDasPrefilter m_filteredDas;
+    uint64_t m_filteredDesignUs = 0;
     int                 m_ringSysDelayCh[8][2] = {
         {358, 371}, {358, 371}, {358, 371}, {358, 371},
         {358, 371}, {358, 371}, {358, 371}, {358, 371}};   // 每通道双波长延时截断（实时预处理使用）

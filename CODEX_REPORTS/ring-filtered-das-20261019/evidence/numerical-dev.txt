@@ -1,0 +1,25 @@
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/DartConfiguration.tcl
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/DartConfiguration.tcl
+Test project D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 40
+    Start 40: filtered_das_test
+
+40: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\filtered_das_test.exe
+40: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+40: Test timeout computed to be: 10000000
+40: PASS MATLAB cases=60 batchVariants=4 all edges included worstNormalizedAbs=2.04774e-07 worstNormalizedL2=1.45794e-07
+1/1 Test #40: filtered_das_test ................   Passed   17.64 sec
+
+The following tests passed:
+	filtered_das_test
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =  17.69 sec

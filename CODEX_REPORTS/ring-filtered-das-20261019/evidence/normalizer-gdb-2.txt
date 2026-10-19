@@ -1,0 +1,8 @@
+[New Thread 51524.0x3938]
+[New Thread 51524.0x9ca8]
+[New Thread 51524.0xbb7c]
+PASS physical round normalizer contract (T1-T18, A1-A12, C4-C7)
+[Thread 51524.0xbb7c exited with code 0]
+[Thread 51524.0x3938 exited with code 0]
+[Thread 51524.0x9ca8 exited with code 0]
+[Inferior 1 (process 51524) exited normally]

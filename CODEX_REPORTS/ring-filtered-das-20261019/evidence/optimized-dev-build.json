@@ -1,0 +1,66 @@
+{
+  "sha": "eed98f0aea78ea4180e9284ee51a5e71fdf11988",
+  "branch": "codex/ring-timevar-lowpass-20261016",
+  "tracked_clean": false,
+  "commands": [
+    {
+      "name": "configure-main",
+      "command": [
+        "D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\cmake.exe",
+        "--preset",
+        "mingw-debug",
+        "-DBUILD_MAINWINDOW_START_TEST=ON"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery",
+      "exit_code": 0,
+      "seconds": 1.2030000000086147,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\optimized-dev-build-configure-main.txt"
+    },
+    {
+      "name": "standard-main",
+      "command": [
+        "cmd",
+        "/c",
+        "build_mingw_debug.cmd"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery",
+      "exit_code": 0,
+      "seconds": 159.96899999999732,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\optimized-dev-build-standard-main.txt"
+    },
+    {
+      "name": "configure-tests",
+      "command": [
+        "D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\cmake.exe",
+        "-S",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\tests",
+        "-B",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\filtered_das_tests",
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        "-DCMAKE_CXX_COMPILER=D:/Qt/Qt6.8.0/Tools/mingw1310_64/bin/g++.exe",
+        "-DQt6_DIR=D:/Qt/Qt6.8.0/6.8.0/mingw_64/lib/cmake/Qt6",
+        "-DPython3_EXECUTABLE=C:\\Users\\yyps\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "exit_code": 0,
+      "seconds": 2.062999999994645,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\optimized-dev-build-configure-tests.txt"
+    },
+    {
+      "name": "build-tests",
+      "command": [
+        "D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\cmake.exe",
+        "--build",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\filtered_das_tests",
+        "-j",
+        "8"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "exit_code": 0,
+      "seconds": 4.187000000005355,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\optimized-dev-build-build-tests.txt"
+    }
+  ]
+}

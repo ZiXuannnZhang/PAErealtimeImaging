@@ -1,5 +1,11 @@
 # PAimageReceiverDiagnostics — 当前生产采集与实时成像说明
 
+> 2026-10-19 联合候选：本实现分支 `codex/ring-timevar-lowpass-20261016` 在已审核
+> `eed98f0` 上新增 FilteredDAS，保留时变低通及启动拒绝修复，旧双极/低频补偿已移除。
+> 未合并 main；两增强的实机视觉、真实采集与 T_arr 待用户联合验收。
+> 任务、测试、性能和 exact-SHA 联合包入口见 `CODEX_REPORTS/ring-filtered-das-20261019/README.md`。
+
+
 > 当前项目状态以仓库根目录 `PROJECT_STATUS.md` 为准；构建/交付以 `BUILD_STANDARD.md` 为准。
 > 本 README 只描述 `MC_410T_MultiCard/delivery` 在 canonical `main` 中的当前生产架构。
 

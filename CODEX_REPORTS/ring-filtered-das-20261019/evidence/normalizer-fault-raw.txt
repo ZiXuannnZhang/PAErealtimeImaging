@@ -1,0 +1,12 @@
+[New Thread 26984.0xb8e4]
+[New Thread 26984.0x4a68]
+[New Thread 26984.0xb40c]
+[New Thread 26984.0xc348]
+[Switching to thread 1 (Thread 26984.0xbe24)]
+#0  0x00007ffdb9ca4c04 in ntdll!ZwRaiseHardError () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#7  0x00007ff62c758754 in paimage::PhysicalRoundNormalizer::classify (this=0xdd919fdc50, measurementSession=7000, triggerSeq=2576, observedMonotonicNs=0) at D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp:142
+142	            if (it->measurementSession == measurementSession_ &&
+$1 = {<std::iterator<std::random_access_iterator_tag, paimage::PhysicalRoundNormalizer::CachedDecision, long long, paimage::PhysicalRoundNormalizer::CachedDecision*, paimage::PhysicalRoundNormalizer::CachedDecision&>> = {<No data fields>}, current = {_M_cur = 0x2935b4c0030, _M_first = 0x2935b4f07f0, _M_last = 0x2935b4f09e8, _M_node = 0x2935b4ecdc8}}
+$2 = {<std::allocator<paimage::PhysicalRoundNormalizer::CachedDecision>> = {<std::__new_allocator<paimage::PhysicalRoundNormalizer::CachedDecision>> = {<No data fields>}, <No data fields>}, <std::_Deque_base<paimage::PhysicalRoundNormalizer::CachedDecision, std::allocator<paimage::PhysicalRoundNormalizer::CachedDecision> >::_Deque_impl_data> = {_M_map = 0x2935b4ebfa0, _M_map_size = 638, _M_start = {_M_cur = 0x2935b171a90, _M_first = 0x2935b171a90, _M_last = 0x2935b171c88, _M_node = 0x2935b4ec640}, _M_finish = {_M_cur = 0x2935b4fea20, _M_first = 0x2935b4fea20, _M_last = 0x2935b4fec18, _M_node = 0x2935b4ed1c0}}, <No data fields>}
+$3 = 72
+[Inferior 1 (process 26984) detached]

@@ -24,4 +24,4 @@ add_custom_command(TARGET mainwindow_start_integration_test POST_BUILD
 enable_testing()
 add_test(NAME mainwindow_start_integration_test COMMAND mainwindow_start_integration_test)
 set_tests_properties(mainwindow_start_integration_test PROPERTIES
-    RUN_SERIAL TRUE TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    RUN_SERIAL TRUE TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

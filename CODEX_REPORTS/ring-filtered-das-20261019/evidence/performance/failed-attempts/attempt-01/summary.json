@@ -1,0 +1,79 @@
+[
+  {
+    "name": "candidate_load_N7500_C8_tvon_fdon_b64",
+    "spec": {
+      "group": "load",
+      "n": 7500,
+      "channels": 8,
+      "tv": "on",
+      "fd": "on",
+      "batch": 64,
+      "grid": 0.1,
+      "block": 200
+    },
+    "command": [
+      "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+      "--synthetic",
+      "1",
+      "--samples",
+      "7500",
+      "--svc",
+      "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ImagingSvc.exe",
+      "--id",
+      "14",
+      "--channels",
+      "255",
+      "--block",
+      "200",
+      "--rounds",
+      "7",
+      "--grid-mm",
+      "0.1",
+      "--benchmark-blocks",
+      "31",
+      "--timevar-lowpass",
+      "on",
+      "--filtered-das",
+      "on",
+      "--filtered-batch",
+      "64",
+      "--no-save",
+      "1",
+      "--out",
+      "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\performance\\candidate_load_N7500_C8_tvon_fdon_b64"
+    ],
+    "cwd": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin",
+    "exit": 2,
+    "wall_seconds": 75.75,
+    "blocks": 11,
+    "service_sha256": "824a6357ea3b7734ba1a71b64096ae6a20390d39d72a850aff001cbca9faf03d",
+    "tool_sha256": "4269bc483260c8f384dc0ce5fa95424b8ac0b06e231687e5dbf8c4266c1671be",
+    "peak_bytes": {
+      "pid": 31428,
+      "working_set": 370188288,
+      "pagefile": 766742528
+    },
+    "cold_roundtrip_ms": 3368.969,
+    "cold_service_ms": 3359.633,
+    "roundtrip": {
+      "warm_count": 10,
+      "median_ms": 3575.42595,
+      "p95_ms": 4440.6867,
+      "max_ms": 4440.6867,
+      "lines_per_second": 447.4991294393889
+    },
+    "service": {
+      "warm_count": 10,
+      "median_ms": 3560.9894999999997,
+      "p95_ms": 4423.043,
+      "max_ms": 4423.043,
+      "lines_per_second": 449.31331586347
+    },
+    "filtered_metrics": {
+      "design_us": 8364.0,
+      "cached_bytes": 36700160.0,
+      "workspace_bytes": 33554432.0,
+      "max_batch": 64.0
+    }
+  }
+]

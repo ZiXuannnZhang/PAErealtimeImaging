@@ -3,6 +3,8 @@
 #include "RingConfigDialog.h"
 #include "RingBlockAssembler.h"
 #include "RingTimevarLowpassSettings.h"
+#include "FilteredDasSettings.h"
+#include <QDoubleSpinBox>
 #include "PaimageAcquisition/SettingsPath.h"
 #include <QApplication>
 #include <QElapsedTimer>
@@ -96,7 +98,8 @@ public:
             stop();
             std::cout << "PASS valid enabled startup -> stop\n";
 
-            auto reject = [&](bool resident) {
+            auto reject = [&](bool resident, bool filtered=false) {
+                const auto acceptedFiltered=filtered_das::toJson(controller.filteredDasConfig());
                 const auto accepted = ring_timevar::toJson(controller.ringTimevarConfig());
                 const QByteArray oldConfig(reinterpret_cast<const char*>(&controller.ringConfig()),
                                            sizeof(RingReconCudaConfig));
@@ -141,9 +144,11 @@ public:
                                 sizeof(RingReconCudaConfig)) == oldConfig
                     && QByteArray(reinterpret_cast<const char*>(controller.m_ringSysDelayCh),
                                   sizeof(controller.m_ringSysDelayCh)) == oldDelays
-                    && ring_timevar::toJson(controller.ringTimevarConfig()) == accepted,
+                    && ring_timevar::toJson(controller.ringTimevarConfig()) == accepted
+                    && filtered_das::toJson(controller.filteredDasConfig()) == acceptedFiltered,
                       "rejection changed accepted configuration");
-                check(dialog.timevarConfig().enabled && dialog.timevarConfig().p2 == 2000,
+                check(filtered ? dialog.filteredDasConfig().enabled && dialog.filteredDasConfig().stopMhz==125
+                      : dialog.timevarConfig().enabled && dialog.timevarConfig().p2 == 2000,
                       "invalid draft silently disabled or clamped");
                 const auto after = window.m_ringAssembler->snapshot();
                 check(after.hasActiveRound == assembler.hasActiveRound
@@ -191,6 +196,26 @@ public:
             start();
             stop();
             std::cout << "PASS valid restart/start/stop regression\n";
+            widget<QDoubleSpinBox>(dialog,"filteredDasStopMhz")->setValue(125);
+            reject(false,true);
+            widget<QDoubleSpinBox>(dialog,"filteredDasStopMhz")->setValue(60);
+            start();
+            check(controller.filteredDasConfig().enabled && controller.filteredDasConfig().referenceMhz==5,
+                  "FilteredDAS snapshot missing from real startup");
+            {QSignalBlocker blocker(checkbox);checkbox->setChecked(false);}
+            window.stopRingFeedWorker();window.m_imagingEnabled=false;window.setImagingParamControlsEnabled(true);
+            widget<QDoubleSpinBox>(dialog,"filteredDasStopMhz")->setValue(125);
+            reject(true,true);
+            controller.stopSvc();waitFor([&]{return !controller.isRunning()&&!controller.m_ringSharedMemory;},"filtered resident cleanup");
+            widget<QDoubleSpinBox>(dialog,"filteredDasStopMhz")->setValue(60);
+            for(bool tv:{false,true})for(bool fd:{false,true}) {
+                widget<QCheckBox>(dialog,"timevarEnabled")->setChecked(tv);
+                widget<QCheckBox>(dialog,"filteredDasEnabled")->setChecked(fd);
+                start();check(controller.ringTimevarConfig().enabled==tv&&controller.filteredDasConfig().enabled==fd,
+                              "four-combination startup snapshot");stop();
+            }
+            std::cout<<"PASS FilteredDAS real rejection inactive/resident, correction/restart, four-combination starts\n";
+
         }
         QFile::remove(paimageSettingsPath());
     }

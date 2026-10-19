@@ -1,0 +1,4 @@
+set pagination off
+thread apply all bt 10
+detach
+quit

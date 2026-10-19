@@ -102,11 +102,20 @@ int main(int argc, char** argv) {
     const bool splice = argInt(args, "--splice", 0) != 0;          // 1=拼接模式（需配准模式）
     const double spliceBlendDeg = argDouble(args, "--splice-blend", 0.0);  // 拼接羽化宽度（°）
     const std::string sysDelayPerCh = argStr(args, "--sys-delay-per-ch");   // 空=各通道统一默认
+    const std::string filteredMode=argStr(args,"--filtered-das");
+    const int filteredBatch=argInt(args,"--filtered-batch",64);
     const std::string timevarMode = argStr(args, "--timevar-lowpass");
     const int roundsArg = argInt(args, "--rounds", 2);
+    const int benchmarkBlocks = argInt(args,"--benchmark-blocks",0);
+    const int frameTimeoutMs = argInt(args,"--frame-timeout-ms",kTimeoutMs);
+    if(frameTimeoutMs<1) { std::fprintf(stderr,"--frame-timeout-ms must be positive\n"); return 2; }
 
     const bool synthetic = argInt(args,"--synthetic",0) != 0;
     const bool noSave = argInt(args,"--no-save",0) != 0;
+    if(benchmarkBlocks<0 || (benchmarkBlocks>0 &&
+       (!synthetic || identityJumpAt>0 || dropBlock>=0 || timeoutResetSec>0))) {
+        std::fprintf(stderr,"--benchmark-blocks is only for uninterrupted synthetic full-block timing\n"); return 2;
+    }
     if ((!synthetic && dataPath.empty()) || svcPath.empty()) {
         std::fprintf(stderr,
             "usage: ring_svc_selftest --data <11.dat> --svc <ImagingSvc.exe> "
@@ -116,7 +125,7 @@ int main(int argc, char** argv) {
             "[--sos-radii-mm 3] [--sos 1490,1540] "
             "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...] "
             "[--identity-jump-at N] [--drop-block N] "
-            "[--timevar-lowpass off|on|high] [--rounds N] [--synthetic 1] [--samples N] [--no-save 1]\n");
+            "[--filtered-das off|on|high] [--filtered-batch N] [--mask-length N] [--benchmark-blocks N] [--frame-timeout-ms 20000] [--timevar-lowpass off|on|high] [--rounds N] [--synthetic 1] [--samples N] [--no-save 1]\n");
         return 2;
     }
     if (!timevarMode.empty() && timevarMode != "off" && timevarMode != "on" && timevarMode != "high") {
@@ -309,7 +318,7 @@ int main(int argc, char** argv) {
     ring["minDistance"] = 0.0;
     ring["maskOutOfRange"] = 1;
     ring["dbrSigRemove"] = 1;
-    ring["maskLength"] = 300;
+    ring["maskLength"] = argInt(args,"--mask-length",300);
     ring["delayCut"] = 1;
     ring["singalImpair"] = 0;
     QJsonArray imv; imv.append(2000.0); imv.append(400.0);
@@ -362,6 +371,12 @@ int main(int argc, char** argv) {
         timevar["fftLength"] = 256;
     }
     ring["timevarLowpass"] = timevar;
+    if(!filteredMode.empty()&&filteredMode!="off"&&filteredMode!="on"&&filteredMode!="high") {
+        std::fprintf(stderr,"--filtered-das must be off|on|high\n"); return 2;
+    }
+    ring["filteredDas"]=QJsonObject{{"enabled",filteredMode=="on"||filteredMode=="high"},
+        {"order",.5},{"referenceMhz",5.0},{"passMhz",40.0},{"stopMhz",60.0},
+        {"padFactor",filteredMode=="high"?8.0:4.0},{"batchColumns",filteredBatch}};
 
     QJsonObject params;
     params["imagingMode"] = "ring";
@@ -457,7 +472,7 @@ int main(int argc, char** argv) {
         bool got = false;
         bool identityMatch = false;
         double serviceMs=0;
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kTimeoutMs);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(frameTimeoutMs);
         while (std::chrono::steady_clock::now() < deadline) {
             zmq::message_t msg;
             while (sock.recv(msg, zmq::recv_flags::dontwait)) {
@@ -481,6 +496,10 @@ int main(int argc, char** argv) {
                         obj.value(QStringLiteral("round_complete")).isBool() &&
                         obj.value(QStringLiteral("round_complete")).toBool() == expectedComplete;
                     serviceMs=obj["process_us"].toDouble()/1000.0;
+                    if(obj.contains("filtered_cached_bytes"))
+                        std::printf("[filtered-metrics] design_us=%.0f cached_bytes=%.0f workspace_bytes=%.0f max_batch=%.0f\n",
+                            obj["filtered_design_us"].toDouble(),obj["filtered_cached_bytes"].toDouble(),
+                            obj["filtered_workspace_bytes"].toDouble(),obj["filtered_max_batch"].toDouble());
                     got = true;
                     break;
                 }
@@ -495,6 +514,7 @@ int main(int argc, char** argv) {
         const double snapshotMs = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();
         std::printf("[block-timing] submit=%llu roundtrip_ms=%.9f service_ms=%.9f\n",
                     static_cast<unsigned long long>(producerEvent.submitIndex),snapshotMs,serviceMs);
+        std::fflush(stdout);
         if (expectedComplete) {
             // 整圈 wall：首块 submitWallUs → round_complete 快照到达
             const double wallMs =
@@ -585,7 +605,7 @@ int main(int argc, char** argv) {
 
     const int nRounds = roundsArg;   // 预算测试用 --rounds 6（第 1 圈预热不计入）；
                                      // 默认 2 保持既有复现行为
-    const int nBlocksTotal = nBlocks * nRounds;
+    const int nBlocksTotal = benchmarkBlocks>0 ? std::min(nBlocks*nRounds,benchmarkBlocks) : nBlocks*nRounds;
     int resetBase = 0;       // 超时复位后新一圈的数据列基准（模拟重新开始采集）
     std::uint64_t roundGeneration = 0;
     for (int b = 0; b < nBlocksTotal; ++b) {
@@ -635,6 +655,8 @@ int main(int argc, char** argv) {
     }
 
     sendJson(sock, {{"cmd", "stop"}});
+    if(benchmarkBlocks>0)
+        std::printf("[benchmark] normal stop after %d complete blocks; configured blocks_per_round=%d unchanged\n",nBlocksTotal,nBlocks);
     const auto observationDeadline = std::chrono::steady_clock::now()
         + std::chrono::milliseconds(500);
     while (std::chrono::steady_clock::now() < observationDeadline) {

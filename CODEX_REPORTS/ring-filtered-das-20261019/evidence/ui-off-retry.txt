@@ -1,0 +1,36 @@
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/DartConfiguration.tcl
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/DartConfiguration.tcl
+Test project D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 42
+    Start 42: filtered_das_ui_test
+
+42: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\filtered-ui-isolated\filtered_das_ui_test.exe
+42: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+42: Environment variables: 
+42:  QT_QPA_PLATFORM=offscreen
+42: Test timeout computed to be: 60
+42: PASS FilteredDAS UI factory/draft/advanced/defaults/restart/precision/INI/independence
+1/2 Test #42: filtered_das_ui_test .............   Passed    0.69 sec
+test 43
+    Start 43: filtered_das_off_test
+
+43: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\filtered_das_off_test.exe
+43: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+43: Test timeout computed to be: 60
+43: PASS exact eed98f0 OFF timevar OFF/ON 256 fingerprints
+2/2 Test #43: filtered_das_off_test ............   Passed    0.48 sec
+
+The following tests passed:
+	filtered_das_ui_test
+	filtered_das_off_test
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   1.20 sec

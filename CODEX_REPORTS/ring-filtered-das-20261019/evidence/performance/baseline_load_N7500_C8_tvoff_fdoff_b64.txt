@@ -1,0 +1,106 @@
+command=["D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe", "--synthetic", "1", "--samples", "7500", "--svc", "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\baseline\\bin\\ImagingSvc.exe", "--id", "14", "--channels", "255", "--block", "200", "--rounds", "7", "--grid-mm", "0.1", "--benchmark-blocks", "31", "--timevar-lowpass", "off", "--filtered-das", "off", "--filtered-batch", "64", "--no-save", "1", "--out", "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\performance\\baseline_load_N7500_C8_tvoff_fdoff_b64"]
+cwd=D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\mingw_debug\bin
+[selftest] timevar=off rounds=7 grid_mm=0.1000 block=200 channels=0xFF
+[block-timing] submit=1 roundtrip_ms=112.858000000 service_ms=95.711000000
+block   1/5: 113.67 ms
+[block-timing] submit=2 roundtrip_ms=102.156300000 service_ms=90.854000000
+  diff vs prev: wl1=0.722665 wl2=0.706295
+block   2/5: 103.73 ms
+[block-timing] submit=3 roundtrip_ms=108.155500000 service_ms=88.843000000
+  diff vs prev: wl1=0.579473 wl2=0.544841
+block   3/5: 109.69 ms
+[block-timing] submit=4 roundtrip_ms=104.568300000 service_ms=86.080000000
+  diff vs prev: wl1=0.523237 wl2=0.47748
+block   4/5: 106.21 ms
+[block-timing] submit=5 roundtrip_ms=97.387100000 service_ms=88.595000000
+[round-wall] generation=0 wall_ms=3622.69 blocks=5
+  diff vs prev: wl1=0.433339 wl2=0.442317
+block   5/5: 99.00 ms
+[block-timing] submit=6 roundtrip_ms=108.970700000 service_ms=92.256000000
+  diff vs prev: wl1=0.603573 wl2=0.612811
+block   6/5: 110.58 ms
+[block-timing] submit=7 roundtrip_ms=109.909200000 service_ms=90.532000000
+  diff vs prev: wl1=0.722665 wl2=0.706295
+block   7/5: 111.60 ms
+[block-timing] submit=8 roundtrip_ms=107.393500000 service_ms=102.938000000
+  diff vs prev: wl1=0.579473 wl2=0.544841
+block   8/5: 109.21 ms
+[block-timing] submit=9 roundtrip_ms=130.733800000 service_ms=112.679000000
+  diff vs prev: wl1=0.523237 wl2=0.47748
+block   9/5: 132.39 ms
+[block-timing] submit=10 roundtrip_ms=135.556200000 service_ms=123.164000000
+[round-wall] generation=1 wall_ms=3701.34 blocks=5
+  diff vs prev: wl1=0.433339 wl2=0.442317
+block  10/5: 137.23 ms
+[block-timing] submit=11 roundtrip_ms=142.614300000 service_ms=132.790000000
+  diff vs prev: wl1=0.603573 wl2=0.612811
+block  11/5: 144.29 ms
+[block-timing] submit=12 roundtrip_ms=158.939700000 service_ms=147.834000000
+  diff vs prev: wl1=0.722665 wl2=0.706295
+block  12/5: 160.53 ms
+[block-timing] submit=13 roundtrip_ms=162.191900000 service_ms=142.241000000
+  diff vs prev: wl1=0.579473 wl2=0.544841
+block  13/5: 163.94 ms
+[block-timing] submit=14 roundtrip_ms=173.421300000 service_ms=151.063000000
+  diff vs prev: wl1=0.523237 wl2=0.47748
+block  14/5: 175.15 ms
+[block-timing] submit=15 roundtrip_ms=151.809800000 service_ms=137.684000000
+[round-wall] generation=2 wall_ms=3920.59 blocks=5
+  diff vs prev: wl1=0.433339 wl2=0.442317
+block  15/5: 153.30 ms
+[block-timing] submit=16 roundtrip_ms=154.082000000 service_ms=142.711000000
+  diff vs prev: wl1=0.603573 wl2=0.612811
+block  16/5: 155.59 ms
+[block-timing] submit=17 roundtrip_ms=149.769400000 service_ms=145.093000000
+  diff vs prev: wl1=0.722665 wl2=0.706295
+block  17/5: 151.51 ms
+[block-timing] submit=18 roundtrip_ms=166.052400000 service_ms=145.678000000
+  diff vs prev: wl1=0.579473 wl2=0.544841
+block  18/5: 168.17 ms
+[block-timing] submit=19 roundtrip_ms=156.588600000 service_ms=140.546000000
+  diff vs prev: wl1=0.523237 wl2=0.47748
+block  19/5: 158.20 ms
+[block-timing] submit=20 roundtrip_ms=147.472500000 service_ms=140.258000000
+[round-wall] generation=3 wall_ms=3889.56 blocks=5
+  diff vs prev: wl1=0.433339 wl2=0.442317
+block  20/5: 149.13 ms
+[block-timing] submit=21 roundtrip_ms=156.068000000 service_ms=143.090000000
+  diff vs prev: wl1=0.603573 wl2=0.612811
+block  21/5: 157.60 ms
+[block-timing] submit=22 roundtrip_ms=169.293200000 service_ms=148.453000000
+  diff vs prev: wl1=0.722665 wl2=0.706295
+block  22/5: 170.91 ms
+[block-timing] submit=23 roundtrip_ms=158.326300000 service_ms=143.607000000
+  diff vs prev: wl1=0.579473 wl2=0.544841
+block  23/5: 160.03 ms
+[block-timing] submit=24 roundtrip_ms=161.604200000 service_ms=139.195000000
+  diff vs prev: wl1=0.523237 wl2=0.47748
+block  24/5: 163.10 ms
+[block-timing] submit=25 roundtrip_ms=168.249400000 service_ms=145.689000000
+[round-wall] generation=4 wall_ms=3943.18 blocks=5
+  diff vs prev: wl1=0.433339 wl2=0.442317
+block  25/5: 169.87 ms
+[block-timing] submit=26 roundtrip_ms=150.064800000 service_ms=136.987000000
+  diff vs prev: wl1=0.603573 wl2=0.612811
+block  26/5: 151.62 ms
+[block-timing] submit=27 roundtrip_ms=150.687100000 service_ms=141.230000000
+  diff vs prev: wl1=0.722665 wl2=0.706295
+block  27/5: 152.43 ms
+[block-timing] submit=28 roundtrip_ms=154.433200000 service_ms=139.070000000
+  diff vs prev: wl1=0.579473 wl2=0.544841
+block  28/5: 156.04 ms
+[block-timing] submit=29 roundtrip_ms=168.741800000 service_ms=144.339000000
+  diff vs prev: wl1=0.523237 wl2=0.47748
+block  29/5: 170.21 ms
+[block-timing] submit=30 roundtrip_ms=154.571300000 service_ms=138.016000000
+[round-wall] generation=5 wall_ms=3903.95 blocks=5
+  diff vs prev: wl1=0.433339 wl2=0.442317
+block  30/5: 156.22 ms
+[block-timing] submit=31 roundtrip_ms=154.949900000 service_ms=140.455000000
+  diff vs prev: wl1=0.603573 wl2=0.612811
+block  31/5: 156.58 ms
+[benchmark] normal stop after 31 complete blocks; configured blocks_per_round=5 unchanged
+done: channels=8 K=500 rounds=7 blocks=31 total=4477.7 ms avg=144.44 ms
+[RingSHMObs] kinds: final=1 round_barrier_reset=7
+[RingSHMObs] service kind=final session=1 epoch=0 submitted=0 notifications=31 consumed=31 mismatch=0 ready_zero=0 duplicate=0 gap=0 avg_queue_us=19541.2 avg_copy_us=13348.6 avg_process_us=127719.1
+[RingSHMObs] producer session=1 submitted=31 slot_busy=0 last_seq=30 last_interval_us=952051

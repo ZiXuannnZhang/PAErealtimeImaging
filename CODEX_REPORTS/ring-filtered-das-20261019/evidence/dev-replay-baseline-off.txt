@@ -1,0 +1,4 @@
+command=["D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe", "--synthetic", "1", "--samples", "5000", "--id", "14", "--channels", "15", "--block", "200", "--rounds", "1", "--grid-mm", ".1", "--svc", "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\baseline\\bin\\ImagingSvc.exe", "--timevar-lowpass", "off", "--filtered-das", "off", "--out", "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\dev-off-baseline-off"]
+cwd=D:\ChatGPT\PAERealtimeImaging
+[selftest] timevar=off rounds=1 grid_mm=0.1000 block=200 channels=0xF
+timeout at block 0

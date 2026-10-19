@@ -1,0 +1,49 @@
+{
+  "sha": "b1b61a065c9e70aa016733c2409a3cbd7bea3e20",
+  "branch": "codex/ring-timevar-lowpass-20261016",
+  "tracked_clean": false,
+  "commands": [
+    {
+      "name": "build-tests",
+      "command": [
+        "D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\cmake.exe",
+        "--build",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\filtered_das_tests",
+        "-j",
+        "8"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "exit_code": 0,
+      "seconds": 7.0939999999973224,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\prefinal-tests-build-tests.txt"
+    },
+    {
+      "name": "list",
+      "command": [
+        "D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\ctest.exe",
+        "--test-dir",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\filtered_das_tests",
+        "-N"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "exit_code": 0,
+      "seconds": 0.17200000000593718,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\prefinal-tests-list.txt"
+    },
+    {
+      "name": "regression-new",
+      "command": [
+        "D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\ctest.exe",
+        "--test-dir",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\filtered_das_tests",
+        "-V",
+        "--timeout",
+        "90"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "exit_code": 8,
+      "seconds": 57.25,
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\prefinal-tests-regression-new.txt"
+    }
+  ]
+}

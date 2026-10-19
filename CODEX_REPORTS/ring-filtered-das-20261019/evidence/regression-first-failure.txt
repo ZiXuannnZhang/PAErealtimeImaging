@@ -1,0 +1,536 @@
+command=["D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\ctest.exe", "--test-dir", "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\timevar_tests", "-V", "--timeout", "90"]
+cwd=D:\ChatGPT\PAERealtimeImaging
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/DartConfiguration.tcl
+UpdateCTestConfiguration  from :D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/DartConfiguration.tcl
+Test project D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+Constructing a list of tests
+Done constructing a list of tests
+Updating test list for fixtures
+Added 0 tests to meet fixture requirements
+Checking test dependency graph...
+Checking test dependency graph end
+test 1
+      Start  1: ring_timevar_lowpass_test
+
+1: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\ring_timevar_lowpass_test.exe
+1: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+1: Test timeout computed to be: 90
+1: PASS baselineOFF=128 MATLAB cases=36 columns=327 worstNormalizedAbs=5.03385e-13 floatWorst=0
+ 1/55 Test  #1: ring_timevar_lowpass_test ...............   Passed    7.43 sec
+test 2
+      Start  2: ring_timevar_service_test
+
+2: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\ring_timevar_service_test.exe
+2: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+2: Test timeout computed to be: 90
+2: PASS service config atomicity, failure whole-block barrier, raw isolation, round/stale/reset
+ 2/55 Test  #2: ring_timevar_service_test ...............   Passed    0.76 sec
+test 3
+      Start  3: ring_timevar_ui_test
+
+3: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\ui-isolated\ring_timevar_ui_test.exe
+3: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+3: Environment variables: 
+3:  QT_QPA_PLATFORM=offscreen
+3: Test timeout computed to be: 90
+3: PASS UI advanced/parent cancel, apply, defaults, restart, invalid draft isolation
+ 3/55 Test  #3: ring_timevar_ui_test ....................   Passed    1.99 sec
+test 4
+      Start  4: ring_display_mapping_test
+
+4: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\ring_display_mapping_test.exe
+4: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+4: Test timeout computed to be: 90
+4: ring_display_mapping_test: PASS
+ 4/55 Test  #4: ring_display_mapping_test ...............   Passed    0.39 sec
+test 5
+      Start  5: ring_display_render_test
+
+5: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\ring_display_render_test.exe
+5: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+5: Environment variables: 
+5:  QT_QPA_PLATFORM=offscreen
+5: Test timeout computed to be: 90
+5: ring_display_render_test: PASS
+ 5/55 Test  #5: ring_display_render_test ................   Passed    1.11 sec
+test 6
+      Start  6: timeout_presentation_test
+
+6: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\timeout_presentation_test.exe
+6: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+6: Test timeout computed to be: 90
+6: PASS C10 capture-before-reset/old-directory/lifetime; C12 reset success/failure
+ 6/55 Test  #6: timeout_presentation_test ...............   Passed    0.22 sec
+test 7
+      Start  7: ring_block_assembler_test
+
+7: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\ring_block_assembler_test.exe
+7: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+7: Test timeout computed to be: 90
+7: PASS T1 normal full-length
+7: PASS T2 short line zero-padding
+7: PASS T3 long line truncation
+7: PASS T4 duplicate first-wins
+7: PASS T5 out-of-order triggers
+7: PASS T6 temporal overflow
+7: PASS T7 numerically smallest current
+7: PASS T8 sequence wrap overflow
+7: PASS T9 timeout reset
+7: PASS T10 external timeout ownership
+7: PASS T11 normal golden regression
+7: PASS T12 logical round boundary
+7: PASS R1 identity residual hard barrier
+7: PASS R2 CountBoundary final sync retention
+7: PASS R3 stale round drop
+7: PASS R4 generation gap/session floor
+7: PASS R10 measurement session restart
+7: PASS all RingBlockAssembler tests (T1-T12,R1-R4,R10)
+ 7/55 Test  #7: ring_block_assembler_test ...............   Passed    0.37 sec
+test 8
+      Start  8: imaging_bypass_test
+
+8: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\imaging_bypass_test.exe
+8: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+8: Test timeout computed to be: 90
+8: PASS imaging bypass: bounded admission, explicit drops, session/service isolation, early filters, saving independence
+ 8/55 Test  #8: imaging_bypass_test .....................   Passed    0.40 sec
+test 9
+      Start  9: data_processor_imaging_isolation_test
+
+9: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\data_processor_imaging_isolation_test.exe
+9: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+9: Test timeout computed to be: 90
+9: PASS 4000-frame pressure: saveAccepted=4000 while the downstream imaging queue saturated and its worker was delayed
+ 9/55 Test  #9: data_processor_imaging_isolation_test ...   Passed    0.57 sec
+test 10
+      Start 10: frontend_preprocessor_test
+
+10: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\frontend_preprocessor_test.exe
+10: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+10: Test timeout computed to be: 90
+10: PASS  T1 identity deep-copy: distinct pointer, full metadata/freqA/freqB, raw untouched
+10: PASS  T2 full-resolution: 2048-point input fully preserved by display and frontend output
+10: PASS  T3 one result / two consumers: single clone feeds DisplayBuffer and RingFeedSink
+10: PASS  T4 FIFO ordering: 64 triggers dispatched in submit order
+10: PASS  T5 non-blocking submit: submit/deliverAssembled return while the worker is parked
+10: PASS  T6 bounded overflow: capacity-2 FIFO rejects deterministically as FrontendSubmitResult::QueueFull
+10: PASS  T7 save isolation: 12/12 raw saves consumed while the frontend queue rejected 10 frames
+10: PASS  T8 session stale: old queued/in-flight frames dropped across beginSession
+10: PASS  T9 timeout stale: barrier drop of queued/in-flight old-round frames
+10: PASS  T10 CountBoundary final: final logical trigger survives the barrier exactly once
+10: PASS  T11 stop lifecycle: clear + join with no post-stop dispatch
+10: PASS  T12 exception containment: processing/downstream faults contained, acquisition and save unaffected
+10: PASS  F1 both paths disabled: output equals input point by point
+10: PASS  F2 highpass only / lowpass only / both: all three paths execute, lengths preserved
+10: PASS  F3 zero-phase: filtfilt asymmetry 2.334e-07 vs forward-only 0.011551
+10: PASS  F4 per-A-line independence: no state carry-over, joined buffer matches isolated runs, merged-call deviation 0.654035
+10: PASS  F5 edge extension: L = 3 x order, odd reflection verified point by point
+10: PASS  F6 short-sequence guard: n < 2 and n <= L are deterministic, finite, length preserved
+10: PASS  F7 save isolation: raw pointwise unchanged, filter only rewrote the clone
+10: PASS  F8 shared clone dispatch: one filtered clone feeds DisplayBuffer and RingFeedSink
+10: PASS  F9 effective moment: in-flight frame keeps its coefficients, next frame switches
+10: PASS  F10 design counters: one design per configuration change, none per frame
+10: PASS  F11 concurrent config update: 3 x 150 frames with a racing updater, no torn state
+10: PASS  F12 parameter validation: 3 rejection classes leave the config untouched
+10: PASS  F13 exception containment: filter fault stayed on the worker and later frames kept flowing
+10: PASS  frontend_preprocessor_test: 12/12 architecture contracts + 13/13 filter contracts
+10/55 Test #10: frontend_preprocessor_test ..............   Passed    0.75 sec
+test 11
+      Start 11: ring_production_blockers_test
+
+11: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\ring_production_blockers_test.exe
+11: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+11: Test timeout computed to be: 90
+11: ring_production_blockers_test failures=0
+11/55 Test #11: ring_production_blockers_test ...........   Passed    0.32 sec
+test 12
+      Start 12: diagnostic_recorder_test
+
+12: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\diagnostic_recorder_test.exe
+12: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+12: Test timeout computed to be: 90
+12/55 Test #12: diagnostic_recorder_test ................   Passed    1.70 sec
+test 13
+      Start 13: ring_shm_observability_test
+
+13: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\ring_shm_observability_test.exe
+13: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+13: Test timeout computed to be: 90
+13: ring_shm_observability_test: PASS (T1-T11,T13)
+13/55 Test #13: ring_shm_observability_test .............   Passed    0.36 sec
+test 14
+      Start 14: diagnostic_dialog_test
+
+14: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\diagnostic_dialog_test.exe
+14: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+14: Environment variables: 
+14:  QT_QPA_PLATFORM=offscreen
+14: Test timeout computed to be: 90
+14: PASS diagnostic dialog time-window validation/note/path selection
+14/55 Test #14: diagnostic_dialog_test ..................   Passed    4.07 sec
+test 15
+      Start 15: diagnostic_time_window_test
+
+15: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\diagnostic_time_window_test.exe
+15: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+15: Test timeout computed to be: 90
+15: PASS diagnostic time-window multi-run/active-boundary/empty-window export
+15/55 Test #15: diagnostic_time_window_test .............   Passed    1.05 sec
+test 16
+      Start 16: process_scheduling_test
+
+16: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\process_scheduling_test.exe
+16: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+16: Test timeout computed to be: 90
+16: [IngressProtection] requestedPriority=BELOW_NORMAL priorityApply=ok effectivePriority=BELOW_NORMAL originalProcessMask=0xFFFFFFFF requestedProcessMask=0xFFFFFFFA affinityApply=ok effectiveProcessMask=0xFFFFFFFA reservedLogicalCpus=0,2
+16: PASS process scheduling tests
+16/55 Test #16: process_scheduling_test .................   Passed    0.22 sec
+test 17
+      Start 17: network_ingress_observability_test
+
+17: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\network_ingress_observability_test.exe
+17: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+17: Test timeout computed to be: 90
+17: PASS network ingress observability helpers
+17/55 Test #17: network_ingress_observability_test ......   Passed    0.32 sec
+test 18
+      Start 18: network_snapshot_test
+
+18: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\network_snapshot_test.exe
+18: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+18: Test timeout computed to be: 90
+18: PASS read-only adapter/route snapshot and loopback relation
+18/55 Test #18: network_snapshot_test ...................   Passed    0.44 sec
+test 19
+      Start 19: network_diagnostics_test
+
+19: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\network_diagnostics_test.exe "--legacy-control-only"
+19: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+19: Test timeout computed to be: 90
+19: PASS 4 targets: all confirmed
+19: PASS 5 targets: fifth timeout; first four confirmed
+19/55 Test #19: network_diagnostics_test ................   Passed    5.09 sec
+test 20
+      Start 20: measurement_session_transaction_test
+
+20: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\measurement_session_transaction_test.exe
+20: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+20: Test timeout computed to be: 90
+20: PASS measurement session transaction tests
+20/55 Test #20: measurement_session_transaction_test ....   Passed    0.31 sec
+test 21
+      Start 21: session_boundary_test
+
+21: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\session_boundary_test.exe
+21: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+21: Test timeout computed to be: 90
+21: PASS session boundary reset/100-cycle tests
+21/55 Test #21: session_boundary_test ...................   Passed    2.04 sec
+test 22
+      Start 22: session_boundary_receiver_test
+
+22: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\session_boundary_receiver_test.exe
+22: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+22: Test timeout computed to be: 90
+22: PASS receiver-aware session boundary stress
+22/55 Test #22: session_boundary_receiver_test ..........   Passed   12.89 sec
+test 23
+      Start 23: data_processor_batch_test
+
+23: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\data_processor_batch_test.exe
+23: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+23: Test timeout computed to be: 90
+23: PASS DataProcessor batch/counter tests
+23/55 Test #23: data_processor_batch_test ...............   Passed    0.66 sec
+test 24
+      Start 24: card_status_formatting_test
+
+24: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\card_status_formatting_test.exe
+24: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+24: Test timeout computed to be: 90
+24: PASS card status formatting
+24/55 Test #24: card_status_formatting_test .............   Passed    0.36 sec
+test 25
+      Start 25: round_policy_settings_test
+
+25: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\round_policy_settings_test.exe
+25: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+25: Test timeout computed to be: 90
+25: PASS round policy settings
+25/55 Test #25: round_policy_settings_test ..............   Passed    0.28 sec
+test 26
+      Start 26: paimage_network_test
+
+26: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_network_test.exe
+26: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+26: Test timeout computed to be: 90
+26: cpuMs=437.5 wallMs=2232.3 traceEnabled=1 injectedMissing=0
+26: hostRingReturns=252 maxSenderLateMs=13.9189 stress=0
+26: PASS actual NetworkController: 4-card UDP, CONFIG ACK then START, 20->50->20, source startup, Ring and retained saving files, async Stop
+26/55 Test #26: paimage_network_test ....................   Passed    2.75 sec
+test 27
+      Start 27: paimage_production_gap_test
+
+27: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_production_gap_test.exe
+27: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+27: Test timeout computed to be: 90
+27: PASS B-ADD-1 production full gap: T100->T104 missing=3 dropped=3 partial=0
+27: PASS B-ADD-2 production partial+full gap: partial=1 missing=3 dropped=21
+27: PASS B-ADD-3 production adjacent: T200->T201 missing=0 dropped=0
+27: PASS B-ADD-4 production wrap forward: T65534->T1 missing=2 dropped=2
+27: PASS B-ADD-5 production backstep/stale: missing stays 4, anchor never retreated
+27: PASS B-ADD-6 production session reset: T100 then T120 after restart, missing=0
+27: PASS B-ADD-7 production same-session reset: T1000->T10 no gap, T10->T14 missing=3 dropped=3
+27: PASS B-ADD-8A production threshold 255: T400->T145 backstep, T401 adjacent, missing=0
+27: PASS B-ADD-8B production threshold 256: T400->T144 reset, T144->T148 missing=3 dropped=3
+27: PASS paimage production trigger-gap accounting: B-ADD-1..8
+27/55 Test #27: paimage_production_gap_test .............   Passed    4.02 sec
+test 28
+      Start 28: paimage_start_race
+
+28: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_start_race_test.exe "--output" "D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/start-race-artifacts"
+28: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+28: Test timeout computed to be: 90
+28: sessions=61 hardSocketErrors=0 emulatorSendErrors=0 traceQueueDropped=0 traceIncomplete=false
+28: PASS deterministic paimage START Fence UDP integration
+28/55 Test #28: paimage_start_race ......................   Passed    1.00 sec
+test 29
+      Start 29: paimage_start_fence_regression
+
+29: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_start_fence_regression_test.exe
+29: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+29: Test timeout computed to be: 90
+29: completeStartFalseReturnedFalse=true sourceRemainedDisabled=true releasedCount=0 cardFrameCount=0 syncFrameCount=0 nextCompatibilityStartPassed=true
+29/55 Test #29: paimage_start_fence_regression ..........   Passed    0.65 sec
+test 30
+      Start 30: paimage_start_overflow
+
+30: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_start_overflow_test.exe
+30: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+30: Test timeout computed to be: 90
+30: overflowObserved=true completeStartReturnedFalse=true overflowCount=1 failedDiscardCount=9000 releasedCount=0 cardFrameCount=0 syncFrameCount=0 recoveryPassed=true
+30/55 Test #30: paimage_start_overflow ..................   Passed    0.74 sec
+test 31
+      Start 31: paimage_host_output_test
+
+31: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_host_output_test.exe
+31: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+31: Test timeout computed to be: 90
+31: PASS C1-C3/C8/C13 startup=0 disable=0 raw=4 realtime=4/card
+31: PASS C1-C3/C8/C13 startup=0 disable=1 raw=6 realtime=4/card
+31: PASS C1-C3/C8/C13 startup=7 disable=0 raw=4 realtime=4/card
+31: PASS C1-C3/C8/C13 startup=7 disable=1 raw=6 realtime=4/card
+31: PASS production source/output/host boundary: four cards, 28/70, exact float16 files, display and Ring; normalized 1+N save/Ring identity; queued saving generation retains original directory; physical idle timeout shared by save/Ring; SourceCore assembly timeout isolated
+31/55 Test #31: paimage_host_output_test ................   Passed    2.22 sec
+test 32
+      Start 32: filesaver_round_boundary_test
+
+32: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\filesaver_round_boundary_test.exe
+32: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+32: Test timeout computed to be: 90
+32: filesaver_round_boundary_test: ALL PASS
+32/55 Test #32: filesaver_round_boundary_test ...........   Passed    1.92 sec
+test 33
+      Start 33: ring_round_ui_state_test
+
+33: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\ring_round_ui_state_test.exe
+33: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+33: Test timeout computed to be: 90
+33: ring_round_ui_state_test: ALL PASS
+33/55 Test #33: ring_round_ui_state_test ................   Passed    0.23 sec
+test 34
+      Start 34: ring_round_identity_test
+
+34: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\ring_round_identity_test.exe
+34: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+34: Test timeout computed to be: 90
+34: ring_round_identity_test: ALL PASS (R5-R10,R14)
+34/55 Test #34: ring_round_identity_test ................   Passed    0.25 sec
+test 35
+      Start 35: auto_save_round_coordinator_test
+
+35: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\auto_save_round_coordinator_test.exe
+35: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+35: Test timeout computed to be: 90
+35: auto_save_round_coordinator_test: ALL PASS
+35/55 Test #35: auto_save_round_coordinator_test ........   Passed    0.38 sec
+test 36
+      Start 36: count_boundary_save_binding_test
+
+36: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\count_boundary_save_binding_test.exe
+36: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+36: Test timeout computed to be: 90
+36: count_boundary_save_binding_test: C1-C10 ALL PASS
+36/55 Test #36: count_boundary_save_binding_test ........   Passed    1.66 sec
+test 37
+      Start 37: paimage_trace_bundle_test
+
+37: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_trace_bundle_test.exe
+37: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+37: Test timeout computed to be: 90
+37: PASS active writer flush, fixed sequence cut, excluded post-click record with old timestamp, ZIP manifest
+37/55 Test #37: paimage_trace_bundle_test ...............   Passed    1.16 sec
+test 38
+      Start 38: startup_diagnostics_analyze_test
+
+38: Test command: C:\Users\yyps\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe "D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/tests/startup_diagnostics_analyze_test.py" "D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/startup-diagnostics-fixtures"
+38: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+38: Test timeout computed to be: 90
+38: PASS startup diagnostics START Fence fixtures: clean, gate-drop, failed, incomplete, session-correlation
+38/55 Test #38: startup_diagnostics_analyze_test ........   Passed    0.55 sec
+test 39
+      Start 39: paimage_start_race_analyzer
+
+39: Test command: C:\Users\yyps\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe "D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/tests/paimage_start_race_analyzer_test.py" "D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/start-race-artifacts" "D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/tests/../tools/startup_diagnostics_analyze.py"
+39: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+39: Test timeout computed to be: 90
+39: realTraceAnalyzer=passed successSessionCount=60 cleanSessionCount=61 failedSessionCount=1 inconclusiveSuccessSessions=0 gateDropSuccessSessions=0 missingStage2JoinCount=0 rawIngressCount=3937 heldIngressCount=883 releasedIngressCount=880
+39/55 Test #39: paimage_start_race_analyzer .............   Passed    0.33 sec
+test 40
+      Start 40: filtered_das_test
+
+40: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\filtered_das_test.exe
+40: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+40: Test timeout computed to be: 90
+40: PASS MATLAB cases=60 batchVariants=4 all edges included worstNormalizedAbs=2.04774e-07 worstNormalizedL2=1.45794e-07 doubleWorst=4.62636e-16 singleWorst=2.04774e-07
+40/55 Test #40: filtered_das_test .......................   Passed   16.64 sec
+test 41
+      Start 41: filtered_das_service_test
+
+41: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\filtered_das_service_test.exe
+41: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+41: Test timeout computed to be: 90
+41: PASS channels=4 timevar=0 filtered=0
+41: PASS channels=4 timevar=0 filtered=1
+41: PASS channels=4 timevar=1 filtered=0
+41: PASS channels=4 timevar=1 filtered=1
+41: PASS channels=8 timevar=0 filtered=0
+41: PASS channels=8 timevar=0 filtered=1
+41: PASS channels=8 timevar=1 filtered=0
+41: PASS channels=8 timevar=1 filtered=1
+41: PASS production four combinations, MATLAB pre-DAS/DAS, actual nt, WL2 once, late failure, atomic configuration worstNormalizedAbs=2.08616e-07
+41/55 Test #41: filtered_das_service_test ...............   Passed    2.61 sec
+test 42
+      Start 42: filtered_das_ui_test
+
+42: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\filtered-ui-isolated\filtered_das_ui_test.exe
+42: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+42: Environment variables: 
+42:  QT_QPA_PLATFORM=offscreen
+42: Test timeout computed to be: 90
+42: PASS FilteredDAS UI factory/draft/advanced/defaults/restart/precision/INI/independence
+42/55 Test #42: filtered_das_ui_test ....................   Passed    0.28 sec
+test 43
+      Start 43: filtered_das_off_test
+
+43: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\filtered_das_off_test.exe
+43: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests
+43: Test timeout computed to be: 90
+43: PASS exact eed98f0 OFF timevar OFF/ON 256 fingerprints
+43/55 Test #43: filtered_das_off_test ...................   Passed    0.23 sec
+test 44
+      Start 44: paimage_discovery_checks
+
+44: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_discovery_checks.exe
+44: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+44: Test timeout computed to be: 90
+44: PASS discovery policy: local exclusion, 60-byte-only admission, slow retries, ordering, cancel, stale sessions
+44/55 Test #44: paimage_discovery_checks ................   Passed    1.58 sec
+test 45
+      Start 45: paimage_discovery_socket_checks
+
+45: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_discovery_socket_checks.exe
+45: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+45: Test timeout computed to be: 90
+45: PASS discovery socket: CONFIG on 8080, ACK on 8000, per-round resend, rebind, occupied failure
+45/55 Test #45: paimage_discovery_socket_checks .........   Passed    4.11 sec
+test 46
+      Start 46: paimage_core_checks
+
+46: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_core_checks.exe
+46: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+46: Test timeout computed to be: 90
+46: PASS: source recovery component checks (not product integration or EXE differential testing)
+46/55 Test #46: paimage_core_checks .....................   Passed    0.46 sec
+test 47
+      Start 47: paimage_output_checks
+
+47: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_output_checks.exe
+47: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+47: Test timeout computed to be: 90
+47: PASS output queue policy (not worker/GUI integration)
+47/55 Test #47: paimage_output_checks ...................   Passed    0.34 sec
+test 48
+      Start 48: physical_round_normalizer_test
+
+48: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\physical_round_normalizer_test.exe
+48: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+48: Test timeout computed to be: 90
+48/55 Test #48: physical_round_normalizer_test ..........***Exception: SegFault  0.43 sec
+test 49
+      Start 49: paimage_control_checks
+
+49: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_control_checks.exe
+49: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+49: Test timeout computed to be: 90
+49: PASS control policy: separate ACKs, selective four rounds, deadlines, failure order
+49/55 Test #49: paimage_control_checks ..................   Passed    0.39 sec
+test 50
+      Start 50: paimage_socket_short
+
+50: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_socket_replay.exe "--seconds" "2" "--samples" "5000" "--out" "replay-short"
+50: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+50: Test timeout computed to be: 90
+50: PASS sent=8960 ingress=8960 cards=320 sync=80 partial=0
+50/55 Test #50: paimage_socket_short ....................   Passed    2.81 sec
+test 51
+      Start 51: paimage_trace_checks
+
+51: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_trace_checks.exe
+51: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+51: Test timeout computed to be: 90
+51: PASS trace queue saturation, budget exhaustion, write failure and rotation
+51/55 Test #51: paimage_trace_checks ....................   Passed    0.29 sec
+test 52
+      Start 52: paimage_worker_checks
+
+52: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_worker_checks.exe
+52: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+52: Test timeout computed to be: 90
+52: PASS worker boundaries: per-card saturation, measurement restart preservation, startup priority, whole-block eviction
+52/55 Test #52: paimage_worker_checks ...................   Passed    0.51 sec
+test 53
+      Start 53: paimage_protocol_checks
+
+53: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_protocol_checks.exe
+53: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+53: Test timeout computed to be: 90
+53: PASS real UDP protocol emulator: CONFIG/18/60/START/data-on-feedback/STOP
+53/55 Test #53: paimage_protocol_checks .................   Passed    0.71 sec
+test 54
+      Start 54: paimage_conversion_checks
+
+54: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_conversion_checks.exe
+54: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+54: Test timeout computed to be: 90
+54: PASS concurrent shared conversion, 28/70 packet sample counts, raw B/A contract and round-terminal metadata
+54/55 Test #54: paimage_conversion_checks ...............   Passed    0.40 sec
+test 55
+      Start 55: paimage_looplog_checks
+
+55: Test command: D:\ChatGPT\PAERealtimeImaging\MC_410T_MultiCard\delivery\build\timevar_tests\paimage_core\paimage_looplog_checks.exe
+55: Working Directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/paimage_core
+55: Test timeout computed to be: 90
+55: PASS: startup policy and bounded loop log checks
+55/55 Test #55: paimage_looplog_checks ..................   Passed    0.29 sec
+
+98% tests passed, 1 tests failed out of 55
+
+Total Test time (real) =  94.41 sec
+
+The following tests FAILED:
+	 48 - physical_round_normalizer_test (SEGFAULT)
+Errors while running CTest
+Output from these tests are in: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/timevar_tests/Testing/Temporary/LastTest.log
+Use "--rerun-failed --output-on-failure" to re-run the failed cases verbosely.

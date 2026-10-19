@@ -20,6 +20,8 @@ add_executable(ImagingSvc
     ${CMAKE_CURRENT_SOURCE_DIR}/../RingRecon/ring_recon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../RingTimevarLowpass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../RingTimevarLowpassSettings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../FilteredDasPrefilter.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../FilteredDasSettings.cpp
 )
 
 # ============================================================
@@ -106,5 +108,5 @@ endif()
 
 # Keep the CPU DSP kernel optimized in Debug too; preserve symbols and no fast-math.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../RingTimevarLowpass.cpp PROPERTIES COMPILE_OPTIONS "-O2")
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../RingTimevarLowpass.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../FilteredDasPrefilter.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 endif()

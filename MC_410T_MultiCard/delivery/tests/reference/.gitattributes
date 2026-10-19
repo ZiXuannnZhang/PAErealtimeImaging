@@ -1,0 +1,2 @@
+# The task's frozen helper must retain the exact appendix SHA256 on Windows.
+pa2d_bandlimited_prefilter.m -text

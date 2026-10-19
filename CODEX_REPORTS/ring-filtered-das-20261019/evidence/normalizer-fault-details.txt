@@ -1,0 +1,22 @@
+[New Thread 38068.0xb7c8]
+[New Thread 38068.0xcdcc]
+[New Thread 38068.0xbc5c]
+[New Thread 38068.0x3490]
+[Switching to thread 1 (Thread 38068.0xccec)]
+#0  0x00007ffdb9ca4c04 in ntdll!ZwRaiseHardError () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#0  0x00007ffdb9ca4c04 in ntdll!ZwRaiseHardError () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#1  0x00007ffdb6e3f7e3 in UnhandledExceptionFilter () from C:\WINDOWS\System32\KernelBase.dll
+#2  0x00007ffdb9caa030 in strncpy () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#3  0x00007ffdb9c64b93 in ntdll!__C_specific_handler () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#4  0x00007ffdb9ca64af in ntdll!.chkstk () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#5  0x00007ffdb9c04065 in ntdll!RtlWow64GetCurrentMachine () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#6  0x00007ffdb9ca5dee in ntdll!KiUserExceptionDispatcher () from C:\WINDOWS\SYSTEM32\ntdll.dll
+#7  0x00007ff62c758754 in paimage::PhysicalRoundNormalizer::classify (this=0x1577ffe150, measurementSession=7000, triggerSeq=1650, observedMonotonicNs=0) at D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp:142
+#8  0x00007ff62c751545 in (anonymous namespace)::classify (normalizer=..., session=7000, trigger=1650, observedMonotonicNs=0) at D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/tests/paimage_core/physical_round_normalizer_test.cpp:20
+#9  0x00007ff62c751a65 in main () at D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/tests/paimage_core/physical_round_normalizer_test.cpp:64
+#7  0x00007ff62c758754 in paimage::PhysicalRoundNormalizer::classify (this=0x1577ffe150, measurementSession=7000, triggerSeq=1650, observedMonotonicNs=0) at D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp:142
+142	            if (it->measurementSession == measurementSession_ &&
+$1 = {<std::iterator<std::random_access_iterator_tag, paimage::PhysicalRoundNormalizer::CachedDecision, long long, paimage::PhysicalRoundNormalizer::CachedDecision*, paimage::PhysicalRoundNormalizer::CachedDecision&>> = {<No data fields>}, current = {measurementSession = 12883787758, roundGeneration = 2107253260576, triggerSeq = 24, classification = {decision = paimage::PhysicalTriggerDecision::OperationalStartupControl, measurementSession = 2107256733696, roundGeneration = 255, triggerSeq = 112, logicalTriggerIndex = 2107257778176, newDistinct = 204, roundComplete = false, isFinalLogicalTrigger = false}}}
+$2 = {<std::allocator<paimage::PhysicalRoundNormalizer::CachedDecision>> = {<std::__new_allocator<paimage::PhysicalRoundNormalizer::CachedDecision>> = {<No data fields>}, <No data fields>}, <std::_Deque_base<paimage::PhysicalRoundNormalizer::CachedDecision, std::allocator<paimage::PhysicalRoundNormalizer::CachedDecision> >::_Deque_impl_data> = {_M_map = 0x1eaa24cbe60, _M_map_size = 638, _M_start = {measurementSession = 7000, roundGeneration = 0, triggerSeq = 0, classification = {decision = paimage::PhysicalTriggerDecision::OperationalStartupControl, measurementSession = 7000, roundGeneration = 0, triggerSeq = 0, logicalTriggerIndex = -1, newDistinct = true, roundComplete = false, isFinalLogicalTrigger = false}}, _M_finish = {measurementSession = 0, roundGeneration = 0, triggerSeq = 0, classification = {decision = paimage::PhysicalTriggerDecision::OperationalStartupControl, measurementSession = 0, roundGeneration = 0, triggerSeq = 0, logicalTriggerIndex = 0, newDistinct = false, roundComplete = false, isFinalLogicalTrigger = false}}}, <No data fields>}
+$3 = 72
+[Inferior 1 (process 38068) detached]

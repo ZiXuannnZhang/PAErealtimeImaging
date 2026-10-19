@@ -1,0 +1,10 @@
+set pagination off
+thread 1
+frame 4
+print svc.m_ringBlockIndex
+print svc.m_ringObs
+print svc.m_ringRound
+print svc.m_filteredDas.m->batches
+print svc.m_filteredDas.m->transforms
+detach
+quit

@@ -1,0 +1,37 @@
+command=["D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe", "--synthetic", "1", "--samples", "5000", "--id", "14", "--channels", "15", "--block", "200", "--rounds", "1", "--grid-mm", ".1", "--svc", "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\baseline\\bin\\ImagingSvc.exe", "--timevar-lowpass", "on", "--filtered-das", "off", "--out", "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\filtered-das\\native-dev-off-baseline-on"]
+cwd=D:\ChatGPT\PAERealtimeImaging
+[selftest] timevar=on rounds=1 grid_mm=0.1000 block=200 channels=0xF
+[block-timing] submit=1 roundtrip_ms=628.603400000 service_ms=620.474000000
+block   1/10: 630.38 ms
+[block-timing] submit=2 roundtrip_ms=637.592700000 service_ms=629.302000000
+  diff vs prev: wl1=0.786354 wl2=0.786394
+block   2/10: 641.80 ms
+[block-timing] submit=3 roundtrip_ms=3119.515000000 service_ms=3102.159000000
+  diff vs prev: wl1=1.08629 wl2=1.2067
+block   3/10: 3136.36 ms
+[block-timing] submit=4 roundtrip_ms=3587.596600000 service_ms=3569.989000000
+  diff vs prev: wl1=3.73513 wl2=2.30805
+block   4/10: 3599.04 ms
+[block-timing] submit=5 roundtrip_ms=3737.862000000 service_ms=3722.945000000
+  diff vs prev: wl1=2.79188 wl2=2.29373
+block   5/10: 3748.13 ms
+[block-timing] submit=6 roundtrip_ms=3434.124500000 service_ms=3412.892000000
+  diff vs prev: wl1=2.50091 wl2=2.05399
+block   6/10: 3444.38 ms
+[block-timing] submit=7 roundtrip_ms=4810.307300000 service_ms=4785.512000000
+  diff vs prev: wl1=2.17114 wl2=1.21226
+block   7/10: 4820.19 ms
+[block-timing] submit=8 roundtrip_ms=2215.492700000 service_ms=2186.237000000
+  diff vs prev: wl1=0.483042 wl2=0.483083
+block   8/10: 2225.22 ms
+[block-timing] submit=9 roundtrip_ms=2405.270100000 service_ms=2381.656000000
+  diff vs prev: wl1=0.386136 wl2=0.376421
+block   9/10: 2417.87 ms
+[block-timing] submit=10 roundtrip_ms=2222.577600000 service_ms=2200.500000000
+[round-wall] generation=0 wall_ms=35202.19 blocks=10
+  diff vs prev: wl1=0.364843 wl2=0.365617
+block  10/10: 2231.27 ms
+done: channels=4 K=1000 rounds=1 blocks=10 total=26894.6 ms avg=2689.46 ms
+[RingSHMObs] kinds: final=1 round_barrier_reset=1
+[RingSHMObs] service kind=final session=1 epoch=0 submitted=0 notifications=10 consumed=10 mismatch=0 ready_zero=0 duplicate=0 gap=0 avg_queue_us=20881.8 avg_copy_us=11328.9 avg_process_us=2661428.3
+[RingSHMObs] producer session=1 submitted=10 slot_busy=0 last_seq=9 last_interval_us=3514656

@@ -16,6 +16,7 @@ struct RingTimevarServiceTest {
         QJsonArray channels;for(int i=0;i<8;++i)channels.append(i==0?1:0);
         QJsonObject ring{{"sampDepth",2030},{"daqHz",250e6},{"alinesPerChannelPerBlock",4},
             {"enabledChannels",channels},{"sysDelay",QJsonArray{10,12}}};
+        ring["filteredDas"]=QJsonObject{{"enabled",false}};
         for(const auto& invalid:{QJsonValue(QJsonValue::Null),QJsonValue(1),
             QJsonValue(QJsonObject{{"enabled",true},{"p2",2031}}),
             QJsonValue(QJsonObject{{"windowLength",1}}),
