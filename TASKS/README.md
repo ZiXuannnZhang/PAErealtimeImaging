@@ -1,6 +1,10 @@
 # Codex Task Channel
 
-## 当前派发（2026-10-16）
+## 当前派发（2026-10-19）
+
+- [FilteredDAS 滤波反投影实时移植](./FilteredDAS滤波反投影实时移植_20261019-184012.md)：继续 codex/ring-timevar-lowpass-20261016，精确起点 eed98f0；旧增强移除、时变低通和启动拒绝修复已获软件审查通过，两项增强由用户联合实机验收。仅 Ring 实时链路，默认 Order=0.5、Reference=5 MHz、Pass=40 MHz、Stop=60 MHz、PadFactor=4、BatchColumns=64。不开新实现分支，不合并 main。
+
+## 既有派发（2026-10-16）
 
 - [Ring 旧重建增强移除与 STFT 时变低通接入](./环形旧增强移除与时变低通接入_20261016-132206.md)：从 main@a8c15cf 新建实现分支；仅影响 Ring 重建，默认 45 MHz / 1 MHz / 780 / 2000。详见任务内的精确基线、实现设计及验收要求。
 - 本索引下方的历史候选状态仅保留原记录语境。当前项目状态以最新 origin/main 的治理文档为准；HANDOFF.md 是当前接力入口，不能替代前三份治理文档。本任务不继承历史 START 候选未合并或旧 postFilter harness 的范围限制。
