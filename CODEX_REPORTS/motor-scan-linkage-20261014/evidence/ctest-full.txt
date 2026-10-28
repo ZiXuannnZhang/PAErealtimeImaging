@@ -1,0 +1,812 @@
+Internal ctest changing into directory: D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/build/tests_mingw_debug
+Test project D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/build/tests_mingw_debug
+      Start  1: ring_signal_enhancer_test
+ 1/52 Test  #1: ring_signal_enhancer_test ...............   Passed    0.03 sec
+      Start  2: ring_enhancer_bench
+ 2/52 Test  #2: ring_enhancer_bench .....................   Passed   30.62 sec
+      Start  3: ring_enhancer_parity_test
+ 3/52 Test  #3: ring_enhancer_parity_test ...............   Passed    0.40 sec
+      Start  4: ring_display_mapping_test
+ 4/52 Test  #4: ring_display_mapping_test ...............   Passed    0.14 sec
+      Start  5: ring_display_render_test
+ 5/52 Test  #5: ring_display_render_test ................   Passed    0.64 sec
+      Start  6: timeout_presentation_test
+ 6/52 Test  #6: timeout_presentation_test ...............   Passed    0.04 sec
+      Start  7: ring_block_assembler_test
+ 7/52 Test  #7: ring_block_assembler_test ...............   Passed    0.17 sec
+      Start  8: imaging_bypass_test
+ 8/52 Test  #8: imaging_bypass_test .....................   Passed    0.06 sec
+      Start  9: data_processor_imaging_isolation_test
+ 9/52 Test  #9: data_processor_imaging_isolation_test ...   Passed    0.11 sec
+      Start 10: frontend_preprocessor_test
+10/52 Test #10: frontend_preprocessor_test ..............   Passed    0.11 sec
+      Start 11: ring_production_blockers_test
+11/52 Test #11: ring_production_blockers_test ...........   Passed    0.06 sec
+      Start 12: diagnostic_recorder_test
+12/52 Test #12: diagnostic_recorder_test ................   Passed    0.45 sec
+      Start 13: ring_shm_observability_test
+13/52 Test #13: ring_shm_observability_test .............   Passed    0.04 sec
+      Start 14: diagnostic_dialog_test
+14/52 Test #14: diagnostic_dialog_test ..................   Passed    3.21 sec
+      Start 15: diagnostic_time_window_test
+15/52 Test #15: diagnostic_time_window_test .............   Passed    0.22 sec
+      Start 16: process_scheduling_test
+16/52 Test #16: process_scheduling_test .................   Passed    0.04 sec
+      Start 17: network_ingress_observability_test
+17/52 Test #17: network_ingress_observability_test ......   Passed    0.06 sec
+      Start 18: network_snapshot_test
+18/52 Test #18: network_snapshot_test ...................   Passed    0.06 sec
+      Start 19: network_diagnostics_test
+19/52 Test #19: network_diagnostics_test ................***Failed    0.07 sec
+FAIL control/feedback startup
+FAIL configuration evidence was not persisted
+
+      Start 20: measurement_session_transaction_test
+20/52 Test #20: measurement_session_transaction_test ....   Passed    0.05 sec
+      Start 21: session_boundary_test
+21/52 Test #21: session_boundary_test ...................   Passed    1.78 sec
+      Start 22: session_boundary_receiver_test
+22/52 Test #22: session_boundary_receiver_test ..........***Failed  227.32 sec
+FAIL loopback receiver started
+FAIL exact-window session armed
+FAIL pre-Start trailing packet drained
+FAIL pre-Start trailing packet remains closed-admission
+FAIL T2 begin fence
+FAIL T2 receiver enters START_FENCE_HOLD
+FAIL T2 aggregate exposes START_FENCE_HOLD
+FAIL T2 complete fence success
+FAIL T2 same held datagrams complete first trigger
+FAIL T2 first admitted trigger has zero loss
+FAIL T5 stop first session
+FAIL T5 failure session armed
+FAIL T5 begin fence
+FAIL T5 complete fence failure cleanup
+FAIL T5 failure cleanup keeps backlog out of processor
+FAIL T5 cleanup failed session
+FAIL T5 clean retry armed
+FAIL T5 clean retry begin
+FAIL T5 clean retry complete
+FAIL T5 clean retry completes first trigger
+FAIL exact-window fixture stop
+FAIL pending receiver started
+FAIL pending session armed
+FAIL T3 begin fence
+FAIL T3 complete command remains pending
+FAIL T3 pending complete succeeds
+FAIL T3 pending data completes after RUNNING publish
+FAIL T3 same readable batch is admitted after completion
+FAIL four-card loopback receiver started
+FAIL four-card loopback armed
+FAIL T6 card 0 begin HOLD
+FAIL T6 card 0 is held
+FAIL T6 aggregate exposes card 0 HOLD
+FAIL T6 later card 1 remains ARMED
+FAIL T6 later card 2 remains ARMED
+FAIL T6 later card 3 remains ARMED
+FAIL T6 card 0 complete fence
+FAIL T6 card 0 held batch completes
+FAIL T6 card 1 begin HOLD
+FAIL T6 card 1 is held
+FAIL T6 aggregate exposes card 1 HOLD
+FAIL T6 earlier card 0 remains RUNNING
+FAIL T6 later card 2 remains ARMED
+FAIL T6 later card 3 remains ARMED
+FAIL T6 running card completes during HOLD
+FAIL T6 running card socket counter advances
+FAIL T6 card 1 complete fence
+FAIL T6 card 1 held batch completes
+FAIL T6 card 2 begin HOLD
+FAIL T6 card 2 is held
+FAIL T6 aggregate exposes card 2 HOLD
+FAIL T6 earlier card 0 remains RUNNING
+FAIL T6 earlier card 1 remains RUNNING
+FAIL T6 later card 3 remains ARMED
+FAIL T6 running card completes during HOLD
+FAIL T6 running card socket counter advances
+FAIL T6 card 2 complete fence
+FAIL T6 card 2 held batch completes
+FAIL T6 card 3 begin HOLD
+FAIL T6 card 3 is held
+FAIL T6 aggregate exposes card 3 HOLD
+FAIL T6 earlier card 0 remains RUNNING
+FAIL T6 earlier card 1 remains RUNNING
+FAIL T6 earlier card 2 remains RUNNING
+FAIL T6 running card completes during HOLD
+FAIL T6 running card socket counter advances
+FAIL T6 card 3 complete fence
+FAIL T6 card 3 held batch completes
+FAIL T6 aggregate RUNNING only after four completions
+FAIL stress loopback receiver started
+FAIL T8 cycle 0 session armed
+FAIL T8 cycle 0 begin HOLD
+FAIL T8 cycle 0 exact pending/readable window held
+FAIL T8 cycle 0 complete fence succeeds
+FAIL T8 cycle 0 first trigger completes
+FAIL T8 cycle 0 stop/disarm
+FAIL T8 cycle 1 session armed
+FAIL T8 cycle 1 begin HOLD
+FAIL T8 cycle 1 exact pending/readable window held
+FAIL T8 cycle 1 complete fence succeeds
+FAIL T8 cycle 1 first trigger completes
+FAIL T8 cycle 1 stop/disarm
+FAIL T8 cycle 2 session armed
+FAIL T8 cycle 2 begin HOLD
+FAIL T8 cycle 2 exact pending/readable window held
+FAIL T8 cycle 2 complete fence succeeds
+FAIL T8 cycle 2 first trigger completes
+FAIL T8 cycle 2 stop/disarm
+FAIL T8 cycle 3 session armed
+FAIL T8 cycle 3 begin HOLD
+FAIL T8 cycle 3 exact pending/readable window held
+FAIL T8 cycle 3 complete fence succeeds
+FAIL T8 cycle 3 first trigger completes
+FAIL T8 cycle 3 stop/disarm
+FAIL T8 cycle 4 session armed
+FAIL T8 cycle 4 begin HOLD
+FAIL T8 cycle 4 exact pending/readable window held
+FAIL T8 cycle 4 complete fence succeeds
+FAIL T8 cycle 4 first trigger completes
+FAIL T8 cycle 4 stop/disarm
+FAIL T8 cycle 5 session armed
+FAIL T8 cycle 5 begin HOLD
+FAIL T8 cycle 5 exact pending/readable window held
+FAIL T8 cycle 5 complete fence succeeds
+FAIL T8 cycle 5 first trigger completes
+FAIL T8 cycle 5 stop/disarm
+FAIL T8 cycle 6 session armed
+FAIL T8 cycle 6 begin HOLD
+FAIL T8 cycle 6 exact pending/readable window held
+FAIL T8 cycle 6 complete fence succeeds
+FAIL T8 cycle 6 first trigger completes
+FAIL T8 cycle 6 stop/disarm
+FAIL T8 cycle 7 session armed
+FAIL T8 cycle 7 begin HOLD
+FAIL T8 cycle 7 exact pending/readable window held
+FAIL T8 cycle 7 complete fence succeeds
+FAIL T8 cycle 7 first trigger completes
+FAIL T8 cycle 7 stop/disarm
+FAIL T8 cycle 8 session armed
+FAIL T8 cycle 8 begin HOLD
+FAIL T8 cycle 8 exact pending/readable window held
+FAIL T8 cycle 8 complete fence succeeds
+FAIL T8 cycle 8 first trigger completes
+FAIL T8 cycle 8 stop/disarm
+FAIL T8 cycle 9 session armed
+FAIL T8 cycle 9 begin HOLD
+FAIL T8 cycle 9 exact pending/readable window held
+FAIL T8 cycle 9 complete fence succeeds
+FAIL T8 cycle 9 first trigger completes
+FAIL T8 cycle 9 stop/disarm
+FAIL T8 cycle 10 session armed
+FAIL T8 cycle 10 begin HOLD
+FAIL T8 cycle 10 exact pending/readable window held
+FAIL T8 cycle 10 complete fence succeeds
+FAIL T8 cycle 10 first trigger completes
+FAIL T8 cycle 10 stop/disarm
+FAIL T8 cycle 11 session armed
+FAIL T8 cycle 11 begin HOLD
+FAIL T8 cycle 11 exact pending/readable window held
+FAIL T8 cycle 11 complete fence succeeds
+FAIL T8 cycle 11 first trigger completes
+FAIL T8 cycle 11 stop/disarm
+FAIL T8 cycle 12 session armed
+FAIL T8 cycle 12 begin HOLD
+FAIL T8 cycle 12 exact pending/readable window held
+FAIL T8 cycle 12 complete fence succeeds
+FAIL T8 cycle 12 first trigger completes
+FAIL T8 cycle 12 stop/disarm
+FAIL T8 cycle 13 session armed
+FAIL T8 cycle 13 begin HOLD
+FAIL T8 cycle 13 exact pending/readable window held
+FAIL T8 cycle 13 complete fence succeeds
+FAIL T8 cycle 13 first trigger completes
+FAIL T8 cycle 13 stop/disarm
+FAIL T8 cycle 14 session armed
+FAIL T8 cycle 14 begin HOLD
+FAIL T8 cycle 14 exact pending/readable window held
+FAIL T8 cycle 14 complete fence succeeds
+FAIL T8 cycle 14 first trigger completes
+FAIL T8 cycle 14 stop/disarm
+FAIL T8 cycle 15 session armed
+FAIL T8 cycle 15 begin HOLD
+FAIL T8 cycle 15 exact pending/readable window held
+FAIL T8 cycle 15 complete fence succeeds
+FAIL T8 cycle 15 first trigger completes
+FAIL T8 cycle 15 stop/disarm
+FAIL T8 cycle 16 session armed
+FAIL T8 cycle 16 begin HOLD
+FAIL T8 cycle 16 exact pending/readable window held
+FAIL T8 cycle 16 complete fence succeeds
+FAIL T8 cycle 16 first trigger completes
+FAIL T8 cycle 16 stop/disarm
+FAIL T8 cycle 17 session armed
+FAIL T8 cycle 17 begin HOLD
+FAIL T8 cycle 17 exact pending/readable window held
+FAIL T8 cycle 17 complete fence succeeds
+FAIL T8 cycle 17 first trigger completes
+FAIL T8 cycle 17 stop/disarm
+FAIL T8 cycle 18 session armed
+FAIL T8 cycle 18 begin HOLD
+FAIL T8 cycle 18 exact pending/readable window held
+FAIL T8 cycle 18 complete fence succeeds
+FAIL T8 cycle 18 first trigger completes
+FAIL T8 cycle 18 stop/disarm
+FAIL T8 cycle 19 session armed
+FAIL T8 cycle 19 begin HOLD
+FAIL T8 cycle 19 exact pending/readable window held
+FAIL T8 cycle 19 complete fence succeeds
+FAIL T8 cycle 19 first trigger completes
+FAIL T8 cycle 19 stop/disarm
+FAIL T8 cycle 20 session armed
+FAIL T8 cycle 20 begin HOLD
+FAIL T8 cycle 20 exact pending/readable window held
+FAIL T8 cycle 20 complete fence succeeds
+FAIL T8 cycle 20 first trigger completes
+FAIL T8 cycle 20 stop/disarm
+FAIL T8 cycle 21 session armed
+FAIL T8 cycle 21 begin HOLD
+FAIL T8 cycle 21 exact pending/readable window held
+FAIL T8 cycle 21 complete fence succeeds
+FAIL T8 cycle 21 first trigger completes
+FAIL T8 cycle 21 stop/disarm
+FAIL T8 cycle 22 session armed
+FAIL T8 cycle 22 begin HOLD
+FAIL T8 cycle 22 exact pending/readable window held
+FAIL T8 cycle 22 complete fence succeeds
+FAIL T8 cycle 22 first trigger completes
+FAIL T8 cycle 22 stop/disarm
+FAIL T8 cycle 23 session armed
+FAIL T8 cycle 23 begin HOLD
+FAIL T8 cycle 23 exact pending/readable window held
+FAIL T8 cycle 23 complete fence succeeds
+FAIL T8 cycle 23 first trigger completes
+FAIL T8 cycle 23 stop/disarm
+FAIL T8 cycle 24 session armed
+FAIL T8 cycle 24 begin HOLD
+FAIL T8 cycle 24 exact pending/readable window held
+FAIL T8 cycle 24 complete fence succeeds
+FAIL T8 cycle 24 first trigger completes
+FAIL T8 cycle 24 stop/disarm
+FAIL T8 cycle 25 session armed
+FAIL T8 cycle 25 begin HOLD
+FAIL T8 cycle 25 exact pending/readable window held
+FAIL T8 cycle 25 complete fence succeeds
+FAIL T8 cycle 25 first trigger completes
+FAIL T8 cycle 25 stop/disarm
+FAIL T8 cycle 26 session armed
+FAIL T8 cycle 26 begin HOLD
+FAIL T8 cycle 26 exact pending/readable window held
+FAIL T8 cycle 26 complete fence succeeds
+FAIL T8 cycle 26 first trigger completes
+FAIL T8 cycle 26 stop/disarm
+FAIL T8 cycle 27 session armed
+FAIL T8 cycle 27 begin HOLD
+FAIL T8 cycle 27 exact pending/readable window held
+FAIL T8 cycle 27 complete fence succeeds
+FAIL T8 cycle 27 first trigger completes
+FAIL T8 cycle 27 stop/disarm
+FAIL T8 cycle 28 session armed
+FAIL T8 cycle 28 begin HOLD
+FAIL T8 cycle 28 exact pending/readable window held
+FAIL T8 cycle 28 complete fence succeeds
+FAIL T8 cycle 28 first trigger completes
+FAIL T8 cycle 28 stop/disarm
+FAIL T8 cycle 29 session armed
+FAIL T8 cycle 29 begin HOLD
+FAIL T8 cycle 29 exact pending/readable window held
+FAIL T8 cycle 29 complete fence succeeds
+FAIL T8 cycle 29 first trigger completes
+FAIL T8 cycle 29 stop/disarm
+FAIL T8 cycle 30 session armed
+FAIL T8 cycle 30 begin HOLD
+FAIL T8 cycle 30 exact pending/readable window held
+FAIL T8 cycle 30 complete fence succeeds
+FAIL T8 cycle 30 first trigger completes
+FAIL T8 cycle 30 stop/disarm
+FAIL T8 cycle 31 session armed
+FAIL T8 cycle 31 begin HOLD
+FAIL T8 cycle 31 exact pending/readable window held
+FAIL T8 cycle 31 complete fence succeeds
+FAIL T8 cycle 31 first trigger completes
+FAIL T8 cycle 31 stop/disarm
+FAIL T8 cycle 32 session armed
+FAIL T8 cycle 32 begin HOLD
+FAIL T8 cycle 32 exact pending/readable window held
+FAIL T8 cycle 32 complete fence succeeds
+FAIL T8 cycle 32 first trigger completes
+FAIL T8 cycle 32 stop/disarm
+FAIL T8 cycle 33 session armed
+FAIL T8 cycle 33 begin HOLD
+FAIL T8 cycle 33 exact pending/readable window held
+FAIL T8 cycle 33 complete fence succeeds
+FAIL T8 cycle 33 first trigger completes
+FAIL T8 cycle 33 stop/disarm
+FAIL T8 cycle 34 session armed
+FAIL T8 cycle 34 begin HOLD
+FAIL T8 cycle 34 exact pending/readable window held
+FAIL T8 cycle 34 complete fence succeeds
+FAIL T8 cycle 34 first trigger completes
+FAIL T8 cycle 34 stop/disarm
+FAIL T8 cycle 35 session armed
+FAIL T8 cycle 35 begin HOLD
+FAIL T8 cycle 35 exact pending/readable window held
+FAIL T8 cycle 35 complete fence succeeds
+FAIL T8 cycle 35 first trigger completes
+FAIL T8 cycle 35 stop/disarm
+FAIL T8 cycle 36 session armed
+FAIL T8 cycle 36 begin HOLD
+FAIL T8 cycle 36 exact pending/readable window held
+FAIL T8 cycle 36 complete fence succeeds
+FAIL T8 cycle 36 first trigger completes
+FAIL T8 cycle 36 stop/disarm
+FAIL T8 cycle 37 session armed
+FAIL T8 cycle 37 begin HOLD
+FAIL T8 cycle 37 exact pending/readable window held
+FAIL T8 cycle 37 complete fence succeeds
+FAIL T8 cycle 37 first trigger completes
+FAIL T8 cycle 37 stop/disarm
+FAIL T8 cycle 38 session armed
+FAIL T8 cycle 38 begin HOLD
+FAIL T8 cycle 38 exact pending/readable window held
+FAIL T8 cycle 38 complete fence succeeds
+FAIL T8 cycle 38 first trigger completes
+FAIL T8 cycle 38 stop/disarm
+FAIL T8 cycle 39 session armed
+FAIL T8 cycle 39 begin HOLD
+FAIL T8 cycle 39 exact pending/readable window held
+FAIL T8 cycle 39 complete fence succeeds
+FAIL T8 cycle 39 first trigger completes
+FAIL T8 cycle 39 stop/disarm
+FAIL T8 cycle 40 session armed
+FAIL T8 cycle 40 begin HOLD
+FAIL T8 cycle 40 exact pending/readable window held
+FAIL T8 cycle 40 complete fence succeeds
+FAIL T8 cycle 40 first trigger completes
+FAIL T8 cycle 40 stop/disarm
+FAIL T8 cycle 41 session armed
+FAIL T8 cycle 41 begin HOLD
+FAIL T8 cycle 41 exact pending/readable window held
+FAIL T8 cycle 41 complete fence succeeds
+FAIL T8 cycle 41 first trigger completes
+FAIL T8 cycle 41 stop/disarm
+FAIL T8 cycle 42 session armed
+FAIL T8 cycle 42 begin HOLD
+FAIL T8 cycle 42 exact pending/readable window held
+FAIL T8 cycle 42 complete fence succeeds
+FAIL T8 cycle 42 first trigger completes
+FAIL T8 cycle 42 stop/disarm
+FAIL T8 cycle 43 session armed
+FAIL T8 cycle 43 begin HOLD
+FAIL T8 cycle 43 exact pending/readable window held
+FAIL T8 cycle 43 complete fence succeeds
+FAIL T8 cycle 43 first trigger completes
+FAIL T8 cycle 43 stop/disarm
+FAIL T8 cycle 44 session armed
+FAIL T8 cycle 44 begin HOLD
+FAIL T8 cycle 44 exact pending/readable window held
+FAIL T8 cycle 44 complete fence succeeds
+FAIL T8 cycle 44 first trigger completes
+FAIL T8 cycle 44 stop/disarm
+FAIL T8 cycle 45 session armed
+FAIL T8 cycle 45 begin HOLD
+FAIL T8 cycle 45 exact pending/readable window held
+FAIL T8 cycle 45 complete fence succeeds
+FAIL T8 cycle 45 first trigger completes
+FAIL T8 cycle 45 stop/disarm
+FAIL T8 cycle 46 session armed
+FAIL T8 cycle 46 begin HOLD
+FAIL T8 cycle 46 exact pending/readable window held
+FAIL T8 cycle 46 complete fence succeeds
+FAIL T8 cycle 46 first trigger completes
+FAIL T8 cycle 46 stop/disarm
+FAIL T8 cycle 47 session armed
+FAIL T8 cycle 47 begin HOLD
+FAIL T8 cycle 47 exact pending/readable window held
+FAIL T8 cycle 47 complete fence succeeds
+FAIL T8 cycle 47 first trigger completes
+FAIL T8 cycle 47 stop/disarm
+FAIL T8 cycle 48 session armed
+FAIL T8 cycle 48 begin HOLD
+FAIL T8 cycle 48 exact pending/readable window held
+FAIL T8 cycle 48 complete fence succeeds
+FAIL T8 cycle 48 first trigger completes
+FAIL T8 cycle 48 stop/disarm
+FAIL T8 cycle 49 session armed
+FAIL T8 cycle 49 begin HOLD
+FAIL T8 cycle 49 exact pending/readable window held
+FAIL T8 cycle 49 complete fence succeeds
+FAIL T8 cycle 49 first trigger completes
+FAIL T8 cycle 49 stop/disarm
+FAIL T8 cycle 50 session armed
+FAIL T8 cycle 50 begin HOLD
+FAIL T8 cycle 50 exact pending/readable window held
+FAIL T8 cycle 50 complete fence succeeds
+FAIL T8 cycle 50 first trigger completes
+FAIL T8 cycle 50 stop/disarm
+FAIL T8 cycle 51 session armed
+FAIL T8 cycle 51 begin HOLD
+FAIL T8 cycle 51 exact pending/readable window held
+FAIL T8 cycle 51 complete fence succeeds
+FAIL T8 cycle 51 first trigger completes
+FAIL T8 cycle 51 stop/disarm
+FAIL T8 cycle 52 session armed
+FAIL T8 cycle 52 begin HOLD
+FAIL T8 cycle 52 exact pending/readable window held
+FAIL T8 cycle 52 complete fence succeeds
+FAIL T8 cycle 52 first trigger completes
+FAIL T8 cycle 52 stop/disarm
+FAIL T8 cycle 53 session armed
+FAIL T8 cycle 53 begin HOLD
+FAIL T8 cycle 53 exact pending/readable window held
+FAIL T8 cycle 53 complete fence succeeds
+FAIL T8 cycle 53 first trigger completes
+FAIL T8 cycle 53 stop/disarm
+FAIL T8 cycle 54 session armed
+FAIL T8 cycle 54 begin HOLD
+FAIL T8 cycle 54 exact pending/readable window held
+FAIL T8 cycle 54 complete fence succeeds
+FAIL T8 cycle 54 first trigger completes
+FAIL T8 cycle 54 stop/disarm
+FAIL T8 cycle 55 session armed
+FAIL T8 cycle 55 begin HOLD
+FAIL T8 cycle 55 exact pending/readable window held
+FAIL T8 cycle 55 complete fence succeeds
+FAIL T8 cycle 55 first trigger completes
+FAIL T8 cycle 55 stop/disarm
+FAIL T8 cycle 56 session armed
+FAIL T8 cycle 56 begin HOLD
+FAIL T8 cycle 56 exact pending/readable window held
+FAIL T8 cycle 56 complete fence succeeds
+FAIL T8 cycle 56 first trigger completes
+FAIL T8 cycle 56 stop/disarm
+FAIL T8 cycle 57 session armed
+FAIL T8 cycle 57 begin HOLD
+FAIL T8 cycle 57 exact pending/readable window held
+FAIL T8 cycle 57 complete fence succeeds
+FAIL T8 cycle 57 first trigger completes
+FAIL T8 cycle 57 stop/disarm
+FAIL T8 cycle 58 session armed
+FAIL T8 cycle 58 begin HOLD
+FAIL T8 cycle 58 exact pending/readable window held
+FAIL T8 cycle 58 complete fence succeeds
+FAIL T8 cycle 58 first trigger completes
+FAIL T8 cycle 58 stop/disarm
+FAIL T8 cycle 59 session armed
+FAIL T8 cycle 59 begin HOLD
+FAIL T8 cycle 59 exact pending/readable window held
+FAIL T8 cycle 59 complete fence succeeds
+FAIL T8 cycle 59 first trigger completes
+FAIL T8 cycle 59 stop/disarm
+FAIL T8 cycle 60 session armed
+FAIL T8 cycle 60 begin HOLD
+FAIL T8 cycle 60 exact pending/readable window held
+FAIL T8 cycle 60 complete fence succeeds
+FAIL T8 cycle 60 first trigger completes
+FAIL T8 cycle 60 stop/disarm
+FAIL T8 cycle 61 session armed
+FAIL T8 cycle 61 begin HOLD
+FAIL T8 cycle 61 exact pending/readable window held
+FAIL T8 cycle 61 complete fence succeeds
+FAIL T8 cycle 61 first trigger completes
+FAIL T8 cycle 61 stop/disarm
+FAIL T8 cycle 62 session armed
+FAIL T8 cycle 62 begin HOLD
+FAIL T8 cycle 62 exact pending/readable window held
+FAIL T8 cycle 62 complete fence succeeds
+FAIL T8 cycle 62 first trigger completes
+FAIL T8 cycle 62 stop/disarm
+FAIL T8 cycle 63 session armed
+FAIL T8 cycle 63 begin HOLD
+FAIL T8 cycle 63 exact pending/readable window held
+FAIL T8 cycle 63 complete fence succeeds
+FAIL T8 cycle 63 first trigger completes
+FAIL T8 cycle 63 stop/disarm
+FAIL T8 cycle 64 session armed
+FAIL T8 cycle 64 begin HOLD
+FAIL T8 cycle 64 exact pending/readable window held
+FAIL T8 cycle 64 complete fence succeeds
+FAIL T8 cycle 64 first trigger completes
+FAIL T8 cycle 64 stop/disarm
+FAIL T8 cycle 65 session armed
+FAIL T8 cycle 65 begin HOLD
+FAIL T8 cycle 65 exact pending/readable window held
+FAIL T8 cycle 65 complete fence succeeds
+FAIL T8 cycle 65 first trigger completes
+FAIL T8 cycle 65 stop/disarm
+FAIL T8 cycle 66 session armed
+FAIL T8 cycle 66 begin HOLD
+FAIL T8 cycle 66 exact pending/readable window held
+FAIL T8 cycle 66 complete fence succeeds
+FAIL T8 cycle 66 first trigger completes
+FAIL T8 cycle 66 stop/disarm
+FAIL T8 cycle 67 session armed
+FAIL T8 cycle 67 begin HOLD
+FAIL T8 cycle 67 exact pending/readable window held
+FAIL T8 cycle 67 complete fence succeeds
+FAIL T8 cycle 67 first trigger completes
+FAIL T8 cycle 67 stop/disarm
+FAIL T8 cycle 68 session armed
+FAIL T8 cycle 68 begin HOLD
+FAIL T8 cycle 68 exact pending/readable window held
+FAIL T8 cycle 68 complete fence succeeds
+FAIL T8 cycle 68 first trigger completes
+FAIL T8 cycle 68 stop/disarm
+FAIL T8 cycle 69 session armed
+FAIL T8 cycle 69 begin HOLD
+FAIL T8 cycle 69 exact pending/readable window held
+FAIL T8 cycle 69 complete fence succeeds
+FAIL T8 cycle 69 first trigger completes
+FAIL T8 cycle 69 stop/disarm
+FAIL T8 cycle 70 session armed
+FAIL T8 cycle 70 begin HOLD
+FAIL T8 cycle 70 exact pending/readable window held
+FAIL T8 cycle 70 complete fence succeeds
+FAIL T8 cycle 70 first trigger completes
+FAIL T8 cycle 70 stop/disarm
+FAIL T8 cycle 71 session armed
+FAIL T8 cycle 71 begin HOLD
+FAIL T8 cycle 71 exact pending/readable window held
+FAIL T8 cycle 71 complete fence succeeds
+FAIL T8 cycle 71 first trigger completes
+FAIL T8 cycle 71 stop/disarm
+FAIL T8 cycle 72 session armed
+FAIL T8 cycle 72 begin HOLD
+FAIL T8 cycle 72 exact pending/readable window held
+FAIL T8 cycle 72 complete fence succeeds
+FAIL T8 cycle 72 first trigger completes
+FAIL T8 cycle 72 stop/disarm
+FAIL T8 cycle 73 session armed
+FAIL T8 cycle 73 begin HOLD
+FAIL T8 cycle 73 exact pending/readable window held
+FAIL T8 cycle 73 complete fence succeeds
+FAIL T8 cycle 73 first trigger completes
+FAIL T8 cycle 73 stop/disarm
+FAIL T8 cycle 74 session armed
+FAIL T8 cycle 74 begin HOLD
+FAIL T8 cycle 74 exact pending/readable window held
+FAIL T8 cycle 74 complete fence succeeds
+FAIL T8 cycle 74 first trigger completes
+FAIL T8 cycle 74 stop/disarm
+FAIL T8 cycle 75 session armed
+FAIL T8 cycle 75 begin HOLD
+FAIL T8 cycle 75 exact pending/readable window held
+FAIL T8 cycle 75 complete fence succeeds
+FAIL T8 cycle 75 first trigger completes
+FAIL T8 cycle 75 stop/disarm
+FAIL T8 cycle 76 session armed
+FAIL T8 cycle 76 begin HOLD
+FAIL T8 cycle 76 exact pending/readable window held
+FAIL T8 cycle 76 complete fence succeeds
+FAIL T8 cycle 76 first trigger completes
+FAIL T8 cycle 76 stop/disarm
+FAIL T8 cycle 77 session armed
+FAIL T8 cycle 77 begin HOLD
+FAIL T8 cycle 77 exact pending/readable window held
+FAIL T8 cycle 77 complete fence succeeds
+FAIL T8 cycle 77 first trigger completes
+FAIL T8 cycle 77 stop/disarm
+FAIL T8 cycle 78 session armed
+FAIL T8 cycle 78 begin HOLD
+FAIL T8 cycle 78 exact pending/readable window held
+FAIL T8 cycle 78 complete fence succeeds
+FAIL T8 cycle 78 first trigger completes
+FAIL T8 cycle 78 stop/disarm
+FAIL T8 cycle 79 session armed
+FAIL T8 cycle 79 begin HOLD
+FAIL T8 cycle 79 exact pending/readable window held
+FAIL T8 cycle 79 complete fence succeeds
+FAIL T8 cycle 79 first trigger completes
+FAIL T8 cycle 79 stop/disarm
+FAIL T8 cycle 80 session armed
+FAIL T8 cycle 80 begin HOLD
+FAIL T8 cycle 80 exact pending/readable window held
+FAIL T8 cycle 80 complete fence succeeds
+FAIL T8 cycle 80 first trigger completes
+FAIL T8 cycle 80 stop/disarm
+FAIL T8 cycle 81 session armed
+FAIL T8 cycle 81 begin HOLD
+FAIL T8 cycle 81 exact pending/readable window held
+FAIL T8 cycle 81 complete fence succeeds
+FAIL T8 cycle 81 first trigger completes
+FAIL T8 cycle 81 stop/disarm
+FAIL T8 cycle 82 session armed
+FAIL T8 cycle 82 begin HOLD
+FAIL T8 cycle 82 exact pending/readable window held
+FAIL T8 cycle 82 complete fence succeeds
+FAIL T8 cycle 82 first trigger completes
+FAIL T8 cycle 82 stop/disarm
+FAIL T8 cycle 83 session armed
+FAIL T8 cycle 83 begin HOLD
+FAIL T8 cycle 83 exact pending/readable window held
+FAIL T8 cycle 83 complete fence succeeds
+FAIL T8 cycle 83 first trigger completes
+FAIL T8 cycle 83 stop/disarm
+FAIL T8 cycle 84 session armed
+FAIL T8 cycle 84 begin HOLD
+FAIL T8 cycle 84 exact pending/readable window held
+FAIL T8 cycle 84 complete fence succeeds
+FAIL T8 cycle 84 first trigger completes
+FAIL T8 cycle 84 stop/disarm
+FAIL T8 cycle 85 session armed
+FAIL T8 cycle 85 begin HOLD
+FAIL T8 cycle 85 exact pending/readable window held
+FAIL T8 cycle 85 complete fence succeeds
+FAIL T8 cycle 85 first trigger completes
+FAIL T8 cycle 85 stop/disarm
+FAIL T8 cycle 86 session armed
+FAIL T8 cycle 86 begin HOLD
+FAIL T8 cycle 86 exact pending/readable window held
+FAIL T8 cycle 86 complete fence succeeds
+FAIL T8 cycle 86 first trigger completes
+FAIL T8 cycle 86 stop/disarm
+FAIL T8 cycle 87 session armed
+FAIL T8 cycle 87 begin HOLD
+FAIL T8 cycle 87 exact pending/readable window held
+FAIL T8 cycle 87 complete fence succeeds
+FAIL T8 cycle 87 first trigger completes
+FAIL T8 cycle 87 stop/disarm
+FAIL T8 cycle 88 session armed
+FAIL T8 cycle 88 begin HOLD
+FAIL T8 cycle 88 exact pending/readable window held
+FAIL T8 cycle 88 complete fence succeeds
+FAIL T8 cycle 88 first trigger completes
+FAIL T8 cycle 88 stop/disarm
+FAIL T8 cycle 89 session armed
+FAIL T8 cycle 89 begin HOLD
+FAIL T8 cycle 89 exact pending/readable window held
+FAIL T8 cycle 89 complete fence succeeds
+FAIL T8 cycle 89 first trigger completes
+FAIL T8 cycle 89 stop/disarm
+FAIL T8 cycle 90 session armed
+FAIL T8 cycle 90 begin HOLD
+FAIL T8 cycle 90 exact pending/readable window held
+FAIL T8 cycle 90 complete fence succeeds
+FAIL T8 cycle 90 first trigger completes
+FAIL T8 cycle 90 stop/disarm
+FAIL T8 cycle 91 session armed
+FAIL T8 cycle 91 begin HOLD
+FAIL T8 cycle 91 exact pending/readable window held
+FAIL T8 cycle 91 complete fence succeeds
+FAIL T8 cycle 91 first trigger completes
+FAIL T8 cycle 91 stop/disarm
+FAIL T8 cycle 92 session armed
+FAIL T8 cycle 92 begin HOLD
+FAIL T8 cycle 92 exact pending/readable window held
+FAIL T8 cycle 92 complete fence succeeds
+FAIL T8 cycle 92 first trigger completes
+FAIL T8 cycle 92 stop/disarm
+FAIL T8 cycle 93 session armed
+FAIL T8 cycle 93 begin HOLD
+FAIL T8 cycle 93 exact pending/readable window held
+FAIL T8 cycle 93 complete fence succeeds
+FAIL T8 cycle 93 first trigger completes
+FAIL T8 cycle 93 stop/disarm
+FAIL T8 cycle 94 session armed
+FAIL T8 cycle 94 begin HOLD
+FAIL T8 cycle 94 exact pending/readable window held
+FAIL T8 cycle 94 complete fence succeeds
+FAIL T8 cycle 94 first trigger completes
+FAIL T8 cycle 94 stop/disarm
+FAIL T8 cycle 95 session armed
+FAIL T8 cycle 95 begin HOLD
+FAIL T8 cycle 95 exact pending/readable window held
+FAIL T8 cycle 95 complete fence succeeds
+FAIL T8 cycle 95 first trigger completes
+FAIL T8 cycle 95 stop/disarm
+FAIL T8 cycle 96 session armed
+FAIL T8 cycle 96 begin HOLD
+FAIL T8 cycle 96 exact pending/readable window held
+FAIL T8 cycle 96 complete fence succeeds
+FAIL T8 cycle 96 first trigger completes
+FAIL T8 cycle 96 stop/disarm
+FAIL T8 cycle 97 session armed
+FAIL T8 cycle 97 begin HOLD
+FAIL T8 cycle 97 exact pending/readable window held
+FAIL T8 cycle 97 complete fence succeeds
+FAIL T8 cycle 97 first trigger completes
+FAIL T8 cycle 97 stop/disarm
+FAIL T8 cycle 98 session armed
+FAIL T8 cycle 98 begin HOLD
+FAIL T8 cycle 98 exact pending/readable window held
+FAIL T8 cycle 98 complete fence succeeds
+FAIL T8 cycle 98 first trigger completes
+FAIL T8 cycle 98 stop/disarm
+FAIL T8 cycle 99 session armed
+FAIL T8 cycle 99 begin HOLD
+FAIL T8 cycle 99 exact pending/readable window held
+FAIL T8 cycle 99 complete fence succeeds
+FAIL T8 cycle 99 first trigger completes
+FAIL T8 cycle 99 stop/disarm
+FAIL T8 100 exact-window cycles have zero loss
+FAIL receiver-aware session boundary stress
+
+      Start 23: data_processor_batch_test
+23/52 Test #23: data_processor_batch_test ...............***Failed    0.12 sec
+FAIL receiver start
+
+      Start 24: card_status_formatting_test
+24/52 Test #24: card_status_formatting_test .............   Passed    0.05 sec
+      Start 25: round_policy_settings_test
+25/52 Test #25: round_policy_settings_test ..............   Passed    0.07 sec
+      Start 26: paimage_network_test
+26/52 Test #26: paimage_network_test ....................***Failed    0.22 sec
+PAimage-derived 监听失败：bind 8000 error 10048
+FAIL production listen
+
+      Start 27: paimage_production_gap_test
+27/52 Test #27: paimage_production_gap_test .............***Failed    0.05 sec
+FAIL production listen
+
+      Start 28: paimage_start_race
+28/52 Test #28: paimage_start_race ......................   Passed    0.31 sec
+      Start 29: paimage_start_fence_regression
+29/52 Test #29: paimage_start_fence_regression ..........   Passed    0.08 sec
+      Start 30: paimage_start_overflow
+30/52 Test #30: paimage_start_overflow ..................   Passed    0.11 sec
+      Start 31: paimage_host_output_test
+31/52 Test #31: paimage_host_output_test ................   Passed    0.99 sec
+      Start 32: filesaver_round_boundary_test
+32/52 Test #32: filesaver_round_boundary_test ...........   Passed    0.64 sec
+      Start 33: ring_round_ui_state_test
+33/52 Test #33: ring_round_ui_state_test ................   Passed    0.03 sec
+      Start 34: ring_round_identity_test
+34/52 Test #34: ring_round_identity_test ................   Passed    0.05 sec
+      Start 35: auto_save_round_coordinator_test
+35/52 Test #35: auto_save_round_coordinator_test ........   Passed    0.08 sec
+      Start 36: count_boundary_save_binding_test
+36/52 Test #36: count_boundary_save_binding_test ........   Passed    0.45 sec
+      Start 37: paimage_trace_bundle_test
+37/52 Test #37: paimage_trace_bundle_test ...............   Passed    0.27 sec
+      Start 38: startup_diagnostics_analyze_test
+38/52 Test #38: startup_diagnostics_analyze_test ........   Passed    0.32 sec
+      Start 39: paimage_start_race_analyzer
+39/52 Test #39: paimage_start_race_analyzer .............   Passed    0.21 sec
+      Start 40: motor_scan_linkage_test
+40/52 Test #40: motor_scan_linkage_test .................***Failed    0.07 sec
+FAIL assembler_ccw_cw: CCW angles match legacy formula
+FAIL assembler_ccw_cw: CW angles are mirrored (sign flip on k)
+motor_scan_linkage_test FAILED
+
+      Start 41: paimage_discovery_checks
+41/52 Test #41: paimage_discovery_checks ................   Passed    0.14 sec
+      Start 42: paimage_discovery_socket_checks
+42/52 Test #42: paimage_discovery_socket_checks .........***Failed    0.15 sec
+discovery error: 绑定临时反馈端口 8000 失败，WinSock 错误码 10048
+terminate called after throwing an instance of 'std::runtime_error'
+  what():  discovery succeeded
+
+      Start 43: paimage_core_checks
+43/52 Test #43: paimage_core_checks .....................   Passed    0.07 sec
+      Start 44: paimage_output_checks
+44/52 Test #44: paimage_output_checks ...................   Passed    0.03 sec
+      Start 45: physical_round_normalizer_test
+45/52 Test #45: physical_round_normalizer_test ..........   Passed    0.26 sec
+      Start 46: paimage_control_checks
+46/52 Test #46: paimage_control_checks ..................   Passed    0.04 sec
+      Start 47: paimage_socket_short
+47/52 Test #47: paimage_socket_short ....................   Passed    2.40 sec
+      Start 48: paimage_trace_checks
+48/52 Test #48: paimage_trace_checks ....................   Passed    0.11 sec
+      Start 49: paimage_worker_checks
+49/52 Test #49: paimage_worker_checks ...................   Passed    0.15 sec
+      Start 50: paimage_protocol_checks
+50/52 Test #50: paimage_protocol_checks .................   Passed    0.16 sec
+      Start 51: paimage_conversion_checks
+51/52 Test #51: paimage_conversion_checks ...............   Passed    0.05 sec
+      Start 52: paimage_looplog_checks
+52/52 Test #52: paimage_looplog_checks ..................   Passed    0.08 sec
+
+87% tests passed, 7 tests failed out of 52
+
+Total Test time (real) = 273.49 sec
+
+The following tests FAILED:
+	 19 - network_diagnostics_test (Failed)
+	 22 - session_boundary_receiver_test (Failed)
+	 23 - data_processor_batch_test (Failed)
+	 26 - paimage_network_test (Failed)
+	 27 - paimage_production_gap_test (Failed)
+	 40 - motor_scan_linkage_test (Failed)
+	 42 - paimage_discovery_socket_checks (Failed)
+Errors while running CTest
+EXIT_CODE=8

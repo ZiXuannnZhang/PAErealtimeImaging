@@ -24,9 +24,12 @@
 // 角度约定（与 MATLAB 参考/ImagingSvc 一致）：
 //   - 通道 s（启用序 0..M-1）扇区起点 = sectorStartDeg + s*sectorWidthDeg；
 //   - 全局触发 g（0 起）：g 偶 = wl1，g 奇 = wl2（triggerWlOdd=1）；
-//   - wl1 行 k=g/2 的角度 = 扇区起点 + k*stepDeg；
-//   - wl2 原始行 k=g/2 的角度 = 扇区起点 + (k+1)*stepDeg（跨块对齐后与 wl1 同角）；
-//   - 连续多圈采集时角度按每圈 K 回绕（首圈与单圈参考一致）。
+//   - wl1 行 k=g/2 的角度 = 扇区起点 + k*stepDeg；wl2 原始行 k=g/2 的角度 =
+//     扇区起点 + (k+1)*stepDeg（跨块对齐后与 wl1 同角）；
+//   - 连续多圈采集时角度按每圈 K 回绕（首圈与单圈参考一致）；
+//   - 扫描方向 sectorCcw（电机联动）：1 = 逆时针（默认，上式 k 项取 +）；
+//     0 = 顺时针（k 项取 −，即行 k 落在扇区起点 − k*stepDeg，整圈图像
+//     为逆时针结果的镜像）。扇区分配 s 项与方向无关（探头各通道固定布局）。
 // =====================================================================
 class RingBlockAssembler
 {
@@ -83,11 +86,12 @@ public:
     using TimeoutCallback = std::function<void()>;
 
     // enabledChannels: 8 个物理通道是否启用；stepDeg = sectorWidth / K
-    // （K = 每通道每波长每圈 A-line 数）。
+    // （K = 每通道每波长每圈 A-line 数）。sectorCcw: 1 = 逆时针（角度随触发
+    // 递增，历史唯一取值），0 = 顺时针（角度随触发递减，电机联动方向）。
     void configure(const int enabledChannels[8], int perChannelBlock,
                    int sampDepth, double sectorStartDeg, double sectorWidthDeg,
                    double stepDeg, int perChannelFrame, int triggerWlOdd,
-                   double timeoutResetSec);
+                   double timeoutResetSec, int sectorCcw = 1);
 
     void reset();
 
@@ -176,6 +180,7 @@ private:
     double m_stepDeg = 0.0;
     int  m_perChannelFrame = 0;   // 每通道每波长每圈 A-line 数（角度按圈回绕）
     int  m_triggerWlOdd = 1;
+    int  m_sectorCcw = 1;          // 扫描方向：1=逆时针（默认），0=顺时针（电机联动）
     double m_timeoutResetSec = 0.0;   // 0=关闭
     bool m_timeoutManagedExternally = false;
     std::atomic<int64_t> m_lastTriggerUs{0};   // 上一触发时刻（steady 时钟微秒，0=从未）

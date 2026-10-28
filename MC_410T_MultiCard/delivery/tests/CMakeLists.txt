@@ -473,3 +473,13 @@ add_executable(filtered_das_off_test filtered_das_off_test.cpp ../src/RingTimeva
 target_include_directories(filtered_das_off_test PRIVATE ../include ../src/RingRecon)
 target_compile_definitions(filtered_das_off_test PRIVATE FILTERED_OFF_BASELINE="${CMAKE_CURRENT_SOURCE_DIR}/reference/filtered_das_baseline_off.csv")
 add_test(NAME filtered_das_off_test COMMAND filtered_das_off_test)
+# 电机参数联动（LabVIEW -> 本程序）：解析/换算规则/监视器变化检测 + 组包器
+# sectorCcw 顺时针角度镜像（与 ring_block_assembler_test 同口径的内轮断言）。
+add_executable(motor_scan_linkage_test
+    motor_scan_linkage_test.cpp
+    ../src/MotorScanLinkage.cpp ../include/MotorScanLinkage.h
+    ../src/RingBlockAssembler.cpp)
+target_include_directories(motor_scan_linkage_test PRIVATE ../include)
+target_compile_features(motor_scan_linkage_test PRIVATE cxx_std_17)
+target_link_libraries(motor_scan_linkage_test PRIVATE Qt6::Core)
+add_test(NAME motor_scan_linkage_test COMMAND motor_scan_linkage_test)

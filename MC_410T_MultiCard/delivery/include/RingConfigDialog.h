@@ -44,10 +44,24 @@ public:
     // MainWindow -> NetworkController 下发到 Frontend Preprocessing 配置，
     // 不写入 RingReconCudaConfig / ImagingSvc / ring_recon 的任何配置或 JSON。
     frontend_filter::Config frontendFilterConfig() const;
-    // 同一组 QSettings（paimageSettingsPath()+IniFormat）的 RingConfigDialog/Defaults
+    // 同组 QSettings（paimageSettingsPath()+IniFormat）的 RingConfigDialog/Defaults
     // group 中读取已保存的前端滤波默认值。MainWindow 在弹窗尚未 lazy-create 时
     // 也经由此处取得同一份持久化值；无历史键时回退出厂默认。
     static frontend_filter::Config loadFrontendFilterDefaults();
+
+    // ══ 电机参数联动（LabVIEW → 本程序，只读消费端见 MotorScanLinkage）══
+    // 当前启用通道数（勾选数）：MainWindow 联动换算单圈总A-line数时使用。
+    int enabledChannelCount() const;
+    // 联动方向写入（逆=true，与 sectorCcw=1 同义；顺=false）。config() 由此
+    // 产出 cfg.sectorCcw（此前硬编码 1）。无联动输入时保持默认 1（= 现状行为）。
+    void setMotorScanDirection(bool ccw);
+    // 联动换算的单圈总A-line数预校验（与 applyConfig 的换算约束同口径）：
+    // 返回空串 = 可接受；否则为具体原因（调用方据此拒绝联动值并记录）。
+    QString validateMotorScanTotalAlines(int totalAlines) const;
+    // 联动写入单圈总A-line数（调用方须先 validateMotorScanTotalAlines 通过）。
+    void setMotorScanTotalAlines(int totalAlines);
+    // 联动状态行（“电机联动”标签文本；未联动/已联动/拒绝原因）。
+    void setMotorScanLinkageStatus(const QString &status);
 
 signals:
     // applyConfig 成功（应用/确定/成像启动下发）后发出，由 MainWindow 转发给
@@ -82,6 +96,12 @@ private:
     int    m_sampDepth = 4000;   // 采样深度只读值（点/A-line，与线性采集一致）
     bool m_acquisitionKnown = false;
     double m_daqHz = FPGA_ADC_FREQ_HZ;   // 采样率只读值（Hz，真实采集固定 250 MHz）
+    int    m_motorSectorCcw = 1;  // 扫描方向（电机联动）：1=逆时针（默认=历史行为），0=顺时针
+    // 起点角联动覆盖（标准角度）：仅在 setMotorScanDirection（=联动方向已应用）后生效，
+    // 逆时针=180°（九点钟，与未联动时 UI 默认 0 位一致）、顺时针=0°（三点钟）；
+    // 未联动时保持 UI 原逻辑（spinbox 默认 0 → 180° → 九点钟起点，逆时针重建）。
+    double m_motorStartDeg = 180.0;
+    bool   m_motorStartLinked = false;
 
     // 扫描参数
     QSpinBox        *m_spnBlock;
@@ -95,6 +115,7 @@ private:
     QDoubleSpinBox  *m_spnRadiusCh[8];   // 每通道重建半径(mm)，勾选通道生效可写
     QSpinBox        *m_spnSysDelayCh[8][2]; // 每通道双波长延时截断：[ch][0]=wl1(532nm)，[ch][1]=wl2(1064nm)
     QSpinBox        *m_spnTotalAlines;    // 单圈总A线数（含双波长）
+    QLabel          *m_lblMotorLinkage;   // 电机联动状态行（LabVIEW 参数文件消费状态）
     QDoubleSpinBox  *m_spnSectorStart;
     QDoubleSpinBox  *m_spnTimeoutReset;   // 超时重置（秒，0=关闭）
     // 物理轮次启动策略（Session B）：持久化于 RingConfigDialog/Defaults，

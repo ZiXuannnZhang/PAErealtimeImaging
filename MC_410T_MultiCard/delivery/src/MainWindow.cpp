@@ -711,6 +711,8 @@ MainWindow::MainWindow(QWidget *parent)
         m_imagingServiceReady.store(false, std::memory_order_release);
         m_ringSnapshotAdmissionBlocked.store(true, std::memory_order_release);
         m_ringResetCommandSent.store(false, std::memory_order_release);
+        // 成像服务已停止：解冻电机参数联动闸门，本轮已结束，参数可再应用。
+        if (m_motorScanMonitor) m_motorScanMonitor->setApplyGate(true);
         if (m_imagingBypass) m_imagingBypass->setServiceReady(false);
         m_ringAssemblerConfigured = false;
         { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
@@ -777,6 +779,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(m_displayTimer, &QTimer::timeout, this, &MainWindow::onDisplayRefresh);
     // displayTimer 延迟到 showEvent 中启动，确保OpenGL初始化完成后再开始数据刷新
+
+    // 电机参数联动（LabVIEW → 本程序）：读 INI 设置、创建监视器并接线
+    startMotorScanLinkage();
 
     logMessage("系统初始化完成");
 
@@ -2329,6 +2334,20 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
         });
     m_netController->setPhysicalRoundBoundarySink(
         [this](const paimage::PhysicalRoundEvent& event) {
+            // 电机参数联动触发闩锁：只决定“何时应用”联动参数，不改动任何
+            // 超时/计数重置语义。回调运行在采集侧线程，setApplyGate 内部为原子标志。
+            //   本轮首个触发（ControlFiltered = 扫描头部控制触发）→ 冻结，
+            //     本轮不再刷新联动参数；
+            //   源空闲超时（TimeoutBoundary = 扫描间隔）或计数重置
+            //     （CountBoundary = 达到每圈设计触发数的轮次边界）→ 解冻，
+            //     下一轮开始前可再取一次文件参数。
+            if (m_motorScanMonitor) {
+                if (event.kind == paimage::PhysicalRoundEvent::Kind::ControlFiltered)
+                    m_motorScanMonitor->setApplyGate(false);
+                else if (event.kind == paimage::PhysicalRoundEvent::Kind::TimeoutBoundary
+                         || event.kind == paimage::PhysicalRoundEvent::Kind::CountBoundary)
+                    m_motorScanMonitor->setApplyGate(true);
+            }
             if (event.kind == paimage::PhysicalRoundEvent::Kind::CountBoundary) {
                 // Allocate and publish the next data binding synchronously on
                 // the source boundary.  The old-round identity is the key of
@@ -5441,7 +5460,8 @@ void MainWindow::configureRingAssembler()
       m_ringAssembler->configure(enabled, cfg.alinesPerChannelPerBlock,
                                  cfg.sampDepth, cfg.sectorStartDeg, sectorWidth,
                                  step, cfg.alinesPerChannelPerFrame,
-                                 cfg.triggerWlOdd, cfg.timeoutResetSec);
+                                 cfg.triggerWlOdd, cfg.timeoutResetSec,
+                                 cfg.sectorCcw);
       if (physicalRound.measurementSession != 0)
           m_ringAssembler->beginMeasurementSession(
               physicalRound.measurementSession); }
@@ -5464,6 +5484,138 @@ void MainWindow::configureRingAssembler()
                .arg(cfg.enabledChannelCount)
                .arg(cfg.alinesPerChannelPerBlock)
                .arg(step, 0, 'f', 4));
+}
+
+// =====================================================================
+// 电机参数联动（LabVIEW → 本程序）：监视器接线 + 参数消费
+// =====================================================================
+void MainWindow::startMotorScanLinkage()
+{
+    // INI 键（MotorScanLinkage group，均带默认值，无需配置即可启用）：
+    //   Enabled         默认 true（文件不存在只提示、不报错）
+    //   ParamsFile      默认 <exe目录>/motor_scan_params.json
+    //   DirectionInverted 默认 false（true = 写入方布尔语义与 逆/顺 相反）
+    //   TotalAlinesRule 默认 perEnabledChannel（单圈总A-line数 = XStepsNum ×
+    //                    启用通道数；备选 perPeriod / directionOnly）
+    //   TriggerLatch    默认 true（触发闩锁：收到本轮首个触发后冻结联动参数，
+    //                    源空闲超时/未成像时才应用；false = 旧行为，读到变化即应用）
+    QSettings s(paimageSettingsPath(), QSettings::IniFormat);
+    s.beginGroup(QStringLiteral("MotorScanLinkage"));
+    MotorScanLinkageMonitor::Settings st;
+    st.enabled = s.value(QStringLiteral("Enabled"), true).toBool();
+    st.paramsFile = s.value(QStringLiteral("ParamsFile"),
+        QCoreApplication::applicationDirPath()
+            + QStringLiteral("/motor_scan_params.json")).toString();
+    st.directionInverted = s.value(QStringLiteral("DirectionInverted"), false).toBool();
+    st.pollMs = s.value(QStringLiteral("PollMs"), 500).toInt();
+    st.triggerLatch = s.value(QStringLiteral("TriggerLatch"), true).toBool();
+    m_motorTotalAlinesRule = motor_scan_linkage::totalAlinesRuleFromKey(
+        s.value(QStringLiteral("TotalAlinesRule"),
+                QStringLiteral("perEnabledChannel")).toString());
+    s.endGroup();
+
+    m_motorScanMonitor = new MotorScanLinkageMonitor(st, this);
+    connect(m_motorScanMonitor, &MotorScanLinkageMonitor::linkageParamsChanged,
+            this, &MainWindow::onMotorScanLinkageParams);
+    connect(m_motorScanMonitor, &MotorScanLinkageMonitor::linkageStatusChanged,
+            this, [this](const QString &status) {
+        logMessage(QStringLiteral("电机联动：%1").arg(status));
+        if (m_ringConfigDialog)
+            m_ringConfigDialog->setMotorScanLinkageStatus(status);
+    });
+    if (st.enabled) {
+        m_motorScanMonitor->start();
+        logMessage(QStringLiteral("电机联动已启用：参数文件 %1").arg(st.paramsFile));
+    } else {
+        logMessage(QStringLiteral("电机联动未启用（MotorScanLinkage/Enabled=false）"));
+    }
+}
+
+void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &params)
+{
+    // 对话框是这些参数的唯一权威载体：联动值推入对话框控件，之后与用户手改
+    // 参数完全同路径（applyConfig 校验+下发；含每圈设计触发数与运行中自动重启）。
+    ensureRingConfigDialog();
+
+    QJsonObject fields;
+    fields[QStringLiteral("seq")] = static_cast<double>(params.seq);
+    fields[QStringLiteral("writtenAt")] = params.writtenAt;
+    fields[QStringLiteral("source")] = params.source;
+
+    // 方向：逆=true → sectorCcw=1（与历史硬编码取值一致，现状行为保持）；
+    // 顺=false → sectorCcw=0（整圈图像镜像 + 拼接扇区锚点前移一扇区）。
+    if (params.hasDirection) {
+        m_ringConfigDialog->setMotorScanDirection(params.directionCcw);
+        fields[QStringLiteral("direction")] = motor_scan_linkage::describeDirection(
+            params.directionCcw);
+    }
+
+    // 步数：按规则换算单圈总A-line数；换算结果先过对话框同口径预校验，
+    // 不通过只记录+提示、不下发（避免 applyConfig 弹窗打扰）。
+    int totalAlines = 0;
+    if (params.hasXStepsNum) {
+        totalAlines = motor_scan_linkage::deriveTotalAlines(
+            m_motorTotalAlinesRule, params.xStepsNum, params.xStepsPerPeriod,
+            m_ringConfigDialog->enabledChannelCount());
+        fields[QStringLiteral("xStepsNum")] = params.xStepsNum;
+        fields[QStringLiteral("xStepsPerPeriod")] = params.xStepsPerPeriod;
+        fields[QStringLiteral("totalAlinesRule")] =
+            motor_scan_linkage::totalAlinesRuleKey(m_motorTotalAlinesRule);
+    }
+
+    bool applyDirection = params.hasDirection
+        && (!m_motorDirectionApplied || params.directionCcw != m_motorDirectionCcw);
+    bool applyTotal = false;
+    if (totalAlines > 0) {
+        const QString err = m_ringConfigDialog->validateMotorScanTotalAlines(totalAlines);
+        if (!err.isEmpty()) {
+            fields[QStringLiteral("rejectReason")] = err;
+            recordDiagnosticAction(QStringLiteral("motor_linkage_rejected"), fields);
+            logMessage(QStringLiteral("电机联动拒绝单圈总A-line数 %1：%2")
+                           .arg(totalAlines).arg(err));
+            m_ringConfigDialog->setMotorScanLinkageStatus(
+                QStringLiteral("联动拒绝：%1").arg(err));
+        } else {
+            applyTotal = totalAlines != m_motorTotalAlinesApplied;
+        }
+    }
+    if (!applyDirection && !applyTotal) {
+        recordDiagnosticAction(QStringLiteral("motor_linkage_unchanged"), fields);
+        return;   // 联动值无变化：不重复下发
+    }
+
+    if (applyTotal)
+        m_ringConfigDialog->setMotorScanTotalAlines(totalAlines);
+    // 与用户手点“应用”完全同路径：校验+configureRing+每圈触发数/掩膜下发；
+    // 正在成像时由既有 ringConfigChangedWhileRunning 流程自动重启服务。
+    if (!m_ringConfigDialog->applyConfig()) {
+        recordDiagnosticAction(QStringLiteral("motor_linkage_apply_failed"), fields);
+        return;
+    }
+    if (params.hasDirection) {
+        m_motorDirectionApplied = true;
+        m_motorDirectionCcw = params.directionCcw;
+    }
+    if (applyTotal)
+        m_motorTotalAlinesApplied = totalAlines;
+    fields[QStringLiteral("totalAlines")] = totalAlines;
+    fields[QStringLiteral("applied")] = true;
+    // 与 RingConfigDialog 起点角联动同口径：逆=九点钟(180°)、顺=三点钟(0°)。
+    if (params.hasDirection)
+        fields[QStringLiteral("sectorStartDeg")] =
+            params.directionCcw ? 180.0 : 0.0;
+    recordDiagnosticAction(QStringLiteral("motor_linkage_applied"), fields);
+    logMessage(QStringLiteral("电机联动已下发：方向=%1 单圈总A-line数=%2 起点角=%3")
+                   .arg(params.hasDirection
+                            ? motor_scan_linkage::describeDirection(params.directionCcw)
+                            : QStringLiteral("(未变)"))
+                   .arg(applyTotal ? QString::number(totalAlines)
+                                   : QStringLiteral("(未变)"))
+                   .arg(params.hasDirection
+                            ? (params.directionCcw
+                                   ? QStringLiteral("180°（九点钟）")
+                                   : QStringLiteral("0°（三点钟）"))
+                            : QStringLiteral("(未变)")));
 }
 
 // =====================================================================

@@ -719,8 +719,15 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
         std::vector<float> angs[2];
         std::vector<float> rads[2];
         std::vector<float> secs[2];
+        // 拼接扇区锚点必须跟随扫描方向（sectorCcw，电机联动）：
+        // 逆时针（默认）通道 s 的 A-line 覆盖 [φs, φs+w) → 锚点 φs；
+        // 顺时针覆盖 [φs−w, φs) → 锚点 φs−w（CUDA 按 floor((φ−start)/w)
+        // 划分像素扇区，取 s−1 才能把本通道数据投进其实际覆盖的扇区，
+        // 否则拼接掩膜会把整段数据裁掉；φs−w 对 selIdx=0 自动回绕到 M−1）。
+        const int sectorAnchorIdx = m_ringConfig.sectorCcw
+            ? selIdx[c] : (selIdx[c] - 1);
         const double chSectorStartDeg =
-            m_ringConfig.sectorStartDeg + static_cast<double>(selIdx[c]) * sectorWidthDeg;
+            m_ringConfig.sectorStartDeg + static_cast<double>(sectorAnchorIdx) * sectorWidthDeg;
 
         for (int j = 0; j < perCh; ++j) {
             const int pos = j * M + selIdx[c];

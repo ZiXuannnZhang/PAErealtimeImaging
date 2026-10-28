@@ -1,0 +1,9 @@
+Internal ctest changing into directory: D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/build/tests_mingw_debug
+Test project D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/build/tests_mingw_debug
+    Start 42: paimage_discovery_socket_checks
+1/1 Test #42: paimage_discovery_socket_checks ...   Passed    3.13 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =   3.14 sec
+EXIT_CODE=0

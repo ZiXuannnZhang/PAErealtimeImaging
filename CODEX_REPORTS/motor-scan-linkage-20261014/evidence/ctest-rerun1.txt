@@ -1,0 +1,15 @@
+Internal ctest changing into directory: D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/build/tests_mingw_debug
+Test project D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/build/tests_mingw_debug
+    Start 22: session_boundary_receiver_test
+1/4 Test #22: session_boundary_receiver_test ...   Passed   12.52 sec
+    Start 23: data_processor_batch_test
+2/4 Test #23: data_processor_batch_test ........   Passed    0.04 sec
+    Start 26: paimage_network_test
+3/4 Test #26: paimage_network_test .............   Passed    2.34 sec
+    Start 27: paimage_production_gap_test
+4/4 Test #27: paimage_production_gap_test ......   Passed    3.37 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =  18.29 sec
+EXIT_CODE=0

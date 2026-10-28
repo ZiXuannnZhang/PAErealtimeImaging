@@ -1,0 +1,399 @@
+[1/345] Automatic MOC for target paimage_source
+[2/345] Automatic MOC for target paimage_discovery
+[3/345] Automatic MOC for target ring_signal_enhancer_test
+[4/345] Automatic MOC for target ring_enhancer_bench
+[5/345] Automatic MOC for target ring_enhancer_parity_test
+[6/345] Automatic MOC for target ring_display_mapping_test
+[7/345] Building CXX object paimage_core/CMakeFiles/paimage_source.dir/paimage_source_autogen/mocs_compilation.cpp.obj
+[8/345] Automatic MOC for target timeout_presentation_test
+[9/345] Automatic MOC for target imaging_bypass_test
+[10/345] Automatic MOC for target ring_block_assembler_test
+[11/345] Automatic MOC for target ring_shm_observability_test
+[12/345] Building CXX object paimage_core/CMakeFiles/paimage_discovery.dir/paimage_discovery_autogen/mocs_compilation.cpp.obj
+[13/345] Automatic MOC for target ring_production_blockers_test
+[14/345] Automatic MOC for target diagnostic_recorder_test
+[15/345] Automatic MOC for target diagnostic_dialog_test
+[16/345] Automatic MOC for target diagnostic_time_window_test
+[17/345] Automatic MOC for target process_scheduling_test
+[18/345] Automatic MOC for target network_snapshot_test
+[19/345] Automatic MOC for target network_ingress_observability_test
+[20/345] Automatic MOC for target frontend_preprocessor_test
+[21/345] Automatic MOC for target measurement_session_transaction_test
+[22/345] Automatic MOC for target data_processor_imaging_isolation_test
+[23/345] Automatic MOC for target round_policy_settings_test
+[24/345] Building CXX object paimage_core/CMakeFiles/paimage_source.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/ControlState.cpp.obj
+[25/345] Automatic MOC for target ring_display_render_test
+[26/345] Automatic MOC for target card_status_formatting_test
+[27/345] Building CXX object CMakeFiles/ring_signal_enhancer_test.dir/ring_signal_enhancer_test_autogen/mocs_compilation.cpp.obj
+[28/345] Building CXX object paimage_core/CMakeFiles/paimage_source.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp.obj
+[29/345] Building CXX object CMakeFiles/ring_enhancer_bench.dir/ring_enhancer_bench_autogen/mocs_compilation.cpp.obj
+[30/345] Building CXX object paimage_core/CMakeFiles/paimage_source.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/FrameConverter.cpp.obj
+[31/345] Building CXX object paimage_core/CMakeFiles/paimage_source.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/OutputQueues.cpp.obj
+[32/345] Automatic MOC for target ring_round_ui_state_test
+[33/345] Building CXX object CMakeFiles/ring_enhancer_parity_test.dir/ring_enhancer_parity_test_autogen/mocs_compilation.cpp.obj
+[34/345] Automatic MOC for target data_processor_batch_test
+[35/345] Automatic MOC for target ring_round_identity_test
+[36/345] Building CXX object CMakeFiles/ring_display_mapping_test.dir/ring_display_mapping_test_autogen/mocs_compilation.cpp.obj
+[37/345] Automatic MOC for target session_boundary_test
+[38/345] Automatic MOC for target session_boundary_receiver_test
+[39/345] Building CXX object CMakeFiles/ring_block_assembler_test.dir/ring_block_assembler_test_autogen/mocs_compilation.cpp.obj
+[40/345] Building CXX object paimage_core/CMakeFiles/paimage_source.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/SourceCore.cpp.obj
+[41/345] Building CXX object CMakeFiles/ring_signal_enhancer_test.dir/ring_signal_enhancer_test.cpp.obj
+[42/345] Automatic MOC for target motor_scan_linkage_test
+[43/345] Building CXX object CMakeFiles/ring_display_mapping_test.dir/ring_display_mapping_test.cpp.obj
+[44/345] Automatic MOC for target auto_save_round_coordinator_test
+[45/345] Building CXX object CMakeFiles/timeout_presentation_test.dir/timeout_presentation_test_autogen/mocs_compilation.cpp.obj
+[46/345] Building CXX object CMakeFiles/ring_signal_enhancer_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingSignalEnhancer.cpp.obj
+[47/345] Building CXX object CMakeFiles/ring_enhancer_bench.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingSignalEnhancer.cpp.obj
+[48/345] Building CXX object CMakeFiles/imaging_bypass_test.dir/imaging_bypass_test_autogen/mocs_compilation.cpp.obj
+[49/345] Building CXX object CMakeFiles/ring_enhancer_parity_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingSignalEnhancer.cpp.obj
+[50/345] Building CXX object CMakeFiles/ring_enhancer_bench.dir/ring_enhancer_bench.cpp.obj
+[51/345] Linking CXX static library paimage_core\libpaimage_source.a
+[52/345] Building CXX object CMakeFiles/timeout_presentation_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingRoundUiState.cpp.obj
+[53/345] Building CXX object CMakeFiles/ring_block_assembler_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingBlockAssembler.cpp.obj
+[54/345] Building CXX object CMakeFiles/ring_enhancer_parity_test.dir/ring_enhancer_parity_test.cpp.obj
+[55/345] Building CXX object CMakeFiles/ring_block_assembler_test.dir/ring_block_assembler_test.cpp.obj
+[56/345] Automatic MOC for target paimage_socket
+[57/345] Building CXX object paimage_core/CMakeFiles/paimage_socket.dir/paimage_socket_autogen/mocs_compilation.cpp.obj
+[58/345] Automatic MOC for target paimage_core_checks
+[59/345] Automatic MOC for target physical_round_normalizer_test
+[60/345] Automatic MOC for target paimage_control_checks
+[61/345] Automatic MOC for target paimage_output_checks
+[62/345] Building CXX object CMakeFiles/imaging_bypass_test.dir/imaging_bypass_test.cpp.obj
+[63/345] Building CXX object CMakeFiles/imaging_bypass_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/ImagingBypass.cpp.obj
+[64/345] Building CXX object CMakeFiles/ring_display_render_test.dir/ring_display_render_test_autogen/mocs_compilation.cpp.obj
+[65/345] Building CXX object CMakeFiles/data_processor_imaging_isolation_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/ImagingBypass.cpp.obj
+[66/345] Building CXX object CMakeFiles/ring_display_render_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingImageWidget.cpp.obj
+[67/345] Building CXX object CMakeFiles/ring_display_render_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingColorBarWidget.cpp.obj
+[68/345] Building CXX object CMakeFiles/ring_display_render_test.dir/ring_display_render_test.cpp.obj
+[69/345] Building CXX object paimage_core/CMakeFiles/paimage_socket.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/SocketTimestamp.cpp.obj
+[70/345] Automatic MOC for target paimage_conversion_checks
+[71/345] Building CXX object CMakeFiles/timeout_presentation_test.dir/timeout_presentation_test.cpp.obj
+[72/345] Building CXX object CMakeFiles/data_processor_imaging_isolation_test.dir/data_processor_imaging_isolation_test_autogen/mocs_compilation.cpp.obj
+[73/345] Building CXX object paimage_core/CMakeFiles/paimage_socket.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/TraceWriter.cpp.obj
+[74/345] Building CXX object CMakeFiles/data_processor_imaging_isolation_test.dir/data_processor_imaging_isolation_test.cpp.obj
+[75/345] Building CXX object CMakeFiles/ring_display_render_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/ImagingDisplayWindow.cpp.obj
+[76/345] Building CXX object paimage_core/CMakeFiles/paimage_socket.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/ControlSocket.cpp.obj
+[77/345] Building CXX object CMakeFiles/data_processor_imaging_isolation_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendFilter.cpp.obj
+[78/345] Building CXX object CMakeFiles/ring_production_blockers_test.dir/ring_production_blockers_test_autogen/mocs_compilation.cpp.obj
+[79/345] Building CXX object CMakeFiles/data_processor_imaging_isolation_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendPreprocessor.cpp.obj
+[80/345] Building CXX object paimage_core/CMakeFiles/paimage_socket.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/OutputWorkers.cpp.obj
+[81/345] Building CXX object CMakeFiles/frontend_preprocessor_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendFilter.cpp.obj
+[82/345] Building CXX object paimage_core/CMakeFiles/paimage_socket.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/TimingWriter.cpp.obj
+[83/345] Building CXX object CMakeFiles/diagnostic_recorder_test.dir/diagnostic_recorder_test_autogen/mocs_compilation.cpp.obj
+[84/345] Building CXX object paimage_core/CMakeFiles/paimage_socket.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/LoopLog.cpp.obj
+[85/345] Building CXX object paimage_core/CMakeFiles/paimage_socket.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/SocketReceiver.cpp.obj
+[86/345] Building CXX object CMakeFiles/frontend_preprocessor_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/ImagingBypass.cpp.obj
+[87/345] Building CXX object CMakeFiles/ring_production_blockers_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingRoundUiState.cpp.obj
+[88/345] Building CXX object CMakeFiles/ring_shm_observability_test.dir/ring_shm_observability_test_autogen/mocs_compilation.cpp.obj
+[89/345] Building CXX object CMakeFiles/frontend_preprocessor_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendPreprocessor.cpp.obj
+[90/345] Building CXX object CMakeFiles/diagnostic_dialog_test.dir/diagnostic_dialog_test_autogen/mocs_compilation.cpp.obj
+[91/345] Building CXX object paimage_core/CMakeFiles/paimage_discovery.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/CardDiscovery.cpp.obj
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp:24: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   24 | #pragma comment(lib, "iphlpapi.lib")
+      | 
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp:25: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+   25 | #pragma comment(lib, "ws2_32.lib")
+      | 
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp: In function 'paimage::DiscoveryResult paimage::{anonymous}::runDiscoveryCore(const paimage::DiscoveryOptions&, const std::atomic<bool>&, paimage::DiscoveryChannel&, const paimage::DiscoveryEnvironment&)':
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/PaimageAcquisition/CardDiscovery.cpp:281:81: warning: narrowing conversion of '(qint64)startedNs' from 'qint64' {aka 'long long int'} to 'int' [-Wnarrowing]
+  281 |     DiscoverySession session{options, channel, environment, result, {}, {}, {}, startedNs};
+      |                                                                                 ^~~~~~~~~
+[92/345] Building CXX object CMakeFiles/ring_production_blockers_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingBlockAssembler.cpp.obj
+[93/345] Building CXX object CMakeFiles/frontend_preprocessor_test.dir/frontend_preprocessor_test_autogen/mocs_compilation.cpp.obj
+[94/345] Building CXX object CMakeFiles/ring_production_blockers_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp.obj
+[95/345] Building CXX object CMakeFiles/diagnostic_time_window_test.dir/diagnostic_time_window_test_autogen/mocs_compilation.cpp.obj
+[96/345] Linking CXX static library paimage_core\libpaimage_socket.a
+[97/345] Building CXX object CMakeFiles/data_processor_imaging_isolation_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[98/345] Building CXX object CMakeFiles/process_scheduling_test.dir/process_scheduling_test_autogen/mocs_compilation.cpp.obj
+[99/345] Building CXX object CMakeFiles/ring_production_blockers_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/RingRoundPresentation.cpp.obj
+[100/345] Building CXX object CMakeFiles/frontend_preprocessor_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[101/345] Building CXX object paimage_core/CMakeFiles/paimage_discovery.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DiagnosticRecorder.cpp.obj
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp: In member function 'bool DiagnosticRecorder::State::enqueueLocked(QueueItem)':
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp:786:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  786 |         if (removed.kind == QueueItem::Kind::Event) appendFallbackLocked(removed.event); completeLocked(removed.sequence()); queue.push_back(std::move(item)); return true;
+      |         ^~
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp:786:90: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  786 |         if (removed.kind == QueueItem::Kind::Event) appendFallbackLocked(removed.event); completeLocked(removed.sequence()); queue.push_back(std::move(item)); return true;
+      |                                                                                          ^~~~~~~~~~~~~~
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp: In member function 'quint64 DiagnosticRecorder::State::recordEvent(const QString&, const QString&, DiagnosticRecorder::Severity, const QJsonObject&)':
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp:801:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  801 |         if (notify) condition.notify_one(); return event.sequence;
+      |         ^~
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp:801:45: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  801 |         if (notify) condition.notify_one(); return event.sequence;
+      |                                             ^~~~~~
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp: In member function 'bool DiagnosticRecorder::State::flushFiles(QString*)':
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp:842:9: warning: this 'for' clause does not guard... [-Wmisleading-indentation]
+  842 |         for (QFile *file : {&runtimeFile, &eventsFile, &networkHistoryFile, &settingsHistoryFile, &cardHistoryFile}) if (file->isOpen() && !file->flush()) { if (error) *error = QStringLiteral("刷新诊断日志失败：%1").arg(file->errorString()); return false; } return true;
+      |         ^~~
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp:842:259: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'for'
+  842 |         for (QFile *file : {&runtimeFile, &eventsFile, &networkHistoryFile, &settingsHistoryFile, &cardHistoryFile}) if (file->isOpen() && !file->flush()) { if (error) *error = QStringLiteral("刷新诊断日志失败：%1").arg(file->errorString()); return false; } return true;
+      |                                                                                                                                                                                                                                                                   ^~~~~~
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp: In member function 'void DiagnosticRecorder::State::appendRequestStateLocked(DiagnosticRecorder::ExportRequest*) const':
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp:887:9: warning: this 'for' clause does not guard... [-Wmisleading-indentation]
+  887 |         for (const QueueItem &item : queue) addItem(item); if (hasInFlight) addItem(inFlight);
+      |         ^~~
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp:887:60: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'for'
+  887 |         for (const QueueItem &item : queue) addItem(item); if (hasInFlight) addItem(inFlight);
+      |                                                            ^~
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp: In static member function 'static QVector<DiagnosticRecorder::RunInfo> DiagnosticRecorder::enumerateRuns(const QString&)':
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp:1573:9: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1573 |         if (run.runId.isEmpty()) run.runId = info.fileName(); result.append(run);
+      |         ^~
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp:1573:63: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1573 |         if (run.runId.isEmpty()) run.runId = info.fileName(); result.append(run);
+      |                                                               ^~~~~~
+[102/345] Building CXX object CMakeFiles/frontend_preprocessor_test.dir/frontend_preprocessor_test.cpp.obj
+[103/345] Building CXX object CMakeFiles/ring_production_blockers_test.dir/ring_production_blockers_test.cpp.obj
+[104/345] Building CXX object CMakeFiles/data_processor_imaging_isolation_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[105/345] Building CXX object CMakeFiles/ring_shm_observability_test.dir/ring_shm_observability_test.cpp.obj
+[106/345] Automatic MOC for target paimage_start_race_test
+[107/345] Automatic MOC for target paimage_start_fence_regression_test
+[108/345] Automatic MOC for target paimage_start_overflow_test
+[109/345] Automatic MOC for target network_diagnostics_test
+[110/345] Building CXX object CMakeFiles/frontend_preprocessor_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[111/345] Building CXX object CMakeFiles/diagnostic_recorder_test.dir/diagnostic_recorder_test.cpp.obj
+[112/345] Automatic MOC for target paimage_production_gap_test
+[113/345] Automatic MOC for target paimage_network_test
+[114/345] Automatic MOC for target paimage_trace_bundle_test
+[115/345] Automatic MOC for target paimage_socket_replay
+[116/345] Building CXX object CMakeFiles/network_ingress_observability_test.dir/network_ingress_observability_test_autogen/mocs_compilation.cpp.obj
+[117/345] Automatic MOC for target filesaver_round_boundary_test
+[118/345] Automatic MOC for target paimage_host_output_test
+[119/345] Automatic MOC for target paimage_worker_checks
+[120/345] Automatic MOC for target paimage_protocol_checks
+[121/345] Automatic MOC for target paimage_trace_checks
+[122/345] Automatic MOC for target count_boundary_save_binding_test
+[123/345] Automatic MOC for target paimage_looplog_checks
+[124/345] Building CXX object CMakeFiles/network_snapshot_test.dir/network_snapshot_test_autogen/mocs_compilation.cpp.obj
+[125/345] Building CXX object CMakeFiles/diagnostic_dialog_test.dir/diagnostic_dialog_test.cpp.obj
+[126/345] Building CXX object CMakeFiles/diagnostic_time_window_test.dir/diagnostic_time_window_test.cpp.obj
+[127/345] Building CXX object CMakeFiles/diagnostic_dialog_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/DiagnosticExportDialog.cpp.obj
+[128/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/StartupPolicy.cpp.obj
+[129/345] Linking CXX static library paimage_core\libpaimage_discovery.a
+[130/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MeasurementSession.cpp.obj
+[131/345] Building CXX object CMakeFiles/process_scheduling_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/ImagingSvc/ProcessScheduling.cpp.obj
+[132/345] Building CXX object CMakeFiles/network_ingress_observability_test.dir/network_ingress_observability_test.cpp.obj
+[133/345] Building CXX object CMakeFiles/process_scheduling_test.dir/process_scheduling_test.cpp.obj
+[134/345] Building CXX object CMakeFiles/network_snapshot_test.dir/network_snapshot_test.cpp.obj
+[135/345] Automatic MOC for target paimage_discovery_checks
+[136/345] Automatic MOC for target paimage_discovery_socket_checks
+[137/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp.obj
+[138/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendFilter.cpp.obj
+[139/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendPreprocessor.cpp.obj
+[140/345] Building CXX object CMakeFiles/diagnostic_recorder_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp.obj
+[141/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp.obj
+[142/345] Building CXX object CMakeFiles/measurement_session_transaction_test.dir/measurement_session_transaction_test_autogen/mocs_compilation.cpp.obj
+[143/345] Building CXX object CMakeFiles/diagnostic_dialog_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp.obj
+[144/345] Building CXX object CMakeFiles/diagnostic_time_window_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp.obj
+[145/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[146/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/FileSaver.cpp.obj
+[147/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/network_diagnostics_test_autogen/mocs_compilation.cpp.obj
+[148/345] Building CXX object CMakeFiles/network_ingress_observability_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/NetworkDiagnostics.cpp.obj
+[149/345] Building CXX object CMakeFiles/network_snapshot_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/NetworkDiagnostics.cpp.obj
+[150/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[151/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/NetworkDiagnostics.cpp.obj
+[152/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/network_diagnostics_test.cpp.obj
+[153/345] Building CXX object CMakeFiles/measurement_session_transaction_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MeasurementSession.cpp.obj
+[154/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MultiPortReceiver.cpp.obj
+[155/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/Backend.cpp.obj
+[156/345] Building CXX object CMakeFiles/measurement_session_transaction_test.dir/measurement_session_transaction_test.cpp.obj
+[157/345] Building CXX object CMakeFiles/session_boundary_test.dir/session_boundary_test.cpp.obj
+[158/345] Building CXX object CMakeFiles/session_boundary_test.dir/session_boundary_test_autogen/mocs_compilation.cpp.obj
+[159/345] Building CXX object CMakeFiles/session_boundary_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[160/345] Building CXX object CMakeFiles/session_boundary_receiver_test.dir/session_boundary_receiver_test_autogen/mocs_compilation.cpp.obj
+[161/345] Building CXX object CMakeFiles/card_status_formatting_test.dir/card_status_formatting_test_autogen/mocs_compilation.cpp.obj
+[162/345] Building CXX object CMakeFiles/session_boundary_receiver_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MeasurementSession.cpp.obj
+[163/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/HostOutput.cpp.obj
+[164/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp.obj
+[165/345] Building CXX object CMakeFiles/round_policy_settings_test.dir/round_policy_settings_test_autogen/mocs_compilation.cpp.obj
+[166/345] Building CXX object CMakeFiles/session_boundary_receiver_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[167/345] Building CXX object CMakeFiles/data_processor_batch_test.dir/data_processor_batch_test_autogen/mocs_compilation.cpp.obj
+[168/345] Building CXX object CMakeFiles/session_boundary_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[169/345] Building CXX object CMakeFiles/session_boundary_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MultiPortReceiver.cpp.obj
+[170/345] Building CXX object CMakeFiles/card_status_formatting_test.dir/card_status_formatting_test.cpp.obj
+[171/345] Building CXX object CMakeFiles/data_processor_batch_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[172/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/NetworkController.cpp.obj
+[173/345] Building CXX object CMakeFiles/session_boundary_receiver_test.dir/session_boundary_receiver_test.cpp.obj
+[174/345] Building CXX object CMakeFiles/session_boundary_receiver_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[175/345] Building CXX object CMakeFiles/paimage_network_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/StartupPolicy.cpp.obj
+[176/345] Building CXX object CMakeFiles/session_boundary_receiver_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MultiPortReceiver.cpp.obj
+[177/345] Building CXX object CMakeFiles/round_policy_settings_test.dir/round_policy_settings_test.cpp.obj
+[178/345] Building CXX object CMakeFiles/data_processor_batch_test.dir/data_processor_batch_test.cpp.obj
+[179/345] Building CXX object CMakeFiles/paimage_network_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendFilter.cpp.obj
+[180/345] Building CXX object CMakeFiles/paimage_network_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MeasurementSession.cpp.obj
+[181/345] Building CXX object CMakeFiles/data_processor_batch_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[182/345] Building CXX object CMakeFiles/paimage_network_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp.obj
+[183/345] Building CXX object CMakeFiles/paimage_network_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendPreprocessor.cpp.obj
+[184/345] Building CXX object CMakeFiles/paimage_network_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp.obj
+[185/345] Building CXX object CMakeFiles/data_processor_batch_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MultiPortReceiver.cpp.obj
+[186/345] Building CXX object CMakeFiles/network_diagnostics_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/NetworkControllerPaimage.cpp.obj
+[187/345] Building CXX object CMakeFiles/paimage_network_test.dir/paimage_network_test_autogen/mocs_compilation.cpp.obj
+[188/345] Building CXX object CMakeFiles/paimage_network_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[189/345] Building CXX object CMakeFiles/paimage_network_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/FileSaver.cpp.obj
+[190/345] Building CXX object CMakeFiles/paimage_network_test.dir/paimage_network_test.cpp.obj
+[191/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MeasurementSession.cpp.obj
+[192/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/StartupPolicy.cpp.obj
+[193/345] Building CXX object CMakeFiles/paimage_network_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[194/345] Building CXX object CMakeFiles/paimage_network_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/Backend.cpp.obj
+[195/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendFilter.cpp.obj
+[196/345] Building CXX object CMakeFiles/paimage_network_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MultiPortReceiver.cpp.obj
+[197/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp.obj
+[198/345] Building CXX object CMakeFiles/paimage_network_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/NetworkDiagnostics.cpp.obj
+[199/345] Building CXX object CMakeFiles/paimage_network_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/HostOutput.cpp.obj
+[200/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendPreprocessor.cpp.obj
+[201/345] Building CXX object CMakeFiles/paimage_start_race_test.dir/paimage_start_race_test_autogen/mocs_compilation.cpp.obj
+[202/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp.obj
+[203/345] Building CXX object CMakeFiles/paimage_start_fence_regression_test.dir/paimage_start_fence_regression_test_autogen/mocs_compilation.cpp.obj
+[204/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/paimage_production_gap_test.cpp.obj
+[205/345] Building CXX object CMakeFiles/paimage_start_overflow_test.dir/paimage_start_overflow_test_autogen/mocs_compilation.cpp.obj
+[206/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/paimage_production_gap_test_autogen/mocs_compilation.cpp.obj
+[207/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/FileSaver.cpp.obj
+[208/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[209/345] Building CXX object CMakeFiles/paimage_network_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp.obj
+[210/345] Building CXX object CMakeFiles/paimage_network_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/NetworkController.cpp.obj
+[211/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[212/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/NetworkDiagnostics.cpp.obj
+[213/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/Backend.cpp.obj
+[214/345] Building CXX object CMakeFiles/paimage_host_output_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp.obj
+[215/345] Building CXX object CMakeFiles/paimage_start_fence_regression_test.dir/paimage_start_fence_regression_test.cpp.obj
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/tests/paimage_start_fence_regression_test.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[216/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MultiPortReceiver.cpp.obj
+[217/345] Building CXX object CMakeFiles/paimage_host_output_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendFilter.cpp.obj
+[218/345] Building CXX object CMakeFiles/paimage_start_overflow_test.dir/paimage_start_overflow_test.cpp.obj
+D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/tests/paimage_start_overflow_test.cpp:1: warning: "WIN32_LEAN_AND_MEAN" redefined
+    1 | #define WIN32_LEAN_AND_MEAN
+      | 
+<command-line>: note: this is the location of the previous definition
+[219/345] Building CXX object CMakeFiles/paimage_host_output_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendPreprocessor.cpp.obj
+[220/345] Building CXX object CMakeFiles/paimage_host_output_test.dir/paimage_host_output_test_autogen/mocs_compilation.cpp.obj
+[221/345] Building CXX object CMakeFiles/paimage_start_race_test.dir/paimage_start_race_test.cpp.obj
+[222/345] Building CXX object CMakeFiles/paimage_network_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/NetworkControllerPaimage.cpp.obj
+[223/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/HostOutput.cpp.obj
+[224/345] Building CXX object CMakeFiles/filesaver_round_boundary_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp.obj
+[225/345] Building CXX object CMakeFiles/paimage_host_output_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/Backend.cpp.obj
+[226/345] Building CXX object CMakeFiles/paimage_host_output_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[227/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp.obj
+[228/345] Building CXX object CMakeFiles/ring_round_ui_state_test.dir/ring_round_ui_state_test_autogen/mocs_compilation.cpp.obj
+[229/345] Building CXX object CMakeFiles/filesaver_round_boundary_test.dir/filesaver_round_boundary_test_autogen/mocs_compilation.cpp.obj
+[230/345] Building CXX object CMakeFiles/paimage_host_output_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/FileSaver.cpp.obj
+[231/345] Building CXX object CMakeFiles/filesaver_round_boundary_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendFilter.cpp.obj
+[232/345] Building CXX object CMakeFiles/filesaver_round_boundary_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendPreprocessor.cpp.obj
+[233/345] Building CXX object CMakeFiles/ring_round_identity_test.dir/ring_round_identity_test_autogen/mocs_compilation.cpp.obj
+[234/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/NetworkController.cpp.obj
+[235/345] Building CXX object CMakeFiles/paimage_host_output_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/HostOutput.cpp.obj
+[236/345] Building CXX object CMakeFiles/ring_round_ui_state_test.dir/ring_round_ui_state_test.cpp.obj
+[237/345] Building CXX object CMakeFiles/ring_round_ui_state_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingRoundUiState.cpp.obj
+[238/345] Building CXX object CMakeFiles/ring_round_identity_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingRoundUiState.cpp.obj
+[239/345] Building CXX object CMakeFiles/paimage_host_output_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[240/345] Building CXX object CMakeFiles/filesaver_round_boundary_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/Backend.cpp.obj
+[241/345] Building CXX object CMakeFiles/paimage_host_output_test.dir/paimage_host_output_test.cpp.obj
+[242/345] Building CXX object CMakeFiles/filesaver_round_boundary_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[243/345] Building CXX object CMakeFiles/ring_round_identity_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/RingRoundPresentation.cpp.obj
+[244/345] Building CXX object CMakeFiles/filesaver_round_boundary_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/FileSaver.cpp.obj
+[245/345] Building CXX object CMakeFiles/auto_save_round_coordinator_test.dir/auto_save_round_coordinator_test_autogen/mocs_compilation.cpp.obj
+[246/345] Building CXX object CMakeFiles/ring_round_identity_test.dir/ring_round_identity_test.cpp.obj
+[247/345] Building CXX object CMakeFiles/count_boundary_save_binding_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/PhysicalRoundNormalizer.cpp.obj
+[248/345] Building CXX object CMakeFiles/filesaver_round_boundary_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/HostOutput.cpp.obj
+[249/345] Building CXX object CMakeFiles/filesaver_round_boundary_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[250/345] Building CXX object CMakeFiles/paimage_production_gap_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/NetworkControllerPaimage.cpp.obj
+[251/345] Building CXX object CMakeFiles/paimage_trace_bundle_test.dir/paimage_trace_bundle_test_autogen/mocs_compilation.cpp.obj
+[252/345] Building CXX object CMakeFiles/count_boundary_save_binding_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendFilter.cpp.obj
+[253/345] Building CXX object CMakeFiles/auto_save_round_coordinator_test.dir/auto_save_round_coordinator_test.cpp.obj
+[254/345] Building CXX object CMakeFiles/filesaver_round_boundary_test.dir/filesaver_round_boundary_test.cpp.obj
+[255/345] Building CXX object CMakeFiles/auto_save_round_coordinator_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp.obj
+[256/345] Building CXX object paimage_core/CMakeFiles/paimage_discovery_checks.dir/paimage_discovery_checks_autogen/mocs_compilation.cpp.obj
+[257/345] Building CXX object CMakeFiles/count_boundary_save_binding_test.dir/count_boundary_save_binding_test_autogen/mocs_compilation.cpp.obj
+[258/345] Building CXX object CMakeFiles/auto_save_round_coordinator_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/FileSaver.cpp.obj
+[259/345] Building CXX object paimage_core/CMakeFiles/paimage_discovery_socket_checks.dir/paimage_discovery_socket_checks_autogen/mocs_compilation.cpp.obj
+[260/345] Building CXX object CMakeFiles/count_boundary_save_binding_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FrontendPreprocessor.cpp.obj
+[261/345] Building CXX object paimage_core/CMakeFiles/paimage_core_checks.dir/paimage_core_checks_autogen/mocs_compilation.cpp.obj
+[262/345] Building CXX object CMakeFiles/count_boundary_save_binding_test.dir/463ad074272197c0df67b7ca9f83db4e/src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp.obj
+[263/345] Building CXX object paimage_core/CMakeFiles/paimage_output_checks.dir/paimage_output_checks_autogen/mocs_compilation.cpp.obj
+[264/345] Building CXX object CMakeFiles/motor_scan_linkage_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingBlockAssembler.cpp.obj
+[265/345] Building CXX object paimage_core/CMakeFiles/physical_round_normalizer_test.dir/physical_round_normalizer_test_autogen/mocs_compilation.cpp.obj
+[266/345] Building CXX object paimage_core/CMakeFiles/paimage_control_checks.dir/paimage_control_checks_autogen/mocs_compilation.cpp.obj
+[267/345] Building CXX object CMakeFiles/motor_scan_linkage_test.dir/motor_scan_linkage_test_autogen/mocs_compilation.cpp.obj
+[268/345] Building CXX object paimage_core/CMakeFiles/paimage_socket_replay.dir/paimage_socket_replay_autogen/mocs_compilation.cpp.obj
+[269/345] Building CXX object paimage_core/CMakeFiles/paimage_output_checks.dir/output_checks.cpp.obj
+[270/345] Building CXX object paimage_core/CMakeFiles/paimage_core_checks.dir/core_checks.cpp.obj
+[271/345] Building CXX object paimage_core/CMakeFiles/paimage_trace_checks.dir/paimage_trace_checks_autogen/mocs_compilation.cpp.obj
+[272/345] Building CXX object CMakeFiles/count_boundary_save_binding_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/FramePublisher.cpp.obj
+[273/345] Building CXX object CMakeFiles/count_boundary_save_binding_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/FileSaver.cpp.obj
+[274/345] Building CXX object paimage_core/CMakeFiles/paimage_worker_checks.dir/paimage_worker_checks_autogen/mocs_compilation.cpp.obj
+[275/345] Building CXX object paimage_core/CMakeFiles/paimage_protocol_checks.dir/paimage_protocol_checks_autogen/mocs_compilation.cpp.obj
+[276/345] Building CXX object paimage_core/CMakeFiles/physical_round_normalizer_test.dir/physical_round_normalizer_test.cpp.obj
+[277/345] Building CXX object CMakeFiles/motor_scan_linkage_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MotorScanLinkage.cpp.obj
+[278/345] Building CXX object paimage_core/CMakeFiles/paimage_conversion_checks.dir/paimage_conversion_checks_autogen/mocs_compilation.cpp.obj
+[279/345] Building CXX object paimage_core/CMakeFiles/paimage_control_checks.dir/control_checks.cpp.obj
+[280/345] Building CXX object paimage_core/CMakeFiles/paimage_looplog_checks.dir/paimage_looplog_checks_autogen/mocs_compilation.cpp.obj
+[281/345] Building CXX object CMakeFiles/motor_scan_linkage_test.dir/motor_scan_linkage_test.cpp.obj
+[282/345] Linking CXX executable ring_signal_enhancer_test.exe
+[283/345] Linking CXX executable ring_enhancer_bench.exe
+[284/345] Linking CXX executable ring_enhancer_parity_test.exe
+[285/345] Building CXX object CMakeFiles/count_boundary_save_binding_test.dir/count_boundary_save_binding_test.cpp.obj
+[286/345] Building CXX object CMakeFiles/paimage_trace_bundle_test.dir/paimage_trace_bundle_test.cpp.obj
+[287/345] Linking CXX executable ring_display_mapping_test.exe
+[288/345] Building CXX object CMakeFiles/count_boundary_save_binding_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/HostOutput.cpp.obj
+[289/345] Building CXX object paimage_core/CMakeFiles/paimage_trace_checks.dir/trace_checks.cpp.obj
+[290/345] Building CXX object CMakeFiles/count_boundary_save_binding_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/DataProcessor.cpp.obj
+[291/345] Linking CXX executable ring_block_assembler_test.exe
+[292/345] Linking CXX executable imaging_bypass_test.exe
+[293/345] Linking CXX executable timeout_presentation_test.exe
+[294/345] Linking CXX executable ring_shm_observability_test.exe
+[295/345] Building CXX object paimage_core/CMakeFiles/paimage_conversion_checks.dir/conversion_checks.cpp.obj
+[296/345] Building CXX object CMakeFiles/paimage_trace_bundle_test.dir/97dfdc858e1866cf6b1fda67cacf119e/delivery/src/PaimageAcquisition/TraceBundle.cpp.obj
+[297/345] Linking CXX executable process_scheduling_test.exe
+[298/345] Building CXX object paimage_core/CMakeFiles/paimage_worker_checks.dir/worker_checks.cpp.obj
+[299/345] Linking CXX executable ring_production_blockers_test.exe
+[300/345] Building CXX object paimage_core/CMakeFiles/paimage_looplog_checks.dir/looplog_checks.cpp.obj
+[301/345] Linking CXX executable data_processor_imaging_isolation_test.exe
+[302/345] Linking CXX executable ring_display_render_test.exe
+[303/345] Building CXX object paimage_core/CMakeFiles/paimage_discovery_checks.dir/discovery_checks.cpp.obj
+[304/345] Linking CXX executable network_ingress_observability_test.exe
+[305/345] Linking CXX executable frontend_preprocessor_test.exe
+[306/345] Linking CXX executable measurement_session_transaction_test.exe
+[307/345] Linking CXX executable card_status_formatting_test.exe
+[308/345] Linking CXX executable round_policy_settings_test.exe
+[309/345] Linking CXX executable network_snapshot_test.exe
+[310/345] Building CXX object paimage_core/CMakeFiles/paimage_discovery_socket_checks.dir/discovery_socket_checks.cpp.obj
+[311/345] Building CXX object paimage_core/CMakeFiles/paimage_protocol_checks.dir/protocol_checks.cpp.obj
+[312/345] Linking CXX executable session_boundary_test.exe
+[313/345] Building CXX object paimage_core/CMakeFiles/paimage_socket_replay.dir/socket_replay.cpp.obj
+[314/345] Linking CXX executable data_processor_batch_test.exe
+[315/345] Linking CXX executable session_boundary_receiver_test.exe
+[316/345] Linking CXX executable ring_round_ui_state_test.exe
+[317/345] Linking CXX executable ring_round_identity_test.exe
+[318/345] Linking CXX executable motor_scan_linkage_test.exe
+[319/345] Linking CXX executable auto_save_round_coordinator_test.exe
+[320/345] Linking CXX executable paimage_start_fence_regression_test.exe
+[321/345] Linking CXX executable paimage_start_overflow_test.exe
+[322/345] Linking CXX executable paimage_core\paimage_output_checks.exe
+[323/345] Linking CXX executable paimage_core\physical_round_normalizer_test.exe
+[324/345] Linking CXX executable paimage_start_race_test.exe
+[325/345] Linking CXX executable paimage_core\paimage_core_checks.exe
+[326/345] Linking CXX executable paimage_core\paimage_trace_checks.exe
+[327/345] Linking CXX executable paimage_core\paimage_control_checks.exe
+[328/345] Linking CXX executable paimage_core\paimage_worker_checks.exe
+[329/345] Linking CXX executable diagnostic_recorder_test.exe
+[330/345] Linking CXX executable diagnostic_time_window_test.exe
+[331/345] Linking CXX executable paimage_core\paimage_conversion_checks.exe
+[332/345] Linking CXX executable paimage_core\paimage_looplog_checks.exe
+[333/345] Linking CXX executable diagnostic_dialog_test.exe
+[334/345] Linking CXX executable filesaver_round_boundary_test.exe
+[335/345] Linking CXX executable paimage_core\paimage_protocol_checks.exe
+[336/345] Linking CXX executable paimage_core\paimage_socket_replay.exe
+[337/345] Linking CXX executable count_boundary_save_binding_test.exe
+[338/345] Linking CXX executable paimage_host_output_test.exe
+[339/345] Building CXX object CMakeFiles/paimage_trace_bundle_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/DiagnosticRecorder.cpp.obj
+[340/345] Linking CXX executable paimage_core\paimage_discovery_checks.exe
+[341/345] Linking CXX executable paimage_core\paimage_discovery_socket_checks.exe
+[342/345] Linking CXX executable paimage_trace_bundle_test.exe
+[343/345] Linking CXX executable network_diagnostics_test.exe
+[344/345] Linking CXX executable paimage_network_test.exe
+[345/345] Linking CXX executable paimage_production_gap_test.exe
+EXIT_CODE=0

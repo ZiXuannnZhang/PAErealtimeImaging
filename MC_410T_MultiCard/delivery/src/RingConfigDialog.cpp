@@ -264,10 +264,16 @@ void RingConfigDialog::buildUi()
     m_spnTotalAlines->setSingleStep(100); m_spnTotalAlines->setValue(8000);
     m_spnTotalAlines->setToolTip("单圈总A-line数（含双波长）。\n"
         "每通道每波长每圈A-line数 = 单圈总A-line数 / (启用通道数 × 2)");
+    // 电机联动状态行（LabVIEW 参数文件消费状态，只读提示；实际读取在
+    // MainWindow 的 MotorScanLinkageMonitor，这里只显示最新状态文本）。
+    m_lblMotorLinkage = new QLabel(QStringLiteral("未联动（等待 motor_scan_params.json）"));
+    m_lblMotorLinkage->setStyleSheet(roStyle);
+    m_lblMotorLinkage->setWordWrap(true);
     m_spnSectorStart = new QDoubleSpinBox; m_spnSectorStart->setRange(-360, 360);
     m_spnSectorStart->setDecimals(1); m_spnSectorStart->setValue(0.0);
     m_spnSectorStart->setToolTip("0° = 9 点钟方向，正值逆时针偏转。");
     fCh->addRow("单圈总A-line数(含双波长)", m_spnTotalAlines);
+    fCh->addRow("电机联动(方向/步数)", m_lblMotorLinkage);
     fCh->addRow("首通道扇区起点(°,0=9点钟)", m_spnSectorStart);
     m_spnTimeoutReset = new QDoubleSpinBox; m_spnTimeoutReset->setRange(0, 3600);
     m_spnTimeoutReset->setDecimals(1); m_spnTimeoutReset->setValue(0.0);
@@ -723,9 +729,14 @@ RingReconCudaConfig RingConfigDialog::config() const
     // 单圈总A-line数(含双波长) → 每通道每波长每圈A-line数
     cfg.alinesPerChannelPerFrame = (cnt > 0) ? m_spnTotalAlines->value() / (cnt * 2) : 0;
     cfg.alinesPerFrame = m_spnTotalAlines->value();
-    // 扇区起点 UI 语义：0 = 9 点钟方向（标准角度 180°），正值逆时针偏转
-    cfg.sectorStartDeg = 180.0 + m_spnSectorStart->value();
-    cfg.sectorCcw = 1;
+    // 扇区起点 UI 语义：0 = 9 点钟方向（标准角度 180°），正值逆时针偏转；
+    // 电机联动方向已应用时起点随方向同步：逆=九点钟(180°)、顺=三点钟(0°)，
+    // 未联动时保持 UI 原逻辑（默认 0 → 九点钟，逆时针重建 = 历史固定行为）。
+    cfg.sectorStartDeg = m_motorStartLinked
+        ? m_motorStartDeg : (180.0 + m_spnSectorStart->value());
+    // 扫描方向（电机联动）：1 = 逆时针（历史唯一取值=现状行为），0 = 顺时针；
+    // 由 MainWindow 的 MotorScanLinkageMonitor 写入，无联动输入时保持默认 1。
+    cfg.sectorCcw = m_motorSectorCcw;
     cfg.triggerWlOdd = 1;
     cfg.timeoutResetSec = m_spnTimeoutReset->value();
 
@@ -969,6 +980,52 @@ bool RingConfigDialog::applyConfig()
 quint64 RingConfigDialog::startupFilterTriggerCount() const
 {
     return static_cast<quint64>(m_spnStartupFilterTriggers->value());
+}
+
+// ══ 电机参数联动（LabVIEW → 本程序）：读取/校验/写入接口 ══
+
+int RingConfigDialog::enabledChannelCount() const
+{
+    int cnt = 0;
+    for (int c = 0; c < 8; ++c)
+        if (m_chkCh[c]->isChecked()) ++cnt;
+    return cnt;
+}
+
+void RingConfigDialog::setMotorScanDirection(bool ccw)
+{
+    m_motorSectorCcw = ccw ? 1 : 0;
+    // 起点角随扫描方向同步：逆时针=九点钟(标准角 180°)、顺时针=三点钟(0°)。
+    m_motorStartDeg = ccw ? 180.0 : 0.0;
+    m_motorStartLinked = true;
+}
+
+QString RingConfigDialog::validateMotorScanTotalAlines(int totalAlines) const
+{
+    const int cnt = enabledChannelCount();
+    if (cnt == 0)
+        return QStringLiteral("未勾选任何通道");
+    if (totalAlines % (cnt * 2) != 0)
+        return QStringLiteral("单圈总A-line数 %1 无法按 %2 个通道 × 2 个波长整除")
+                   .arg(totalAlines).arg(cnt);
+    const int k = totalAlines / (cnt * 2);
+    if (k < 2)
+        return QStringLiteral("换算后每通道每波长每圈A-line数 K=%1 过小（至少 2）").arg(k);
+    const int blockWl = m_spnBlock->value() / 2;   // 每块单波长A-line数
+    if (k % blockWl != 0)
+        return QStringLiteral("K=%1 需能被每块单波长A-line数 %2 整除").arg(k).arg(blockWl);
+    return QString();
+}
+
+void RingConfigDialog::setMotorScanTotalAlines(int totalAlines)
+{
+    m_spnTotalAlines->setValue(totalAlines);
+}
+
+void RingConfigDialog::setMotorScanLinkageStatus(const QString &status)
+{
+    if (m_lblMotorLinkage)
+        m_lblMotorLinkage->setText(status);
 }
 
 bool RingConfigDialog::disableCountBoundary() const

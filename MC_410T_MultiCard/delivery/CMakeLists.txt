@@ -57,6 +57,7 @@ set(SOURCES
     src/RingImageWidget.cpp
     src/RingColorBarWidget.cpp
     src/RingBlockAssembler.cpp
+    src/MotorScanLinkage.cpp
     src/RingRoundUiState.cpp
     src/RingRoundPresentation.cpp
     src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp
@@ -95,6 +96,7 @@ set(HEADERS
     include/RingImageWidget.h
     include/RingColorBarWidget.h
     include/RingBlockAssembler.h
+    include/MotorScanLinkage.h
     include/RoundIdentity.h
     include/RingRoundIdentity.h
     include/RingRoundPresentation.h

@@ -1,0 +1,4 @@
+Internal ctest changing into directory: D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/build/tests_mingw_debug
+Test project D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/build/tests_mingw_debug
+No tests were found!!!
+EXIT_CODE=0

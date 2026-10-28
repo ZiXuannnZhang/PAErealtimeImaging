@@ -17,7 +17,8 @@ void RingBlockAssembler::configure(const int enabledChannels[8],
                                    int perChannelBlock, int sampDepth,
                                    double sectorStartDeg, double sectorWidthDeg,
                                    double stepDeg, int perChannelFrame,
-                                   int triggerWlOdd, double timeoutResetSec)
+                                   int triggerWlOdd, double timeoutResetSec,
+                                   int sectorCcw)
 {
     m_channelCount = 0;
     m_allMask = 0;
@@ -38,6 +39,7 @@ void RingBlockAssembler::configure(const int enabledChannels[8],
     m_perChannelFrame = perChannelFrame;
     m_triggerWlOdd = triggerWlOdd;
     m_timeoutResetSec = timeoutResetSec;
+    m_sectorCcw = sectorCcw ? 1 : 0;
     m_lastTriggerUs.store(0, std::memory_order_relaxed);
     m_configured = m_channelCount > 0 && perChannelBlock > 0 && sampDepth > 0;
     reset();
@@ -370,8 +372,11 @@ void RingBlockAssembler::appendCompletedTrigger(const PendingTrigger &pt)
         std::memcpy(m_raw.data() + (static_cast<size_t>(base) + s) * m_sampDepth,
                     pt.lines[ch].data(),
                     static_cast<size_t>(m_sampDepth) * sizeof(float));
+        // 扫描方向（电机联动）：逆时针 k 项取 +（历史唯一取值），顺时针取 −，
+        // 即顺时针扫描的整圈图像为逆时针结果的镜像；扇区分配 s 项与方向无关。
+        const double dirSign = m_sectorCcw ? 1.0 : -1.0;
         const double angle = m_sectorStartDeg + s * m_sectorWidthDeg
-                           + (isWl1 ? k : kNext) * m_stepDeg;
+                           + dirSign * (isWl1 ? k : kNext) * m_stepDeg;
         m_angles[base + s] = static_cast<float>(angle);
         m_channels[base + s] = static_cast<uint8_t>(ch);
     }
