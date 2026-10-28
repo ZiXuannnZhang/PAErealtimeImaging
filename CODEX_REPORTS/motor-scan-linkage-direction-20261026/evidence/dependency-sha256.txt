@@ -1,0 +1,11 @@
+pa_recon_core.dll            c1a37e73147c1b8250f96ccdc1fcfc08ca28cecbf1cb3c046d4ab426f2ea0893
+cufft64_12.dll               2480d8ab849d7e9a375275f6c0278b8764c14ac0c1a3bdacaf256ae4a93c5590
+ring_recon_cuda.dll          bf40472d5a46363a35dd1084a01a8c15f13ef203f3ed5b4bb5edf767eeec14b5
+cudart64_12.dll              c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344
+libzmq-v141-mt-4_3_5.dll     37610023d91951bc4177db1f96b54b28911976ac70b221a852887709a02a9ad3
+
+# executables in build/mingw_debug/bin
+PAimageReceiverDiagnostics.exe   e897e57fb68e4ee430b1e89296bec9b83b0b4edfe5df9b682218ba0dd2f64d32
+ImagingSvc.exe                   6398984d2e8c6efd67e24842341de2612fb123d2aa5bb2c5233d4582c64263de
+ring_svc_selftest.exe            7e2b105924221b3ac5b5b04625f9ff3709055056c5a461aa531ca53235e6240e
+ring_udp_replay.exe              70df6f141d7d6421664a28aa0f27e60c23409b755ac60dafa8a924728461c115

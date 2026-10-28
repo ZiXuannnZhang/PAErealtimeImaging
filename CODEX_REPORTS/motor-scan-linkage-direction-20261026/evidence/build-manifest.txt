@@ -1,0 +1,29 @@
+# Build manifest — motor scan linkage (direction + latch), BUILD_STANDARD §12
+repository        : https://github.com/ZiXuannnZhang/PAErealtimeImaging
+branch            : codex/motor-scan-linkage-direction-20261029-0048
+commit sha        : 04e348b96b0e6b6c3ab5484d4a6c2b3bb1f270f8
+tracked tree clean: yes (git status --porcelain --untracked-files=no -> empty)
+build time        : 2026-10-29 00:49-00:52 (UTC+8)
+build host        : DESKTOP-QSQFFOV / Microsoft Windows 11 专业版
+configure preset  : mingw-debug (CMakePresets.json, via canonical script)
+build preset      : mingw-debug-build
+build script      : MC_410T_MultiCard/delivery/build_mingw_debug.cmd  (exit 0)
+cmake             : 3.30.5
+ninja             : 1.12.1
+compiler          : GNU g++ 13.1.0 (Qt Tools/mingw1310_64)
+qt                : 6.8.0 mingw_64
+c++ standard      : C++17
+zeromq (USE_ZEROMQ): ON, MC_410T_MultiCard/delivery/third_party/zeromq
+ring cuda source  : _migration_pack/prebuilt_cuda/bin (fallback prebuilt, not rebuilt)
+                    RING_RECON_CUDA_BIN=.../_migration_pack/prebuilt_cuda/bin
+                    RING_RECON_CUDA_IMPORT_LIB=.../_migration_pack/prebuilt_cuda/bin/libring_recon_cuda.dll.a
+cuda runtime      : cudart64_12.dll / cufft64_12.dll from the same prebuilt pack
+build identity    : generated/PaimageAcquisition/BuildIdentity.h
+                    PAIMAGE_GIT_SHA="04e348b96b0e6b6c3ab5484d4a6c2b3bb1f270f8"
+                    PAIMAGE_TRACKED_DIRTY=false
+                    PAIMAGE_BUILD_TYPE="Debug"
+                    PAIMAGE_COMPILER="GNU 13.1.0"
+native bin        : MC_410T_MultiCard/delivery/build/mingw_debug/bin
+delivery staging  : not produced for this branch (branch content only);
+                    bin/ from the native build dir is the runnable set
+windeployqt       : executed by the build script (Qt runtime + plugins deployed)

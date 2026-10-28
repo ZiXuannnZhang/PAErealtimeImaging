@@ -1,0 +1,15 @@
+# Git receipt — motor scan linkage delivery
+
+repository        : ZiXuannnZhang/PAErealtimeImaging
+branch            : codex/motor-scan-linkage-direction-20261029-0048
+base              : origin/main a8c15cff203da959bd935120605e69dc32ff7145
+code commit       : 04e348b96b0e6b6c3ab5484d4a6c2b3bb1f270f8
+last commit msg   : feat(motor-linkage): LabVIEW motor scan params linkage (direction + step count)
+tracked status    : clean
+
+## ancestry
+git merge-base --is-ancestor origin/main HEAD -> true (branch is a direct descendant of main)
+git rev-list --left-right --count origin/main...HEAD -> ahead 1, behind 0
+
+## push verification
+local HEAD == remote HEAD : recorded in the follow-up receipt commit after push (see below).

@@ -11,6 +11,8 @@
 | `round-identity-history-20260907-16/` | RingBlockAssembler/SHM、PhysicalRound、RoundIdentity 修复与验证 |
 | `session-abcd-closeout-20260918/` | Session A–D 最终执行 receipts / handoff / checklist |
 | `hardware-env-20260914/` | Realtek USB 10GbE 网卡高级属性快照(只读) |
+| `motor-scan-linkage-20261014/` | LabVIEW 电机参数联动初版接入（解析/方向/步数消费点、构建与冒烟证据） |
+| `motor-scan-linkage-direction-20261026/` | 电机联动后续：触发闩锁、计数重置开闸、起点角随方向、方向映射统一 |
 
 ## 适合放入本目录
 

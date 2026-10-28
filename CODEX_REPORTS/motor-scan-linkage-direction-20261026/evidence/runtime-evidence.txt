@@ -1,0 +1,12 @@
+# Runtime evidence — 2026-10-29 00:52:09 run, PAimageReceiverDiagnostics.exe built from 04e348b
+
+## runtime.log (motor linkage lines)
+[seq=14] [2026-10-29T00:52:10.406] [info] [runtime] 电机联动已启用：参数文件 D:/ZZX/ZcodeWorkspace/PAErealtimeimaging/PAErealtimeImaging-src/MC_410T_MultiCard/delivery/build/mingw_debug/bin/motor_scan_params.json
+[seq=18] [2026-10-29T00:52:10.918] [info] [runtime] 电机联动：已联动：顺时针(顺) | XStepsNum=2500 | seq=35
+[seq=21] [2026-10-29T00:52:10.945] [info] [runtime] 电机联动已下发：方向=顺时针(顺) 单圈总A-line数=(未变) 起点角=0°（三点钟）
+
+## events.jsonl (motor_linkage_* events)
+{"category":"ui.action","fields":{"applied":true,"direction":"顺时针(顺)","sectorStartDeg":0,"seq":35,"source":"ui","totalAlines":0,"totalAlinesRule":"directionOnly","writtenAt":"2026/10/28 12:30:59","xStepsNum":2500,"xStepsPerPeriod":2},"message":"motor_linkage_applied","monotonicMs":1341,"runId":"e6e3622c-3aaf-4990-b527-a360ebad9230","sequence":20,"severity":"info","timestamp":"2026-10-29T00:52:10.945"}
+
+## params file consumed
+{"formatVersion":1,"seq":35,"writtenAt":"2026/10/28 12:30:59","source":"LabVIEW:Project:ActiveX:pact-PC-RFSG_V8b_20260618.vi","direction":"CW","xDir":true,"xStepsNum":2500,"xStepsPerPeriod":2}

@@ -1,0 +1,50 @@
+ninja: Entering directory `build/tests_mingw_debug'
+[1/121] Automatic MOC for target ring_signal_enhancer_test
+[2/119] Automatic MOC for target ring_enhancer_bench
+[3/117] Automatic MOC for target ring_enhancer_parity_test
+[4/115] Automatic MOC for target ring_display_mapping_test
+[5/113] Automatic MOC for target ring_display_render_test
+[6/111] Automatic MOC for target ring_block_assembler_test
+[7/110] Automatic MOC for target timeout_presentation_test
+[8/108] Automatic MOC for target imaging_bypass_test
+[9/106] Automatic MOC for target data_processor_imaging_isolation_test
+[10/104] Automatic MOC for target frontend_preprocessor_test
+[11/102] Automatic MOC for target ring_production_blockers_test
+[12/101] Automatic MOC for target diagnostic_recorder_test
+[13/99] Automatic MOC for target ring_shm_observability_test
+[14/97] Automatic MOC for target diagnostic_dialog_test
+[15/95] Automatic MOC for target diagnostic_time_window_test
+[16/93] Automatic MOC for target process_scheduling_test
+[17/91] Automatic MOC for target network_ingress_observability_test
+[18/89] Automatic MOC for target network_snapshot_test
+[19/87] Automatic MOC for target network_diagnostics_test
+[20/85] Automatic MOC for target measurement_session_transaction_test
+[21/83] Automatic MOC for target session_boundary_test
+[22/81] Automatic MOC for target session_boundary_receiver_test
+[23/79] Automatic MOC for target data_processor_batch_test
+[24/77] Automatic MOC for target card_status_formatting_test
+[25/75] Automatic MOC for target round_policy_settings_test
+[26/73] Automatic MOC for target paimage_network_test
+[27/71] Automatic MOC for target paimage_production_gap_test
+[28/69] Automatic MOC for target paimage_start_race_test
+[29/67] Automatic MOC for target paimage_start_fence_regression_test
+[30/65] Automatic MOC for target paimage_start_overflow_test
+[31/63] Automatic MOC for target paimage_host_output_test
+[32/61] Automatic MOC for target filesaver_round_boundary_test
+[33/59] Automatic MOC for target ring_round_ui_state_test
+[34/57] Automatic MOC for target ring_round_identity_test
+[35/55] Automatic MOC for target auto_save_round_coordinator_test
+[36/53] Automatic MOC for target count_boundary_save_binding_test
+[37/51] Automatic MOC for target paimage_trace_bundle_test
+[38/49] Automatic MOC for target motor_scan_linkage_test
+[39/49] Building CXX object CMakeFiles/ring_block_assembler_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingBlockAssembler.cpp.obj
+[40/49] Building CXX object CMakeFiles/ring_production_blockers_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingBlockAssembler.cpp.obj
+[41/49] Building CXX object CMakeFiles/ring_block_assembler_test.dir/ring_block_assembler_test.cpp.obj
+[42/49] Building CXX object CMakeFiles/motor_scan_linkage_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/RingBlockAssembler.cpp.obj
+[43/49] Linking CXX executable ring_block_assembler_test.exe
+[44/49] Building CXX object CMakeFiles/motor_scan_linkage_test.dir/motor_scan_linkage_test_autogen/mocs_compilation.cpp.obj
+[45/49] Building CXX object CMakeFiles/motor_scan_linkage_test.dir/eae08dc71952d1d014636927cb487981/MC_410T_MultiCard/delivery/src/MotorScanLinkage.cpp.obj
+[46/49] Building CXX object CMakeFiles/motor_scan_linkage_test.dir/motor_scan_linkage_test.cpp.obj
+[47/49] Building CXX object CMakeFiles/ring_production_blockers_test.dir/ring_production_blockers_test.cpp.obj
+[48/49] Linking CXX executable motor_scan_linkage_test.exe
+[49/49] Linking CXX executable ring_production_blockers_test.exe

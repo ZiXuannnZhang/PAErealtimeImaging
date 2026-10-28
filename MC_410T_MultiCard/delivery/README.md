@@ -145,7 +145,34 @@ RoundIdentity 是 Ring / UI / service 边界的 ownership key。旧的按固定�
 CUDA rebuild / dependency / delivery 规则不要在本 README 维护第二套版本；
 统一遵循根目录 `BUILD_STANDARD.md`。
 
-## 8. Build
+## 8. 电机扫描参数联动（LabVIEW → 本程序）
+
+电机扫描方向与步数由 LabVIEW 前端经外部桥接写入 `motor_scan_params.json`
+（`formatVersion` 1），本程序每 `PollMs`（默认 500 ms）轮询该文件：
+
+```text
+motor_scan_params.json -> MotorScanLinkageMonitor
+  -> RingConfigDialog（方向 / 单圈总A-line数）
+  -> applyConfig（与用户手改参数完全同一路径）
+  -> RingBlockAssembler(sectorCcw, sectorStartDeg) / ImagingSvc 拼接锚点
+```
+
+方向消费：`sectorCcw` 决定 A-line 角度按 `+k`（逆）还是 `−k`（顺）递增，
+起点角随方向取 180°（九点钟）/ 0°（三点钟）。未联动时保持历史行为
+（`sectorCcw=1`、起点九点钟、逆时针重建）。
+
+触发闩锁：本轮首个触发（`ControlFiltered`）后冻结参数应用，源空闲超时
+（`TimeoutBoundary`）或计数重置（`CountBoundary`）或成像停止后恢复，
+保证同一轮内总 A-line 数/方向不变。冻结期仍读文件并在状态行标注
+「本轮已闩锁」。
+
+INI 组 `[MotorScanLinkage]`：`Enabled`、`ParamsFile`（默认 `<exe目录>` 下）、
+`DirectionInverted`、`TotalAlinesRule`（`perEnabledChannel` / `perPeriod` /
+`directionOnly`）、`PollMs`、`TriggerLatch`，全部有默认值，不配置即可启用。
+写入端契约、方向映射与验证证据见
+`../../CODEX_REPORTS/motor-scan-linkage-direction-20261026/README.md`。
+
+## 9. Build
 
 正式 Windows 默认入口：
 
@@ -170,7 +197,7 @@ ring_svc_selftest.exe
 ring_udp_replay.exe
 ```
 
-## 9. 当前文档入口
+## 10. 当前文档入口
 
 - `docs/README.md` — 当前模块文档索引；
 - `docs/诊断日志导出.md` — 诊断 ZIP 的使用与判读；
