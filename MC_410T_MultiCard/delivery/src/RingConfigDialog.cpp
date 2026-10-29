@@ -30,6 +30,7 @@
 #include <QScrollArea>
 #include <QFrame>
 #include <QMessageBox>
+#include <QFileDialog>
 #include <algorithm>
 
 namespace {
@@ -270,11 +271,23 @@ void RingConfigDialog::buildUi()
     m_lblMotorLinkage->setObjectName(QStringLiteral("motorScanLinkageStatus"));
     m_lblMotorLinkage->setStyleSheet(roStyle);
     m_lblMotorLinkage->setWordWrap(true);
+    m_btnMotorParamsFile = new QPushButton(QStringLiteral("参数文件选择"));
+    m_btnMotorParamsFile->setObjectName(QStringLiteral("motorScanParamsFileButton"));
+    connect(m_btnMotorParamsFile, &QPushButton::clicked, this, [this] {
+        const QString path = QFileDialog::getOpenFileName(this,
+            QStringLiteral("选择电机联动参数文件"), m_motorParamsFile,
+            QStringLiteral("JSON 参数文件 (*.json);;所有文件 (*)"));
+        if (!path.isEmpty()) emit motorScanParamsFileSelected(path);
+    });
+    auto *motorLinkageRow = new QHBoxLayout;
+    motorLinkageRow->setContentsMargins(0, 0, 0, 0);
+    motorLinkageRow->addWidget(m_lblMotorLinkage, 1);
+    motorLinkageRow->addWidget(m_btnMotorParamsFile);
     m_spnSectorStart = new QDoubleSpinBox; m_spnSectorStart->setRange(-360, 360);
     m_spnSectorStart->setDecimals(1); m_spnSectorStart->setValue(0.0);
     m_spnSectorStart->setToolTip("0° = 9 点钟方向，正值逆时针偏转。");
     fCh->addRow("单圈总A-line数(含双波长)", m_spnTotalAlines);
-    fCh->addRow("电机联动(方向/步数)", m_lblMotorLinkage);
+    fCh->addRow("电机联动(方向/步数)", motorLinkageRow);
     fCh->addRow("首通道扇区起点(°,0=9点钟)", m_spnSectorStart);
     m_spnTimeoutReset = new QDoubleSpinBox; m_spnTimeoutReset->setRange(0, 3600);
     m_spnTimeoutReset->setDecimals(1); m_spnTimeoutReset->setValue(0.0);
@@ -1054,6 +1067,13 @@ void RingConfigDialog::setMotorScanLinkageStatus(const QString &status)
 {
     if (m_lblMotorLinkage)
         m_lblMotorLinkage->setText(status);
+}
+
+void RingConfigDialog::setMotorScanParamsFile(const QString &path)
+{
+    m_motorParamsFile = path;
+    m_btnMotorParamsFile->setToolTip(QStringLiteral("当前参数文件：\n%1").arg(path));
+    m_lblMotorLinkage->setToolTip(path);
 }
 
 bool RingConfigDialog::disableCountBoundary() const

@@ -4376,8 +4376,21 @@ void MainWindow::ensureRingConfigDialog()
 {
     if (m_ringConfigDialog) return;
     m_ringConfigDialog = new RingConfigDialog(m_imagingController, this);
-    if (m_motorScanMonitor)
+    if (m_motorScanMonitor) {
         m_ringConfigDialog->setMotorScanLinkageStatus(m_motorScanMonitor->lastStatus());
+        m_ringConfigDialog->setMotorScanParamsFile(m_motorScanMonitor->paramsFile());
+    }
+    connect(m_ringConfigDialog, &RingConfigDialog::motorScanParamsFileSelected,
+            this, [this](const QString &selected) {
+        if (!m_motorScanMonitor) return;
+        const QString path = QDir::fromNativeSeparators(QFileInfo(selected).absoluteFilePath());
+        QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
+        settings.setValue(QStringLiteral("MotorScanLinkage/ParamsFile"), path);
+        settings.sync();
+        m_ringConfigDialog->setMotorScanParamsFile(path);
+        m_motorScanMonitor->setParamsFile(path);
+        logMessage(QStringLiteral("电机联动参数文件已切换：%1").arg(path));
+    });
     // Session B：RingConfigDialog 应用/确定（含成像启动下发）成功后，把当前
     // 物理轮次启动策略转发给当前 NetworkController 的 Session A production API。
     connect(m_ringConfigDialog, &RingConfigDialog::roundPolicyChanged,

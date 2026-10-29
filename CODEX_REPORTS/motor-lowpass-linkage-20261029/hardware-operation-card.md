@@ -4,7 +4,7 @@
 
 ## 接线和参数
 
-1. LabVIEW 打开正在操作的工程和主 VI。发送端桥接的 `outPath` 指向接收端 exe 目录下的 `motor_scan_params.json`。接收端最小 INI 使用 exe 目录默认路径，不导入异机绝对路径。
+1. LabVIEW 打开正在操作的工程和主 VI。发送端桥接的 `outPath` 指向 `motor_scan_params.json`；接收端环形参数窗口中点击电机联动状态右侧“参数文件选择”，浏览选择同一文件。选择的路径会保存并在下次启动恢复；未选择时使用 exe 目录默认路径。
 2. 发送端 `bridge_config.txt` 的 `dirTrueIsCcw=false`；接收端 `DirectionInverted=false`。面板逆应写 `CCW/xDir=false`，顺应写 `CW/xDir=true`。改语义时只翻转一侧映射。
 3. 接收端 `[MotorScanLinkage]`：`Enabled=true`、`TotalAlinesRule=directionOnly`、`TriggerLatch=true`、`PollMs=500`。只联动方向，步数只用于观察，不自动改圈长。源码仍保留显式选择的步数换算模式。
 4. 桥接日志必须显示当前工程面板 `FPWinOpen=True`；仅有旧 JSON 文件不算活链路。包内 sender-bridge-reference 是 handoff 的参考文件，需要现场已有的 LabVIEW、Python/pywin32 环境；启动脚本和路径按现场调整。

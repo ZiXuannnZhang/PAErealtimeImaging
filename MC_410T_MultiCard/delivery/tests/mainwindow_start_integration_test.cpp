@@ -9,6 +9,8 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QFileDialog>
+#include <QPushButton>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QProcess>
@@ -55,6 +57,7 @@ public:
               "test must use isolated INI directory");
         QFile::remove(paimageSettingsPath());
         const QString motorFile = QCoreApplication::applicationDirPath() + "/motor-test.json";
+        const QString selectedMotorFile = QCoreApplication::applicationDirPath() + "/motor-selected.json";
         QFile::remove(motorFile);
         {
             QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
@@ -269,13 +272,63 @@ public:
                 && motorError.contains(QStringLiteral("正在编辑")), "motor update consumed a visible filter draft");
             dialog.reject();
 
+            // Exercise the real browser without bypassing the physical-round gate.
+            { QSaveFile file(selectedMotorFile); check(file.open(QIODevice::WriteOnly), "selected motor file open");
+              file.write("{\"formatVersion\":1,\"direction\":\"CCW\"}"); check(file.commit(), "selected motor file commit"); }
+            paimage::PhysicalRoundNormalizer selectionRound(8, [&](const paimage::PhysicalRoundEvent& event) {
+                window.m_motorScanMonitor->onPhysicalRoundEvent(event);
+            });
+            selectionRound.setStartupFilterTriggerCount(0); selectionRound.beginSession(77);
+            selectionRound.classify(77, 10);
+            auto* fileButton = widget<QPushButton>(dialog, "motorScanParamsFileButton");
+            check(fileButton->text() == QStringLiteral("参数文件选择"), "file picker button label");
+            dialog.show();
+            bool pickerOpened = false;
+            QTimer::singleShot(0, [&] {
+                for (auto* top : QApplication::topLevelWidgets())
+                    if (auto* picker = qobject_cast<QFileDialog*>(top)) {
+                        pickerOpened = true; picker->selectFile(selectedMotorFile);
+                        QMetaObject::invokeMethod(picker, "accept", Qt::QueuedConnection);
+                    }
+            });
+            fileButton->click();
+            check(pickerOpened && window.m_motorScanMonitor->paramsFile() == selectedMotorFile,
+                  "browse selection did not switch the live monitor");
+            check(QSettings(paimageSettingsPath(), QSettings::IniFormat)
+                .value("MotorScanLinkage/ParamsFile").toString() == selectedMotorFile,
+                "selected parameter path not persisted");
+            check(!window.m_motorScanMonitor->applyGateOpen() && controller.ringConfig().sectorCcw == 0,
+                  "file selection bypassed an active round latch");
+            QTimer::singleShot(0, [&] {
+                for (auto* top : QApplication::topLevelWidgets())
+                    if (auto* picker = qobject_cast<QFileDialog*>(top)) picker->reject();
+            });
+            fileButton->click();
+            check(window.m_motorScanMonitor->paramsFile() == selectedMotorFile,
+                  "cancel changed the parameter file");
+            dialog.reject(); selectionRound.timeoutBoundary(77); window.m_motorScanMonitor->tick();
+            check(controller.ringConfig().sectorCcw == 1 && controller.ringConfig().sectorStartDeg == 180,
+                  "selected file was not consumed at the next idle boundary");
+            dialog.show(); QApplication::processEvents();
+            auto* linkageLabel = widget<QLabel>(dialog, "motorScanLinkageStatus");
+            const auto row = linkageLabel->geometry().united(fileButton->geometry());
+            linkageLabel->parentWidget()->grab(QRect(0, row.y()-30,
+                linkageLabel->parentWidget()->width(), row.height()+60))
+                .save(QCoreApplication::applicationDirPath()+"/motor-file-picker.png");
+            dialog.reject();
+            std::cout << "PASS parameter file browser selection/cancel/persistence/active-round latch\n";
         }
+        { MainWindow restarted;
+          check(restarted.m_motorScanMonitor->paramsFile() == selectedMotorFile,
+                "application restart did not restore the selected file"); }
         QFile::remove(paimageSettingsPath());
         QFile::remove(motorFile);
+        QFile::remove(selectedMotorFile);
     }
 };
 
 int main(int argc, char** argv) {
+    QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc, argv);
     try { MainWindowStartIntegrationTest::run(); return 0; }
     catch (const std::exception& e) { std::cerr << "FAIL " << e.what() << '\n'; return 1; }

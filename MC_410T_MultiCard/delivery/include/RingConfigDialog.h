@@ -63,8 +63,10 @@ public:
     void setMotorScanTotalAlines(int totalAlines);
     // 联动状态行（“电机联动”标签文本；未联动/已联动/拒绝原因）。
     void setMotorScanLinkageStatus(const QString &status);
+    void setMotorScanParamsFile(const QString &path);
 
 signals:
+    void motorScanParamsFileSelected(const QString &path);
     // applyConfig 成功（应用/确定/成像启动下发）后发出，由 MainWindow 转发给
     // NetworkController::setStartupFilterTriggerCount / setDisableCountBoundary。
     void roundPolicyChanged(quint64 startupFilterTriggerCount, bool disableCountBoundary);
@@ -103,6 +105,8 @@ private:
     // 未联动时保持 UI 原逻辑（spinbox 默认 0 → 180° → 九点钟起点，逆时针重建）。
     double m_motorStartDeg = 180.0;
     bool   m_motorStartLinked = false;
+    QString m_motorParamsFile;
+    QPushButton *m_btnMotorParamsFile = nullptr;
 
     // 扫描参数
     QSpinBox        *m_spnBlock;

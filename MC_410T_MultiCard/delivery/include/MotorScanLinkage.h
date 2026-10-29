@@ -120,6 +120,8 @@ public:
     explicit MotorScanLinkageMonitor(Settings settings, QObject *parent = nullptr);
 
     void start();
+    QString paramsFile() const { return m_settings.paramsFile; }
+    void setParamsFile(const QString &path); // 主线程切换文件，不改变物理轮闩锁
     // 测试缝：直接驱动一次轮询（生产路径经 QTimer；单测不进事件循环）
     void tick();
     bool fileSeen() const { return m_fileSeen; }

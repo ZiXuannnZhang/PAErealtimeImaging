@@ -13,6 +13,8 @@
 
 ## 修复
 
+参数文件选择（后续界面更新）：电机联动状态栏右侧新增“参数文件选择”按钮，浏览并选择 JSON 参数文件后立即切换监视路径，写入 `MotorScanLinkage/ParamsFile`，下次启动恢复。取消浏览不改变路径。选择文件不解除物理轮闩锁；参数窗口关闭且轮次允许时，才应用新文件参数。按钮及状态栏悬停提示当前完整路径。
+
 1. Normalizer 追加 `RoundStarted=3`（日志 `physical_round_started`），每轮首个新物理 identity 通知一次，与 startupFilter 数量独立；原分类、过滤、计数、timeout、save ownership 不变。迟到重复卡不产生重复通知。
 2. MainWindow 和测试共用 Monitor 的 `onPhysicalRoundEvent`：RoundStarted 关闭应用闸门，CountBoundary/TimeoutBoundary 打开。成像服务停止不再被误当作物理轮结束；监听真正停止或新建监听时恢复闸门。
 3. 闸门关闭与主线程同步下发事务互斥，解决“检查时开闸、下发时已开始下一轮”的窗口；源线程在返回首触发前完成关闸。信号仍由主线程同步消费，自动下发不弹模态参数警告。

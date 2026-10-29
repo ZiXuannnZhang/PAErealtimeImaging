@@ -189,6 +189,16 @@ void MotorScanLinkageMonitor::start()
     if (m_settings.enabled) m_timer.start();
 }
 
+void MotorScanLinkageMonitor::setParamsFile(const QString &path)
+{
+    m_settings.paramsFile = path;
+    m_haveParams = false;
+    m_fileSeen = false;
+    m_pendingApply = true;
+    m_applyError.clear();
+    tick();
+}
+
 void MotorScanLinkageMonitor::setApplyGate(bool open)
 {
     // 触发闩锁关闭时保持旧行为：闸门入口为空操作。
