@@ -41,3 +41,5 @@ canonical 当前入口：
 
 同一阶段高度重复的临时说明会合并成 archive README；原始证据有审计价值时保留。
 完全被后续总结覆盖且没有独有证据价值的临时 handoff/plan 可以从当前树删除，Git history 仍可恢复。
+
+当前联合候选的移植、修复和实机操作卡见 [motor-lowpass-linkage-20261029](motor-lowpass-linkage-20261029/README.md)。

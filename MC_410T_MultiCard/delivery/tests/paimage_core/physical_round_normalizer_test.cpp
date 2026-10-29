@@ -1,3 +1,5 @@
+// Existing boundary/filter event assertions exclude the new RoundStarted notification.
+// Actual RoundStarted -> motor gate integration is covered by motor_scan_linkage_test.
 #include "PaimageAcquisition/PhysicalRoundNormalizer.h"
 
 #include <algorithm>
@@ -25,7 +27,7 @@ int main() {
     // T1: one operational control identity plus N logical identities.
     {
         std::vector<PhysicalRoundEvent> events;
-        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { events.push_back(event); });
+        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { if(event.kind != PhysicalRoundEvent::Kind::RoundStarted) events.push_back(event); });
         normalizer.beginSession(7);
         require(classify(normalizer, 7, 10).decision ==
                     PhysicalTriggerDecision::OperationalStartupControl,
@@ -180,7 +182,7 @@ int main() {
     // T8: a timeout clears a partial logical round and requires a new control.
     {
         std::vector<PhysicalRoundEvent> events;
-        PhysicalRoundNormalizer normalizer(4, [&](const auto& event) { events.push_back(event); });
+        PhysicalRoundNormalizer normalizer(4, [&](const auto& event) { if(event.kind != PhysicalRoundEvent::Kind::RoundStarted) events.push_back(event); });
         normalizer.beginSession(14);
         classify(normalizer, 14, 700);
         classify(normalizer, 14, 701);
@@ -247,7 +249,7 @@ int main() {
     // new operational control and the partial logical count is discarded.
     {
         std::vector<PhysicalRoundEvent> events;
-        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { events.push_back(event); });
+        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { if(event.kind != PhysicalRoundEvent::Kind::RoundStarted) events.push_back(event); });
         normalizer.setTimeoutResetSec(1.0e-6);
         normalizer.beginSession(19);
         classify(normalizer, 19, 100, 1000);
@@ -317,7 +319,7 @@ int main() {
     // later distinct identity therefore observes the original physical gap.
     {
         std::vector<PhysicalRoundEvent> events;
-        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { events.push_back(event); });
+        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { if(event.kind != PhysicalRoundEvent::Kind::RoundStarted) events.push_back(event); });
         normalizer.setTimeoutResetSec(1.0e-6);
         normalizer.beginSession(22);
         classify(normalizer, 22, 130, 1000);
@@ -337,7 +339,7 @@ int main() {
     // uint16 wrap without using numeric trigger order.
     {
         std::vector<PhysicalRoundEvent> events;
-        PhysicalRoundNormalizer normalizer(2, [&](const auto& event) { events.push_back(event); });
+        PhysicalRoundNormalizer normalizer(2, [&](const auto& event) { if(event.kind != PhysicalRoundEvent::Kind::RoundStarted) events.push_back(event); });
         normalizer.setTimeoutResetSec(1.0e-6);
         normalizer.beginSession(23);
         classify(normalizer, 23, 0xffffU, 1000);
@@ -356,7 +358,7 @@ int main() {
     // the CountBoundary observer still fires exactly once.
     {
         std::vector<PhysicalRoundEvent> events;
-        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { events.push_back(event); });
+        PhysicalRoundNormalizer normalizer(3, [&](const auto& event) { if(event.kind != PhysicalRoundEvent::Kind::RoundStarted) events.push_back(event); });
         normalizer.beginSession(24);
         require(classify(normalizer, 24, 900).decision ==
                     PhysicalTriggerDecision::OperationalStartupControl,

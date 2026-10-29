@@ -478,7 +478,7 @@ add_test(NAME filtered_das_off_test COMMAND filtered_das_off_test)
 add_executable(motor_scan_linkage_test
     motor_scan_linkage_test.cpp
     ../src/MotorScanLinkage.cpp ../include/MotorScanLinkage.h
-    ../src/RingBlockAssembler.cpp)
+    ../src/RingBlockAssembler.cpp ../src/PaimageAcquisition/PhysicalRoundNormalizer.cpp)
 target_include_directories(motor_scan_linkage_test PRIVATE ../include)
 target_compile_features(motor_scan_linkage_test PRIVATE cxx_std_17)
 target_link_libraries(motor_scan_linkage_test PRIVATE Qt6::Core)

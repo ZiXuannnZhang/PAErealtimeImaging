@@ -11,6 +11,10 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QTemporaryDir>
+#include <future>
+#include <thread>
+#include <chrono>
+#include <limits>
 
 #include <cmath>
 #include <cstdint>
@@ -384,6 +388,97 @@ void testAssemblerCcwCw(Runner &r)
     r.check(mirrorOk, "CW is the exact mirror of CCW (sum == 0 mod 360)");
 }
 
+void testProductionRoundLatch(Runner &r)
+{
+    r.test = "production_round_latch";
+    for (int filter : {0, 1, 3}) for (bool timeoutOnly : {false, true}) {
+        QTemporaryDir dir;
+        const auto path = dir.filePath("params.json");
+        auto write = [&](const char *direction) {
+            QFile f(path);
+            r.check(f.open(QIODevice::WriteOnly), "write production params");
+            f.write(QByteArray("{\"formatVersion\":1,\"direction\":\"") + direction + "\"}");
+        };
+        MotorScanLinkageMonitor::Settings settings;
+        settings.paramsFile = path;
+        MotorScanLinkageMonitor monitor(settings);
+        int applied = 0, started = 0;
+        QObject::connect(&monitor, &MotorScanLinkageMonitor::linkageParamsChanged,
+                         [&](const Params &) { ++applied; });
+        paimage::PhysicalRoundNormalizer normalizer(4, [&](const paimage::PhysicalRoundEvent &event) {
+            monitor.onPhysicalRoundEvent(event); // shared with MainWindow production wiring
+            if (event.kind == paimage::PhysicalRoundEvent::Kind::RoundStarted) ++started;
+        });
+        normalizer.setStartupFilterTriggerCount(filter);
+        normalizer.setDisableCountBoundary(timeoutOnly);
+        normalizer.beginSession(1);
+        write("CCW"); monitor.tick();
+        r.check(applied == 1, "idle initial apply");
+        normalizer.classify(1, 100, 1000);
+        normalizer.classify(1, 100, 1001); // same physical identity on a late card
+        r.check(started == 1 && !monitor.applyGateOpen(), "first physical trigger latches for every filter policy");
+        write("CW"); monitor.tick();
+        r.check(applied == 1 && monitor.applyPending(), "live round never applies direction");
+        for (int i = 1; i < filter + 4; ++i) normalizer.classify(1, 100 + i, 1000 + i * 10);
+        if (timeoutOnly) {
+            r.check(!monitor.applyGateOpen(), "cap is not a boundary in timeout-only mode");
+            normalizer.timeoutBoundary(1);
+        }
+        r.check(monitor.applyGateOpen(), "count/timeout boundary opens gate");
+        monitor.tick(); monitor.tick();
+        r.check(applied == 2 && !monitor.applyPending(), "boundary applies latest direction once");
+        normalizer.classify(1, 200, 2000);
+        r.check(started == 2 && !monitor.applyGateOpen(), "next round latches again");
+        write("CCW"); monitor.tick();
+        normalizer.timeoutBoundary(1);
+        normalizer.classify(1, 300, 3000); // next scan starts before the 500ms poll
+        monitor.tick();
+        r.check(applied == 2 && monitor.applyPending(), "missed idle poll never updates an active next round");
+        normalizer.timeoutBoundary(1); monitor.tick();
+        r.check(applied == 3, "deferred parameters survive multiple rounds");
+    }
+}
+
+void testRetryAndSerializedApply(Runner &r)
+{
+    r.test = "retry_serialized_apply";
+    QTemporaryDir dir;
+    const auto path = dir.filePath("params.json");
+    { QFile file(path); r.check(file.open(QIODevice::WriteOnly), "write retry params");
+      file.write("{\"formatVersion\":1,\"direction\":\"CW\"}"); }
+    MotorScanLinkageMonitor::Settings settings; settings.paramsFile = path;
+    MotorScanLinkageMonitor monitor(settings);
+    int attempts = 0;
+    std::thread source;
+    std::promise<void> attempted, closed;
+    auto attemptedFuture = attempted.get_future(); auto closedFuture = closed.get_future();
+    QObject::connect(&monitor, &MotorScanLinkageMonitor::linkageParamsChanged,
+                     [&](const Params &) {
+        if (++attempts == 1) {
+            monitor.retryPendingApply(QStringLiteral("invalid draft"));
+            return;
+        }
+        source = std::thread([&] {
+            attempted.set_value(); monitor.setApplyGate(false); closed.set_value();
+        });
+        attemptedFuture.wait();
+        r.check(closedFuture.wait_for(std::chrono::milliseconds(20)) == std::future_status::timeout,
+                "round start cannot cross an in-flight synchronous apply");
+    });
+    monitor.tick();
+    r.check(monitor.applyPending() && monitor.lastStatus().contains("invalid draft"),
+            "rejected input stays pending with honest status");
+    monitor.tick(); source.join();
+    r.check(attempts == 2 && !monitor.applyPending() && !monitor.applyGateOpen(),
+            "same file retries after rejection, then source closes the gate");
+    using namespace motor_scan_linkage;
+    r.check(deriveTotalAlines(TotalAlinesRule::PerPeriod, 100000000, 1000000, 8) == 0,
+            "valid JSON magnitude cannot overflow int conversion");
+    r.check(deriveTotalAlines(TotalAlinesRule::PerEnabledChannel,
+                            std::numeric_limits<int>::max(), 1, 8) == 0,
+            "channel multiplication rejects overflow");
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -398,6 +493,8 @@ int main(int argc, char **argv)
     testMonitor(runner);
     testMonitorTriggerLatch(runner);
     testAssemblerCcwCw(runner);
+    testProductionRoundLatch(runner);
+    testRetryAndSerializedApply(runner);
 
     if (!runner.ok) {
         std::cerr << "motor_scan_linkage_test FAILED\n";

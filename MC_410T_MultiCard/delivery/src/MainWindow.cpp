@@ -711,8 +711,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_imagingServiceReady.store(false, std::memory_order_release);
         m_ringSnapshotAdmissionBlocked.store(true, std::memory_order_release);
         m_ringResetCommandSent.store(false, std::memory_order_release);
-        // 成像服务已停止：解冻电机参数联动闸门，本轮已结束，参数可再应用。
-        if (m_motorScanMonitor) m_motorScanMonitor->setApplyGate(true);
+        // 服务停止不代表物理轮结束；闩锁仍由采集轮次/监听生命周期拥有。
         if (m_imagingBypass) m_imagingBypass->setServiceReady(false);
         m_ringAssemblerConfigured = false;
         { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
@@ -2301,6 +2300,12 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     saveSettings();  // 持久化自动识别的卡数
 
     m_netController = new NetworkController(this);
+    if (m_motorScanMonitor) m_motorScanMonitor->setApplyGate(true);
+    connect(m_netController, &NetworkController::stopped, this,
+            [this, controller = m_netController]() {
+        if (m_netController == controller && m_motorScanMonitor)
+            m_motorScanMonitor->setApplyGate(true);
+    });
     m_netController->setDiagnosticContext(
         m_diagnosticListenId,
         targetSourceKind);
@@ -2334,20 +2339,8 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
         });
     m_netController->setPhysicalRoundBoundarySink(
         [this](const paimage::PhysicalRoundEvent& event) {
-            // 电机参数联动触发闩锁：只决定“何时应用”联动参数，不改动任何
-            // 超时/计数重置语义。回调运行在采集侧线程，setApplyGate 内部为原子标志。
-            //   本轮首个触发（ControlFiltered = 扫描头部控制触发）→ 冻结，
-            //     本轮不再刷新联动参数；
-            //   源空闲超时（TimeoutBoundary = 扫描间隔）或计数重置
-            //     （CountBoundary = 达到每圈设计触发数的轮次边界）→ 解冻，
-            //     下一轮开始前可再取一次文件参数。
-            if (m_motorScanMonitor) {
-                if (event.kind == paimage::PhysicalRoundEvent::Kind::ControlFiltered)
-                    m_motorScanMonitor->setApplyGate(false);
-                else if (event.kind == paimage::PhysicalRoundEvent::Kind::TimeoutBoundary
-                         || event.kind == paimage::PhysicalRoundEvent::Kind::CountBoundary)
-                    m_motorScanMonitor->setApplyGate(true);
-            }
+            // RoundStarted 不依赖 startupFilter 数量，首物理触发返回前关闸。
+            if (m_motorScanMonitor) m_motorScanMonitor->onPhysicalRoundEvent(event);
             if (event.kind == paimage::PhysicalRoundEvent::Kind::CountBoundary) {
                 // Allocate and publish the next data binding synchronously on
                 // the source boundary.  The old-round identity is the key of
@@ -4383,6 +4376,8 @@ void MainWindow::ensureRingConfigDialog()
 {
     if (m_ringConfigDialog) return;
     m_ringConfigDialog = new RingConfigDialog(m_imagingController, this);
+    if (m_motorScanMonitor)
+        m_ringConfigDialog->setMotorScanLinkageStatus(m_motorScanMonitor->lastStatus());
     // Session B：RingConfigDialog 应用/确定（含成像启动下发）成功后，把当前
     // 物理轮次启动策略转发给当前 NetworkController 的 Session A production API。
     connect(m_ringConfigDialog, &RingConfigDialog::roundPolicyChanged,
@@ -5533,19 +5528,27 @@ void MainWindow::startMotorScanLinkage()
 
 void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &params)
 {
+    if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() != 1) {
+        m_motorScanMonitor->retryPendingApply(QStringLiteral("等待环形成像模式"));
+        return;
+    }
     // 对话框是这些参数的唯一权威载体：联动值推入对话框控件，之后与用户手改
     // 参数完全同路径（applyConfig 校验+下发；含每圈设计触发数与运行中自动重启）。
     ensureRingConfigDialog();
+    if (m_ringConfigDialog->isVisible()) {
+        m_motorScanMonitor->retryPendingApply(QStringLiteral("参数窗口正在编辑，关闭后应用电机参数"));
+        return;
+    }
+    m_ringConfigDialog->setAcquisitionParams(m_sampleIntervalNs, ui->edtDataTime->text().toInt());
 
     QJsonObject fields;
     fields[QStringLiteral("seq")] = static_cast<double>(params.seq);
     fields[QStringLiteral("writtenAt")] = params.writtenAt;
-    fields[QStringLiteral("source")] = params.source;
+    fields[QStringLiteral("paramsSource")] = params.source;
 
     // 方向：逆=true → sectorCcw=1（与历史硬编码取值一致，现状行为保持）；
     // 顺=false → sectorCcw=0（整圈图像镜像 + 拼接扇区锚点前移一扇区）。
     if (params.hasDirection) {
-        m_ringConfigDialog->setMotorScanDirection(params.directionCcw);
         fields[QStringLiteral("direction")] = motor_scan_linkage::describeDirection(
             params.directionCcw);
     }
@@ -5561,6 +5564,11 @@ void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &para
         fields[QStringLiteral("xStepsPerPeriod")] = params.xStepsPerPeriod;
         fields[QStringLiteral("totalAlinesRule")] =
             motor_scan_linkage::totalAlinesRuleKey(m_motorTotalAlinesRule);
+        if (m_motorTotalAlinesRule != motor_scan_linkage::TotalAlinesRule::DirectionOnly
+                && totalAlines <= 0) {
+            m_motorScanMonitor->retryPendingApply(QStringLiteral("步数换算缺少输入或超出整数范围"));
+            return;
+        }
     }
 
     bool applyDirection = params.hasDirection
@@ -5573,8 +5581,8 @@ void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &para
             recordDiagnosticAction(QStringLiteral("motor_linkage_rejected"), fields);
             logMessage(QStringLiteral("电机联动拒绝单圈总A-line数 %1：%2")
                            .arg(totalAlines).arg(err));
-            m_ringConfigDialog->setMotorScanLinkageStatus(
-                QStringLiteral("联动拒绝：%1").arg(err));
+            m_motorScanMonitor->retryPendingApply(err);
+            return;
         } else {
             applyTotal = totalAlines != m_motorTotalAlinesApplied;
         }
@@ -5584,11 +5592,13 @@ void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &para
         return;   // 联动值无变化：不重复下发
     }
 
-    if (applyTotal)
-        m_ringConfigDialog->setMotorScanTotalAlines(totalAlines);
     // 与用户手点“应用”完全同路径：校验+configureRing+每圈触发数/掩膜下发；
     // 正在成像时由既有 ringConfigChangedWhileRunning 流程自动重启服务。
-    if (!m_ringConfigDialog->applyConfig()) {
+    QString applyError;
+    if (!m_ringConfigDialog->applyMotorScanParams(params.hasDirection, params.directionCcw,
+                                                applyTotal ? totalAlines : 0, &applyError)) {
+        m_motorScanMonitor->retryPendingApply(applyError);
+        fields[QStringLiteral("rejectReason")] = applyError;
         recordDiagnosticAction(QStringLiteral("motor_linkage_apply_failed"), fields);
         return;
     }

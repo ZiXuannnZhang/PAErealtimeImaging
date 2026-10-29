@@ -1,3 +1,5 @@
+// Existing boundary/filter event assertions exclude the new RoundStarted notification.
+// Actual RoundStarted -> motor gate integration is covered by motor_scan_linkage_test.
 #include "PaimageAcquisition/HostOutput.h"
 #include "FrontendPreprocessor.h"
 #include "AcqConfig.h"
@@ -144,7 +146,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         DataProcessor processor(0,nullptr,nullptr,config,
             [stage=frontends.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
         HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,3,
-            [&](const PhysicalRoundEvent& event){roundEvents.push_back(event);});
+            [&](const PhysicalRoundEvent& event){if(event.kind != PhysicalRoundEvent::Kind::RoundStarted) roundEvents.push_back(event);});
         wireFrontends(output,frontends);
         output.beginSession(77);output.start();
         const auto save=output.startSaving(root.path(),100,"normalized");
@@ -218,7 +220,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         DataProcessor processor(0,nullptr,nullptr,config,
             [stage=frontends.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
         HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,3,
-            [&](const PhysicalRoundEvent& event){roundEvents.push_back(event);},1.0e-6);
+            [&](const PhysicalRoundEvent& event){if(event.kind != PhysicalRoundEvent::Kind::RoundStarted) roundEvents.push_back(event);},1.0e-6);
         wireFrontends(output,frontends);
         output.beginSession(79);output.start();
         const auto save=output.startSaving(root.path(),100,"timeout");
@@ -303,7 +305,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         DataProcessor processor(0,nullptr,nullptr,config,
             [stage=frontends.back().get()](const TriggerGroupPtr& frame){return stage->submit(frame);});
         HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,4,
-            [&](const PhysicalRoundEvent& event){roundEvents.push_back(event);},5.0);
+            [&](const PhysicalRoundEvent& event){if(event.kind != PhysicalRoundEvent::Kind::RoundStarted) roundEvents.push_back(event);},5.0);
         wireFrontends(output,frontends);
         output.beginSession(80);output.start();
         std::atomic<bool> sawAssemblyTimeout{false};

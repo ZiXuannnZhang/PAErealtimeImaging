@@ -184,6 +184,8 @@ PhysicalRoundClassification PhysicalRoundNormalizer::classify(
         result.newDistinct = true;
         ++physicalDistinctObserved_;
         ++currentPhysicalDistinctCount_;
+        if (currentPhysicalDistinctCount_ == 1)
+            events.push_back(eventLocked(PhysicalRoundEvent::Kind::RoundStarted, triggerSeq));
 
         // Frame timestamps are monotonic ingress timestamps. Do not move the
         // anchor backwards if a malformed/out-of-order source timestamp is
@@ -388,6 +390,8 @@ const char* physicalRoundStateName(PhysicalRoundState state) {
 
 const char* physicalRoundEventName(PhysicalRoundEvent::Kind kind) {
     switch (kind) {
+    case PhysicalRoundEvent::Kind::RoundStarted:
+        return "physical_round_started";
     case PhysicalRoundEvent::Kind::ControlFiltered:
         return "round_control_filtered";
     case PhysicalRoundEvent::Kind::CountBoundary:

@@ -1,0 +1,87 @@
+{
+  "sha": "a16264acba3cf17e6b8e31e1bc96b78d419fea42",
+  "baseline": "3340fbff5ed93ff2ba87b496275e663e877fa693",
+  "branch": "codex/ring-lowpass-motor-linkage-20261029",
+  "tracked_clean": false,
+  "commands": [
+    {
+      "name": "list",
+      "command": [
+        "D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\ctest.exe",
+        "--test-dir",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\filtered_das_tests",
+        "-N"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\motor-lowpass\\dev-validate-list.txt",
+      "exit_code": 0,
+      "seconds": 0.09400000001187436
+    },
+    {
+      "name": "regression",
+      "command": [
+        "D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\ctest.exe",
+        "--test-dir",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\filtered_das_tests",
+        "-V",
+        "--timeout",
+        "120"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\motor-lowpass\\dev-validate-regression.txt",
+      "exit_code": 0,
+      "seconds": 118.04699999999139
+    },
+    {
+      "name": "main-entry",
+      "command": [
+        "D:\\Qt\\Qt6.8.0\\Tools\\CMake_64\\bin\\ctest.exe",
+        "--test-dir",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug",
+        "-V",
+        "-R",
+        "^mainwindow_start_integration_test$"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\motor-lowpass\\dev-validate-main-entry.txt",
+      "exit_code": 0,
+      "seconds": 59.51600000000326
+    },
+    {
+      "name": "selftest",
+      "command": [
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+        "--synthetic",
+        "1",
+        "--samples",
+        "5000",
+        "--id",
+        "14",
+        "--channels",
+        "3",
+        "--block",
+        "200",
+        "--rounds",
+        "1",
+        "--grid-mm",
+        ".2",
+        "--timevar-lowpass",
+        "on",
+        "--filtered-das",
+        "on",
+        "--benchmark-blocks",
+        "2",
+        "--no-save",
+        "1",
+        "--svc",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ImagingSvc.exe",
+        "--out",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\motor-lowpass\\dev-selftest"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging",
+      "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\motor-lowpass\\dev-validate-selftest.txt",
+      "exit_code": 0,
+      "seconds": 7.235000000000582
+    }
+  ]
+}

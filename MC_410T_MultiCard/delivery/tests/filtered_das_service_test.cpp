@@ -45,7 +45,11 @@ struct RingTimevarServiceTest {
                 {"alinesPerFrame",channels*perCh*4},{"enabledChannels",enabled},{"sysDelayPerChannel",delays},
                 {"fov",.002},{"gridSize",.0001},{"dbrSigRemove",1},{"maskLength",300},{"delayCut",1},
                 {"singalImpair",1},{"imValue",QJsonArray{.3,.4}},{"shiftWL2",1}};
-            for(int tv:{0,1})for(int fd:{0,1}) {
+            for(int ccw:{1,0})for(bool splice:{false,true})for(int tv:{0,1})for(int fd:{0,1}) {
+                const double start = ccw ? 180.0 : 0.0;
+                const double sign = ccw ? 1.0 : -1.0;
+                ring["sectorCcw"]=ccw; ring["sectorStartDeg"]=start;
+                ring["multiRadius"]=int(splice); ring["spliceMode"]=int(splice);
                 ring["timevarLowpass"]=QJsonObject{{"enabled",bool(tv)}};
                 ring["filteredDas"]=QJsonObject{{"enabled",bool(fd)},{"batchColumns",2}};
                 svc.processRingConfigure(ring);need(svc.m_ringCuda[0]&&svc.m_ringCuda[1],"configure CUDA");svc.m_running=true;
@@ -57,21 +61,23 @@ struct RingTimevarServiceTest {
                     auto* ch=reinterpret_cast<uint8_t*>(h+1)+ringChannelsOffset(n*lines,lines);
                     for(int j=0;j<perCh;++j)for(int c=0;c<channels;++c) {
                         const int pos=j*channels+c;std::memcpy(a+pos*n,raw.data()+(j*8+c)*n,n*4);
-                        angles[pos]=float(c*360.0/channels+(j/2)*2);ch[pos]=c;
+                        angles[pos]=float(start+c*360.0/channels+sign*(j/2)*2);ch[pos]=c;
                     }
                     shm.unlock();
                 };
                 fill(1);const std::vector<float> input(reinterpret_cast<float*>(h+1),reinterpret_cast<float*>(h+1)+n*lines);
                 svc.processRingPulse(1,1,0,true,{1,0},false);need(svc.m_ringBlockIndex==1,"first block failed");
                 need(!std::memcmp(h+1,input.data(),input.size()*4),"shared/raw input modified");
-                std::vector<float> flat[2],angles[2],radii[2];
+                std::vector<float> flat[2],angles[2],radii[2],sectors[2];
                 for(int c=0;c<channels;++c)for(int w=0;w<2;++w) {
                     const auto expected=read("service_"+std::to_string(tv)+"_c"+std::to_string(c)+"_w"+std::to_string(w)+(fd?"_after.bin":"_before.bin"));
                     const int nt=n-(358+13*w+3*c)+1;need(captured[c][w].size()==3,"column order/count");
                     for(int j=0;j<3;++j) {
                         compare(captured[c][w][j],std::vector<float>(expected.begin()+j*nt,expected.begin()+(j+1)*nt));
                         flat[w].insert(flat[w].end(),expected.begin()+j*nt,expected.begin()+(j+1)*nt);
-                        angles[w].push_back(float(c*360.0/channels+j*2));radii[w].push_back(float(svc.m_ringConfig.radiusPerChannel[c]));
+                        angles[w].push_back(float(start+c*360.0/channels+sign*j*2));
+                        sectors[w].push_back(float(start+(ccw?c:c-1)*360.0/channels));
+                        radii[w].push_back(float(svc.m_ringConfig.radiusPerChannel[c]));
                     }
                     if(w==1)compare(svc.m_ringPrevWL2[c],captured[c][w].back());
                 }
@@ -79,7 +85,11 @@ struct RingTimevarServiceTest {
                 for(int w=0;w<2;++w) {
                     void* ref=nullptr;need(ring_recon_cuda_create(&svc.m_ringConfig,&ref)==0,"reference CUDA create");
                     const int nd=int(angles[w].size()),nt=int(flat[w].size()/nd);
-                    need(ring_recon_cuda_append_angles_radii(ref,flat[w].data(),nt,nd,angles[w].data(),radii[w].data())==0,"reference DAS append");
+                    const int rc=splice
+                        ? ring_recon_cuda_append_angles_radii_sector(ref,flat[w].data(),nt,nd,
+                            angles[w].data(),radii[w].data(),sectors[w].data(),float(360.0/channels))
+                        : ring_recon_cuda_append_angles_radii(ref,flat[w].data(),nt,nd,angles[w].data(),radii[w].data());
+                    need(rc==0,"reference DAS append");
                     std::vector<float> image(frame);need(ring_recon_cuda_snapshot(ref,20,1,image.data())==0,"reference snapshot");
                     compare(w?svc.m_ringDisplay1:svc.m_ringDisplay0,image);ring_recon_cuda_destroy(ref);
                 }
@@ -123,7 +133,7 @@ struct RingTimevarServiceTest {
                     need(oldTv==ring_timevar::toJson(svc.m_ringTimevarConfig)&&oldFd==filtered_das::toJson(svc.m_filteredDasConfig),"rejection partially accepted enhancement");
                 }
                 svc.resetRingRecon();need(svc.m_ringBlockIndex==0&&svc.m_ringPrevWL2[0].empty(),"reset retained history");
-                std::cout<<"PASS channels="<<channels<<" timevar="<<tv<<" filtered="<<fd<<"\n";
+                std::cout<<"PASS channels="<<channels<<" ccw="<<ccw<<" splice="<<splice<<" timevar="<<tv<<" filtered="<<fd<<"\n";
             }
         }
         std::cout<<"PASS production four combinations, MATLAB pre-DAS/DAS, actual nt, WL2 once, late failure, atomic configuration worstNormalizedAbs="<<worst<<'\n';

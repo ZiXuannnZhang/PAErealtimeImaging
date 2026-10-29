@@ -14,6 +14,8 @@
 #include <QProcess>
 #include <QSharedMemory>
 #include <QSignalBlocker>
+#include <QSaveFile>
+#include <QJsonDocument>
 #include <QSpinBox>
 #include <QThread>
 #include <iostream>
@@ -52,12 +54,16 @@ public:
         check(QCoreApplication::applicationDirPath().endsWith("startup-isolated"),
               "test must use isolated INI directory");
         QFile::remove(paimageSettingsPath());
+        const QString motorFile = QCoreApplication::applicationDirPath() + "/motor-test.json";
+        QFile::remove(motorFile);
         {
             QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
             settings.setValue("RingConfigDialog/Defaults/block", 4);
             settings.setValue("RingConfigDialog/Defaults/totalAlines", 8);
             settings.setValue("RingConfigDialog/Defaults/fovMm", 4.0);
             settings.setValue("RingConfigDialog/Defaults/gridMm", 0.1);
+            settings.setValue("MotorScanLinkage/ParamsFile", motorFile);
+            settings.setValue("MotorScanLinkage/TotalAlinesRule", "directionOnly");
             for (int channel = 0; channel < 8; ++channel)
                 settings.setValue(QString("RingConfigDialog/Defaults/ch%1").arg(channel), channel == 0);
             settings.sync();
@@ -66,8 +72,12 @@ public:
             MainWindow window;
             auto& controller = *window.m_imagingController;
             window.m_cmbImagingMode->setCurrentIndex(1);
+            window.m_motorScanMonitor->tick();
+            const auto earlyStatus = window.m_motorScanMonitor->lastStatus();
             window.ensureRingConfigDialog();
             auto& dialog = *window.m_ringConfigDialog;
+            check(widget<QLabel>(dialog, "motorScanLinkageStatus")->text() == earlyStatus,
+                  "lazy dialog did not recover the monitor status");
             auto* depth = widget<QLineEdit>(window, "edtDataTime");
             auto* checkbox = window.m_chkRealtimeImaging;
             int toggles = 0;
@@ -211,13 +221,57 @@ public:
             for(bool tv:{false,true})for(bool fd:{false,true}) {
                 widget<QCheckBox>(dialog,"timevarEnabled")->setChecked(tv);
                 widget<QCheckBox>(dialog,"filteredDasEnabled")->setChecked(fd);
+                check(dialog.applyConfig(), "joint configuration rejected");
+                const auto acceptedTv = ring_timevar::toJson(controller.ringTimevarConfig());
+                const auto acceptedFd = filtered_das::toJson(controller.filteredDasConfig());
+                auto writeMotor = [&](const char *direction) {
+                    QSaveFile file(motorFile);
+                    check(file.open(QIODevice::WriteOnly), "open motor file");
+                    file.write(QJsonDocument(QJsonObject{{"formatVersion",1},{"direction",direction},
+                        {"xStepsNum",2000}}).toJson());
+                    check(file.commit(), "atomic motor file commit");
+                };
+                writeMotor("CCW"); window.m_motorScanMonitor->tick();
                 start();check(controller.ringTimevarConfig().enabled==tv&&controller.filteredDasConfig().enabled==fd,
-                              "four-combination startup snapshot");stop();
+                              "four-combination startup snapshot");
+                paimage::PhysicalRoundNormalizer normalizer(8, [&](const paimage::PhysicalRoundEvent& event) {
+                    window.m_motorScanMonitor->onPhysicalRoundEvent(event);
+                });
+                normalizer.setStartupFilterTriggerCount(0); normalizer.beginSession(1);
+                normalizer.classify(1, 100);
+                const int startsBeforeMotor = controller.m_testSvcStarts;
+                writeMotor("CW"); window.m_motorScanMonitor->tick();
+                check(controller.ringConfig().sectorCcw == 1 && controller.m_testSvcStarts == startsBeforeMotor,
+                      "zero-filter active round changed direction/service");
+                normalizer.timeoutBoundary(1); window.m_motorScanMonitor->tick();
+                waitFor([&]{return controller.isRunning() && window.m_imagingServiceReady.load()
+                    && controller.m_testSvcStarts > startsBeforeMotor;}, "motor boundary restart failed");
+                check(controller.ringConfig().sectorCcw == 0 && controller.ringConfig().sectorStartDeg == 0
+                    && ring_timevar::toJson(controller.ringTimevarConfig()) == acceptedTv
+                    && filtered_das::toJson(controller.filteredDasConfig()) == acceptedFd,
+                      "motor direction restart lost either lowpass/FilteredDAS snapshot");
+                // A service stopping inside another active round must not reopen the motor gate.
+                normalizer.classify(1, 101); stop();
+                check(!window.m_motorScanMonitor->applyGateOpen(), "service stop reopened an active physical round");
+                normalizer.timeoutBoundary(1);
             }
-            std::cout<<"PASS FilteredDAS real rejection inactive/resident, correction/restart, four-combination starts\n";
+            std::cout<<"PASS FilteredDAS real rejection, four-combination motor CW restart with both filter snapshots, service-stop latch\n";
+            QString motorError;
+            const auto oldDirection = controller.ringConfig().sectorCcw;
+            widget<QDoubleSpinBox>(dialog,"filteredDasStopMhz")->setValue(125);
+            check(!dialog.applyMotorScanParams(true, true, 0, &motorError) && !motorError.isEmpty(),
+                  "invalid filter draft did not reject motor update without a modal dialog");
+            check(controller.ringConfig().sectorCcw == oldDirection && dialog.config().sectorCcw == oldDirection,
+                  "rejected motor update left hidden direction/anchor changes");
+            dialog.reject();
+            dialog.show();
+            check(!dialog.applyMotorScanParams(true, true, 0, &motorError)
+                && motorError.contains(QStringLiteral("正在编辑")), "motor update consumed a visible filter draft");
+            dialog.reject();
 
         }
         QFile::remove(paimageSettingsPath());
+        QFile::remove(motorFile);
     }
 };
 

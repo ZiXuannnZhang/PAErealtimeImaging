@@ -266,7 +266,8 @@ void RingConfigDialog::buildUi()
         "每通道每波长每圈A-line数 = 单圈总A-line数 / (启用通道数 × 2)");
     // 电机联动状态行（LabVIEW 参数文件消费状态，只读提示；实际读取在
     // MainWindow 的 MotorScanLinkageMonitor，这里只显示最新状态文本）。
-    m_lblMotorLinkage = new QLabel(QStringLiteral("未联动（等待 motor_scan_params.json）"));
+    m_lblMotorLinkage = new QLabel(QStringLiteral("联动状态：等待参数文件"));
+    m_lblMotorLinkage->setObjectName(QStringLiteral("motorScanLinkageStatus"));
     m_lblMotorLinkage->setStyleSheet(roStyle);
     m_lblMotorLinkage->setWordWrap(true);
     m_spnSectorStart = new QDoubleSpinBox; m_spnSectorStart->setRange(-360, 360);
@@ -879,38 +880,40 @@ void RingConfigDialog::sysDelayPerChannel(int out[8][2]) const
             out[c][w] = m_spnSysDelayCh[c][w]->value();
 }
 
-bool RingConfigDialog::applyConfig()
+bool RingConfigDialog::applyConfig(QString *error)
 {
     if (!m_controller) return false;
+    if (error) error->clear();
+    const auto rejectConfig = [this, error](const QString &message) {
+        if (error) *error = message;
+        else QMessageBox::warning(this, "参数错误", message);
+        return false;
+    };
 
     int cnt = 0;
     for (int c = 0; c < 8; ++c)
         if (m_chkCh[c]->isChecked()) ++cnt;
     if (cnt == 0) {
-        QMessageBox::warning(this, "参数错误", "请至少勾选一个通道。");
-        return false;
+        return rejectConfig(QStringLiteral("请至少勾选一个通道。"));
     }
 
     const int total = m_spnTotalAlines->value();
     const int divisor = cnt * 2;    // 启用通道数 × 激发光波长数(2)
     if (total % divisor != 0) {
-        QMessageBox::warning(this, "参数错误",
+        return rejectConfig(
             QString("单圈总A-line数 %1 无法按 %2 个通道 × 2 个波长整除，请调整单圈总A-line数。")
                 .arg(total).arg(cnt));
-        return false;
     }
     const int k = total / divisor;
     if (k < 2) {
-        QMessageBox::warning(this, "参数错误",
+        return rejectConfig(
             QString("换算后每通道每波长每圈A-line数 K=%1 过小（至少 2）。").arg(k));
-        return false;
     }
     const int blockWl = m_spnBlock->value() / 2;   // 每块单波长A-line数
     if (k % blockWl != 0) {
-        QMessageBox::warning(this, "参数错误",
+        return rejectConfig(
             QString("换算后每通道每波长每圈A-line数 K=%1 需能被每块单波长A-line数 %2 整除，"
                     "请调整单圈总A-line数或每通道每块A-line数。").arg(k).arg(blockWl));
-        return false;
     }
 
     // 双声速模型参数校验（格式/递增/元素数关系）
@@ -921,8 +924,7 @@ bool RingConfigDialog::applyConfig()
     QString sosErr;
     if (!parseSoundSpeedModel(m_edtSosRadii->text(), m_edtSosSpeeds->text(),
                               radiiM, &radiiCount, speedsMps, &speedsCount, &sosErr)) {
-        QMessageBox::warning(this, "参数错误", sosErr);
-        return false;
+        return rejectConfig(sosErr);
     }
 
     // 前端滤波参数校验（任务 3.4）。任一不满足则拒绝本次下发：配置保持原值不变，
@@ -931,10 +933,7 @@ bool RingConfigDialog::applyConfig()
         const frontend_filter::Config feFilter = frontendFilterConfig();
         const frontend_filter::Validation feResult = frontend_filter::validate(feFilter);
         if (feResult != frontend_filter::Validation::Ok) {
-            QMessageBox::warning(this, "参数错误",
-                                 QString::fromUtf8(
-                                     frontend_filter::validationMessage(feResult)));
-            return false;
+            return rejectConfig(QString::fromUtf8(frontend_filter::validationMessage(feResult)));
         }
     }
 
@@ -944,13 +943,14 @@ bool RingConfigDialog::applyConfig()
     const auto timevar=timevarConfig();
     std::string timevarError;
     if (!ring_timevar::validate(timevar,m_daqHz,m_sampDepth,&timevarError)) {
-        QMessageBox::warning(this,"参数错误",QString::fromStdString(timevarError)); return false;
+        return rejectConfig(QString::fromStdString(timevarError));
     }
     QString filteredError;
     if(!validateFilteredDraft(&filteredError)) {
-        QMessageBox::warning(this,"参数错误",filteredError); return false;
+        return rejectConfig(filteredError);
     }
-    if (!m_controller->configureRing(applied,timevar,sysDelayCh,filteredDasConfig())) return false;
+    if (!m_controller->configureRing(applied,timevar,sysDelayCh,filteredDasConfig()))
+        return rejectConfig(QStringLiteral("成像服务拒绝联动配置，保留当前配置"));
     m_filteredAccepted=filteredDasConfig();
     const int effectiveSpeeds=radiiCount>0 ? speedsCount : 1;
     double minSpeed=*std::min_element(speedsMps,speedsMps+effectiveSpeeds);
@@ -984,6 +984,32 @@ quint64 RingConfigDialog::startupFilterTriggerCount() const
 
 // ══ 电机参数联动（LabVIEW → 本程序）：读取/校验/写入接口 ══
 
+bool RingConfigDialog::applyMotorScanParams(bool hasDirection, bool ccw,
+                                           int totalAlines, QString *error)
+{
+    // 不提交正在编辑的滤波/几何草稿；保留待应用文件，关闭参数窗口后重试。
+    if (isVisible()) {
+        if (error) *error = QStringLiteral("参数窗口正在编辑，关闭后应用电机参数");
+        return false;
+    }
+    if (totalAlines > 0) {
+        const auto reason = validateMotorScanTotalAlines(totalAlines);
+        if (!reason.isEmpty()) { if (error) *error = reason; return false; }
+    }
+    const auto oldDirection = m_motorSectorCcw;
+    const auto oldStart = m_motorStartDeg;
+    const auto oldLinked = m_motorStartLinked;
+    const auto oldTotal = m_spnTotalAlines->value();
+    if (hasDirection) setMotorScanDirection(ccw);
+    if (totalAlines > 0) setMotorScanTotalAlines(totalAlines);
+    if (applyConfig(error)) return true;
+    m_motorSectorCcw = oldDirection;
+    m_motorStartDeg = oldStart;
+    m_motorStartLinked = oldLinked;
+    m_spnTotalAlines->setValue(oldTotal);
+    return false;
+}
+
 int RingConfigDialog::enabledChannelCount() const
 {
     int cnt = 0;
@@ -1002,6 +1028,8 @@ void RingConfigDialog::setMotorScanDirection(bool ccw)
 
 QString RingConfigDialog::validateMotorScanTotalAlines(int totalAlines) const
 {
+    if (totalAlines < m_spnTotalAlines->minimum() || totalAlines > m_spnTotalAlines->maximum())
+        return QStringLiteral("单圈总A-line数 %1 超出界面允许范围").arg(totalAlines);
     const int cnt = enabledChannelCount();
     if (cnt == 0)
         return QStringLiteral("未勾选任何通道");

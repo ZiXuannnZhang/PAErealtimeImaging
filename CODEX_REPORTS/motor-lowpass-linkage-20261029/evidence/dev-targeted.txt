@@ -1,0 +1,14 @@
+Internal ctest changing into directory: D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests
+Test project D:/ChatGPT/PAERealtimeImaging/MC_410T_MultiCard/delivery/build/filtered_das_tests
+    Start 31: paimage_host_output_test
+1/4 Test #31: paimage_host_output_test .........   Passed    2.16 sec
+    Start 41: filtered_das_service_test
+2/4 Test #41: filtered_das_service_test ........   Passed   17.07 sec
+    Start 44: motor_scan_linkage_test
+3/4 Test #44: motor_scan_linkage_test ..........   Passed    0.67 sec
+    Start 49: physical_round_normalizer_test
+4/4 Test #49: physical_round_normalizer_test ...   Passed    0.39 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Total Test time (real) =  20.35 sec

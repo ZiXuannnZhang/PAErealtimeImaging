@@ -1,0 +1,15 @@
+command=["D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe", "--synthetic", "1", "--samples", "5000", "--id", "14", "--channels", "3", "--block", "200", "--rounds", "1", "--grid-mm", ".2", "--timevar-lowpass", "on", "--filtered-das", "on", "--benchmark-blocks", "2", "--no-save", "1", "--svc", "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ImagingSvc.exe", "--out", "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\motor-lowpass\\dev-selftest"]
+cwd=D:\ChatGPT\PAERealtimeImaging
+[selftest] timevar=on rounds=1 grid_mm=0.2000 block=200 channels=0x3
+[filtered-metrics] design_us=8797 cached_bytes=36700160 workspace_bytes=33554432 max_batch=64
+[block-timing] submit=1 roundtrip_ms=764.878300000 service_ms=754.149000000
+block   1/20: 765.15 ms
+[filtered-metrics] design_us=8797 cached_bytes=36700160 workspace_bytes=33554432 max_batch=64
+[block-timing] submit=2 roundtrip_ms=760.072500000 service_ms=741.486000000
+  diff vs prev: wl1=1.373 wl2=1.45102
+block   2/20: 761.42 ms
+[benchmark] normal stop after 2 complete blocks; configured blocks_per_round=20 unchanged
+done: channels=2 K=2000 rounds=1 blocks=2 total=1526.6 ms avg=763.28 ms
+[RingSHMObs] kinds: final=1 round_barrier_reset=1
+[RingSHMObs] service kind=final session=1 epoch=0 submitted=0 notifications=2 consumed=2 mismatch=0 ready_zero=0 duplicate=0 gap=0 avg_queue_us=6146.5 avg_copy_us=2967.0 avg_process_us=747932.5
+[RingSHMObs] producer session=1 submitted=2 slot_busy=0 last_seq=1 last_interval_us=918130

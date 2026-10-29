@@ -1,0 +1,2 @@
+# Preserve raw CTest output, including its environment-line trailing spaces.
+*.txt -whitespace

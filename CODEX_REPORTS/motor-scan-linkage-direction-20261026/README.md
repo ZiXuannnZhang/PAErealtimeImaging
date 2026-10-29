@@ -144,14 +144,16 @@ INI `TriggerLatch`（默认 `true`）设为 `false` 时 `setApplyGate` 为空操
 | 顺（本分支构建） | `direction=CW, xDir=true, xStepsNum=2500` | `顺时针(顺)`、`起点角=0°（三点钟）`、`totalAlines=0`（directionOnly） |
 | 逆（同日更早构建，同代码） | `direction=CCW, xDir=false, xStepsNum=2000` | `逆时针(逆)`、`sectorStartDeg=180`、`totalAlines=0` |
 
-顺/逆两条链路的软件侧均已实测一致（面板 → 参数文件 → 状态行 → 重建参数）。
+证据边界更正（2026-10-29）：逆向记录来自当时活动面板与桥接；顺向记录是接收端消费
+2026-10-28 12:30 写入的真实快照，并非 2026-10-29 当时的活面板链路。
+因此只证明顺向接收消费，不证明顺向活链路或真实图像。两者均待实机验收。
 
 ## 5. 交付回执（BUILD_STANDARD §15）
 
 ```text
 Build target branch  : codex/motor-scan-linkage-direction-20261029-0048
 Build target SHA     : 04e348b96b0e6b6c3ab5484d4a6c2b3bb1f270f8
-                       (evidence/docs commit follows; MC_410T_MultiCard tree unchanged)
+                       (evidence/docs commit follows; production/test sources unchanged; delivery README changed)
 Tracked tree clean   : yes
 Configure preset     : mingw-debug
 Build preset         : mingw-debug-build

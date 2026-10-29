@@ -47,7 +47,8 @@ struct PhysicalRoundEvent {
     enum class Kind : std::uint8_t {
         ControlFiltered = 0,
         CountBoundary = 1,
-        TimeoutBoundary = 2
+        TimeoutBoundary = 2,
+        RoundStarted = 3 // first new physical identity, including startupFilter=0
     };
 
     Kind kind = Kind::ControlFiltered;

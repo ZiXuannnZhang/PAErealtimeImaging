@@ -34,7 +34,8 @@ public:
     RingTimevarLowpassConfig timevarConfig() const; // 环形重建增强配置（独立于 CUDA ABI）
     FilteredDasConfig filteredDasConfig() const;
     void sysDelayPerChannel(int out[8][2]) const;   // 每通道双波长延时截断（[通道][波长]）
-    bool applyConfig();                   // 校验并下发配置（应用/确定共用）
+    bool applyConfig(QString *error = nullptr); // 自动联动传入 error 时不弹出模态窗口
+    bool applyMotorScanParams(bool hasDirection, bool ccw, int totalAlines, QString *error);
 
     // 物理轮次启动策略控件当前值（Session B；持久化见 RoundPolicySettings）
     quint64 startupFilterTriggerCount() const;

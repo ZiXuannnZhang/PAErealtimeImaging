@@ -5,6 +5,8 @@
 #include <QTimer>
 
 #include <atomic>
+#include <mutex>
+#include "PaimageAcquisition/PhysicalRoundNormalizer.h"
 
 // ============================================================
 // MotorScanLinkage — LabVIEW 上位机电机参数联动（只读消费端）
@@ -129,8 +131,11 @@ public:
     //   open = false → 冻结：tick() 仍读文件、仍刷新状态行，但不发 linkageParamsChanged；
     //                  冻结期间累积的变化在开闸后的下一次 tick 补发一次。
     // Settings::triggerLatch=false 时本入口为空操作（保持旧行为）。
-    // 允许从采集侧回调线程调用（内部为原子标志）。
+    // 可由采集线程调用；与主线程同步参数消费互斥，首触发返回前完成关闸。
     void setApplyGate(bool open);
+    void onPhysicalRoundEvent(const paimage::PhysicalRoundEvent &event);
+    // 同步消费槽拒绝时保留待应用值，下一次空闲轮询重试，不丢失参数。
+    void retryPendingApply(const QString &reason);
     bool applyGateOpen() const { return m_applyGateOpen.load(std::memory_order_relaxed); }
     bool applyPending() const { return m_pendingApply; }
 
@@ -148,5 +153,7 @@ private:
     motor_scan_linkage::Params m_lastParams;   // 最近一次观测到的参数（非“已应用”）
     QString m_lastStatus;
     std::atomic<bool> m_applyGateOpen{true};   // 触发闩锁：默认开
+    std::recursive_mutex m_applyMutex;
+    QString m_applyError;
     bool m_pendingApply = false;     // 冻结期间累积了未应用的参数变化
 };

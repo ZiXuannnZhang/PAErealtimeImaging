@@ -8,6 +8,7 @@
 #include <QJsonValue>
 
 #include <utility>
+#include <limits>
 
 namespace motor_scan_linkage {
 namespace {
@@ -131,19 +132,22 @@ int deriveTotalAlines(TotalAlinesRule rule, int xStepsNum,
 {
     if (xStepsNum <= 0)
         return 0;
+    qint64 total = 0;
     switch (rule) {
     case TotalAlinesRule::PerEnabledChannel:
         if (enabledChannelCount <= 0)
             return 0;
-        return xStepsNum * enabledChannelCount;
+        total = qint64(xStepsNum) * enabledChannelCount;
+        break;
     case TotalAlinesRule::PerPeriod:
         if (xStepsPerPeriod <= 0)
             return 0;
-        return xStepsNum * xStepsPerPeriod;
+        total = qint64(xStepsNum) * xStepsPerPeriod;
+        break;
     case TotalAlinesRule::DirectionOnly:
         return 0;
     }
-    return 0;
+    return total <= std::numeric_limits<int>::max() ? static_cast<int>(total) : 0;
 }
 
 bool totalAlinesConsistent(int totalAlines, int enabledChannelCount)
@@ -171,6 +175,8 @@ QString describeDirection(bool ccw)
 MotorScanLinkageMonitor::MotorScanLinkageMonitor(Settings settings, QObject *parent)
     : QObject(parent), m_settings(std::move(settings))
 {
+    m_lastStatus = m_settings.enabled ? QStringLiteral("联动状态：等待参数文件")
+                                     : QStringLiteral("电机联动未启用");
     if (m_settings.pollMs < 100)
         m_settings.pollMs = 100;
     m_timer.setInterval(m_settings.pollMs);
@@ -180,7 +186,7 @@ MotorScanLinkageMonitor::MotorScanLinkageMonitor(Settings settings, QObject *par
 
 void MotorScanLinkageMonitor::start()
 {
-    m_timer.start();
+    if (m_settings.enabled) m_timer.start();
 }
 
 void MotorScanLinkageMonitor::setApplyGate(bool open)
@@ -188,7 +194,22 @@ void MotorScanLinkageMonitor::setApplyGate(bool open)
     // 触发闩锁关闭时保持旧行为：闸门入口为空操作。
     if (!m_settings.triggerLatch)
         return;
+    std::lock_guard<std::recursive_mutex> lock(m_applyMutex);
     m_applyGateOpen.store(open, std::memory_order_relaxed);
+}
+
+void MotorScanLinkageMonitor::onPhysicalRoundEvent(const paimage::PhysicalRoundEvent &event)
+{
+    using Kind = paimage::PhysicalRoundEvent::Kind;
+    if (event.kind == Kind::RoundStarted) setApplyGate(false);
+    else if (event.kind == Kind::CountBoundary || event.kind == Kind::TimeoutBoundary)
+        setApplyGate(true);
+}
+
+void MotorScanLinkageMonitor::retryPendingApply(const QString &reason)
+{
+    m_pendingApply = true;
+    m_applyError = reason;
 }
 
 void MotorScanLinkageMonitor::setStatus(const QString &status)
@@ -201,6 +222,7 @@ void MotorScanLinkageMonitor::setStatus(const QString &status)
 
 void MotorScanLinkageMonitor::tick()
 {
+    if (!m_settings.enabled) return;
     using motor_scan_linkage::Params;
     using motor_scan_linkage::ParseStatus;
 
@@ -235,12 +257,6 @@ void MotorScanLinkageMonitor::tick()
         .arg(params.hasXStepsNum
                  ? QString::number(params.xStepsNum) : QStringLiteral("未提供"))
         .arg(params.seq);
-    // 触发闩锁冻结期间照常显示文件当前值，但标注“本轮不生效”，
-    // 避免把“文件已改”误读为“已下发”。
-    setStatus(applyGateOpen()
-                  ? statusText
-                  : QStringLiteral("%1（本轮已闩锁，改动下一轮生效）").arg(statusText));
-
     const bool observedChanged = !m_haveParams
         || params.hasDirection != m_lastParams.hasDirection
         || params.directionCcw != m_lastParams.directionCcw
@@ -251,11 +267,19 @@ void MotorScanLinkageMonitor::tick()
     m_haveParams = true;
     if (observedChanged)
         m_pendingApply = true;
-    // 触发闩锁：闸门关闭时只记“待应用”，不发出；开闸后的下一次 tick 补发一次
-    // （否则冻结期间操作员改的参数会永久丢失）。发出前重新读一次闸门，
-    // 尽量缩小“本轮刚触发、闸门刚关”与本次发出之间的窗口。
-    if (m_pendingApply && applyGateOpen()) {
-        m_pendingApply = false;
-        emit linkageParamsChanged(params);
+    // 信号在主线程同步消费。锁覆盖 gate 检查与下发事务；采集侧 RoundStarted
+    // 在返回/交付首触发前完成关闸，不能在检查与下发之间穿过。
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_applyMutex);
+        if (m_pendingApply && applyGateOpen()) {
+            m_pendingApply = false;
+            m_applyError.clear();
+            emit linkageParamsChanged(params);
+        }
     }
+    setStatus(!m_applyError.isEmpty()
+        ? QStringLiteral("联动待应用：%1").arg(m_applyError)
+        : !applyGateOpen()
+            ? QStringLiteral("%1（本轮已闩锁，改动下一轮生效）").arg(statusText)
+            : statusText);
 }
