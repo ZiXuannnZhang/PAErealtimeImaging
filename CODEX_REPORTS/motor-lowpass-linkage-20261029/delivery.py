@@ -12,7 +12,9 @@ import time
 parser = argparse.ArgumentParser()
 parser.add_argument('action', choices=['build', 'validate', 'package'])
 parser.add_argument('--stage', default='dev')
+parser.add_argument('--local-only', action='store_true', help='package an unpublished local commit without pushing')
 args = parser.parse_args()
+assert not args.local_only or args.action == 'package', '--local-only is a packaging option'
 root = Path(__file__).resolve().parents[2]
 project = root / 'MC_410T_MultiCard/delivery'
 out = root / 'artifacts/motor-lowpass'
@@ -94,8 +96,9 @@ elif args.action == 'validate':
         '--no-save', '1', '--svc', native/'ImagingSvc.exe', '--out', out/(args.stage+'-selftest')])
 else:
     assert args.stage == 'final' and clean
-    remote = git('ls-remote', '--heads', 'origin', 'refs/heads/'+branch).split()[0]
-    assert remote == sha
+    remote_output = git('ls-remote', '--heads', 'origin', 'refs/heads/'+branch)
+    remote = remote_output.split()[0] if remote_output else None
+    assert args.local_only or remote == sha, 'unpublished candidate requires explicit --local-only'
     identity = project/'build/mingw_debug/generated/PaimageAcquisition/BuildIdentity.h'
     header = identity.read_text()
     assert f'PAIMAGE_GIT_SHA "{sha}"' in header and 'PAIMAGE_TRACKED_DIRTY false' in header
@@ -114,7 +117,8 @@ else:
         if 'CMakeFiles/MC410T_Receiver.dir' in text or 'CMakeFiles/ImagingSvc.dir' in text:
             assert 'MAINWINDOW_START_TEST_SEAM' not in text and 'RING_TIMEVAR_TEST_SEAM' not in text
     stamp = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).strftime('%Y%m%d-%H%M%S')
-    target = root/'artifacts/build-delivery'/f'{stamp}_{sha[:8]}_lowpass_motor'
+    suffix = 'lowpass_motor_local_direction' if args.local_only else 'lowpass_motor'
+    target = root/'artifacts/build-delivery'/f'{stamp}_{sha[:8]}_{suffix}'
     target.mkdir(parents=True, exist_ok=False)
     state = {'PAimageReceiverDiagnostics.ini', 'app_log.txt', 'paimage-diagnostics', 'motor_scan_params.json'}
     shutil.copytree(native, target/'bin', ignore=lambda directory, names: state.intersection(names) if Path(directory)==native else set())
@@ -126,10 +130,13 @@ else:
     shutil.copytree(Path(__file__).parent, target/'evidence')
     for path in out.glob('final-*.txt'): shutil.copy2(path, target/path.name)
     for action in ['build', 'validate']: shutil.copy2(out/f'final-{action}.json', target/f'validation-{action}.json')
-    (target/'git-receipt.txt').write_text('branch='+branch+'\nlocal='+sha+'\nremote='+remote+'\ntracked_clean=true\nbaseline='+baseline+'\n'+git('log', '-3', '--oneline')+'\n', encoding='utf-8')
+    (target/'git-receipt.txt').write_text('branch='+branch+'\nlocal='+sha+'\nremote='+str(remote)+
+        '\nlocal_only='+str(args.local_only).lower()+'\nremote_matches_local='+str(remote==sha).lower()+
+        '\ntracked_clean=true\nbaseline='+baseline+'\n'+git('log', '-3', '--oneline')+'\n', encoding='utf-8')
     (target/'dependency-sha256.txt').write_text(''.join(digest(native/name)+'  '+name+'\n' for name in keys))
     (target/'build-manifest.txt').write_text('repository=ZiXuannnZhang/PAErealtimeImaging\nbranch='+branch+'\nsha='+sha+
-        '\ntracked_clean=true\nQt=6.8.0 MinGW=13.1.0; versions in final-build logs\npresets=mingw-debug / mingw-debug-build\nscript=build_mingw_debug.cmd\nRing CUDA source=_migration_pack/prebuilt_cuda/bin (same runtime hashes as lowpass baseline)\n'+
+        '\ntracked_clean=true\nlocal_only='+str(args.local_only).lower()+
+        '\nQt=6.8.0 MinGW=13.1.0; versions in final-build logs\npresets=mingw-debug / mingw-debug-build\nscript=build_mingw_debug.cmd\nRing CUDA source=_migration_pack/prebuilt_cuda/bin (same runtime hashes as lowpass baseline)\n'+
         'INI=minimal directionOnly motor configuration; no local acquisition/calibration state or stale motor JSON\nnative='+str(native)+'\ndelivery='+str(target)+'\n', encoding='utf-8')
     (target/'validation.txt').write_text('56/56 CTest; real MainWindow integration 1/1; synthetic service selftest PASS.\nHardware acquisition, image direction, motor live bridge, T_arr: UNVERIFIED; user will perform joint hardware acceptance.\n', encoding='utf-8')
     bridge = root/'_migration_pack/_handoff-20261029/sender-side-labview-bridge'
@@ -139,7 +146,8 @@ else:
             shutil.copy2(bridge/name, reference/name)
     (target/'file-sha256.txt').write_text(''.join(digest(f)+'  '+f.relative_to(target).as_posix()+'\n'
         for f in sorted(target.rglob('*')) if f.is_file()), encoding='utf-8')
-    receipt.update(delivery=str(target), local=sha, remote=remote,
+    receipt.update(delivery=str(target), local=sha, remote=remote, local_only=args.local_only,
+                   remote_matches_local=remote==sha,
                    dependencies={name:digest(native/name) for name in keys})
     save()
     print(target)

@@ -244,12 +244,13 @@ public:
                 normalizer.classify(1, 100);
                 const int startsBeforeMotor = controller.m_testSvcStarts;
                 writeMotor("CW"); window.m_motorScanMonitor->tick();
-                check(controller.ringConfig().sectorCcw == 1 && controller.m_testSvcStarts == startsBeforeMotor,
+                check(controller.ringConfig().sectorCcw == 0 && controller.ringConfig().sectorStartDeg == 180
+                    && controller.m_testSvcStarts == startsBeforeMotor,
                       "zero-filter active round changed direction/service");
                 normalizer.timeoutBoundary(1); window.m_motorScanMonitor->tick();
                 waitFor([&]{return controller.isRunning() && window.m_imagingServiceReady.load()
                     && controller.m_testSvcStarts > startsBeforeMotor;}, "motor boundary restart failed");
-                check(controller.ringConfig().sectorCcw == 0 && controller.ringConfig().sectorStartDeg == 0
+                check(controller.ringConfig().sectorCcw == 1 && controller.ringConfig().sectorStartDeg == 0
                     && ring_timevar::toJson(controller.ringTimevarConfig()) == acceptedTv
                     && filtered_das::toJson(controller.filteredDasConfig()) == acceptedFd,
                       "motor direction restart lost either lowpass/FilteredDAS snapshot");
@@ -297,7 +298,7 @@ public:
             check(QSettings(paimageSettingsPath(), QSettings::IniFormat)
                 .value("MotorScanLinkage/ParamsFile").toString() == selectedMotorFile,
                 "selected parameter path not persisted");
-            check(!window.m_motorScanMonitor->applyGateOpen() && controller.ringConfig().sectorCcw == 0,
+            check(!window.m_motorScanMonitor->applyGateOpen() && controller.ringConfig().sectorCcw == 1,
                   "file selection bypassed an active round latch");
             QTimer::singleShot(0, [&] {
                 for (auto* top : QApplication::topLevelWidgets())
@@ -307,7 +308,7 @@ public:
             check(window.m_motorScanMonitor->paramsFile() == selectedMotorFile,
                   "cancel changed the parameter file");
             dialog.reject(); selectionRound.timeoutBoundary(77); window.m_motorScanMonitor->tick();
-            check(controller.ringConfig().sectorCcw == 1 && controller.ringConfig().sectorStartDeg == 180,
+            check(controller.ringConfig().sectorCcw == 0 && controller.ringConfig().sectorStartDeg == 180,
                   "selected file was not consumed at the next idle boundary");
             dialog.show(); QApplication::processEvents();
             auto* linkageLabel = widget<QLabel>(dialog, "motorScanLinkageStatus");

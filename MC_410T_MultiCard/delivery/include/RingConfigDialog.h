@@ -53,8 +53,8 @@ public:
     // ══ 电机参数联动（LabVIEW → 本程序，只读消费端见 MotorScanLinkage）══
     // 当前启用通道数（勾选数）：MainWindow 联动换算单圈总A-line数时使用。
     int enabledChannelCount() const;
-    // 联动方向写入（逆=true，与 sectorCcw=1 同义；顺=false）。config() 由此
-    // 产出 cfg.sectorCcw（此前硬编码 1）。无联动输入时保持默认 1（= 现状行为）。
+    // 面板方向写入：逆=true -> sectorCcw=0，顺=false -> 1（实机校正映射）。
+    // 起点保持逆=180°、顺=0°。无联动输入时沿用原有默认方向位 1。
     void setMotorScanDirection(bool ccw);
     // 联动换算的单圈总A-line数预校验（与 applyConfig 的换算约束同口径）：
     // 返回空串 = 可接受；否则为具体原因（调用方据此拒绝联动值并记录）。
@@ -99,7 +99,7 @@ private:
     int    m_sampDepth = 4000;   // 采样深度只读值（点/A-line，与线性采集一致）
     bool m_acquisitionKnown = false;
     double m_daqHz = FPGA_ADC_FREQ_HZ;   // 采样率只读值（Hz，真实采集固定 250 MHz）
-    int    m_motorSectorCcw = 1;  // 扫描方向（电机联动）：1=逆时针（默认=历史行为），0=顺时针
+    int    m_motorSectorCcw = 1;  // 重建方向位：1=正角步进、0=负角步进；不等同面板文字
     // 起点角联动覆盖（标准角度）：仅在 setMotorScanDirection（=联动方向已应用）后生效，
     // 逆时针=180°（九点钟，与未联动时 UI 默认 0 位一致）、顺时针=0°（三点钟）；
     // 未联动时保持 UI 原逻辑（spinbox 默认 0 → 180° → 九点钟起点，逆时针重建）。

@@ -5559,8 +5559,7 @@ void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &para
     fields[QStringLiteral("writtenAt")] = params.writtenAt;
     fields[QStringLiteral("paramsSource")] = params.source;
 
-    // 方向：逆=true → sectorCcw=1（与历史硬编码取值一致，现状行为保持）；
-    // 顺=false → sectorCcw=0（整圈图像镜像 + 拼接扇区锚点前移一扇区）。
+    // 面板方向由 RingConfigDialog 按实机校正映射到重建方向位：逆->0，顺->1。
     if (params.hasDirection) {
         fields[QStringLiteral("direction")] = motor_scan_linkage::describeDirection(
             params.directionCcw);
@@ -5623,12 +5622,14 @@ void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &para
         m_motorTotalAlinesApplied = totalAlines;
     fields[QStringLiteral("totalAlines")] = totalAlines;
     fields[QStringLiteral("applied")] = true;
-    // 与 RingConfigDialog 起点角联动同口径：逆=九点钟(180°)、顺=三点钟(0°)。
-    if (params.hasDirection)
+    // 记录实际下发配置，区分面板方向文字与重建内部方向位。
+    if (params.hasDirection) {
         fields[QStringLiteral("sectorStartDeg")] =
-            params.directionCcw ? 180.0 : 0.0;
+            m_imagingController->ringConfig().sectorStartDeg;
+        fields[QStringLiteral("sectorCcw")] = m_imagingController->ringConfig().sectorCcw;
+    }
     recordDiagnosticAction(QStringLiteral("motor_linkage_applied"), fields);
-    logMessage(QStringLiteral("电机联动已下发：方向=%1 单圈总A-line数=%2 起点角=%3")
+    logMessage(QStringLiteral("电机联动已下发：面板方向=%1 单圈总A-line数=%2 起点角=%3 sectorCcw=%4")
                    .arg(params.hasDirection
                             ? motor_scan_linkage::describeDirection(params.directionCcw)
                             : QStringLiteral("(未变)"))
@@ -5638,7 +5639,8 @@ void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &para
                             ? (params.directionCcw
                                    ? QStringLiteral("180°（九点钟）")
                                    : QStringLiteral("0°（三点钟）"))
-                            : QStringLiteral("(未变)")));
+                            : QStringLiteral("(未变)"))
+                   .arg(m_imagingController->ringConfig().sectorCcw));
 }
 
 // =====================================================================

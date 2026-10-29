@@ -2,6 +2,8 @@
 
 使用交付包的完整 `bin/`，记录包目录、Git SHA、`BuildIdentity.h` 和依赖哈希；原运行配置及采集数据保留。新包只带最小电机联动 INI，实际采集参数、通道、半径、延时、声速和网格请使用已确认的现场值。
 
+本地实机方向校正版：保持 `DirectionInverted=false`，面板逆/CCW 下发 `sectorCcw=0, sectorStartDeg=180`；面板顺/CW 下发 `sectorCcw=1, sectorStartDeg=0`。本轮只反转重建步进方向，不旋转起点；视觉方向需重新对照实物复测。`git-receipt.txt` 的 `local_only=true` 表示该包源码尚未推送远端。
+
 ## 接线和参数
 
 1. LabVIEW 打开正在操作的工程和主 VI。发送端桥接的 `outPath` 指向 `motor_scan_params.json`；接收端环形参数窗口中点击电机联动状态右侧“参数文件选择”，浏览选择同一文件。选择的路径会保存并在下次启动恢复；未选择时使用 exe 目录默认路径。

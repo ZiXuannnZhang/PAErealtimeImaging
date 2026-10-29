@@ -748,8 +748,8 @@ RingReconCudaConfig RingConfigDialog::config() const
     // 未联动时保持 UI 原逻辑（默认 0 → 九点钟，逆时针重建 = 历史固定行为）。
     cfg.sectorStartDeg = m_motorStartLinked
         ? m_motorStartDeg : (180.0 + m_spnSectorStart->value());
-    // 扫描方向（电机联动）：1 = 逆时针（历史唯一取值=现状行为），0 = 顺时针；
-    // 由 MainWindow 的 MotorScanLinkageMonitor 写入，无联动输入时保持默认 1。
+    // 重建角度步进方向位：1=正向、0=负向；电机面板输入经实机校正映射写入。
+    // 无联动输入时保持默认 1，不改变原有手动重建路径。
     cfg.sectorCcw = m_motorSectorCcw;
     cfg.triggerWlOdd = 1;
     cfg.timeoutResetSec = m_spnTimeoutReset->value();
@@ -1033,8 +1033,10 @@ int RingConfigDialog::enabledChannelCount() const
 
 void RingConfigDialog::setMotorScanDirection(bool ccw)
 {
-    m_motorSectorCcw = ccw ? 1 : 0;
-    // 起点角随扫描方向同步：逆时针=九点钟(标准角 180°)、顺时针=三点钟(0°)。
+    // 2026-10-29 实机观察：旧 CCW->1 / CW->0 的视觉方向与面板相反。
+    // 只反转重建步进方向，保留面板方向文字、输入文件语义及原有起点角。
+    m_motorSectorCcw = ccw ? 0 : 1;
+    // 面板逆=九点钟(180°)、面板顺=三点钟(0°)，本次不改起点位置。
     m_motorStartDeg = ccw ? 180.0 : 0.0;
     m_motorStartLinked = true;
 }

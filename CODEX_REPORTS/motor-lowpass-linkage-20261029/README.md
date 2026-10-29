@@ -13,6 +13,21 @@
 
 ## 修复
 
+### 本地实机方向校正（2026-10-29，未推送）
+
+用户在 `39b8ec9` 版本实机观察到：面板“逆”对应视觉顺时针，面板“顺”对应视觉逆时针。本地候选在重建配置入口反转联动方向位，保留桥接、JSON、状态文字和起点角约定：
+
+| 面板 / JSON 输入 | 新 sectorCcw | 起点角 | 目标视觉方向（待复测） |
+|---|---:|---:|---|
+| 逆 / CCW | 0 | 180°，九点钟 | 逆时针 |
+| 顺 / CW | 1 | 0°，三点钟 | 顺时针 |
+
+配置仍使用 `DirectionInverted=false`。无联动输入的手动重建路径、低通核、FilteredDAS 核与 CUDA ABI 均未改变。诊断同时记录面板方向和实际下发的 `sectorCcw/sectorStartDeg`。
+
+本轮仅创建本地提交并更新交付包，不执行 push。按 exact 本地 SHA 重新构建、验证后，使用 `delivery.py package --stage final --local-only` 打包；该显式模式保留干净工作树、BuildIdentity、回归和依赖哈希检查，但如实记录本地与远端 SHA 不同。不得将本地包标成远端已发布版本。新方向映射的视觉结果仍待用户实机复测。
+
+### 既有移植与修复
+
 参数文件选择（后续界面更新）：电机联动状态栏右侧新增“参数文件选择”按钮，浏览并选择 JSON 参数文件后立即切换监视路径，写入 `MotorScanLinkage/ParamsFile`，下次启动恢复。取消浏览不改变路径。选择文件不解除物理轮闩锁；参数窗口关闭且轮次允许时，才应用新文件参数。按钮及状态栏悬停提示当前完整路径。
 
 1. Normalizer 追加 `RoundStarted=3`（日志 `physical_round_started`），每轮首个新物理 identity 通知一次，与 startupFilter 数量独立；原分类、过滤、计数、timeout、save ownership 不变。迟到重复卡不产生重复通知。
