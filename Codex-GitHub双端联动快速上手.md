@@ -49,18 +49,24 @@ git show origin/codex/task-docs:TASKS/<任务文件名>
 
 ## 2. Current project state
 
-截至 2026-10-13，用户已确认将环形增强 bd69785 的完整生产/测试源码线性接入旧 main
-6ff0e02，使用普通单父提交与普通快进推送，不产生 merge commit 或 force push。
-新 main 是下一步开发基准；原环形分支与 count-boundary ref 保留追溯。
-这是内容接入，原 tip 不因此成为 main 的祖先，不能把它误记为直接快进到旧 tip。
+截至 2026-11-04，用户确认本地最新交付包及本分支此前工作均已通过实机测试，并授权将
+`codex/ring-lowpass-motor-linkage-20261029` 普通 fast-forward 接入 `main`。
+已验收源码为 `1fb9478e71c95815671c5e1a2c1b3d6a302746d1`；本次只追加治理文档，不修改已验收源码。
 
-main 已含原 START/A/B/C/D/前端链及环形增强、FFT 优化、掩膜/毫米坐标、发现早退 A、
-count-boundary 前端刷新解耦。已记录的硬件验收范围保持不变；Layer 2b T_arr 未执行，
-双极补偿效果调优搁置，discovery B 范围待用户决定。新 main 的 exact SHA 以远端为准。
+当前能力包括原采集/前端/轮次链、圆形掩膜与毫米坐标、发现早退 A、count-boundary 前端刷新解耦，
+以及 Ring STFT 时变低通、FilteredDAS、电机方向/步数参数联动、参数文件选择与持久化、物理轮内冻结及方向映射修正。
+旧双极/低频补偿已移除；两项新滤波默认关闭。面板“逆”映射 `sectorCcw=0`、起点 180°，
+“顺”映射 `sectorCcw=1`、起点 0°；桥接配置保持 `DirectionInverted=false`。
 
-旧轻量包构建于 3c6323d，与 bd69785 生产/测试源码一致；不能将旧 binary identity 改标为新 main。
-本地旧副本与可再生产物按本轮用户授权移入 _pending_delete，源码先核实远端备份；
-原始数据/硬件证据单独保护，最终删除仅由用户执行。详情见前三份治理文档。
+验收包保留 `1fb9478` 的 BuildIdentity；本次文档提交不产生新二进制。
+Layer 2b T_arr 未取得独立实测记录，discovery B 待决定；7 / 4007 仍是现场观察而非协议常量，
+额外 trigger 的精确 FPGA/LabVIEW 来源未证明。验收追溯见 `CODEX_REPORTS/main-acceptance-20261104/README.md`。
+
+已验收包为 artifacts/build-delivery/20261029-213219_1fb9478e_lowpass_motor_local_direction/，
+旧 local-only 回执保持原样，由 2026-11-04 的实机接受与发布授权补充。不重标旧 binary identity。
+原低通分支 tip 3340fbf 保留；本次是祖先链直接快进，无 merge commit/force/rebase。
+本地旧 main d3054d5 含独有文档/开发配置提交，保留原样，未混入远端 main。
+若旧 local main 不能 ff-only，按下节停止该本地同步；可从已核对的 latest origin/main 新建任务分支。
 
 ## 3. New implementation task
 

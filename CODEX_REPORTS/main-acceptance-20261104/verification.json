@@ -1,0 +1,92 @@
+{
+  "confirmation_date": "2026-11-04",
+  "timezone": "Asia/Shanghai",
+  "hardware_acceptance_source": "User confirmation in this chat; no new field logs or screenshots supplied in this turn",
+  "accepted_source_sha": "1fb9478e71c95815671c5e1a2c1b3d6a302746d1",
+  "accepted_MC_410T_MultiCard_tree": "f178261cbf95cfdf937af01ee705f26f7c034f5a",
+  "previous_remote_main": "a8c15cff203da959bd935120605e69dc32ff7145",
+  "previous_remote_feature": "39b8ec92dcd5e496fb5302096730d6cb359dcf58",
+  "integration_method": "Normal fast-forward of remote main and feature to a documentation-only descendant of accepted_source_sha",
+  "accepted_delivery": "artifacts/build-delivery/20261029-213219_1fb9478e_lowpass_motor_local_direction",
+  "manifest_sha256": "8b5c19f3a42ac15ce415d0fd465797f598f369f1e6283b9706c6ec838a279f0f",
+  "verified_manifest_entries": 75,
+  "manifest_result": "PASS",
+  "historical_build_validation": [
+    {
+      "file": "validation-build.json",
+      "sha256": "17c06305b2e4d3a0db95c03094a67f507cad775076f1c94250091827a7d4a807",
+      "commands": [
+        {
+          "name": "cmake",
+          "exit_code": 0,
+          "seconds": 0.09300000000803266
+        },
+        {
+          "name": "compiler",
+          "exit_code": 0,
+          "seconds": 0.03199999999196734
+        },
+        {
+          "name": "qt",
+          "exit_code": 0,
+          "seconds": 0.07800000000861473
+        },
+        {
+          "name": "ninja",
+          "exit_code": 0,
+          "seconds": 0.014999999999417923
+        },
+        {
+          "name": "configure-main",
+          "exit_code": 0,
+          "seconds": 2.0789999999979045
+        },
+        {
+          "name": "standard-main",
+          "exit_code": 0,
+          "seconds": 79.71899999999732
+        },
+        {
+          "name": "configure-tests",
+          "exit_code": 0,
+          "seconds": 3.125
+        },
+        {
+          "name": "tests",
+          "exit_code": 0,
+          "seconds": 7.375
+        }
+      ]
+    },
+    {
+      "file": "validation-validate.json",
+      "sha256": "5d6dd7031337c73d8a0c1042d31836b91a38267d7b4c8829ace91129784035a4",
+      "commands": [
+        {
+          "name": "list",
+          "exit_code": 0,
+          "seconds": 0.09399999999732245
+        },
+        {
+          "name": "regression",
+          "exit_code": 0,
+          "seconds": 60.812999999994645
+        },
+        {
+          "name": "main-entry",
+          "exit_code": 0,
+          "seconds": 58.3130000000092
+        },
+        {
+          "name": "selftest",
+          "exit_code": 0,
+          "seconds": 6.39100000000326
+        }
+      ]
+    }
+  ],
+  "historical_tests": "56/56 CTest; real MainWindow 1/1; synthetic service selftest PASS at accepted_source_sha",
+  "formal_T_arr_measurement": "NOT_EXECUTED / not inferred from general hardware acceptance",
+  "local_main_preserved": "d3054d51e19570a6ef38774b8a82326738dce53b",
+  "local_main_policy": "Diverged local main left unchanged; active feature matches origin/main after remote fast-forward"
+}

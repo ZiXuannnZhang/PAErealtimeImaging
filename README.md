@@ -1,27 +1,21 @@
 # PAERealtimeImaging
 
-> 2026-10-19 联合候选：本实现分支 `codex/ring-timevar-lowpass-20261016` 在已审核
-> `eed98f0` 上新增 FilteredDAS，保留时变低通及启动拒绝修复，旧双极/低频补偿已移除。
-> 未合并 main；两增强的实机视觉、真实采集与 T_arr 待用户联合验收。
-> 任务、测试、性能和 exact-SHA 联合包入口见 `CODEX_REPORTS/ring-filtered-das-20261019/README.md`。
-
-
 Windows 多卡实时光声采集与成像项目。当前正式源码与开发基线均为 canonical `main`。
 
 ## Current status
 
-截至 2026-10-13：main 是下一步开发基准。用户已确认把环形增强 bd69785 的完整源码、
-测试与证据线性接入旧 main 6ff0e02，使用普通单父提交与普通快进推送，保留原分支历史。
-main 的生产/测试源码与 bd69785 完全一致；旧 tip 不因此成为 main 的祖先。
+截至 2026-11-04，用户确认本地最新交付包及本分支此前工作均已通过实机测试，并授权将
+`codex/ring-lowpass-motor-linkage-20261029` 普通 fast-forward 接入 `main`。
+已验收源码为 `1fb9478e71c95815671c5e1a2c1b3d6a302746d1`；本次只追加治理文档，不修改已验收源码。
 
-当前 main 已含前端链、环形信号增强、FFT 优化、圆形显示掩膜与毫米坐标、发现早退 A 范围、
-count-boundary 前端刷新解耦。A/B/C/D 当前范围实机通过；发现早退 A 与 count-boundary
-于 2026-10-01 实机通过。双极补偿效果调优搁置，Layer 2b T_arr 未执行，discovery B 待决定。
-7 / 4007 是现场观察而非协议常量，额外 trigger 精确 FPGA/LabVIEW 来源仍未证明。
+当前能力包括原采集/前端/轮次链、圆形掩膜与毫米坐标、发现早退 A、count-boundary 前端刷新解耦，
+以及 Ring STFT 时变低通、FilteredDAS、电机方向/步数参数联动、参数文件选择与持久化、物理轮内冻结及方向映射修正。
+旧双极/低频补偿已移除；两项新滤波默认关闭。面板“逆”映射 `sectorCcw=0`、起点 180°，
+“顺”映射 `sectorCcw=1`、起点 0°；桥接配置保持 `DirectionInverted=false`。
 
-已有轻量包实际构建于 3c6323d，其源码与 aa9097e、bd69785 相同；本次接入不产生新二进制。
-构建身份、验收边界与追溯点见 PROJECT_STATUS.md。
-旧副本与可再生产物按用户授权移入 _pending_delete 待审核；最终删除仅由用户执行。
+验收包保留 `1fb9478` 的 BuildIdentity；本次文档提交不产生新二进制。
+Layer 2b T_arr 未取得独立实测记录，discovery B 待决定；7 / 4007 仍是现场观察而非协议常量，
+额外 trigger 的精确 FPGA/LabVIEW 来源未证明。验收追溯见 `CODEX_REPORTS/main-acceptance-20261104/README.md`。
 
 ## Canonical documentation
 
@@ -115,11 +109,3 @@ git switch -c codex/<task-name>-<timestamp>
 
 除非 task document 明确指定 reviewed baseline，否则不要从 Session A/B/C/D、START、
 physical-round 或 integration historical branches 开始新开发。
-
-## 2026-10-16 实现候选（尚未合入 main）
-
-`codex/ring-timevar-lowpass-20261016` 从批准基线 a8c15cff 移除旧双极/低频增强，接入仅 Ring 服务消费的 STFT 时变低通。
-默认关闭，45/1 MHz、780/2000；执行位置在完整 A-line 的 DBR/限幅/DelayCut 前。
-新配置、主/高级草稿、默认保存和启动恢复已接线；独立 MATLAB 数值与软件回执见
-`CODEX_REPORTS/ring-timevar-lowpass-20261016/`，模块说明见 `MC_410T_MultiCard/delivery/docs/环形重建增强.md`。
-这是实现分支候选，不更改 canonical main 接受状态；硬件/视觉验收与真实 T_arr 仍未验证。

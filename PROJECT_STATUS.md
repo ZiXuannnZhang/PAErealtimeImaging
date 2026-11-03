@@ -1,73 +1,84 @@
 # PAERealtimeImaging 当前项目状态
 
-> 更新时间：2026-10-13（UTC+8）。当前 main 是唯一源码、文档与下一步开发基准。
-> 分支治理见 REPOSITORY_BASELINE.md，构建交付见 BUILD_STANDARD.md；具体任务要求优先。
+> 更新时间：2026-11-04（UTC+8）。canonical 源码、文档与下一步开发基准为 latest origin/main。
+> 分支治理见 REPOSITORY_BASELINE.md，构建交付见 BUILD_STANDARD.md；用户当前明确要求优先。
 
 ## 1. 当前结论
 
-用户已决定将环形增强的最新内容接入 main，并确认采用线性接入方案：
-在旧 main **6ff0e02fac0d6fe0e5a4edd089c09c85d18ff5fa** 上建立普通单父提交，
-生产与测试源码完整取自 **bd697851d2a1b6f11c39c06baf7308f1cac372ce**，
-保留并更新 main 的一级项目文档。随后普通快进推送并同步本地 main。
-原分支及历史继续保留；没有 merge commit、force push、rebase 或既有历史改写。
+截至 2026-11-04，用户确认本地最新交付包及本分支此前工作均已通过实机测试，并授权将
+`codex/ring-lowpass-motor-linkage-20261029` 普通 fast-forward 接入 `main`。
+已验收源码为 `1fb9478e71c95815671c5e1a2c1b3d6a302746d1`；本次只追加治理文档，不修改已验收源码。
 
-旧 main 与环形分支原本分叉（共同祖先 c95917f，双方独有 4 / 17 个提交），
-无法直接把 main 指向 bd69785。此次是内容线性接入：
-**bd69785 的源码已进入 main，但 bd69785 本身不因此成为 main 的祖先。**
+当前能力包括原采集/前端/轮次链、圆形掩膜与毫米坐标、发现早退 A、count-boundary 前端刷新解耦，
+以及 Ring STFT 时变低通、FilteredDAS、电机方向/步数参数联动、参数文件选择与持久化、物理轮内冻结及方向映射修正。
+旧双极/低频补偿已移除；两项新滤波默认关闭。面板“逆”映射 `sectorCcw=0`、起点 180°，
+“顺”映射 `sectorCcw=1`、起点 0°；桥接配置保持 `DirectionInverted=false`。
+
+验收包保留 `1fb9478` 的 BuildIdentity；本次文档提交不产生新二进制。
+Layer 2b T_arr 未取得独立实测记录，discovery B 待决定；7 / 4007 仍是现场观察而非协议常量，
+额外 trigger 的精确 FPGA/LabVIEW 来源未证明。验收追溯见 `CODEX_REPORTS/main-acceptance-20261104/README.md`。
+
+用户此次确认覆盖该分支已交付工作，包含最新方向修正；取代此前“仅本地、不推送”的限制。
+旧远端 main a8c15cf 是已验收源码 1fb9478 的祖先，本次直接快进，无需内容重接或 merge commit。
+实机结论来自用户确认；本轮没有新增现场日志或截图，不补写未提供的操作参数、时序数字或根因结论。
+历史报告的“待实机/未合 main/仅本地”保留原时间语境，当前接受状态以本文件为准。
 
     CANONICAL_BRANCH                     = main
     CANONICAL_MAIN_HEAD                  = latest origin/main
-    IMPORTED_SOURCE_REFERENCE            = bd697851d2a1b6f11c39c06baf7308f1cac372ce
-    MC_410T_MULTICARD_TREE                = ff2e987a3f44565496ff57f8467e891ea04757d0
-    NEXT_DEVELOPMENT_BASELINE             = latest origin/main
-    HISTORY_POLICY                       = preserve original branches and commits
+    ACCEPTED_SOURCE_SHA                  = 1fb9478e71c95815671c5e1a2c1b3d6a302746d1
+    MC_410T_MULTICARD_TREE                = f178261cbf95cfdf937af01ee705f26f7c034f5a
+    PREVIOUS_REMOTE_MAIN                 = a8c15cff203da959bd935120605e69dc32ff7145
+    INTEGRATION_METHOD                   = normal fast-forward; documentation-only closeout
+    LOWPASS_FILTEREDDAS_MOTOR_HARDWARE    = PASS_FOR_USER_TESTED_SCOPE (confirmed 2026-11-04)
     A_B_C_D_HARDWARE_VALIDATION           = PASS_FOR_CURRENT_SCOPE
-    DISCOVERY_A_HARDWARE_VALIDATION       = PASS_FOR_CURRENT_SCOPE (2026-10-01)
-    COUNT_BOUNDARY_HARDWARE_VALIDATION    = PASS_FOR_CURRENT_SCOPE (2026-10-01)
+    DISCOVERY_A_COUNT_BOUNDARY_HARDWARE   = PASS_FOR_CURRENT_SCOPE (2026-10-01)
     LAYER_2B_T_ARR_MEASUREMENT            = NOT_EXECUTED
-    BIPOLAR_COMPENSATION_EFFECT_TUNING    = SHELVED_BY_USER
+    LEGACY_BIPOLAR_LOWFREQ_ENHANCEMENT    = REMOVED_FROM_PRODUCTION
     DISCOVERY_B_DISPOSITION              = PENDING_USER_DECISION
     FPGA_LABVIEW_EXTRA_TRIGGER_SOURCE    = NOT_PROVEN
 
-## 2. 进入当前 main 的内容
+## 2. 当前 main 的内容
 
-- 原 main 已接受的 START-admission、PhysicalRoundNormalizer、RoundIdentity、timeout、
-  realtime imaging cap、AutoSave binding、Ring/CUDA reset/stale barrier。
-- 2026-09-24 前端链：全分辨率显示裁切、异步 Frontend Preprocessing Stage、逐 A-line
-  零相位滤波、保存/闸门与写盘故障修复、卡片状态与通道显示命名。
-- 环形增强：RingSignalEnhancer 的双极波形补偿与低频补偿 H(f)，FFT A1/A2/A3 优化，
-  显示层零值圆形掩膜与毫米坐标。A4 未实施、A5 未派发，无 RingReconCudaConfig ABI 变化。
-- 发现早退 A 范围：达期望卡数后提前结束发现，移植提交 6744787。
-- count-boundary 前端解耦：勾选“禁用计数重置”并超过设计触发数后，时域/频域持续刷新，
-  publisher 和 Ring 成像保持冻结，保存与卡片计数照常；未勾选模式保持原语义。
-- 上述分支内 CODEX_REPORTS 证据与交付回执随内容接入，保留原始记录口径。
+- 保留 START-admission、PhysicalRoundNormalizer、RoundIdentity、timeout、成像 cap、AutoSave
+  binding、Ring/CUDA reset/stale barrier，以及前端异步预处理、显示裁切、滤波、保存和卡片状态链。
+- 保留发现早退 A、count-boundary 前端解耦、圆形显示掩膜与毫米坐标。
+- 移除旧双极/低频补偿及其控件、配置和生产算法，使用 Ring STFT 时变低通；它在完整 A-line 的
+  DBR/限幅/DelayCut 前执行，默认关闭。旧增强专用 FFT 优化不再列为当前生产能力。
+- 新增独立 FilteredDAS 预滤波；两种滤波可独立组合，配置原子接受，失败不提交半块 CUDA/WL2 历史。
+- 修复配置被拒绝后 MainWindow 仍启动 Ring 的问题；修复 Normalizer newest-first 缓存遍历。
+- 电机参数文件联动方向、起点及配置允许的圈长规则；“参数文件选择”可浏览 JSON，
+  路径写入 INI 并在启动恢复。物理轮首触发冻结，CountBoundary/TimeoutBoundary 后允许应用，
+  startupFilter=0 同样生效；服务停止不冒充物理轮结束，失败保留待重试，编辑窗口开启时暂缓。
+- 实机方向修正：逆/CCW → sectorCcw=0、180°（九点钟）；顺/CW → sectorCcw=1、0°（三点钟）。
+  DirectionInverted=false，输入文字和桥接含义不反转，无联动手动路径保持。验收包使用 directionOnly，
+  不将本次用户确认写成全部步数规则组合的逐项实机测量。
+- raw/save、共享 frontend、CUDA/SHM ABI 和既有轮次 ownership 保持；本次接入不新增源码改动。
 
-将内容接入 main 不扩大既有硬件验收范围。双极补偿实现仍在源码中，但效果调优已搁置；
-实时性正式结论仍依赖尚未执行的 Layer 2b T_arr 实测，当前结论具有条件性。
+## 3. 验收、构建身份与追溯
 
-## 3. 关键追溯点与交付包
-
-| 对象 | 提交 / 身份 |
+| 对象 | 身份 / 状态 |
 |---|---|
-| START-admission 接受点 | 6313540f72544c0f68820c4815903abaa0b8c1e1 |
-| PhysicalRound 集成点 | 52cf7713d7e0e935cb14663ec3470f3a25bfeb90 |
-| Session A / B | eb283f6 / 676df4a |
-| Session C 接受源码 | d9daa2d7af6bb8341349e405433824e89e42bcd4 |
-| Session D 最终追溯点 | 69a7606f95c97c839fd618115f4092a4291d8906 |
-| 旧 main 前端链源码身份 | 491aa34cfa9553954eea949a7703df7194eb7699 |
-| count-boundary 功能提交 | aa9097ef126ab3ea4a2a1ce2c5786ecaba7cd184 |
-| 已有轻量包构建提交 | 3c6323dcdf587322c896f8039868eca19ba5a3d5 |
-| 本次环形内容输入 tip | bd697851d2a1b6f11c39c06baf7308f1cac372ce |
+| 原 canonical main | a8c15cff203da959bd935120605e69dc32ff7145 |
+| 原低通/FilteredDAS 分支 tip | 3340fbff5ed93ff2ba87b496275e663e877fa693（保留） |
+| 电机 bundle 原始实现 / 报告 | 04e348b / 50f41e5，移植为 20c46e9 / a16264a |
+| 联合修复 / 文件选择 | 0c5147a / 39b8ec9 |
+| 实机已验收源码 / BuildIdentity | 1fb9478e71c95815671c5e1a2c1b3d6a302746d1 |
+| 验收包 | artifacts/build-delivery/20261029-213219_1fb9478e_lowpass_motor_local_direction/ |
+| 本次确认与核查记录 | CODEX_REPORTS/main-acceptance-20261104/ |
 
-PAimage_CountBoundaryFrontendOnly_aa9097e_lightweight 实际构建于 3c6323d，tracked dirty=false。
-其生产/测试源码与 aa9097e、bd69785 完全一致；bd69785 仅追加交付回执。
-2026-10-13 只读核查确认主程序内嵌 SHA、运行记录及哈希一致，清单内 22 个 EXE/DLL
-匹配，只有 INI 与交付清单不同。本次接入不重新构建、不产生新的二进制身份。
-后续正式交付必须在新的 exact main SHA 重新 configure/build 并记录 BuildIdentity。
+上述 exact 1fb9478、tracked-clean 的标准 configure/build、56/56 CTest、真实 MainWindow
+入口 1/1 与合成服务 selftest 均已通过。32 组服务矩阵覆盖 4/8 通道、两个方向、拼接和两滤波开关。
+既有 MATLAB 数值、旧 OFF 字节一致性及性能证据分别保留在 ring-timevar-lowpass、ring-filtered-das 报告，
+不改写为本轮重新执行的性能实验。用户此次确认覆盖该分支已交付功能的实机测试范围。
 
-历史 Session D 的 CTest 45/45、环形/count-boundary 的 CTest 51/51 均为原提交的证据，
-不宣称为新 main SHA 上重新执行的测试。count-boundary 的部分 .log 未归档 .txt 的证据
-缺口继续保留，不能因此将已记录的实机通过改写为未通过。
+本次仅文档收尾，生产/测试子树与 1fb9478 一致；不重新构建、不修改验收包或旧回执。
+包内 local_only=true、旧远端 SHA 和当时 UNVERIFIED 文案保持原样，当前验收/发布状态由本次记录补充。
+将来若交付新的 main exact SHA，仍须重新 configure/build 并记录新 BuildIdentity。
+
+历史 START 6313540、PhysicalRound 52cf771、A/B eb283f6/676df4a、C d9daa2d7、D 69a7606f、
+前端链 491aa34、count-boundary aa9097e、旧轻量包 3c6323d、旧增强内容输入 bd69785 保留追溯。
+2026-10-13 曾将 bd69785 内容线性接入 main；原 tip 并非因此成为 main 祖先。本次则为真实祖先链快进。
+旧 count-boundary 部分 .log 未归档 .txt 的证据缺口继续保留。
 
 ## 4. 冻结语义
 
@@ -87,22 +98,16 @@ PAimage_CountBoundaryFrontendOnly_aa9097e_lightweight 实际构建于 3c6323d，
 
 ## 5. 分支角色与下一步
 
-main 是下一步开发基准。环形增强和 count-boundary 的内容已接入 main，原 ref 保留追溯；
-不能把“源码相同”误写为“原 tip 已是 main 祖先”。discovery A 范围已进入 main，B 范围
-（本地绑定默认值与 tooltip 文案）仍留原分支待用户决定。task-docs 只保存任务规格；
-最新 postFilter harness 派发不代表新实现已完成。
+新工作默认从 latest origin/main 新建任务分支。联合功能分支作为本次已验收集成追溯保留；
+原低通分支 codex/ring-timevar-lowpass-20261016@3340fbf 已被 main 祖先链包含，原 ref 不移动。
+发现早退 B（本地绑定默认值和 tooltip）仍待用户决定；task-docs 派发不能当作生产实现。
+ring-zero-phase-pa-inversion 仅作数值参考，不维护；B1→B2 起点约定作废。
+DAS B-tier 实验继续不维护，其旧结论不因本次独立 FilteredDAS 实现进入 main 而被接受。
+Layer 2b T_arr、额外 trigger 根因和全孔径 8 通道正式校准仍各自保留原边界。
 
-ring-zero-phase-pa-inversion 仍只作数值参考、不再维护；其 B1→B2 起点约定作废。
-DAS B-tier 实验分支继续不维护，其源码、测试、文档与结论不作为 canonical 事实。
-新功能默认从 latest origin/main 新建任务分支。完整历史盘点可查旧 main 6ff0e02 的文档。
+## 6. 本地工作区与保留
 
-## 6. 本地清理
-
-用户于 2026-10-13 明确授权：先核实源码远端备份，只保留最新 main 的活跃源码和文档；
-可再生构建/测试产物移入根目录 _pending_delete/<task>/ 待用户审核后自行删除。
-未备份源码先建立单独远端备份，不纳入 main。原始采集、校准结果、硬件证据和未确认可再生
-数据单独标记“保留、不可删除”，不混入可删除集合。代理不执行最终删除，也不清空旧暂存区。
-
-权威顺序：PROJECT_STATUS → REPOSITORY_BASELINE → BUILD_STANDARD → HANDOFF →
-Codex-GitHub双端联动快速上手 → 子工程 README → CODEX_REPORTS。
-任务明确要求可覆盖冲突条款。
+本地旧 main d3054d51e19570a6ef38774b8a82326738dce53b 含一份独有文档/开发配置提交，
+与本次实现分叉，按治理规则原样保留，不 reset/rebase、不隐式接入。远端 main 独立正常快进；
+当前联合分支在发布后与 origin/main 同步。其他未跟踪文件和 frozen handoff 均不改动。
+旧 _pending_delete 最终删除仅由用户执行；原始数据、校准和硬件证据保持保护，不新增清理授权。

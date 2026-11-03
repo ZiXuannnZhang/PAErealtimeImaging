@@ -1,68 +1,45 @@
 # HANDOFF — PAERealtimeImaging 当前接力入口
 
-> 2026-10-19 联合候选：本实现分支 `codex/ring-timevar-lowpass-20261016` 在已审核
-> `eed98f0` 上新增 FilteredDAS，保留时变低通及启动拒绝修复，旧双极/低频补偿已移除。
-> 未合并 main；两增强的实机视觉、真实采集与 T_arr 待用户联合验收。
-> 任务、测试、性能和 exact-SHA 联合包入口见 `CODEX_REPORTS/ring-filtered-das-20261019/README.md`。
+> 更新时间：2026-11-04（UTC+8）。当前基准为 latest origin/main。
 
+截至 2026-11-04，用户确认本地最新交付包及本分支此前工作均已通过实机测试，并授权将
+`codex/ring-lowpass-motor-linkage-20261029` 普通 fast-forward 接入 `main`。
+已验收源码为 `1fb9478e71c95815671c5e1a2c1b3d6a302746d1`；本次只追加治理文档，不修改已验收源码。
 
-> 更新时间：2026-10-13（UTC+8）。当前基准始终取 latest origin/main。
+当前能力包括原采集/前端/轮次链、圆形掩膜与毫米坐标、发现早退 A、count-boundary 前端刷新解耦，
+以及 Ring STFT 时变低通、FilteredDAS、电机方向/步数参数联动、参数文件选择与持久化、物理轮内冻结及方向映射修正。
+旧双极/低频补偿已移除；两项新滤波默认关闭。面板“逆”映射 `sectorCcw=0`、起点 180°，
+“顺”映射 `sectorCcw=1`、起点 0°；桥接配置保持 `DirectionInverted=false`。
 
-用户已确认将环形增强 bd69785 的完整源码/测试内容线性接入旧 main 6ff0e02，
-建立普通单父提交并普通快进推送。没有 merge commit、force push 或旧历史改写。
-旧环形与 count-boundary 分支保留追溯；内容已进入 main，不代表旧 tip 已成为 main 祖先。
+验收包保留 `1fb9478` 的 BuildIdentity；本次文档提交不产生新二进制。
+Layer 2b T_arr 未取得独立实测记录，discovery B 待决定；7 / 4007 仍是现场观察而非协议常量，
+额外 trigger 的精确 FPGA/LabVIEW 来源未证明。验收追溯见 `CODEX_REPORTS/main-acceptance-20261104/README.md`。
 
-## 当前状态
+## 接手要点
 
-- 下一步开发从 latest origin/main 开始，生产/测试源码与 bd69785 完全一致。
-- START-admission、Session A/B/C/D 已收尾，当前验证范围实机通过。
-- 发现早退 A 范围、count-boundary 前端解耦于 2026-10-01 实机通过。
-- 双极补偿效果调优搁置；Layer 2b T_arr 尚未执行，实时性结论仍为条件性。
-- discovery B 范围归宿待用户决定；postFilter 只有任务派发记录，不代表实现完成。
-- 7 / 4007 不是协议常量，额外 trigger 的 FPGA/LabVIEW 精确来源仍未证明。
-- 当前 main 已含环形信号增强、FFT 优化、掩膜/毫米坐标、发现早退 A 和 count-boundary；
-  不再从旧分支的“尚未并入 main”状态推断当前能力。
+先读 PROJECT_STATUS.md、REPOSITORY_BASELINE.md、BUILD_STANDARD.md，再读本文件与协作指南。
+新任务默认从 latest origin/main 新建分支。原低通 tip 3340fbf 和全部历史分支保留追溯。
+电机物理轮首触发冻结参数，计数/超时边界后允许应用；startupFilter=0 生效，服务停止不解除闩锁，
+窗口编辑暂缓，拒绝后保留重试。参数文件选择后记忆路径，不解除当前物理轮冻结。
 
-## 生产链
+Ring 服务先对完整 A-line 做时变低通，再做既有 DBR/限幅/DelayCut，随后 FilteredDAS 和既有对齐/几何/CUDA DAS。
+raw/save 与 frontend clone 隔离；成像 cap 后前端信号可持续刷新，publisher/Ring 冻结。
+旧 MultiPortReceiver/PacketAssemblyBuffer 不是生产入口。CONFIG 仍需当前事务全卡 60-byte ACK。
+RoundIdentity、timeout/save/reset 顺序与统计语义以 PROJECT_STATUS.md §4 为准；CUDA/SHM ABI 未改变。
+修改 RingReconCudaConfig 时仍须核对全部 DLL/consumer ABI。RadiusCalibration 仍需真实全孔径校准数据，
+不对 raw Bscan 做 circshift。
+ring-zero-phase 仅作数值参考，DAS B-tier 已停维护，尚无全孔径 8 通道正式校准完成结论。
 
-    FPGA → SocketReceiver → SourceCore → HostOutput
-      CardFrame → save queue → FileSaver
-      SyncFrame → DataProcessor::deliverAssembled
-        → FramePublisher (raw group, optional)
-        → FrontendPreprocessor (async clone / filter / display preparation)
-          → DisplayBuffer
-          → Ring feed → RingBlockAssembler → ImagingController → ImagingSvc → ring_recon_cuda
+## 已验收交付
 
-raw/save 与 frontend clone 隔离。超 cap 的 frontend-only 标记使 publisher 与 Ring 冻结，
-前端信号继续刷新；旧 MultiPortReceiver/PacketAssemblyBuffer 不是生产 UDP ingress owner。
-CONFIG 成功需要当前事务全卡 60-byte ACK，18-byte ready packet 不替代 ACK。
-
-## 接手与交付
-
-先读 PROJECT_STATUS.md、REPOSITORY_BASELINE.md、BUILD_STANDARD.md，再读本文件与协作指南；
-具体任务要求以 codex/task-docs:TASKS/<task>.md 为准。历史 receipt 不覆盖当前状态。
-
-正式构建按 BUILD_STANDARD.md，在待交付 exact SHA 重新 configure/build、记录 BuildIdentity、
-tracked-clean、工具链、runtime 来源和 SHA256。旧包构建 3c6323d 与当前源码相同，
-但不能把旧 binary identity 改称新的 main SHA。本次接入不生成新二进制或硬件验收结果。
-
-RoundIdentity、startup filter、timeout/save/reset 顺序与统计语义以 PROJECT_STATUS.md §4 为准。
-修改 RingReconCudaConfig 时必须同步核对所有 DLL/consumer ABI。
-
-ring-zero-phase 分支只作数值参考；DAS B-tier 分支停止维护，其结论不进入 canonical 状态。
-RadiusCalibration 仍需真实全孔径校准数据，不对 raw Bscan 做 circshift；
-尚无“8 通道正式全量校准完成”结论。_migration_pack 的 frozen provenance 文件保持原样。
+artifacts/build-delivery/20261029-213219_1fb9478e_lowpass_motor_local_direction/，
+BuildIdentity 为 1fb9478e71c95815671c5e1a2c1b3d6a302746d1、tracked-clean；
+标准构建、56/56 回归、真实 MainWindow 1/1、合成服务自检通过。
+包内旧 local-only/UNVERIFIED 回执保留原样，由本次验收记录补充；不重标旧二进制。
+将来正式新交付仍须在目标 exact SHA configure/build，记录 runtime 来源、SHA256 与完整 bin。
 
 ## 本地工作区
 
-当前 main 是唯一活跃源码/文档基准。旧副本、可再生构建和测试结果按本轮授权移入
-_pending_delete；源码先核实远端备份，未备份的原始数据与证据单独保护。
-只有用户执行最终删除。不要清空旧 _pending_delete，不用 reset --hard / clean 强制同步。
-
-## 2026-10-16 实现候选（尚未合入 main）
-
-`codex/ring-timevar-lowpass-20261016` 从批准基线 a8c15cff 移除旧双极/低频增强，接入仅 Ring 服务消费的 STFT 时变低通。
-默认关闭，45/1 MHz、780/2000；执行位置在完整 A-line 的 DBR/限幅/DelayCut 前。
-新配置、主/高级草稿、默认保存和启动恢复已接线；独立 MATLAB 数值与软件回执见
-`CODEX_REPORTS/ring-timevar-lowpass-20261016/`，模块说明见 `MC_410T_MultiCard/delivery/docs/环形重建增强.md`。
-这是实现分支候选，不更改 canonical main 接受状态；硬件/视觉验收与真实 T_arr 仍未验证。
+本地旧 main d3054d5 含一份独有文档/开发配置提交，与已验收链分叉，保留不改；
+当前联合分支在发布后对应远端 main。不要 reset/rebase 或隐式接入旧 main 内容。
+未跟踪文件、frozen _migration_pack 和旧 _pending_delete 保持原样，最终删除仅由用户执行。

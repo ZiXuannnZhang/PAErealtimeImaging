@@ -67,37 +67,22 @@ tracked working tree clean
 
 2026-09-18 A/B/C/D 收尾后，默认正式构建对象是最新 `origin/main`，除非当前 task document 明确指定其他 reviewed commit。
 
-2026-10-13 接入更新：用户已确认将环形增强 bd69785 的生产/测试源码完整线性接入 main，
-当前源码参考身份为 bd69785（MC_410T_MultiCard tree=ff2e987a3f44565496ff57f8467e891ea04757d0）。
-原轻量包构建于 3c6323d，与当前源码相同，但 binary/BuildIdentity 仍属于旧构建提交。
-本次接入与磁盘清理不重新构建、不执行新的硬件验收；后续正式交付必须在新 main exact SHA
-重新 configure/build，不能将旧二进制重标为新 main 的交付身份。
-
-本轮接受链的追溯点：
+2026-11-04 接入更新：用户确认联合功能分支最新本地包及此前工作实机通过，授权 fast-forward 为 main。
+已验收源码/BuildIdentity 为 1fb9478e71c95815671c5e1a2c1b3d6a302746d1，
+MC_410T_MultiCard tree 为 f178261cbf95cfdf937af01ee705f26f7c034f5a；验收包为：
 
 ```text
-accepted A/B/C/D candidate code = d9daa2d7af6bb8341349e405433824e89e42bcd4
-Session D final traceability HEAD = 69a7606f95c97c839fd618115f4092a4291d8906
+artifacts/build-delivery/20261029-213219_1fb9478e_lowpass_motor_local_direction/
 ```
 
-上面两点是 Session D 验证时的 source identity，**不代表当前 `main`**。2026-09-24 前端链
-fast-forward 进入后，canonical `main` 的源码树已越过 `d9daa2d7`（2026-09-24 当时源码树身份 `491aa34`；当前已接入 bd69785，
-见 `PROJECT_STATUS.md` 第 2 节）。因此：
+该包在 exact SHA、tracked-clean 状态完成标准 configure/build、56/56 CTest、真实 MainWindow
+入口 1/1 和合成服务自检。包打包时按用户要求仅本地，旧回执的 local_only 和旧远端状态保持原样；
+用户于 2026-11-04 另行授权发布，确认与包清单核查见 CODEX_REPORTS/main-acceptance-20261104/。
 
-- 不得用 `d9daa2d7` 的 source tree 或 binary/BuildIdentity 充当当前 `main` 的交付身份；
-- 在 `main` 上构建时一律取最新 `origin/main` 的 exact SHA 重新 configure/build；
-- A/B/C/D 的验证语义仍由上述追溯点承载，不因源码树前进而需要重新设计。
-
-当前实机结论为“当前验证范围通过；底层额外 trigger 精确 FPGA/LabVIEW 来源未证明”。历史 validation branch 继续保留，但不再是默认正式 build target。
-
-START-admission 软件修复已存在于 canonical ancestry；其历史硬件 root-cause attribution 仍是独立命题。
-
-为 canonical main 构建时：
-
-- checkout/fast-forward 到最新 `origin/main` exact SHA；
-- tracked tree clean；
-- 最终交付必须在该 exact SHA 上重新 configure；
-- 不得因为历史候选曾经通过测试而复用旧 BuildIdentity 作为新 main 的正式交付身份。
+本次 main 收尾只更新文档，不生成新二进制，不将 1fb9478 的 BuildIdentity 改成文档提交 SHA。
+实机接受覆盖用户实测范围，未补充 Layer 2b T_arr 正式测量。以后生成 main 新包仍须取
+latest origin/main exact SHA，tracked-clean，重新 configure/build 并记录独立 BuildIdentity。
+历史 Session C/D、3c6323d、bd69785 仅保留原阶段追溯，不作为当前默认交付身份。
 
 ### 2.3 最终交付构建必须在最终 commit 上重新 configure
 
@@ -385,17 +370,8 @@ libzmq-v141-mt-4_3_5.dll
 - 若 runtime 与软件回归时不同，必须显式标记；
 - 现场日志、截图、抓包和最终结论必须能回溯到 exact candidate SHA 与该测试包依赖哈希。
 
-当前两个候选分别使用：
-
-```text
-Physical round / RoundIdentity:
-  52cf7713d7e0e935cb14663ec3470f3a25bfeb90
-
-START admission:
-  6313540f72544c0f68820c4815903abaa0b8c1e1
-```
-
-若现场运行的实际二进制不是对应 SHA 的可追溯构建，则结果不能直接用于该候选的 hardware acceptance。
+当前已验收包身份见 §2.2。历史 PhysicalRound 52cf771 和 START 6313540 仅为原阶段追溯点，
+不再列为当前待验收候选。验收记录必须对应实际运行包的 exact SHA，不重标旧二进制。
 
 Physical-round 验收还有额外证据要求：不能只根据最终图像“看起来正常”判定通过。必须尽量保存能重建 distinct physical trigger count、CountBoundary、TimeoutBoundary、RoundIdentity、ring reset / epoch reset、stale drop 和 next-round clean start 的诊断记录；日志无证据的链路应标记 `UNVERIFIED`。
 

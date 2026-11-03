@@ -1,28 +1,34 @@
 # Repository Baseline and Branch Governance
 
-> Updated 2026-10-13 (UTC+8). The canonical source and next development baseline are latest origin/main.
+> Updated 2026-11-04 (UTC+8). The canonical source/docs and next development baseline are latest origin/main.
 
 ## Canonical integration
 
-The user explicitly accepted a linear content integration from
-bd697851d2a1b6f11c39c06baf7308f1cac372ce onto the previous main
-6ff0e02fac0d6fe0e5a4edd089c09c85d18ff5fa. The new integration commit has exactly one parent
-(the previous main), preserves current repository-level documentation, and imports the complete
-ring-branch implementation/tests/evidence. Main is updated with a normal fast-forward push.
+On 2026-11-04 the user confirmed successful hardware testing of the latest local delivery and
+preceding work on codex/ring-lowpass-motor-linkage-20261029, and authorized publishing local
+progress and fast-forwarding this branch into main.
+Previous remote main a8c15cff203da959bd935120605e69dc32ff7145 is an ancestor of accepted source
+1fb9478e71c95815671c5e1a2c1b3d6a302746d1 (10 commits ahead before documentation closeout).
+Both remote main and the integration branch advance normally to the same documentation-only
+descendant. No merge commit, force push, rebase, content replay or existing-history rewrite is used.
 
-The previous main and ring tip had diverged at c95917f (4 main-only / 17 ring-only commits).
-A direct fast-forward to that existing ring tip was impossible. The user approved this alternative;
-there is no merge commit, rebase, force push, or rewrite of existing commits.
+The accepted MC_410T_MultiCard tree is f178261cbf95cfdf937af01ee705f26f7c034f5a.
+Closeout must preserve that entire production/test subtree. The original lowpass branch
+codex/ring-timevar-lowpass-20261016@3340fbff5ed93ff2ba87b496275e663e877fa693 stays unchanged
+and is contained by main ancestry. Imported motor commits retain cherry-pick -x provenance.
 
-The MC_410T_MultiCard subtree must equal ring tip tree
-ff2e987a3f44565496ff57f8467e891ea04757d0. Importing source content does not make bd69785 an
-ancestor of main. Original branch refs and accepted commit identities remain preserved remotely.
+Historical 2026-10-13 integration was different: bd69785 content was imported as a single-parent
+commit onto 6ff0e02 because those refs had diverged. Its old subtree constraint
+ff2e987a3f44565496ff57f8467e891ea04757d0 applies only to that historical integration,
+not today's source. That content import never made bd69785 itself an ancestor of main.
 
 ## Current branch roles
 
 | Branch | Role |
 |---|---|
-| main | Sole canonical source/docs and next development baseline |
+| main | Canonical source/docs; accepted lowpass/FilteredDAS/motor integration and next baseline |
+| codex/ring-lowpass-motor-linkage-20261029 | Hardware-accepted integration; retained at the main closeout revision |
+| codex/ring-timevar-lowpass-20261016 | Original ref retained at 3340fbf; contained by main |
 | codex/ring-reconstruction-enhancement-20260926-181824 | Content imported from bd69785; original implementation history retained |
 | codex/count-boundary-frontend-only-20260929-024946 | Same tip/source as ring branch; read-only traceability |
 | codex/discovery-early-exit-localbind-20260926-123437 | A scope imported through 6744787; B scope disposition remains pending |
@@ -45,9 +51,12 @@ The old frontend-chain source identity was 491aa34.
 The count-boundary implementation is aa9097e, lightweight package build 3c6323d, ring content tip bd69785.
 
 Hardware acceptance remains scoped: A/B/C/D passed the current tested scope; discovery A and
-count-boundary passed on 2026-10-01. Bipolar effect tuning is shelved, Layer 2b T_arr not measured,
+count-boundary passed on 2026-10-01. Legacy bipolar/low-frequency enhancement has since been removed. Layer 2b T_arr remains unmeasured,
 and discovery B awaits a decision. Main integration does not create new hardware evidence.
 The existing count-boundary .log-to-.txt evidence gap remains separately recorded.
+The user confirmed hardware acceptance of the lowpass/FilteredDAS/motor delivery on 2026-11-04;
+see PROJECT_STATUS.md and CODEX_REPORTS/main-acceptance-20261104. This does not supply a
+formal T_arr measurement or resolve FPGA/LabVIEW root-cause attribution.
 
 ## Source of truth and development
 
@@ -58,6 +67,9 @@ guide are entry points. Specific task requirements override conflicts.
 Local main follows origin/main only by fast-forward. New implementation tasks normally branch
 from latest origin/main. If refs diverge, inventory and resolve the method explicitly; do not reset,
 force-push, or silently replay accepted histories. Keep old histories for provenance.
+Local main d3054d51e19570a6ef38774b8a82326738dce53b has one unique documentation/development
+configuration commit and is left unchanged. It is not the accepted main baseline. Remote main
+is fast-forwarded directly from the active branch; do not reset or silently import local main.
 
 ## Local cleanup authorized 2026-10-13
 
@@ -80,12 +92,13 @@ must remain recoverable from the recorded refs after a move.
 Task documents live on codex/task-docs under TASKS/<简要任务说明>_YYYYMMDD-HHMMSS.md
 (TASKS/README.md exempt). Software implementation and task specifications remain separate.
 Source review, automated tests, hardware acceptance, and hardware root-cause attribution are distinct.
-Future source integration requires an explicit scope and recorded method; this user-approved
-single-parent content import is the specific resolution for the 2026-10-13 divergence.
+Future source integration requires an explicit scope and recorded method. The 2026-10-13
+single-parent content import resolved that historical divergence; the 2026-11-04 acceptance
+instead authorizes the direct fast-forward recorded above.
 
 ## Historical branch inventory
 
-The following is the fixed audit BEFORE this integration. Its ahead/behind counts use main@29bb51e,
+The following is the fixed audit BEFORE the historical 2026-10-13 integration. Its ahead/behind counts use main@29bb51e,
 not the new main. It is retained as history, not a live capability/merge-status table.
 
 ## 2026-10-13 remote branch inventory
