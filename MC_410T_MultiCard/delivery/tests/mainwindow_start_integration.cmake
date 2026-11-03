@@ -20,6 +20,8 @@ add_custom_command(TARGET mainwindow_start_integration_test POST_BUILD
         "${CMAKE_SOURCE_DIR}/libs/imaging/cufft64_12.dll"
         "${RING_RECON_CUDA_BIN}/ring_recon_cuda.dll"
         "${RING_RECON_CUDA_BIN}/cudart64_12.dll"
+        "${RING_RECON_CUDA_BIN}/cublas64_12.dll"
+        "${RING_RECON_CUDA_BIN}/cublasLt64_12.dll"
         "$<TARGET_FILE_DIR:mainwindow_start_integration_test>")
 enable_testing()
 add_test(NAME mainwindow_start_integration_test COMMAND mainwindow_start_integration_test)

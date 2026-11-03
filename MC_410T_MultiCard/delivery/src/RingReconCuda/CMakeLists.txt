@@ -9,7 +9,21 @@ set(CMAKE_CUDA_ARCHITECTURES 89)
 
 # CUDA 重建核心（DLL，C 接口，供 MinGW 上位机/ImagingSvc 后续链接）
 add_library(ring_recon_cuda SHARED
+    ${CMAKE_CURRENT_SOURCE_DIR}/../RingRecon/ring_fbp.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/../RingRecon/ring_recon_cuda.cu)
+find_package(CUDAToolkit REQUIRED)
+target_link_libraries(ring_recon_cuda PRIVATE CUDA::cublas)
+add_executable(ring_fbp_core_test ../../tests/ring_fbp_core_test.cpp)
+target_include_directories(ring_fbp_core_test PRIVATE ../RingRecon ../../include)
+target_link_libraries(ring_fbp_core_test PRIVATE ring_recon_cuda)
+set_target_properties(ring_fbp_core_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+if(MSVC)
+    target_compile_options(ring_fbp_core_test PRIVATE /utf-8)
+endif()
+add_custom_command(TARGET ring_recon_cuda POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CUDAToolkit_BIN_DIR}/cublas64_12.dll" "${CUDAToolkit_BIN_DIR}/cublasLt64_12.dll"
+      "$<TARGET_FILE_DIR:ring_recon_cuda>")
 target_include_directories(ring_recon_cuda PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../RingRecon)
 target_compile_definitions(ring_recon_cuda PRIVATE RING_RECON_CUDA_EXPORTS)

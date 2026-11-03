@@ -14,6 +14,8 @@
 #include "RingTimevarLowpass.h"
 #include "FilteredDasPrefilter.h"
 #include "ring_recon_cuda.h"
+#include "RingFbpSettings.h"
+#include "RingFbpStream.h"
 
 namespace zmq { class context_t; class socket_t; }
 namespace pa_recon_qt { class PAReconstructor; struct Config; }
@@ -55,6 +57,7 @@ private:
                           uint64_t submitWallUs, bool notifySeqValid,
                           const paimage::RoundIdentity &round, bool sourceRoundComplete);
     void resetRingRecon();        // 圈末/超时共用：清空 CUDA 累积与跨圈边界状态
+    bool processFbpBlock(const QVector<float>&, const QVector<float>&, const QVector<quint8>&, bool final);
     void sendRingObservation(const char *kind,
                              const ring_shm_obs::Snapshot &snapshot,
                              const QJsonObject &extra = QJsonObject());
@@ -80,6 +83,13 @@ private:
 
     // 环形扫描并行分支
     RingReconCudaConfig m_ringConfig;
+    RingFbpSettings m_fbpSettings;
+    void* m_fbp[2]={nullptr,nullptr};
+    ring_fbp_stream::Stream m_fbpStreams[8][2];
+    QVector<float> m_fbpPrefixRaw,m_fbpPrefixAngles;
+    QVector<quint8> m_fbpPrefixChannels;
+    bool m_fbpTimingReady=false;
+    double m_fbpCardShift[4]={};
     RingTimevarLowpassConfig   m_ringTimevarConfig;
     RingTimevarLowpass  m_ringTimevar;
     FilteredDasConfig m_filteredDasConfig;

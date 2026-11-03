@@ -103,6 +103,8 @@ if(RING_RECON_CUDA_BIN)
             "${RING_RECON_CUDA_BIN}/ring_recon_cuda.dll" $<TARGET_FILE_DIR:ImagingSvc>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${RING_RECON_CUDA_BIN}/cudart64_12.dll" $<TARGET_FILE_DIR:ImagingSvc>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${RING_RECON_CUDA_BIN}/cublas64_12.dll" "${RING_RECON_CUDA_BIN}/cublasLt64_12.dll" $<TARGET_FILE_DIR:ImagingSvc>
         COMMENT "Deploying ring_recon_cuda runtime")
 endif()
 

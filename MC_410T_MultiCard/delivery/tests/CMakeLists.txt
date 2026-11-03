@@ -1,11 +1,54 @@
 cmake_minimum_required(VERSION 3.21)
 project(diagnostic_recorder_test LANGUAGES CXX)
 
+set(RING_TEST_CUDA_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../build/ring_recon_cuda/bin" CACHE PATH "Test CUDA runtime")
+set(RING_TEST_CUDA_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../build/ring_recon_cuda/libring_recon_cuda.dll.a" CACHE FILEPATH "Test CUDA import library")
+file(COPY "${RING_TEST_CUDA_BIN}/cublas64_12.dll" "${RING_TEST_CUDA_BIN}/cublasLt64_12.dll" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
+file(COPY "${RING_TEST_CUDA_BIN}/cublas64_12.dll" "${RING_TEST_CUDA_BIN}/cublasLt64_12.dll" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/ui-isolated")
+file(COPY "${RING_TEST_CUDA_BIN}/cublas64_12.dll" "${RING_TEST_CUDA_BIN}/cublasLt64_12.dll" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/filtered-ui-isolated")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
+
+add_executable(ring_fbp_service_test ring_fbp_service_test.cpp
+    ../src/ImagingSvc/ImagingSvc.cpp ../src/ImagingSvc/ImagingSvc.h
+    ../src/RingRecon/ring_recon.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp
+    ../src/FilteredDasPrefilter.cpp ../src/FilteredDasSettings.cpp)
+target_include_directories(ring_fbp_service_test PRIVATE ../include ../src/RingRecon ../src/ImagingSvc ../libs/imaging ../third_party/zeromq/include)
+target_compile_definitions(ring_fbp_service_test PRIVATE RING_TIMEVAR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(ring_fbp_service_test PRIVATE Qt6::Core ws2_32 "${RING_TEST_CUDA_LIB}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.lib")
+add_test(NAME ring_fbp_service_test COMMAND ring_fbp_service_test)
+set_tests_properties(ring_fbp_service_test PROPERTIES RUN_SERIAL TRUE)
+add_executable(ring_fbp_controller_test ring_fbp_controller_test.cpp ../src/ImagingController.cpp ../include/ImagingController.h
+    ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/RingRecon/ring_recon.cpp
+    ../src/FilteredDasPrefilter.cpp ../src/FilteredDasSettings.cpp)
+target_include_directories(ring_fbp_controller_test PRIVATE ../include ../src/RingRecon ../third_party/zeromq/include)
+target_compile_definitions(ring_fbp_controller_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_link_libraries(ring_fbp_controller_test PRIVATE Qt6::Gui "${RING_TEST_CUDA_LIB}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a")
+set_target_properties(ring_fbp_controller_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/controller-isolated")
+set_property(TARGET ring_fbp_controller_test APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../build/mingw_debug/bin/ImagingSvc.exe")
+add_custom_command(TARGET ring_fbp_controller_test POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/../build/mingw_debug/bin/ImagingSvc.exe"
+    "${RING_TEST_CUDA_BIN}/ring_recon_cuda.dll" "${RING_TEST_CUDA_BIN}/cudart64_12.dll"
+    "${RING_TEST_CUDA_BIN}/cublas64_12.dll" "${RING_TEST_CUDA_BIN}/cublasLt64_12.dll"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.dll"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/cufft64_12.dll"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
+    "$<TARGET_FILE_DIR:ring_fbp_controller_test>")
+add_test(NAME ring_fbp_controller_test COMMAND ring_fbp_controller_test)
+set_tests_properties(ring_fbp_controller_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 45)
+add_custom_command(TARGET ring_fbp_service_test POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${RING_TEST_CUDA_BIN}/ring_recon_cuda.dll" "${RING_TEST_CUDA_BIN}/cudart64_12.dll"
+    "${RING_TEST_CUDA_BIN}/cublas64_12.dll" "${RING_TEST_CUDA_BIN}/cublasLt64_12.dll"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.dll"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/cufft64_12.dll"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
+    "$<TARGET_FILE_DIR:ring_fbp_service_test>")
 
 add_executable(ring_timevar_lowpass_test ring_timevar_lowpass_test.cpp
     ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/RingRecon/ring_recon.cpp)
@@ -25,12 +68,12 @@ if(WIN32)
         ../libs/imaging ../third_party/zeromq/include)
     target_compile_definitions(ring_timevar_service_test PRIVATE RING_TIMEVAR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(ring_timevar_service_test PRIVATE Qt6::Core ws2_32
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/libring_recon_cuda.dll.a"
+        "${RING_TEST_CUDA_LIB}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a"
         "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.lib")
     add_custom_command(TARGET ring_timevar_service_test POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/ring_recon_cuda.dll"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/cudart64_12.dll"
+        "${RING_TEST_CUDA_BIN}/ring_recon_cuda.dll"
+        "${RING_TEST_CUDA_BIN}/cudart64_12.dll"
         "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.dll"
         "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/cufft64_12.dll"
         "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
@@ -45,15 +88,15 @@ if(WIN32)
         ../third_party/zeromq/include)
     target_compile_definitions(ring_timevar_ui_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(ring_timevar_ui_test PRIVATE Qt6::Widgets
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/libring_recon_cuda.dll.a"
+        "${RING_TEST_CUDA_LIB}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a")
     set_target_properties(ring_timevar_ui_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ui-isolated")
     add_test(NAME ring_timevar_ui_test COMMAND ring_timevar_ui_test)
     set_tests_properties(ring_timevar_ui_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_custom_command(TARGET ring_timevar_ui_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/ring_recon_cuda.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/cudart64_12.dll"
+            "${RING_TEST_CUDA_BIN}/ring_recon_cuda.dll"
+            "${RING_TEST_CUDA_BIN}/cudart64_12.dll"
             "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
             "$<TARGET_FILE_DIR:ring_timevar_ui_test>")
 endif()
@@ -432,12 +475,12 @@ if(WIN32)
         ../libs/imaging ../third_party/zeromq/include)
     target_compile_definitions(filtered_das_service_test PRIVATE RING_TIMEVAR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(filtered_das_service_test PRIVATE Qt6::Core ws2_32
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/libring_recon_cuda.dll.a"
+        "${RING_TEST_CUDA_LIB}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a"
         "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.lib")
     add_custom_command(TARGET filtered_das_service_test POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/ring_recon_cuda.dll"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/cudart64_12.dll"
+        "${RING_TEST_CUDA_BIN}/ring_recon_cuda.dll"
+        "${RING_TEST_CUDA_BIN}/cudart64_12.dll"
         "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.dll"
         "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/cufft64_12.dll"
         "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
@@ -456,15 +499,15 @@ if(WIN32)
         ../third_party/zeromq/include)
     target_compile_definitions(filtered_das_ui_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(filtered_das_ui_test PRIVATE Qt6::Widgets
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/libring_recon_cuda.dll.a"
+        "${RING_TEST_CUDA_LIB}"
         "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a")
     set_target_properties(filtered_das_ui_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/filtered-ui-isolated")
     add_test(NAME filtered_das_ui_test COMMAND filtered_das_ui_test)
     set_tests_properties(filtered_das_ui_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_custom_command(TARGET filtered_das_ui_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/ring_recon_cuda.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../../_migration_pack/prebuilt_cuda/bin/cudart64_12.dll"
+            "${RING_TEST_CUDA_BIN}/ring_recon_cuda.dll"
+            "${RING_TEST_CUDA_BIN}/cudart64_12.dll"
             "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
             "$<TARGET_FILE_DIR:filtered_das_ui_test>")
 endif()

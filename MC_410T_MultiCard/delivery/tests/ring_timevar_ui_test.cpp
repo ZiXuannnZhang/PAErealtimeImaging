@@ -15,6 +15,7 @@
 #include <QFile>
 #include <QFontDatabase>
 #include <QGroupBox>
+#include <QLineEdit>
 #include <iostream>
 #include <stdexcept>
 
@@ -102,6 +103,20 @@ int main(int argc,char** argv) {
         deepDefaults.setAcquisitionParams(4,16000);dismissMessage();
         check(!deepDefaults.applyConfig()&&deepDefaults.timevarConfig().p2==5000,
               "depth change silently clamped configuration");
+        QFile::remove(paimageSettingsPath());
+        RingConfigDialog fbp(&controller);fbp.setAcquisitionParams(4,4000);
+        widget<QComboBox>(fbp,"ringReconAlgorithm")->setCurrentIndex(1);
+        check(fbp.fbpSettings().enabled&&!fbp.filteredDasConfig().enabled,"FBP selector isolation");
+        check(fbp.applyConfig(),"FBP apply failed");
+        widget<QComboBox>(fbp,"ringReconAlgorithm")->setCurrentIndex(0);fbp.reject();
+        check(fbp.fbpSettings().enabled,"cancel lost accepted FBP algorithm");
+        widget<QLineEdit>(fbp,"fbpDensities")->setText("broken");QString err;
+        check(!fbp.applyConfig(&err),"invalid density applied");
+        fbp.reject();check(fbp.fbpSettings().densities[0]==1000,"cancel retained invalid density");
+        click(fbp,"设为默认");RingConfigDialog fbpRestart(&controller);fbpRestart.setAcquisitionParams(4,4000);
+        check(fbpRestart.fbpSettings().enabled,"restart lost FBP algorithm");
+        fbpRestart.show();fbpRestart.findChild<QTabWidget*>()->setCurrentIndex(1);app.processEvents();
+        fbpRestart.grab().save(QCoreApplication::applicationDirPath()+"/ring-fbp-ui.png");
         QFile::remove(paimageSettingsPath());
         std::cout<<"PASS UI advanced/parent cancel, apply, defaults, restart, invalid draft isolation\n";
         return 0;

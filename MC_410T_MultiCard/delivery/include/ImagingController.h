@@ -16,6 +16,7 @@
 #include "ImagingParams.h"
 #include "RingTimevarLowpassConfig.h"
 #include "FilteredDasConfig.h"
+#include "RingFbpSettings.h"
 #include "RingShmObservability.h"
 #include "RoundIdentity.h"
 #include "ring_recon_cuda.h"
@@ -55,7 +56,8 @@ public:
     bool configureRing(const RingReconCudaConfig &ringCfg,
                        const RingTimevarLowpassConfig &timevarCfg,
                        const int (*sysDelayCh)[2] = nullptr,
-                       const FilteredDasConfig &filteredDasCfg = FilteredDasConfig{});
+                       const FilteredDasConfig &filteredDasCfg = FilteredDasConfig{},
+                       const RingFbpSettings &fbp = RingFbpSettings{});
     bool isRingMode() const { return m_ringMode; }
     const RingReconCudaConfig &ringConfig() const { return m_ringConfig; }
     const FilteredDasConfig &filteredDasConfig() const { return m_filteredDasConfig; }
@@ -164,6 +166,9 @@ private:
     RingReconCudaConfig m_ringConfig;
     RingTimevarLowpassConfig   m_ringTimevarConfig;
     FilteredDasConfig m_filteredDasConfig;
+    RingFbpSettings m_fbpSettings;
+    std::atomic<bool> m_fbpPreparing{false};
+    quint64 m_fbpPrepareToken=0;
     int                 m_ringSysDelayCh[8][2] = {
         {358, 371}, {358, 371}, {358, 371}, {358, 371},
         {358, 371}, {358, 371}, {358, 371}, {358, 371}};   // 每通道双波长延时截断（独立于 CUDA 结构体，避免 ABI 变更）

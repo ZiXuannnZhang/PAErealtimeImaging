@@ -5,6 +5,7 @@
 #include "FrontendFilter.h"
 #include "RingTimevarLowpassConfig.h"
 #include "FilteredDasConfig.h"
+#include "RingFbpSettings.h"
 #include "ring_recon_cuda.h"
 
 class ImagingController;
@@ -33,6 +34,7 @@ public:
     RingReconCudaConfig config() const;   // 当前控件值（含换算后的每通道每波长每圈A线数）
     RingTimevarLowpassConfig timevarConfig() const; // 环形重建增强配置（独立于 CUDA ABI）
     FilteredDasConfig filteredDasConfig() const;
+    RingFbpSettings fbpSettings() const;
     void sysDelayPerChannel(int out[8][2]) const;   // 每通道双波长延时截断（[通道][波长]）
     bool applyConfig(QString *error = nullptr); // 自动联动传入 error 时不弹出模态窗口
     bool applyMotorScanParams(bool hasDirection, bool ccw, int totalAlines, QString *error);
@@ -152,6 +154,13 @@ private:
     RingTimevarLowpassConfig m_timevarDraft;
     RingTimevarLowpassConfig m_timevarAccepted;
     QCheckBox *m_chkFilteredDas;
+    QComboBox *m_cmbAlgorithm;
+    QCheckBox *m_chkFbpMedian;
+    QCheckBox *m_chkFbpInvert;
+    QLineEdit *m_edtFbpDensities;
+    QLineEdit *m_edtFbpCalibration;
+    RingFbpSettings m_fbpAccepted;
+    void setFbpDraft(const RingFbpSettings&);
     QPushButton *m_btnFilteredDasAdvanced;
     QDoubleSpinBox *m_spnFilteredOrder, *m_spnFilteredReference, *m_spnFilteredPass, *m_spnFilteredStop;
     QLabel *m_filteredSamplingHint;

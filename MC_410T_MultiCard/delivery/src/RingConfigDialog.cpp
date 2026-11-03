@@ -128,6 +128,7 @@ RingConfigDialog::RingConfigDialog(ImagingController *controller, QWidget *paren
     restoreDefaults();
     m_timevarAccepted = timevarConfig();
     m_filteredAccepted = filteredDasConfig();
+    m_fbpAccepted=fbpSettings();
 
     // 记忆上次关闭前的大小
     QSettings s(paimageSettingsPath(), QSettings::IniFormat);
@@ -330,8 +331,21 @@ void RingConfigDialog::buildUi()
     auto *reconPage = new QWidget;
     auto *reconLayout = new QVBoxLayout(reconPage);
 
-    auto *grpGrid = new QGroupBox("成像网格与 DAS");
+    auto *grpGrid = new QGroupBox("成像网格与重建");
     auto *fGrid = new QFormLayout(grpGrid);
+    m_cmbAlgorithm=new QComboBox;m_cmbAlgorithm->setObjectName("ringReconAlgorithm");
+    m_cmbAlgorithm->addItems({"DAS",QString::fromUtf8("改进 FBP（精确核 / 同心圆折射）")});
+    fGrid->addRow("重建算法",m_cmbAlgorithm);
+    m_chkFbpMedian=new QCheckBox("相邻扫描位置三点中值");m_chkFbpMedian->setChecked(true);
+    m_chkFbpInvert=new QCheckBox("输入取反（MATLAB 原型极性）");m_chkFbpInvert->setChecked(true);
+    m_edtFbpDensities=new QLineEdit("1000,1100,1100,1100,1100,1100,1100,1100");
+    m_edtFbpDensities->setObjectName("fbpDensities");
+    m_edtFbpCalibration=new QLineEdit;m_edtFbpCalibration->setPlaceholderText("可选环形标定 JSON：角度偏移及亚采样时延");
+    auto* calibrationBrowse=new QPushButton("选择标定文件");
+    connect(calibrationBrowse,&QPushButton::clicked,this,[this]{auto p=QFileDialog::getOpenFileName(this,"选择环形 FBP 标定",m_edtFbpCalibration->text(),"JSON (*.json)");if(!p.isEmpty())m_edtFbpCalibration->setText(p);});
+    fGrid->addRow("FBP 预处理",m_chkFbpMedian);fGrid->addRow("",m_chkFbpInvert);
+    fGrid->addRow("各层密度（内→外，kg/m³）",m_edtFbpDensities);
+    fGrid->addRow("FBP 标定",m_edtFbpCalibration);fGrid->addRow("",calibrationBrowse);
     m_spnFovMm = new QDoubleSpinBox; m_spnFovMm->setRange(1, 500); m_spnFovMm->setDecimals(3); m_spnFovMm->setValue(36.0);
     m_spnGridMm = new QDoubleSpinBox; m_spnGridMm->setRange(0.005, 5); m_spnGridMm->setDecimals(3); m_spnGridMm->setValue(0.01);
     m_spnFovDeg = new QDoubleSpinBox; m_spnFovDeg->setRange(1, 360); m_spnFovDeg->setValue(360);
@@ -432,6 +446,15 @@ void RingConfigDialog::buildUi()
     m_filteredSamplingHint=new QLabel; m_filteredSamplingHint->setObjectName("filteredDasSamplingHint");
     m_filteredSamplingHint->setWordWrap(true); fEnhance->addRow(m_filteredSamplingHint);
     setFilteredDraft(FilteredDasConfig{});
+    connect(m_cmbAlgorithm,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int i){
+        if(i==1)m_chkFilteredDas->setChecked(false);m_chkFilteredDas->setEnabled(i==0);
+        m_chkFbpMedian->setEnabled(i==1);m_chkFbpInvert->setEnabled(i==1);
+        m_edtFbpDensities->setEnabled(i==1);m_edtFbpCalibration->setEnabled(i==1);
+        m_chkShiftWL2->setEnabled(i==0);
+        m_chkShiftWL2->setToolTip(i==1?QStringLiteral("FBP 使用每条 A-line 的实际角度，无需复制第二波长的跨块历史数据"):QString());
+        m_cmbApod->setEnabled(i==0);m_spnDistWeight->setEnabled(i==0);
+        m_spnMinDistMm->setEnabled(i==0);m_chkMaskOob->setEnabled(i==0);
+    });
     reconLayout->addWidget(grpEnhance);
 
     auto *grpSos = new QGroupBox("声速模型（双声速，与 Ringscan_DAS_loop_realtime_dual 一致）");
@@ -634,6 +657,12 @@ void RingConfigDialog::restoreDefaults()
         });
     }
     setFilteredDraft(filtered);
+    m_cmbAlgorithm->setCurrentIndex(val("exactFbpEnabled",false).toBool()?1:0);
+    if(m_cmbAlgorithm->currentIndex()==1)m_chkFilteredDas->setChecked(false);
+    m_chkFbpMedian->setChecked(val("exactFbpMedian",true).toBool());
+    m_chkFbpInvert->setChecked(val("exactFbpInvert",true).toBool());
+    m_edtFbpDensities->setText(val("exactFbpDensities","1000,1100,1100,1100,1100,1100,1100,1100").toString());
+    m_edtFbpCalibration->setText(val("exactFbpCalibration",QString()).toString());
     m_chkMaskOob->setChecked(val("maskOob", true).toBool());
     // 显示掩膜（工作一）：与既有键同一 Defaults group、同一读写路径；
     // 无历史键时回退出厂默认（不启用、6.57mm）。
@@ -697,6 +726,9 @@ void RingConfigDialog::saveDefaults()
     s.setValue("minDistMm", m_spnMinDistMm->value());
     ring_timevar::saveSettings(s,timevarConfig());
     filtered_das::saveSettings(s,filteredDasConfig());
+    s.setValue("exactFbpEnabled",m_cmbAlgorithm->currentIndex()==1);
+    s.setValue("exactFbpMedian",m_chkFbpMedian->isChecked());s.setValue("exactFbpInvert",m_chkFbpInvert->isChecked());
+    s.setValue("exactFbpDensities",m_edtFbpDensities->text());s.setValue("exactFbpCalibration",m_edtFbpCalibration->text());
     s.setValue("maskOob", m_chkMaskOob->isChecked());
     // 显示掩膜（工作一）与其他默认参数同一次“设为默认”落盘（同一 Defaults group）
     s.setValue("displayMaskEnabled", m_chkDisplayMask->isChecked());
@@ -821,6 +853,7 @@ void RingConfigDialog::setTimevarDraft(const RingTimevarLowpassConfig& c)
 }
 void RingConfigDialog::reject()
 {
+    setFbpDraft(m_fbpAccepted);
     setTimevarDraft(m_timevarAccepted);
     setFilteredDraft(m_filteredAccepted);
     QDialog::reject();
@@ -883,6 +916,10 @@ bool RingConfigDialog::validateDraft(QString* error) const
     std::string e;
     if(!ring_timevar::validate(timevarConfig(),m_daqHz,m_sampDepth,&e))return fail(QString::fromStdString(e));
     if(!validateFilteredDraft(error))return false;
+    auto fbp=fbpSettings();
+    int delays[8][2];sysDelayPerChannel(delays);
+    if(!ring_fbp_settings::loadCalibration(fbp,m_daqHz,error)||
+       !ring_fbp_settings::validate(fbp,config(),delays,error))return false;
     return true;
 }
 
@@ -962,9 +999,10 @@ bool RingConfigDialog::applyConfig(QString *error)
     if(!validateFilteredDraft(&filteredError)) {
         return rejectConfig(filteredError);
     }
-    if (!m_controller->configureRing(applied,timevar,sysDelayCh,filteredDasConfig()))
+    if (!m_controller->configureRing(applied,timevar,sysDelayCh,filteredDasConfig(),fbpSettings()))
         return rejectConfig(QStringLiteral("成像服务拒绝联动配置，保留当前配置"));
     m_filteredAccepted=filteredDasConfig();
+    m_fbpAccepted=fbpSettings();
     const int effectiveSpeeds=radiiCount>0 ? speedsCount : 1;
     double minSpeed=*std::min_element(speedsMps,speedsMps+effectiveSpeeds);
     const double spatialMhz=minSpeed/(2*applied.gridSize)/1e6;
@@ -1141,7 +1179,20 @@ void RingConfigDialog::hideEvent(QHideEvent *event)
 }
 
 FilteredDasConfig RingConfigDialog::filteredDasConfig() const {
-    auto c=m_filteredDraft; c.enabled=m_chkFilteredDas->isChecked(); return c;
+    auto c=m_filteredDraft; c.enabled=m_chkFilteredDas->isChecked()&&m_cmbAlgorithm->currentIndex()==0; return c;
+}
+RingFbpSettings RingConfigDialog::fbpSettings() const {
+    RingFbpSettings s;s.enabled=m_cmbAlgorithm->currentIndex()==1;s.median=m_chkFbpMedian->isChecked();
+    s.invert=m_chkFbpInvert->isChecked();s.calibrationFile=m_edtFbpCalibration->text().trimmed();
+    auto vals=m_edtFbpDensities->text().split(QRegularExpression("[,;\\s]+"),Qt::SkipEmptyParts);
+    for(int i=0;i<8;++i){bool ok=false;double v=i<vals.size()?vals[i].toDouble(&ok):1100;s.densities[i]=(i>=vals.size()||ok)?v:-1;}
+    if(vals.isEmpty()||vals.size()>8||vals.size()<config().soundSpeedRadiiCount+1)s.densities[0]=-1;
+    return s;
+}
+void RingConfigDialog::setFbpDraft(const RingFbpSettings&s){
+    m_cmbAlgorithm->setCurrentIndex(s.enabled?1:0);m_chkFbpMedian->setChecked(s.median);m_chkFbpInvert->setChecked(s.invert);
+    QStringList densities;for(double d:s.densities)densities.append(QString::number(d,'g',12));
+    m_edtFbpDensities->setText(densities.join(','));m_edtFbpCalibration->setText(s.calibrationFile);
 }
 void RingConfigDialog::setFilteredDraft(const FilteredDasConfig& c) {
     m_filteredDraft=c;

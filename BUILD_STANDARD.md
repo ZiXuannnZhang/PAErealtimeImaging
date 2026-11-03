@@ -281,6 +281,15 @@ cufft64_12.dll SHA256
 pa_recon_core.dll SHA256
 ```
 
+### 8.4 改进 FBP 候选分支的额外依赖
+
+`codex/ring-exact-fbp-20261104` 修改了 CUDA 核心，先执行
+`MC_410T_MultiCard/delivery/build_ring_fbp_cuda.cmd` 生成本地 DLL 及 MinGW 导入库，
+再执行标准主工程脚本。旧 prebuilt 不包含 FBP 导出接口，不能用于本候选分支。
+完整 bin 还必须包含同一 CUDA 12.8 toolkit 的 `cublas64_12.dll` 和
+`cublasLt64_12.dll`，依赖回执追加两者来源与 SHA256。
+本条是该任务分支的构建要求，不重标 main 的既有验收包。
+
 ---
 
 ## 9. Qt runtime 部署

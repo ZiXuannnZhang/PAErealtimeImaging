@@ -194,13 +194,20 @@ bool ImagingController::startSvc()
     // 等待子进程就绪后下发配置和启动命令。
     // 300ms 在系统负载高时 ZMQ PAIR 连接可能尚未建立，configure 会丢失，
     // 加长到 1000ms 保证连接就绪（PAIR connect 前发送的消息会被丢弃）。
-    QTimer::singleShot(1000, this, [this]() { sendConfigureAndStart(); });
+    const bool prepareFbp=m_ringMode&&m_fbpSettings.enabled;
+    if(prepareFbp){m_fbpPreparing=true;m_running=true;++m_fbpPrepareToken;}
+    const auto token=m_fbpPrepareToken;
+    QTimer::singleShot(1000, this, [this,prepareFbp,token]() {
+        if(prepareFbp&&(!m_fbpPreparing||token!=m_fbpPrepareToken))return;
+        sendConfigureAndStart();
+    });
 
     return true;
 }
 
 void ImagingController::stopSvc()
 {
+    m_fbpPreparing=false;++m_fbpPrepareToken;
 #ifdef MAINWINDOW_START_TEST_SEAM
     ++m_testSvcStops;
 #endif
@@ -303,7 +310,8 @@ void ImagingController::configure(const GeneralParams &general,
 bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
                                       const RingTimevarLowpassConfig &timevarCfg,
                                       const int (*sysDelayCh)[2],
-                                      const FilteredDasConfig &filteredDasCfg)
+                                      const FilteredDasConfig &filteredDasCfg,
+                                      const RingFbpSettings &fbp)
 {
     std::string timevarError;
     if (!ring_timevar::validate(timevarCfg, ringCfg.daqHz, ringCfg.sampDepth, &timevarError)) {
@@ -313,6 +321,12 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
     std::vector<int> lengths;
     int delays[8][2];
     for(int c=0;c<8;++c)for(int w=0;w<2;++w) delays[c][w]=sysDelayCh?sysDelayCh[c][w]:ringCfg.sysDelay[w];
+    auto preparedFbp=fbp;QString fbpError;
+    if(!ring_fbp_settings::loadCalibration(preparedFbp,ringCfg.daqHz,&fbpError)||
+       !ring_fbp_settings::validate(preparedFbp,ringCfg,delays,&fbpError)||
+       (fbp.enabled&&filteredDasCfg.enabled)) {
+        emit svcError(fbpError.isEmpty()?QStringLiteral("改进 FBP 不能与 FilteredDAS 同时启用"):fbpError);return false;
+    }
     if(filteredDasCfg.enabled && !filtered_das::inputLengths(ringCfg.sampDepth,ringCfg.delayCut!=0,
             delays,ringCfg.enabledChannels,lengths,&timevarError)) {
         emit svcError(QString::fromStdString(timevarError)); return false;
@@ -322,6 +336,7 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
         emit svcError(QString::fromStdString(timevarError)); return false;
     }
     m_filteredDasConfig=filteredDasCfg;
+    m_fbpSettings=preparedFbp;
     m_ringConfig = ringCfg;
     m_ringTimevarConfig = timevarCfg;
     if (sysDelayCh) {
@@ -364,7 +379,7 @@ bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
         emit svcError(QStringLiteral("环形块缺少有效物理轮次身份，拒绝提交"));
         return false;
     }
-    if (!m_running.load(std::memory_order_relaxed) || !m_ringSharedMemory) {
+    if (!m_running.load(std::memory_order_relaxed) || m_fbpPreparing || !m_ringSharedMemory) {
         emit svcError(QStringLiteral("环形服务未就绪，拒绝提交块"));
         return false;
     }
@@ -839,7 +854,17 @@ void ImagingController::processMessage(const QJsonObject &msg)
 {
     QString cmd = msg["cmd"].toString();
 
-    if (cmd == "ring_shm_observation") {
+    if(cmd=="ring_fbp_configured"){
+        const auto token=msg["token"].toString().toULongLong();
+        // processMessage runs under the receive mutex; send start after releasing it.
+        QTimer::singleShot(0,this,[this,token]{
+            if(!m_fbpPreparing||token!=m_fbpPrepareToken||!m_running)return;
+            if(!sendCommand({{"cmd","start"}})){emit svcError("FBP 启动命令发送失败");stopSvc();return;}
+            m_fbpPreparing=false;
+            emit svcStatus(QStringLiteral("FBP 走时表和精确核准备完成"),0);
+            emit svcReady();
+        });
+    } else if (cmd == "ring_shm_observation") {
         emit svcStatus(QStringLiteral("[RingSHMObs] ")
                            + QString::fromUtf8(QJsonDocument(msg).toJson(QJsonDocument::Compact)), 0);
     } else if (cmd == "ring_snapshot_ready") {
@@ -868,6 +893,7 @@ void ImagingController::processMessage(const QJsonObject &msg)
         emit imageReady(frameDataToImage(frameData, m_scanParams.nx, m_scanParams.ny), seq);
 
     } else if (cmd == "error") {
+        if(m_fbpPreparing.exchange(false))QTimer::singleShot(0,this,[this]{stopSvc();});
         emit svcError(msg["msg"].toString());
 
     } else if (cmd == "status") {
@@ -906,7 +932,7 @@ void ImagingController::sendConfigureAndStart()
     if (!m_zmqSocket) return;
 
     m_running = true;
-    emit svcReady();                   // 通知主窗口服务已就绪
+    if(!(m_ringMode&&m_fbpSettings.enabled))emit svcReady();
 
     // ══ 环形扫描并行分支：下发完整可配置参数 ══
     if (m_ringMode) {
@@ -975,11 +1001,21 @@ void ImagingController::sendConfigureAndStart()
         ring["timeoutResetSec"] = m_ringConfig.timeoutResetSec;
         ring["timevarLowpass"] = ring_timevar::toJson(m_ringTimevarConfig);
         ring["filteredDas"] = filtered_das::toJson(m_filteredDasConfig);
+        ring["exactFbp"] = ring_fbp_settings::toJson(m_fbpSettings);
+        ring["fbpPrepareToken"]=QString::number(m_fbpPrepareToken);
 
                 QJsonObject params;
         params["imagingMode"] = "ring";
         params["ring"] = ring;
-        sendCommand({{"cmd", "configure"}, {"params", params}});
+        const bool sent=sendCommand({{"cmd", "configure"}, {"params", params}});
+        if(m_fbpSettings.enabled){
+            if(!sent){emit svcError("FBP 配置发送失败");stopSvc();return;}
+            emit svcStatus(QStringLiteral("正在准备 FBP 走时表和精确核"),0);
+            const auto token=m_fbpPrepareToken;
+            QTimer::singleShot(120000,this,[this,token]{if(m_fbpPreparing&&token==m_fbpPrepareToken){
+                emit svcError("FBP 配置预热超时");stopSvc();}});
+            return;
+        }
         QThread::msleep(10);
         sendCommand({{"cmd", "start"}});
         return;
