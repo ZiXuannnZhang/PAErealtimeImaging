@@ -129,7 +129,6 @@ public:
             cc.imValue[0] = cfg_.pre[0].imValue;
             cc.imValue[1] = cfg_.pre[1].imValue;
             cc.interpolation = (cfg_.recon.interpolation == "linear") ? 0 : 1;
-            cc.distanceWeightExponent = cfg_.recon.distanceWeightExponent;
             cc.maskOutOfRange = cfg_.recon.maskOutOfRange ? 1 : 0;
             if (ring_recon_cuda_create(&cc, &cudaH_[0]) != 0 ||
                 ring_recon_cuda_create(&cc, &cudaH_[1]) != 0) {
@@ -275,7 +274,6 @@ int main(int argc, char** argv) {
     cfg.recon.theta0Deg = 0.0;
     cfg.recon.fovDeg = spec.fovDeg;
     cfg.recon.fovTheta0Deg = 0.0;
-    cfg.recon.distanceWeightExponent = 1.0;
     cfg.recon.maskOutOfRange = true;
     cfg.recon.interpolation = "linear";
     for (int w = 0; w < 2; ++w) {

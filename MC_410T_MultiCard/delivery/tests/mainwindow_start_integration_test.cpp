@@ -3,7 +3,8 @@
 #include "RingConfigDialog.h"
 #include "RingBlockAssembler.h"
 #include "RingTimevarLowpassSettings.h"
-#include "FilteredDasSettings.h"
+#include "RingFbpSettings.h"
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include "PaimageAcquisition/SettingsPath.h"
 #include <QApplication>
@@ -96,7 +97,7 @@ public:
                 // Actual UI signal -> production MainWindow::onRealtimeImagingToggled.
                 checkbox->setChecked(true);
                 waitFor([&] { return controller.isRunning() && window.m_imagingEnabled
-                    && checkbox->isEnabled(); }, "valid startup did not become ready");
+                    && window.m_imagingServiceReady.load() && checkbox->isEnabled(); }, "valid startup did not become ready");
                 check(checkbox->isChecked() && !depth->isEnabled(), "running UI not locked");
             };
             auto stop = [&] {
@@ -111,8 +112,8 @@ public:
             stop();
             std::cout << "PASS valid enabled startup -> stop\n";
 
-            auto reject = [&](bool resident, bool filtered=false) {
-                const auto acceptedFiltered=filtered_das::toJson(controller.filteredDasConfig());
+            auto reject = [&](bool resident, bool fbp=false) {
+                const auto acceptedFbp=ring_fbp_settings::toJson(controller.m_fbpSettings);
                 const auto accepted = ring_timevar::toJson(controller.ringTimevarConfig());
                 const QByteArray oldConfig(reinterpret_cast<const char*>(&controller.ringConfig()),
                                            sizeof(RingReconCudaConfig));
@@ -158,20 +159,24 @@ public:
                     && QByteArray(reinterpret_cast<const char*>(controller.m_ringSysDelayCh),
                                   sizeof(controller.m_ringSysDelayCh)) == oldDelays
                     && ring_timevar::toJson(controller.ringTimevarConfig()) == accepted
-                    && filtered_das::toJson(controller.filteredDasConfig()) == acceptedFiltered,
+                    && ring_fbp_settings::toJson(controller.m_fbpSettings) == acceptedFbp,
                       "rejection changed accepted configuration");
-                check(filtered ? dialog.filteredDasConfig().enabled && dialog.filteredDasConfig().stopMhz==125
+                check(fbp ? dialog.fbpSettings().enabled && dialog.fbpSettings().densities[0]==0
                       : dialog.timevarConfig().enabled && dialog.timevarConfig().p2 == 2000,
                       "invalid draft silently disabled or clamped");
                 const auto after = window.m_ringAssembler->snapshot();
                 check(after.hasActiveRound == assembler.hasActiveRound
                     && after.activeRound == assembler.activeRound && after.blockTriggers == assembler.blockTriggers,
                       "rejection reset assembler state");
-                check(window.m_ringAssemblerConfigured == configured
-                    && window.m_imagingServiceReady.load() == ready
-                    && window.m_restartRingOnSvcStop == restart && window.m_imagingEnabled == imaging
-                    && window.m_lblImagingStatus->text() == status && !window.m_imagingTimer->isActive(),
-                      "rejection changed prior startup/presentation state");
+                check(window.m_ringAssemblerConfigured == configured, "rejection changed assembler configured state");
+                check(window.m_imagingServiceReady.load() == ready, "rejection changed service ready state");
+                check(window.m_restartRingOnSvcStop == restart && window.m_imagingEnabled == imaging,
+                      "rejection changed restart/imaging state");
+                if(window.m_lblImagingStatus->text()!=status)
+                    std::cerr<<"status before="<<status.toStdString()<<" after="<<window.m_lblImagingStatus->text().toStdString()
+                             <<" resident="<<resident<<" fbp="<<fbp<<'\n';
+                check(window.m_lblImagingStatus->text() == status, "rejection changed status text");
+                check(!window.m_imagingTimer->isActive(), "rejection started display timer");
             };
 
             // Non-empty assembler sentinel detects a reset as well as reconfiguration.
@@ -209,24 +214,26 @@ public:
             start();
             stop();
             std::cout << "PASS valid restart/start/stop regression\n";
-            widget<QDoubleSpinBox>(dialog,"filteredDasStopMhz")->setValue(125);
+            widget<QComboBox>(dialog,"ringReconAlgorithm")->setCurrentIndex(1);
+            widget<QLineEdit>(dialog,"fbpDensities")->setText("0");
             reject(false,true);
-            widget<QDoubleSpinBox>(dialog,"filteredDasStopMhz")->setValue(60);
+            widget<QLineEdit>(dialog,"fbpDensities")->setText("1000,1100,1100,1100,1100,1100,1100,1100");
             start();
-            check(controller.filteredDasConfig().enabled && controller.filteredDasConfig().referenceMhz==5,
-                  "FilteredDAS snapshot missing from real startup");
+            check(controller.m_fbpSettings.enabled && controller.m_fbpSettings.densities[0]==1000,
+                  "FBP snapshot missing from real startup");
             {QSignalBlocker blocker(checkbox);checkbox->setChecked(false);}
             window.stopRingFeedWorker();window.m_imagingEnabled=false;window.setImagingParamControlsEnabled(true);
-            widget<QDoubleSpinBox>(dialog,"filteredDasStopMhz")->setValue(125);
+            widget<QComboBox>(dialog,"ringReconAlgorithm")->setCurrentIndex(1);
+            widget<QLineEdit>(dialog,"fbpDensities")->setText("0");
             reject(true,true);
-            controller.stopSvc();waitFor([&]{return !controller.isRunning()&&!controller.m_ringSharedMemory;},"filtered resident cleanup");
-            widget<QDoubleSpinBox>(dialog,"filteredDasStopMhz")->setValue(60);
-            for(bool tv:{false,true})for(bool fd:{false,true}) {
+            controller.stopSvc();waitFor([&]{return !controller.isRunning()&&!controller.m_ringSharedMemory;},"FBP resident cleanup");
+            widget<QLineEdit>(dialog,"fbpDensities")->setText("1000,1100,1100,1100,1100,1100,1100,1100");
+            for(bool tv:{false,true})for(bool fbp:{false,true}) {
                 widget<QCheckBox>(dialog,"timevarEnabled")->setChecked(tv);
-                widget<QCheckBox>(dialog,"filteredDasEnabled")->setChecked(fd);
+                widget<QComboBox>(dialog,"ringReconAlgorithm")->setCurrentIndex(fbp?1:0);
                 check(dialog.applyConfig(), "joint configuration rejected");
                 const auto acceptedTv = ring_timevar::toJson(controller.ringTimevarConfig());
-                const auto acceptedFd = filtered_das::toJson(controller.filteredDasConfig());
+                const auto acceptedFbp = ring_fbp_settings::toJson(controller.m_fbpSettings);
                 auto writeMotor = [&](const char *direction) {
                     QSaveFile file(motorFile);
                     check(file.open(QIODevice::WriteOnly), "open motor file");
@@ -235,7 +242,7 @@ public:
                     check(file.commit(), "atomic motor file commit");
                 };
                 writeMotor("CCW"); window.m_motorScanMonitor->tick();
-                start();check(controller.ringTimevarConfig().enabled==tv&&controller.filteredDasConfig().enabled==fd,
+                start();check(controller.ringTimevarConfig().enabled==tv&&controller.m_fbpSettings.enabled==fbp,
                               "four-combination startup snapshot");
                 paimage::PhysicalRoundNormalizer normalizer(8, [&](const paimage::PhysicalRoundEvent& event) {
                     window.m_motorScanMonitor->onPhysicalRoundEvent(event);
@@ -252,17 +259,18 @@ public:
                     && controller.m_testSvcStarts > startsBeforeMotor;}, "motor boundary restart failed");
                 check(controller.ringConfig().sectorCcw == 1 && controller.ringConfig().sectorStartDeg == 0
                     && ring_timevar::toJson(controller.ringTimevarConfig()) == acceptedTv
-                    && filtered_das::toJson(controller.filteredDasConfig()) == acceptedFd,
-                      "motor direction restart lost either lowpass/FilteredDAS snapshot");
+                    && ring_fbp_settings::toJson(controller.m_fbpSettings) == acceptedFbp,
+                      "motor direction restart lost either STFT/FBP snapshot");
                 // A service stopping inside another active round must not reopen the motor gate.
                 normalizer.classify(1, 101); stop();
                 check(!window.m_motorScanMonitor->applyGateOpen(), "service stop reopened an active physical round");
                 normalizer.timeoutBoundary(1);
             }
-            std::cout<<"PASS FilteredDAS real rejection, four-combination motor CW restart with both filter snapshots, service-stop latch\n";
+            std::cout<<"PASS FBP real rejection, four-combination motor CW restart with STFT/FBP snapshots, service-stop latch\n";
             QString motorError;
             const auto oldDirection = controller.ringConfig().sectorCcw;
-            widget<QDoubleSpinBox>(dialog,"filteredDasStopMhz")->setValue(125);
+            widget<QComboBox>(dialog,"ringReconAlgorithm")->setCurrentIndex(1);
+            widget<QLineEdit>(dialog,"fbpDensities")->setText("0");
             check(!dialog.applyMotorScanParams(true, true, 0, &motorError) && !motorError.isEmpty(),
                   "invalid filter draft did not reject motor update without a modal dialog");
             check(controller.ringConfig().sectorCcw == oldDirection && dialog.config().sectorCcw == oldDirection,

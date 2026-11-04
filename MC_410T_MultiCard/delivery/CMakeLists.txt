@@ -51,8 +51,6 @@ set(SOURCES
     src/RingConfigDialog.cpp
     src/RingTimevarLowpass.cpp
     src/RingTimevarLowpassSettings.cpp
-    src/FilteredDasPrefilter.cpp
-    src/FilteredDasSettings.cpp
     src/ImagingDisplayWindow.cpp
     src/RingImageWidget.cpp
     src/RingColorBarWidget.cpp
@@ -61,8 +59,7 @@ set(SOURCES
     src/RingRoundUiState.cpp
     src/RingRoundPresentation.cpp
     src/PaimageAcquisition/AutoSaveRoundCoordinator.cpp
-    qcustomplot/qcustomplot.cpp
-)
+    qcustomplot/qcustomplot.cpp)
 
 set(HEADERS
     include/Constants.h
@@ -327,5 +324,5 @@ endif()
 
 # Keep the CPU DSP kernel optimized in Debug too; preserve symbols and no fast-math.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(src/RingTimevarLowpass.cpp src/FilteredDasPrefilter.cpp PROPERTIES COMPILE_OPTIONS "-O2")
+    set_source_files_properties(src/RingTimevarLowpass.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 endif()

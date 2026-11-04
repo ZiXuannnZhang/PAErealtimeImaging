@@ -1,7 +1,7 @@
 #include <array>
 #include "ImagingSvc.h"
+#include "RingSampleWindow.h"
 #include "RingTimevarLowpassSettings.h"
-#include "FilteredDasSettings.h"
 #include "RingTimevarPreprocess.h"
 #include "RingFbpArtifact.h"
 #include "ImagingSharedMemory.h"
@@ -431,10 +431,7 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     cfg.gridSize               = ring["gridSize"].toDouble(cfg.gridSize);
     cfg.fovDeg                 = ring["fovDeg"].toDouble(cfg.fovDeg);
     cfg.fovTheta0Deg           = ring["fovTheta0Deg"].toDouble(cfg.fovTheta0Deg);
-    cfg.apodType               = ring["apodType"].toInt(cfg.apodType);
-    cfg.distanceWeightExponent = ring["distanceWeightExponent"].toDouble(cfg.distanceWeightExponent);
     cfg.interpolation          = ring["interpolation"].toInt(cfg.interpolation);
-    cfg.minDistance            = ring["minDistance"].toDouble(cfg.minDistance);
     cfg.maskOutOfRange         = ring["maskOutOfRange"].toInt(cfg.maskOutOfRange);
     cfg.dbrSigRemove           = ring["dbrSigRemove"].toInt(cfg.dbrSigRemove);
     cfg.maskLength             = ring["maskLength"].toInt(cfg.maskLength);
@@ -511,33 +508,14 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
         sendError("时变低通准备失败: " + QString::fromStdString(planError), 2012);
         return;
     }
-    FilteredDasConfig filteredCfg;
-    if(!filtered_das::fromJson(ring["filteredDas"],cfg.daqHz,0,filteredCfg,&timevarError,false)) {
-        sendError("滤波反投影配置无效: "+timevarError,2014); return;
+    if(!ring_sample_window::validate(cfg.sampDepth,cfg.delayCut!=0,nextSysDelayCh,cfg.enabledChannels,&planError)) {
+        sendError(QString::fromStdString(planError),2014);return;
     }
-    std::vector<int> lengths;
-    if(filteredCfg.enabled && !filtered_das::inputLengths(cfg.sampDepth,cfg.delayCut!=0,
-            nextSysDelayCh,cfg.enabledChannels,lengths,&planError)) {
-        sendError("滤波反投影窗口无效: "+QString::fromStdString(planError),2014); return;
-    }
-    FilteredDasPrefilter preparedFiltered;
-    const auto filteredDesignStart=ring_shm_obs::steadyNowUs();
-    if(!preparedFiltered.configure(filteredCfg,cfg.daqHz,lengths,&planError)) {
-        sendError("滤波反投影准备失败: "+QString::fromStdString(planError),2014); return;
-    }
-    if(filteredCfg.enabled && cfg.soundSpeedsCount>0 && cfg.gridSize>0) {
-        const int effectiveSpeeds=cfg.soundSpeedRadiiCount>0 ? cfg.soundSpeedsCount : 1;
-        const double cmin=*std::min_element(cfg.soundSpeeds,cfg.soundSpeeds+effectiveSpeeds);
-        const double spatialMhz=cmin/(2*cfg.gridSize)/1e6;
-        if(filteredCfg.stopMhz>spatialMhz)
-            qWarning()<<"FilteredDAS spatial sampling advisory: Stop MHz="<<filteredCfg.stopMhz
-                      <<"spatial Nyquist MHz="<<spatialMhz;
-    }
+    const auto fbpPrepareStart=ring_shm_obs::steadyNowUs();
     RingFbpSettings fbpSettings;QString fbpError;
     if(!ring_fbp_settings::fromJson(ring.value("exactFbp").toObject(),fbpSettings,&fbpError)||
-       !ring_fbp_settings::validate(fbpSettings,cfg,nextSysDelayCh,&fbpError)||
-       (fbpSettings.enabled&&filteredCfg.enabled)){
-        sendError(fbpError.isEmpty()?QStringLiteral("FBP and FilteredDAS are mutually exclusive"):fbpError,2016);return;
+       !ring_fbp_settings::validate(fbpSettings,cfg,nextSysDelayCh,&fbpError)){
+        sendError(fbpError,2016);return;
     }
     // Prepare BOTH GPU contexts before committing configuration or destroying old ones.
     void* nextGpu[2]={nullptr,nullptr};
@@ -557,9 +535,7 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     for(auto& c:m_fbpStreams)for(auto& s:c)s.reset();
     m_fbpTimingReady=false;m_fbpPrefixRaw.clear();m_fbpPrefixAngles.clear();m_fbpPrefixChannels.clear();
     std::fill(std::begin(m_fbpCardShift),std::end(m_fbpCardShift),0.);
-    m_filteredDasConfig=filteredCfg;
-    m_filteredDas=std::move(preparedFiltered);
-    m_filteredDesignUs=ring_shm_obs::steadyNowUs()-filteredDesignStart;
+    m_fbpPrepareUs=fbpSettings.enabled?ring_shm_obs::steadyNowUs()-fbpPrepareStart:0;
     m_ringConfig = cfg;
     m_ringTimevarConfig = timevarCfg;
     m_ringTimevar = std::move(prepared);
@@ -782,17 +758,6 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
             rads[w].push_back(static_cast<float>(
                 m_ringConfig.radiusPerChannel[(phCh >= 0 && phCh < 8) ? phCh : 0]));
             secs[w].push_back(static_cast<float>(chSectorStartDeg));
-        }
-
-        for(int w=0;w<2;++w) {
-            std::string error;
-            if(!m_filteredDas.apply(lists[w],&error)) {
-                sendError("滤波反投影处理失败: "+QString::fromStdString(error),2015);
-                return; // No partial CUDA submission or WL2 history commit.
-            }
-#ifdef RING_TIMEVAR_TEST_SEAM
-            if(m_testFilteredLines) m_testFilteredLines(c,w,lists[w]);
-#endif
         }
 
         // wl2 通道内跨块对齐：首块不偏移，后续块前插上一块末根
@@ -1028,11 +993,7 @@ void ImagingSvc::sendRingSnapshotToHost(uint32_t seq, uint64_t submitIndex,
         seq, submitIndex, round, reconstructionComplete);
     msg["process_us"] = static_cast<qint64>(processUs);
     msg["recon_algorithm"]=m_fbpSettings.enabled?"exact_fbp":"das";
-    if(m_fbpSettings.enabled)msg["fbp_prepare_us"]=static_cast<qint64>(m_filteredDesignUs);
-    msg["filtered_design_us"]=static_cast<qint64>(m_filteredDesignUs);
-    msg["filtered_cached_bytes"]=static_cast<qint64>(m_filteredDas.cachedBytes());
-    msg["filtered_workspace_bytes"]=static_cast<qint64>(m_filteredDas.workspaceBytes());
-    msg["filtered_max_batch"]=static_cast<qint64>(m_filteredDas.maxBatchUsed());
+    if(m_fbpSettings.enabled)msg["fbp_prepare_us"]=static_cast<qint64>(m_fbpPrepareUs);
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
     zmq::message_t zmsg(static_cast<size_t>(data.size()));

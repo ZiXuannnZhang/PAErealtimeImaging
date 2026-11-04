@@ -15,7 +15,6 @@
 #include <vector>
 #include "ImagingParams.h"
 #include "RingTimevarLowpassConfig.h"
-#include "FilteredDasConfig.h"
 #include "RingFbpSettings.h"
 #include "RingShmObservability.h"
 #include "RoundIdentity.h"
@@ -56,11 +55,9 @@ public:
     bool configureRing(const RingReconCudaConfig &ringCfg,
                        const RingTimevarLowpassConfig &timevarCfg,
                        const int (*sysDelayCh)[2] = nullptr,
-                       const FilteredDasConfig &filteredDasCfg = FilteredDasConfig{},
                        const RingFbpSettings &fbp = RingFbpSettings{});
     bool isRingMode() const { return m_ringMode; }
     const RingReconCudaConfig &ringConfig() const { return m_ringConfig; }
-    const FilteredDasConfig &filteredDasConfig() const { return m_filteredDasConfig; }
     const RingTimevarLowpassConfig &ringTimevarConfig() const { return m_ringTimevarConfig; }
 
     // 环形扫描：提交一个原始 A-line 块（float32，sampDepth x alinesPerBlock，列主序）
@@ -165,7 +162,6 @@ private:
     // 环形扫描并行分支
     RingReconCudaConfig m_ringConfig;
     RingTimevarLowpassConfig   m_ringTimevarConfig;
-    FilteredDasConfig m_filteredDasConfig;
     RingFbpSettings m_fbpSettings;
     std::atomic<bool> m_fbpPreparing{false};
     quint64 m_fbpPrepareToken=0;

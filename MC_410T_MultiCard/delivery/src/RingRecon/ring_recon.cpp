@@ -146,10 +146,6 @@ void dasReconAppend(const std::vector<float>& bscan, int Nt, int nd,
     const float pre = fs / c;
     const float R = static_cast<float>(rp.R);
     const float R2 = R * R;
-    const float minDist = static_cast<float>(
-        rp.minDistance > 0.0 ? rp.minDistance : rp.gridSize);
-    const float pw = static_cast<float>(rp.distanceWeightExponent + 1.0);  // 2
-
     // 分层声速（与 MATLAB das_recon_circular_gpu_v2 一致）：
     //   tf = d/c_outer + sum_i Li*(1/c_i - 1/c_{i+1})；无边界时退化为单声速
     const int nBound = static_cast<int>(rp.soundSpeedRadii.size());
@@ -213,7 +209,7 @@ void dasReconAppend(const std::vector<float>& bscan, int Nt, int nd,
                 const float dotp = proj - R2;
                 const float dist2 = r2mR2 - 2.0f * dotp;
                 const float dist = std::sqrt(std::max(dist2, 0.0f));
-                const float dsafe = std::max(dist, minDist);
+                if (!(dist > 1e-12f)) continue; // undefined direction at the detector
                 float tf = dist * (useLayers ? preOuter : pre);
                 for (int bi = 0; bi < nBound; ++bi) {
                     const float rb2 = rb2s[static_cast<size_t>(bi)];
@@ -258,15 +254,7 @@ void dasReconAppend(const std::vector<float>& bscan, int Nt, int nd,
                     if (maskOob && !valid) vv = 0.0f;
                 }
 
-                float dsafeP;
-                if (pw == 2.0f) {
-                    dsafeP = dsafe * dsafe;
-                } else if (pw == 1.0f) {
-                    dsafeP = dsafe;
-                } else {
-                    dsafeP = std::pow(dsafe, pw);
-                }
-                const float w = wscale * dotp / (R * dsafeP);
+                const float w = wscale * dotp / (R * dist);
                 acc += w * vv;
                 accw += std::fabs(w);
             }

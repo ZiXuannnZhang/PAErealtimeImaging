@@ -16,6 +16,7 @@
 #include <QFontDatabase>
 #include <QGroupBox>
 #include <QLineEdit>
+#include <QLabel>
 #include <iostream>
 #include <stdexcept>
 
@@ -34,9 +35,19 @@ int main(int argc,char** argv) {
         // Dedicated executable directory: never shares the production INI path.
         check(QCoreApplication::applicationDirPath().endsWith("ui-isolated"),"unsafe settings path");
         QFile::remove(paimageSettingsPath());
+        {QSettings old(paimageSettingsPath(),QSettings::IniFormat);
+            old.setValue("RingConfigDialog/Defaults/apod",2);
+            old.setValue("RingConfigDialog/Defaults/distWeight",8);
+            old.setValue("RingConfigDialog/Defaults/minDistMm",9);
+            old.setValue("RingConfigDialog/Defaults/filteredDasEnabled",true);
+            old.setValue("RingConfigDialog/Defaults/filteredDasOrder","broken");}
         ImagingController controller;
         RingConfigDialog dlg(&controller);dlg.setAcquisitionParams(4,20000);
         check(!dlg.timevarConfig().enabled,"factory enabled");
+        check(!dlg.fbpSettings().enabled,"legacy settings changed algorithm selection");
+        check(!dlg.findChild<QObject*>("filteredDasEnabled"),"retired filter widget survived");
+        for(auto* label:dlg.findChildren<QLabel*>())check(!label->text().contains("Apodization")&&
+            !label->text().contains("距离权重指数")&&!label->text().contains("MinDistance"),"retired DAS control survived");
         check(!widget<QSpinBox>(dlg,"timevarP1")->isEnabled(),"OFF controls enabled");
         for(auto* w:dlg.findChildren<QCheckBox*>())check(!w->text().contains("补偿")&&!w->text().contains("Plot"),"old controls");
         auto advanced=[&](bool accept,bool invalid=false) {
@@ -71,7 +82,9 @@ int main(int argc,char** argv) {
         widget<QSpinBox>(dlg,"timevarP2")->setValue(2200);dlg.reject();
         check(dlg.timevarConfig().p2==2100,"cancel lost applied snapshot");
         QSettings ini(paimageSettingsPath(),QSettings::IniFormat);ini.setValue("RingConfigDialog/Defaults/enhanceFreq",true);ini.sync();
-        click(dlg,"设为默认");
+        click(dlg,"设为默认");ini.sync();
+        for(const auto* key:{"apod","distWeight","minDistMm","filteredDasEnabled","filteredDasOrder"})
+            check(!ini.contains(QString("RingConfigDialog/Defaults/")+key),"retired settings persisted");
         RingConfigDialog restarted(&controller);restarted.setAcquisitionParams(4,20000);
         check(ring_timevar::toJson(restarted.timevarConfig())==ring_timevar::toJson(accepted),"startup lost defaults");
         widget<QSpinBox>(restarted,"timevarP2")->setValue(2300);click(restarted,"恢复默认");
@@ -106,7 +119,7 @@ int main(int argc,char** argv) {
         QFile::remove(paimageSettingsPath());
         RingConfigDialog fbp(&controller);fbp.setAcquisitionParams(4,4000);
         widget<QComboBox>(fbp,"ringReconAlgorithm")->setCurrentIndex(1);
-        check(fbp.fbpSettings().enabled&&!fbp.filteredDasConfig().enabled,"FBP selector isolation");
+        check(fbp.fbpSettings().enabled,"FBP selector isolation");
         check(fbp.applyConfig(),"FBP apply failed");
         widget<QComboBox>(fbp,"ringReconAlgorithm")->setCurrentIndex(0);fbp.reject();
         check(fbp.fbpSettings().enabled,"cancel lost accepted FBP algorithm");

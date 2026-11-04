@@ -1,6 +1,6 @@
 // ring_recon_cuda.cu - dual-wavelength ring-scan DAS CUDA kernel + host wrapper.
 // Mathematically identical to the M1 CPU dasReconAppend: per-pixel x per A-line
-// backprojection, linear/nearest interpolation, distance weighting, FOV mask,
+// backprojection, linear/nearest interpolation, geometric projection, FOV mask,
 // and incremental acc/accW accumulation.
 #include "ring_recon_cuda.h"
 
@@ -31,7 +31,6 @@ struct Handle {
     float pre = 0.0f;
     float R = 0.0f;
     float R2 = 0.0f;
-    float minDist = 0.0f;
     float fovRad = 0.0f;
     float fovTh0Rad = 0.0f;
     int   useFovMask = 0;
@@ -40,7 +39,6 @@ struct Handle {
     int   sectorCount = 0;            // 扇区数（启用通道数）
     int   linear = 1;
     int   maskOob = 1;
-    float wExponent = 1.0f;
     int   nBound = 0;                 // 分层声速边界数
     float preOuter = 0.0f;            // fs/c_outer（分层）或 fs/c（单声速）
     float preCoeff[8] = {0.0f};       // fs*(1/c_i - 1/c_{i+1})
@@ -111,10 +109,7 @@ extern "C" RING_RECON_CUDA_API void ring_recon_cuda_set_defaults(RingReconCudaCo
     cfg->fovDeg = 360.0;
     cfg->fovTheta0Deg = 0.0;
     cfg->normalizeByW = 0;
-    cfg->apodType = 0;
-    cfg->distanceWeightExponent = 1.0;
     cfg->interpolation = 0;     // linear
-    cfg->minDistance = 0.0;
     cfg->maskOutOfRange = 1;
 
     // ---- preprocessing ----
@@ -232,7 +227,7 @@ __global__ void ring_das_kernel(
         const float* __restrict__ blendPrevW, const float* __restrict__ blendNextW,
         const float* __restrict__ xv, const float* __restrict__ yv,
         int nx, int ny,
-        float pre, float minDist, float wExponent,
+        float pre,
         int linear, int maskOob, int useFovMask, float fovRad, float fovTh0Rad,
         int nBound, float preOuter,
         const float* __restrict__ preCoeff, const float* __restrict__ rb2s,
@@ -293,7 +288,7 @@ __global__ void ring_das_kernel(
         const float dotp = proj - R2j;
         const float dist2 = (r2 - R2j) - 2.0f * dotp;
         const float dist = sqrtf(fmaxf(dist2, 0.0f));
-        const float dsafe = fmaxf(dist, minDist);
+        if (!(dist > 1e-12f)) continue; // undefined direction at the detector
         // 分层声速走时（与 MATLAB das_recon_circular_gpu_v2 一致）：
         //   tf = d/c_outer + sum_i Li*(1/c_i - 1/c_{i+1})；单声速时退化为 d/c
         float tf = dist * (nBound > 0 ? preOuter : pre);
@@ -334,16 +329,8 @@ __global__ void ring_das_kernel(
             if (maskOob && !valid) vv = 0.0f;
         }
 
-        const float pw = wExponent + 1.0f;
-        float dsafeP;
-        if (pw == 2.0f) {
-            dsafeP = dsafe * dsafe;
-        } else if (pw == 1.0f) {
-            dsafeP = dsafe;
-        } else {
-            dsafeP = powf(dsafe, pw);
-        }
-        const float wBase = wscale[j] * dotp / (Rj * dsafeP);
+        // Only geometric normal projection remains; no aperture window or distance power.
+        const float wBase = wscale[j] * dotp / (Rj * dist);
         const float w = blendMask ? wBase * blendW : wBase;
         accv += w * vv;
         accwv += fabsf(w);
@@ -446,7 +433,6 @@ extern "C" RING_RECON_CUDA_API int ring_recon_cuda_create(const RingReconCudaCon
     } else {
         h->preOuter = static_cast<float>(cfg->daqHz / c);
     }
-    h->minDist = static_cast<float>(cfg->minDistance > 0.0 ? cfg->minDistance : cfg->gridSize);
     h->useFovMask = (cfg->fovDeg < 359.9999) ? 1 : 0;
     h->spliceMask = (cfg->spliceMode != 0) ? 1 : 0;
     h->sectorStartRad = static_cast<float>(cfg->sectorStartDeg * kPi / 180.0);
@@ -455,7 +441,6 @@ extern "C" RING_RECON_CUDA_API int ring_recon_cuda_create(const RingReconCudaCon
     h->fovTh0Rad = static_cast<float>(cfg->fovTheta0Deg * kPi / 180.0);
     h->linear = (cfg->interpolation == 0) ? 1 : 0;
     h->maskOob = cfg->maskOutOfRange ? 1 : 0;
-    h->wExponent = static_cast<float>(cfg->distanceWeightExponent);
 
     std::vector<float> xv(h->nx), yv(h->ny);
     for (int i = 0; i < h->nx; ++i) {
@@ -604,7 +589,7 @@ static int appendImpl(void* handle, const float* bscan,
     const float blendRad = blendMask
         ? static_cast<float>(h->cfg.spliceBlendDeg * kPi / 180.0) : 0.0f;
 
-    // detector positions, per-line radii and weights (with apodization)
+    // detector positions, per-line radii and geometric weights
     std::vector<float> detx(nd), dety(nd), wscale(nd), rad(nd);
     std::vector<int> sectorIdx(nd);
     const double sectorStartDeg = h->cfg.sectorStartDeg;
@@ -613,7 +598,7 @@ static int appendImpl(void* handle, const float* bscan,
     double arc = blockSpanDeg / static_cast<double>(nd - 1) * kPi / 180.0;
     if (thetaDeg) {
         // Per-line angles: use the average per-line angular step so the
-        // distance weight is non-zero and independent of sector layout.
+        // geometric weight is non-zero and independent of sector layout.
         double totalArc = 0.0;
         for (int j = 1; j < nd; ++j)
             totalArc += std::fabs(static_cast<double>(thetaDeg[j]) -
@@ -639,13 +624,7 @@ static int appendImpl(void* handle, const float* bscan,
         } else {
             sectorIdx[j] = 0;
         }
-        double apod = 1.0;
-        if (h->cfg.apodType == 1) {
-            apod = 0.5 - 0.5 * cos(2.0 * kPi * j / nd);
-        } else if (h->cfg.apodType == 2) {
-            apod = 0.54 - 0.46 * cos(2.0 * kPi * j / nd);
-        }
-        wscale[j] = static_cast<float>(-arc * apod);
+        wscale[j] = static_cast<float>(-arc);
     }
 
     const size_t bscanBytes = static_cast<size_t>(nt) * nd * sizeof(float);
@@ -724,7 +703,7 @@ static int appendImpl(void* handle, const float* bscan,
         h->d_pixPhi,
         blendMask, h->d_blendPrevW, h->d_blendNextW,
         h->d_xv, h->d_yv, h->nx, h->ny,
-        h->pre, h->minDist, h->wExponent,
+        h->pre,
         h->linear, h->maskOob, h->useFovMask, h->fovRad, h->fovTh0Rad,
         h->nBound, h->preOuter, h->d_preCoeff, h->d_rb2s,
         h->d_acc, h->d_accW);

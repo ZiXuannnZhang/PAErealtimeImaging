@@ -3,6 +3,7 @@
 #include "RingFbpArtifact.h"
 #include <QCoreApplication>
 #include <QJsonArray>
+#include <QTemporaryDir>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -11,6 +12,15 @@ static void need(bool b,const char*s){if(!b)throw std::runtime_error(s);}
 static void close(const std::vector<float>&a,const std::vector<float>&b){double d=0,s=0;for(size_t i=0;i<a.size();++i){need(std::isfinite(a[i]),"nonfinite image");d+=pow(double(a[i])-b[i],2);s+=double(b[i])*b[i];}need(s>0&&sqrt(d/s)<1e-5,"service vs all-at-once FBP mismatch");}
 struct RingTimevarServiceTest {
 static void run(){
+    QTemporaryDir calibrationDir;need(calibrationDir.isValid(),"temporary calibration directory");
+    QJsonArray offsets,delaysFbp;
+    for(int c=0;c<8;++c){offsets.append(.15*c);delaysFbp.append(QJsonArray{.375+c*.1,-.625-c*.1});}
+    QJsonObject calibration{{"formatVersion",1},{"geometry","concentric-ring"},{"daqHz",10e6},
+        {"angleOffsetDeg",offsets},{"delayOffsetSamples",delaysFbp}};
+    const auto calibrationPath=calibrationDir.filePath("ring.json");
+    auto writeCalibration=[&]{QFile f(calibrationPath);need(f.open(QIODevice::WriteOnly),"write calibration");
+        auto bytes=QJsonDocument(calibration).toJson();need(f.write(bytes)==bytes.size(),"calibration write size");};
+    writeCalibration();
     for(int M:{4,8})for(int ccw:{0,1})for(bool splice:{false,true})for(bool layered:{false,true}){
         const int depth=256,perCh=6,nx=20,frame=nx*nx,lines=M*perCh;
         QSharedMemory shm("MC_410T_RingShm");need(shm.create(int(ringImagingShmTotalSizeV2(depth*lines,frame,lines,frame))),"isolated SHM");
@@ -23,7 +33,12 @@ static void run(){
             {"sectorCcw",ccw},{"sectorStartDeg",0},{"delayCut",1},{"shiftWL2",1},{"dbrSigRemove",0},{"singalImpair",0},
             {"soundSpeedRadiiCount",layered?1:0},{"soundSpeedRadii",QJsonArray{.007}},{"soundSpeeds",QJsonArray{1490.,1560.}},
             {"timevarLowpass",QJsonObject{{"enabled",false},{"fcMaxMhz",4.},{"fcMinMhz",1.}}},
-            {"filteredDas",QJsonObject{{"enabled",false}}},{"exactFbp",QJsonObject{{"enabled",true},{"invert",false},{"angularSamples",129}}}};
+            {"exactFbp",QJsonObject{{"enabled",true},{"invert",false},{"angularSamples",129}}}};
+        if(layered){RingFbpSettings settings;settings.enabled=true;settings.invert=false;settings.angularSamples=129;
+            settings.calibrationFile=calibrationPath;QString error;
+            need(ring_fbp_settings::loadCalibration(settings,10e6,&error),"calibration load failed");
+            need(settings.delayOffset[3][1]==delaysFbp[3].toArray()[1].toDouble(),"fractional offset lost on import");
+            ring["exactFbp"]=ring_fbp_settings::toJson(settings);}
         ImagingSvc svc;svc.processRingConfigure(ring);need(svc.m_fbp[0]&&svc.m_fbp[1],"FBP configure failed");svc.m_running=true;
         std::vector<ring_fbp_stream::Line> full[8][2];
         for(int block=0;block<3;++block){
@@ -32,9 +47,12 @@ static void run(){
             auto* ch=reinterpret_cast<uint8_t*>(h+1)+ringChannelsOffset(depth*lines,lines);
             for(int j=0;j<perCh;++j)for(int c=0;c<M;++c){int pos=j*M+c,w=j%2,k=block*3+j/2;
                 ang[pos]=float(c*360./M+(ccw?1:-1)*(k+w)*360./M/9);ch[pos]=c;
-                ring_fbp_stream::Line l;l.angle=ang[pos];int cut=(w?7:5)+c-1;
+                ring_fbp_stream::Line l;l.angle=float(ang[pos]+svc.m_fbpSettings.angleOffset[c]);int cut=(w?7:5)+c-1;
+                std::vector<double> uncut;
                 for(int t=0;t<depth;++t){float v=float(sin(t*.27+c*.13+w*.5+k*.09)*exp(-pow((t-80.)/33,2)));
-                    if(k==4&&t==50)v+=3;raw[pos*depth+t]=v;if(t>=cut)l.data.push_back(v);}
+                    if(k==4&&t==50)v+=3;raw[pos*depth+t]=v;uncut.push_back(v);}
+                ring_fbp_stream::fractionalAdvance(uncut,svc.m_fbpSettings.delayOffset[c][w]);
+                for(int t=cut;t<depth;++t)l.data.push_back(float(uncut[t]));
                 full[c][w].push_back(l);
             }
             std::vector<float> saved(raw,raw+depth*lines);shm.unlock();
@@ -66,7 +84,13 @@ static void run(){
     timed.m_ringChannelCount=4;timed.m_fbpSettings.enabled=true;timed.m_fbpSettings.invert=false;
     QJsonArray templates;for(int c=0;c<8;++c){cfg.enabledChannels[c]=c<4;timed.m_ringChannels[c]=c<4;cfg.radiusPerChannel[c]=.004;
         QJsonArray t;for(double v:tmpl)t.append(v);templates.append(QJsonArray{t,t});}
-    timed.m_fbpSettings.artifact={{"startSample",1},{"prefixPerWavelength",8},{"templates",templates}};
+    calibration["artifact"]=QJsonObject{{"startSample",1},{"prefixPerWavelength",8},{"templates",templates}};
+    // This timing-only file has no static shift, isolating the estimated card correction.
+    QJsonArray zeroAngles,zeroDelays;for(int c=0;c<8;++c){zeroAngles.append(0.);zeroDelays.append(QJsonArray{0.,0.});}
+    calibration["angleOffsetDeg"]=zeroAngles;calibration["delayOffsetSamples"]=zeroDelays;writeCalibration();
+    timed.m_fbpSettings.calibrationFile=calibrationPath;QString calibrationError;
+    need(ring_fbp_settings::loadCalibration(timed.m_fbpSettings,10e6,&calibrationError),"timing template import failed");
+    need(ring_fbp_settings::validate(timed.m_fbpSettings,cfg,timed.m_ringSysDelayCh,&calibrationError),"imported template validation");
     auto native=ring_fbp_settings::native(timed.m_fbpSettings,cfg);
     for(int w=0;w<2;++w)need(!ring_fbp_create(&cfg,&native,&timed.m_fbp[w]),ring_fbp_error());
     QVector<float> raw(512*24),angles(24);QVector<quint8>channels(24);

@@ -34,8 +34,7 @@ int main(int argc,char**argv){
     QObject::connect(&controller,&ImagingController::svcStopped,&app,[&]{
         if(failed||phase==2){app.quit();return;}
         phase=1;if(!controller.startSvc())fail("restart failed");});
-    FilteredDasConfig filtered;filtered.enabled=false;
-    if(!controller.configureRing(c,tv,nullptr,filtered,fbp)||!controller.startSvc())return 2;
+    if(!controller.configureRing(c,tv,nullptr,fbp)||!controller.startSvc())return 2;
     QTimer::singleShot(50,&controller,&ImagingController::stopSvc);
     QTimer::singleShot(30000,&app,[&]{fail("controller integration timed out");});
     app.exec();

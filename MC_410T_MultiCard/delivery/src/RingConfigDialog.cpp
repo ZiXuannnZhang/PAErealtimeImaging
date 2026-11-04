@@ -1,8 +1,7 @@
 #include "PaimageAcquisition/SettingsPath.h"
 #include "RingConfigDialog.h"
+#include "RingSampleWindow.h"
 #include "RingTimevarLowpassSettings.h"
-#include "FilteredDasSettings.h"
-#include "FilteredDasPrefilter.h"
 #include <QDialogButtonBox>
 #include <QTimer>
 #include <QSignalBlocker>
@@ -127,7 +126,6 @@ RingConfigDialog::RingConfigDialog(ImagingController *controller, QWidget *paren
     // 未保存过时回退到出厂硬编码默认值
     restoreDefaults();
     m_timevarAccepted = timevarConfig();
-    m_filteredAccepted = filteredDasConfig();
     m_fbpAccepted=fbpSettings();
 
     // 记忆上次关闭前的大小
@@ -351,9 +349,6 @@ void RingConfigDialog::buildUi()
     m_spnFovDeg = new QDoubleSpinBox; m_spnFovDeg->setRange(1, 360); m_spnFovDeg->setValue(360);
     m_spnFovTheta0 = new QDoubleSpinBox; m_spnFovTheta0->setRange(-360, 360); m_spnFovTheta0->setDecimals(1); m_spnFovTheta0->setValue(0.0);
     m_spnFovTheta0->setToolTip("成像扇区起始角，0° = 9 点钟方向，正值逆时针偏转（与首通道扇区起点一致）。");
-    m_cmbApod = new QComboBox; m_cmbApod->addItems({"none", "hann", "hamming"});
-    m_spnDistWeight = new QDoubleSpinBox; m_spnDistWeight->setRange(0, 10); m_spnDistWeight->setValue(1);
-    m_spnMinDistMm = new QDoubleSpinBox; m_spnMinDistMm->setRange(0, 10); m_spnMinDistMm->setDecimals(4); m_spnMinDistMm->setValue(0);
     m_chkMaskOob = new QCheckBox("越界置零"); m_chkMaskOob->setChecked(true);
     // 注：CoverageDeg/Theta0Deg 仅用于离线整帧文件重建脚本，实时链路逐 A-line 角度由扇区模型给出，故不在界面提供；
     // 插值固定为 linear（DAS 反投影需要分数采样点插值，nearest 仅调试用）。
@@ -361,9 +356,6 @@ void RingConfigDialog::buildUi()
     fGrid->addRow("GridSize(mm)", m_spnGridMm);
     fGrid->addRow("成像扇区角宽(°)", m_spnFovDeg);
     fGrid->addRow("成像扇区起始角(°,0=9点钟)", m_spnFovTheta0);
-    fGrid->addRow("Apodization", m_cmbApod);
-    fGrid->addRow("距离权重指数", m_spnDistWeight);
-    fGrid->addRow("MinDistance(mm,0=自动)", m_spnMinDistMm);
     fGrid->addRow("", m_chkMaskOob);
     // 显示掩膜（工作一）：环阵内相干图像无意义但不得限制环内反演——仅在显示
     // 输出上以零值圆形掩膜遮蔽环内。仅显示层参数：不写 RingReconCudaConfig、
@@ -422,38 +414,12 @@ void RingConfigDialog::buildUi()
     });
     connect(m_btnTimevarAdvanced,&QPushButton::clicked,this,&RingConfigDialog::editTimevarAdvanced);
     setTimevarDraft(RingTimevarLowpassConfig{});
-    m_chkFilteredDas=new QCheckBox("滤波反投影"); m_chkFilteredDas->setObjectName("filteredDasEnabled");
-    m_chkFilteredDas->setToolTip("仅作用于 Ring 实时成像；Order 同时决定幅度阶数及配套负相位。");
-    m_btnFilteredDasAdvanced=new QPushButton("高级参数"); m_btnFilteredDasAdvanced->setObjectName("filteredDasAdvanced");
-    auto *filteredRow=new QHBoxLayout;
-    filteredRow->addWidget(m_chkFilteredDas); filteredRow->addWidget(m_btnFilteredDasAdvanced);
-    fEnhance->addRow(filteredRow);
-    m_spnFilteredOrder=new QDoubleSpinBox; m_spnFilteredOrder->setDecimals(12);
-    m_spnFilteredOrder->setRange(0,1); m_spnFilteredOrder->setSingleStep(.1); m_spnFilteredOrder->setObjectName("filteredDasOrder");
-    m_spnFilteredReference=cutoff("filteredDasReferenceMhz");
-    m_spnFilteredPass=cutoff("filteredDasPassMhz"); m_spnFilteredStop=cutoff("filteredDasStopMhz");
-    fEnhance->addRow("Order 滤波阶数",m_spnFilteredOrder);
-    fEnhance->addRow("Reference 参考频率",m_spnFilteredReference);
-    fEnhance->addRow("Pass 通带截止",m_spnFilteredPass); fEnhance->addRow("Stop 阻带起点",m_spnFilteredStop);
-    connect(m_spnFilteredOrder,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double v){m_filteredDraft.order=v;});
-    connect(m_spnFilteredReference,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double v){m_filteredDraft.referenceMhz=v;});
-    connect(m_spnFilteredPass,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double v){m_filteredDraft.passMhz=v;});
-    connect(m_spnFilteredStop,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double v){m_filteredDraft.stopMhz=v;});
-    connect(m_chkFilteredDas,&QCheckBox::toggled,this,[this](bool on) {
-        for(auto* w:{m_spnFilteredOrder,m_spnFilteredReference,m_spnFilteredPass,m_spnFilteredStop}) w->setEnabled(on);
-    });
-    connect(m_btnFilteredDasAdvanced,&QPushButton::clicked,this,&RingConfigDialog::editFilteredAdvanced);
-    m_filteredSamplingHint=new QLabel; m_filteredSamplingHint->setObjectName("filteredDasSamplingHint");
-    m_filteredSamplingHint->setWordWrap(true); fEnhance->addRow(m_filteredSamplingHint);
-    setFilteredDraft(FilteredDasConfig{});
     connect(m_cmbAlgorithm,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int i){
-        if(i==1)m_chkFilteredDas->setChecked(false);m_chkFilteredDas->setEnabled(i==0);
         m_chkFbpMedian->setEnabled(i==1);m_chkFbpInvert->setEnabled(i==1);
         m_edtFbpDensities->setEnabled(i==1);m_edtFbpCalibration->setEnabled(i==1);
         m_chkShiftWL2->setEnabled(i==0);
         m_chkShiftWL2->setToolTip(i==1?QStringLiteral("FBP 使用每条 A-line 的实际角度，无需复制第二波长的跨块历史数据"):QString());
-        m_cmbApod->setEnabled(i==0);m_spnDistWeight->setEnabled(i==0);
-        m_spnMinDistMm->setEnabled(i==0);m_chkMaskOob->setEnabled(i==0);
+        m_chkMaskOob->setEnabled(i==0);
     });
     reconLayout->addWidget(grpEnhance);
 
@@ -591,13 +557,6 @@ void RingConfigDialog::setAcquisitionParams(double sampleIntervalNs, int acqTime
                 QMessageBox::warning(this,"默认参数无效","时变低通默认值不适用于当前采集，使用完整关闭的出厂配置，原记录未改写："+message);
             });
         }
-        QString filteredError;
-        if(!validateFilteredDraft(&filteredError)) {
-            auto safe=FilteredDasConfig{}; safe.enabled=false; setFilteredDraft(safe);m_filteredAccepted=safe;
-            QTimer::singleShot(0,this,[this,filteredError] {
-                QMessageBox::warning(this,"默认参数无效","滤波反投影默认值不适用于当前采集，使用完整关闭的安全配置，原记录未改写："+filteredError);
-            });
-        }
     }
 }
 
@@ -636,9 +595,6 @@ void RingConfigDialog::restoreDefaults()
     m_spnGridMm->setValue(val("gridMm", 0.01).toDouble());
     m_spnFovDeg->setValue(val("fovDeg", 360.0).toDouble());
     m_spnFovTheta0->setValue(val("fovTheta0", 0.0).toDouble());
-    m_cmbApod->setCurrentIndex(val("apod", 0).toInt());
-    m_spnDistWeight->setValue(val("distWeight", 1).toInt());
-    m_spnMinDistMm->setValue(val("minDistMm", 0).toDouble());
     RingTimevarLowpassConfig restored;
     QString timevarError;
     if (!ring_timevar::loadSettings(s,m_daqHz,m_sampDepth,restored,&timevarError,m_acquisitionKnown)) {
@@ -648,17 +604,7 @@ void RingConfigDialog::restoreDefaults()
         });
     }
     setTimevarDraft(restored);
-    FilteredDasConfig filtered;
-    QString filteredError;
-    if(!filtered_das::loadSettings(s,m_daqHz,0,filtered,&filteredError,false)) {
-        filtered=FilteredDasConfig{}; filtered.enabled=false;
-        QTimer::singleShot(0,this,[this,filteredError] {
-            QMessageBox::warning(this,"默认参数无效","滤波反投影默认值无效，使用完整关闭的安全配置，原记录未改写："+filteredError);
-        });
-    }
-    setFilteredDraft(filtered);
     m_cmbAlgorithm->setCurrentIndex(val("exactFbpEnabled",false).toBool()?1:0);
-    if(m_cmbAlgorithm->currentIndex()==1)m_chkFilteredDas->setChecked(false);
     m_chkFbpMedian->setChecked(val("exactFbpMedian",true).toBool());
     m_chkFbpInvert->setChecked(val("exactFbpInvert",true).toBool());
     m_edtFbpDensities->setText(val("exactFbpDensities","1000,1100,1100,1100,1100,1100,1100,1100").toString());
@@ -721,14 +667,12 @@ void RingConfigDialog::saveDefaults()
         s.setValue(QString("radiusCh%1").arg(c), m_spnRadiusCh[c]->value());
     s.setValue("fovDeg", m_spnFovDeg->value());
     s.setValue("fovTheta0", m_spnFovTheta0->value());
-    s.setValue("apod", m_cmbApod->currentIndex());
-    s.setValue("distWeight", m_spnDistWeight->value());
-    s.setValue("minDistMm", m_spnMinDistMm->value());
     ring_timevar::saveSettings(s,timevarConfig());
-    filtered_das::saveSettings(s,filteredDasConfig());
     s.setValue("exactFbpEnabled",m_cmbAlgorithm->currentIndex()==1);
     s.setValue("exactFbpMedian",m_chkFbpMedian->isChecked());s.setValue("exactFbpInvert",m_chkFbpInvert->isChecked());
     s.setValue("exactFbpDensities",m_edtFbpDensities->text());s.setValue("exactFbpCalibration",m_edtFbpCalibration->text());
+    for(const auto& key:s.childKeys())
+        if(key=="apod"||key=="distWeight"||key=="minDistMm"||key.startsWith("filteredDas"))s.remove(key);
     s.setValue("maskOob", m_chkMaskOob->isChecked());
     // 显示掩膜（工作一）与其他默认参数同一次“设为默认”落盘（同一 Defaults group）
     s.setValue("displayMaskEnabled", m_chkDisplayMask->isChecked());
@@ -814,10 +758,7 @@ RingReconCudaConfig RingConfigDialog::config() const
     cfg.fovDeg = m_spnFovDeg->value();
     // 成像扇区起始角 UI 语义：0 = 9 点钟方向（标准角度 180°），正值逆时针
     cfg.fovTheta0Deg = 180.0 + m_spnFovTheta0->value();
-    cfg.apodType = m_cmbApod->currentIndex();
-    cfg.distanceWeightExponent = m_spnDistWeight->value();
     cfg.interpolation = 0;   // 固定 linear（DAS 分数采样点插值）
-    cfg.minDistance = m_spnMinDistMm->value() * 1e-3;
     cfg.maskOutOfRange = m_chkMaskOob->isChecked() ? 1 : 0;
     cfg.dbrSigRemove = m_chkDbr->isChecked() ? 1 : 0;
     cfg.maskLength = m_spnMaskLen->value();
@@ -855,7 +796,6 @@ void RingConfigDialog::reject()
 {
     setFbpDraft(m_fbpAccepted);
     setTimevarDraft(m_timevarAccepted);
-    setFilteredDraft(m_filteredAccepted);
     QDialog::reject();
 }
 void RingConfigDialog::editTimevarAdvanced()
@@ -915,9 +855,10 @@ bool RingConfigDialog::validateDraft(QString* error) const
     if(fe!=frontend_filter::Validation::Ok)return fail(QString::fromUtf8(frontend_filter::validationMessage(fe)));
     std::string e;
     if(!ring_timevar::validate(timevarConfig(),m_daqHz,m_sampDepth,&e))return fail(QString::fromStdString(e));
-    if(!validateFilteredDraft(error))return false;
     auto fbp=fbpSettings();
     int delays[8][2];sysDelayPerChannel(delays);
+    const auto cfg=config();
+    if(!ring_sample_window::validate(m_sampDepth,cfg.delayCut!=0,delays,cfg.enabledChannels,&e))return fail(QString::fromStdString(e));
     if(!ring_fbp_settings::loadCalibration(fbp,m_daqHz,error)||
        !ring_fbp_settings::validate(fbp,config(),delays,error))return false;
     return true;
@@ -991,24 +932,12 @@ bool RingConfigDialog::applyConfig(QString *error)
     sysDelayPerChannel(sysDelayCh);
     const RingReconCudaConfig applied = config();
     const auto timevar=timevarConfig();
-    std::string timevarError;
-    if (!ring_timevar::validate(timevar,m_daqHz,m_sampDepth,&timevarError)) {
-        return rejectConfig(QString::fromStdString(timevarError));
-    }
-    QString filteredError;
-    if(!validateFilteredDraft(&filteredError)) {
-        return rejectConfig(filteredError);
-    }
-    if (!m_controller->configureRing(applied,timevar,sysDelayCh,filteredDasConfig(),fbpSettings()))
+    // Reject editable drafts before controller errors can affect a resident service/UI.
+    QString draftError;
+    if (!validateDraft(&draftError)) return rejectConfig(draftError);
+    if (!m_controller->configureRing(applied,timevar,sysDelayCh,fbpSettings()))
         return rejectConfig(QStringLiteral("成像服务拒绝联动配置，保留当前配置"));
-    m_filteredAccepted=filteredDasConfig();
     m_fbpAccepted=fbpSettings();
-    const int effectiveSpeeds=radiiCount>0 ? speedsCount : 1;
-    double minSpeed=*std::min_element(speedsMps,speedsMps+effectiveSpeeds);
-    const double spatialMhz=minSpeed/(2*applied.gridSize)/1e6;
-    m_filteredSamplingHint->setText(m_filteredAccepted.enabled && m_filteredAccepted.stopMhz>spatialMhz
-        ? QString("空间采样提示：Stop %1 MHz 高于当前网格空间 Nyquist 约 %2 MHz；请联合验收网格与带宽。")
-            .arg(m_filteredAccepted.stopMhz).arg(spatialMhz,0,'g',5) : QString());
     m_timevarAccepted=timevar;
     // 应用成功后将物理轮次启动策略同步给当前 NetworkController（MainWindow 转发）
     emit roundPolicyChanged(startupFilterTriggerCount(), disableCountBoundary());
@@ -1178,9 +1107,6 @@ void RingConfigDialog::hideEvent(QHideEvent *event)
     QDialog::hideEvent(event);
 }
 
-FilteredDasConfig RingConfigDialog::filteredDasConfig() const {
-    auto c=m_filteredDraft; c.enabled=m_chkFilteredDas->isChecked()&&m_cmbAlgorithm->currentIndex()==0; return c;
-}
 RingFbpSettings RingConfigDialog::fbpSettings() const {
     RingFbpSettings s;s.enabled=m_cmbAlgorithm->currentIndex()==1;s.median=m_chkFbpMedian->isChecked();
     s.invert=m_chkFbpInvert->isChecked();s.calibrationFile=m_edtFbpCalibration->text().trimmed();
@@ -1193,43 +1119,4 @@ void RingConfigDialog::setFbpDraft(const RingFbpSettings&s){
     m_cmbAlgorithm->setCurrentIndex(s.enabled?1:0);m_chkFbpMedian->setChecked(s.median);m_chkFbpInvert->setChecked(s.invert);
     QStringList densities;for(double d:s.densities)densities.append(QString::number(d,'g',12));
     m_edtFbpDensities->setText(densities.join(','));m_edtFbpCalibration->setText(s.calibrationFile);
-}
-void RingConfigDialog::setFilteredDraft(const FilteredDasConfig& c) {
-    m_filteredDraft=c;
-    const QSignalBlocker a(m_spnFilteredOrder),b(m_spnFilteredReference),d(m_spnFilteredPass),e(m_spnFilteredStop);
-    m_chkFilteredDas->setChecked(c.enabled);
-    m_spnFilteredOrder->setValue(c.order); m_spnFilteredReference->setValue(c.referenceMhz);
-    m_spnFilteredPass->setValue(c.passMhz); m_spnFilteredStop->setValue(c.stopMhz);
-    for(auto* w:{m_spnFilteredOrder,m_spnFilteredReference,m_spnFilteredPass,m_spnFilteredStop}) w->setEnabled(c.enabled);
-}
-bool RingConfigDialog::validateFilteredDraft(QString* error) const {
-    std::string e; std::vector<int> lengths;
-    const auto c=filteredDasConfig(); const auto cfg=config();
-    int delays[8][2]; sysDelayPerChannel(delays);
-    if(c.enabled&&!filtered_das::inputLengths(m_sampDepth,cfg.delayCut!=0,delays,cfg.enabledChannels,lengths,&e)) {
-        if(error)*error=QString::fromStdString(e); return false;
-    }
-    FilteredDasPrefilter prepared;
-    if(!prepared.configure(c,m_daqHz,lengths,&e)) {if(error)*error=QString::fromStdString(e);return false;}
-    return true;
-}
-void RingConfigDialog::editFilteredAdvanced() {
-    QDialog dlg(this); dlg.setWindowTitle("滤波反投影高级参数"); dlg.setObjectName("filteredDasAdvancedDialog");
-    auto *layout=new QFormLayout(&dlg);
-    auto *pad=new QDoubleSpinBox; pad->setObjectName("filteredDasPadFactor");
-    pad->setDecimals(12); pad->setRange(4,1e9); pad->setValue(m_filteredDraft.padFactor);
-    auto *batch=new QSpinBox; batch->setObjectName("filteredDasBatchColumns");
-    batch->setRange(1,2147483647); batch->setValue(m_filteredDraft.batchColumns);
-    layout->addRow("PadFactor 补零倍数",pad); layout->addRow("BatchColumns 每批 A-line 数",batch);
-    bool padEdited=false; connect(pad,qOverload<double>(&QDoubleSpinBox::valueChanged),&dlg,[&](double){padEdited=true;});
-    auto *buttons=new QDialogButtonBox(QDialogButtonBox::Ok|QDialogButtonBox::Cancel); layout->addRow(buttons);
-    connect(buttons,&QDialogButtonBox::rejected,&dlg,&QDialog::reject);
-    connect(buttons,&QDialogButtonBox::accepted,&dlg,[&] {
-        auto next=filteredDasConfig(); if(padEdited)next.padFactor=pad->value(); next.batchColumns=batch->value();
-        const auto old=m_filteredDraft; m_filteredDraft=next;
-        QString error;
-        if(!validateFilteredDraft(&error)) {m_filteredDraft=old;QMessageBox::warning(&dlg,"参数错误",error);return;}
-        dlg.accept();
-    });
-    dlg.exec();
 }

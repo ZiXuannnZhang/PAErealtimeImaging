@@ -5,7 +5,6 @@ set(RING_TEST_CUDA_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../build/ring_recon_cuda/bin
 set(RING_TEST_CUDA_LIB "${CMAKE_CURRENT_SOURCE_DIR}/../build/ring_recon_cuda/libring_recon_cuda.dll.a" CACHE FILEPATH "Test CUDA import library")
 file(COPY "${RING_TEST_CUDA_BIN}/cublas64_12.dll" "${RING_TEST_CUDA_BIN}/cublasLt64_12.dll" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
 file(COPY "${RING_TEST_CUDA_BIN}/cublas64_12.dll" "${RING_TEST_CUDA_BIN}/cublasLt64_12.dll" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/ui-isolated")
-file(COPY "${RING_TEST_CUDA_BIN}/cublas64_12.dll" "${RING_TEST_CUDA_BIN}/cublasLt64_12.dll" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/filtered-ui-isolated")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -14,8 +13,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
 add_executable(ring_fbp_service_test ring_fbp_service_test.cpp
     ../src/ImagingSvc/ImagingSvc.cpp ../src/ImagingSvc/ImagingSvc.h
-    ../src/RingRecon/ring_recon.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp
-    ../src/FilteredDasPrefilter.cpp ../src/FilteredDasSettings.cpp)
+    ../src/RingRecon/ring_recon.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp)
 target_include_directories(ring_fbp_service_test PRIVATE ../include ../src/RingRecon ../src/ImagingSvc ../libs/imaging ../third_party/zeromq/include)
 target_compile_definitions(ring_fbp_service_test PRIVATE RING_TIMEVAR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(ring_fbp_service_test PRIVATE Qt6::Core ws2_32 "${RING_TEST_CUDA_LIB}"
@@ -24,8 +22,7 @@ target_link_libraries(ring_fbp_service_test PRIVATE Qt6::Core ws2_32 "${RING_TES
 add_test(NAME ring_fbp_service_test COMMAND ring_fbp_service_test)
 set_tests_properties(ring_fbp_service_test PROPERTIES RUN_SERIAL TRUE)
 add_executable(ring_fbp_controller_test ring_fbp_controller_test.cpp ../src/ImagingController.cpp ../include/ImagingController.h
-    ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/RingRecon/ring_recon.cpp
-    ../src/FilteredDasPrefilter.cpp ../src/FilteredDasSettings.cpp)
+    ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/RingRecon/ring_recon.cpp)
 target_include_directories(ring_fbp_controller_test PRIVATE ../include ../src/RingRecon ../third_party/zeromq/include)
 target_compile_definitions(ring_fbp_controller_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(ring_fbp_controller_test PRIVATE Qt6::Gui "${RING_TEST_CUDA_LIB}"
@@ -63,7 +60,7 @@ target_include_directories(ring_timevar_bench PRIVATE ../include ../src/RingReco
 if(WIN32)
     add_executable(ring_timevar_service_test ring_timevar_service_test.cpp
         ../src/ImagingSvc/ImagingSvc.cpp ../src/ImagingSvc/ImagingSvc.h ../src/ImagingSvc/ProcessScheduling.cpp
-        ../src/RingRecon/ring_recon.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/FilteredDasSettings.cpp ../src/FilteredDasPrefilter.cpp)
+        ../src/RingRecon/ring_recon.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp)
     target_include_directories(ring_timevar_service_test PRIVATE ../include ../src/RingRecon ../src/ImagingSvc
         ../libs/imaging ../third_party/zeromq/include)
     target_compile_definitions(ring_timevar_service_test PRIVATE RING_TIMEVAR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -83,7 +80,7 @@ if(WIN32)
     add_executable(ring_timevar_ui_test ring_timevar_ui_test.cpp
         ../src/RingConfigDialog.cpp ../include/RingConfigDialog.h
         ../src/ImagingController.cpp ../include/ImagingController.h
-        ../src/FrontendFilter.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/FilteredDasSettings.cpp ../src/FilteredDasPrefilter.cpp)
+        ../src/FrontendFilter.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp)
     target_include_directories(ring_timevar_ui_test PRIVATE ../include ../src/RingRecon
         ../third_party/zeromq/include)
     target_compile_definitions(ring_timevar_ui_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
@@ -186,8 +183,7 @@ add_test(NAME ring_production_blockers_test COMMAND ring_production_blockers_tes
 
 add_executable(diagnostic_recorder_test
     diagnostic_recorder_test.cpp
-    ../src/DiagnosticRecorder.cpp
-)
+    ../src/DiagnosticRecorder.cpp)
 target_include_directories(diagnostic_recorder_test PRIVATE ../include)
 target_link_libraries(diagnostic_recorder_test PRIVATE Qt6::Core)
 
@@ -458,64 +454,9 @@ endif()
 
 # Keep the CPU DSP kernel optimized in Debug too; preserve symbols and no fast-math.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../src/RingTimevarLowpass.cpp ${CMAKE_CURRENT_SOURCE_DIR}/../src/FilteredDasPrefilter.cpp PROPERTIES COMPILE_OPTIONS "-O2")
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../src/RingTimevarLowpass.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
 
-add_executable(filtered_das_test filtered_das_test.cpp ../src/FilteredDasPrefilter.cpp ../src/FilteredDasSettings.cpp)
-target_include_directories(filtered_das_test PRIVATE ../include)
-target_link_libraries(filtered_das_test PRIVATE Qt6::Core)
-target_compile_definitions(filtered_das_test PRIVATE FILTERED_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/reference/filtered_das_fixtures")
-add_test(NAME filtered_das_test COMMAND filtered_das_test)
-
-if(WIN32)
-    add_executable(filtered_das_service_test filtered_das_service_test.cpp
-        ../src/ImagingSvc/ImagingSvc.cpp ../src/ImagingSvc/ImagingSvc.h ../src/ImagingSvc/ProcessScheduling.cpp
-        ../src/RingRecon/ring_recon.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/FilteredDasSettings.cpp ../src/FilteredDasPrefilter.cpp)
-    target_include_directories(filtered_das_service_test PRIVATE ../include ../src/RingRecon ../src/ImagingSvc
-        ../libs/imaging ../third_party/zeromq/include)
-    target_compile_definitions(filtered_das_service_test PRIVATE RING_TIMEVAR_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(filtered_das_service_test PRIVATE Qt6::Core ws2_32
-        "${RING_TEST_CUDA_LIB}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.lib")
-    add_custom_command(TARGET filtered_das_service_test POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${RING_TEST_CUDA_BIN}/ring_recon_cuda.dll"
-        "${RING_TEST_CUDA_BIN}/cudart64_12.dll"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.dll"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/cufft64_12.dll"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
-        "$<TARGET_FILE_DIR:filtered_das_service_test>")
-    add_test(NAME filtered_das_service_test COMMAND filtered_das_service_test)
-    set_tests_properties(filtered_das_service_test PROPERTIES RUN_SERIAL TRUE)
-    target_compile_definitions(filtered_das_service_test PRIVATE FILTERED_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/reference/filtered_das_fixtures")
-endif()
-
-if(WIN32)
-    add_executable(filtered_das_ui_test filtered_das_ui_test.cpp
-        ../src/RingConfigDialog.cpp ../include/RingConfigDialog.h
-        ../src/ImagingController.cpp ../include/ImagingController.h
-        ../src/FrontendFilter.cpp ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/FilteredDasSettings.cpp ../src/FilteredDasPrefilter.cpp)
-    target_include_directories(filtered_das_ui_test PRIVATE ../include ../src/RingRecon
-        ../third_party/zeromq/include)
-    target_compile_definitions(filtered_das_ui_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(filtered_das_ui_test PRIVATE Qt6::Widgets
-        "${RING_TEST_CUDA_LIB}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a")
-    set_target_properties(filtered_das_ui_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/filtered-ui-isolated")
-    add_test(NAME filtered_das_ui_test COMMAND filtered_das_ui_test)
-    set_tests_properties(filtered_das_ui_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-    add_custom_command(TARGET filtered_das_ui_test POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${RING_TEST_CUDA_BIN}/ring_recon_cuda.dll"
-            "${RING_TEST_CUDA_BIN}/cudart64_12.dll"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
-            "$<TARGET_FILE_DIR:filtered_das_ui_test>")
-endif()
-
-add_executable(filtered_das_off_test filtered_das_off_test.cpp ../src/RingTimevarLowpass.cpp ../src/RingRecon/ring_recon.cpp ../src/FilteredDasPrefilter.cpp)
-target_include_directories(filtered_das_off_test PRIVATE ../include ../src/RingRecon)
-target_compile_definitions(filtered_das_off_test PRIVATE FILTERED_OFF_BASELINE="${CMAKE_CURRENT_SOURCE_DIR}/reference/filtered_das_baseline_off.csv")
-add_test(NAME filtered_das_off_test COMMAND filtered_das_off_test)
 # 电机参数联动（LabVIEW -> 本程序）：解析/换算规则/监视器变化检测 + 组包器
 # sectorCcw 顺时针角度镜像（与 ring_block_assembler_test 同口径的内轮断言）。
 add_executable(motor_scan_linkage_test

@@ -91,7 +91,6 @@ int main(int argc, char** argv) {
     cfg.recon.theta0Deg = theta0;
     cfg.recon.fovDeg = spec.fovDeg;
     cfg.recon.fovTheta0Deg = 0.0;
-    cfg.recon.distanceWeightExponent = 1.0;
     cfg.recon.maskOutOfRange = true;
     cfg.recon.interpolation = "linear";
     if (sosRadiusMm > 0.0) {

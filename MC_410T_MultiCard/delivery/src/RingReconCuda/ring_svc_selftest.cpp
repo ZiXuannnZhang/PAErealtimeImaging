@@ -102,9 +102,7 @@ int main(int argc, char** argv) {
     const bool splice = argInt(args, "--splice", 0) != 0;          // 1=拼接模式（需配准模式）
     const double spliceBlendDeg = argDouble(args, "--splice-blend", 0.0);  // 拼接羽化宽度（°）
     const std::string sysDelayPerCh = argStr(args, "--sys-delay-per-ch");   // 空=各通道统一默认
-    const std::string filteredMode=argStr(args,"--filtered-das");
     const bool exactFbp=argInt(args,"--exact-fbp",0)!=0;
-    const int filteredBatch=argInt(args,"--filtered-batch",64);
     const std::string timevarMode = argStr(args, "--timevar-lowpass");
     const int roundsArg = argInt(args, "--rounds", 2);
     const int benchmarkBlocks = argInt(args,"--benchmark-blocks",0);
@@ -126,7 +124,7 @@ int main(int argc, char** argv) {
             "[--sos-radii-mm 3] [--sos 1490,1540] "
             "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...] "
             "[--identity-jump-at N] [--drop-block N] "
-            "[--exact-fbp 1] [--filtered-das off|on|high] [--filtered-batch N] [--mask-length N] [--benchmark-blocks N] [--frame-timeout-ms 20000] [--timevar-lowpass off|on|high] [--rounds N] [--synthetic 1] [--samples N] [--no-save 1]\n");
+            "[--exact-fbp 1] [--mask-length N] [--benchmark-blocks N] [--frame-timeout-ms 20000] [--timevar-lowpass off|on|high] [--rounds N] [--synthetic 1] [--samples N] [--no-save 1]\n");
         return 2;
     }
     if (!timevarMode.empty() && timevarMode != "off" && timevarMode != "on" && timevarMode != "high") {
@@ -314,10 +312,7 @@ int main(int argc, char** argv) {
     ring["gridSize"] = gridMm * 1e-3;
     ring["fovDeg"] = fovDeg;
     ring["fovTheta0Deg"] = 0.0;
-    ring["apodType"] = 0;
-    ring["distanceWeightExponent"] = 1.0;
     ring["interpolation"] = 0;
-    ring["minDistance"] = 0.0;
     ring["maskOutOfRange"] = 1;
     ring["dbrSigRemove"] = 1;
     ring["maskLength"] = argInt(args,"--mask-length",300);
@@ -373,13 +368,6 @@ int main(int argc, char** argv) {
         timevar["fftLength"] = 256;
     }
     ring["timevarLowpass"] = timevar;
-    if(!filteredMode.empty()&&filteredMode!="off"&&filteredMode!="on"&&filteredMode!="high") {
-        std::fprintf(stderr,"--filtered-das must be off|on|high\n"); return 2;
-    }
-    ring["filteredDas"]=QJsonObject{{"enabled",filteredMode=="on"||filteredMode=="high"},
-        {"order",.5},{"referenceMhz",5.0},{"passMhz",40.0},{"stopMhz",60.0},
-        {"padFactor",filteredMode=="high"?8.0:4.0},{"batchColumns",filteredBatch}};
-
     QJsonObject params;
     params["imagingMode"] = "ring";
     params["ring"] = ring;
@@ -498,10 +486,8 @@ int main(int argc, char** argv) {
                         obj.value(QStringLiteral("round_complete")).isBool() &&
                         obj.value(QStringLiteral("round_complete")).toBool() == expectedComplete;
                     serviceMs=obj["process_us"].toDouble()/1000.0;
-                    if(obj.contains("filtered_cached_bytes"))
-                        std::printf("[filtered-metrics] design_us=%.0f cached_bytes=%.0f workspace_bytes=%.0f max_batch=%.0f\n",
-                            obj["filtered_design_us"].toDouble(),obj["filtered_cached_bytes"].toDouble(),
-                            obj["filtered_workspace_bytes"].toDouble(),obj["filtered_max_batch"].toDouble());
+                    if(obj.contains("fbp_prepare_us"))
+                        std::printf("[fbp-metrics] prepare_us=%.0f\n",obj["fbp_prepare_us"].toDouble());
                     got = true;
                     break;
                 }

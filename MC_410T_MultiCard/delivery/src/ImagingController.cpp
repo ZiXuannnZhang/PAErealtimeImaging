@@ -1,7 +1,6 @@
 #include "ImagingController.h"
+#include "RingSampleWindow.h"
 #include "RingTimevarLowpassSettings.h"
-#include "FilteredDasSettings.h"
-#include "FilteredDasPrefilter.h"
 #include "ImagingSharedMemory.h"
 #include "RingSnapshotCopy.h"
 #ifdef _WIN32
@@ -310,7 +309,6 @@ void ImagingController::configure(const GeneralParams &general,
 bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
                                       const RingTimevarLowpassConfig &timevarCfg,
                                       const int (*sysDelayCh)[2],
-                                      const FilteredDasConfig &filteredDasCfg,
                                       const RingFbpSettings &fbp)
 {
     std::string timevarError;
@@ -318,24 +316,16 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
         emit svcError(QString::fromStdString(timevarError));
         return false;
     }
-    std::vector<int> lengths;
     int delays[8][2];
     for(int c=0;c<8;++c)for(int w=0;w<2;++w) delays[c][w]=sysDelayCh?sysDelayCh[c][w]:ringCfg.sysDelay[w];
+    if(!ring_sample_window::validate(ringCfg.sampDepth,ringCfg.delayCut!=0,delays,ringCfg.enabledChannels,&timevarError)) {
+        emit svcError(QString::fromStdString(timevarError));return false;
+    }
     auto preparedFbp=fbp;QString fbpError;
     if(!ring_fbp_settings::loadCalibration(preparedFbp,ringCfg.daqHz,&fbpError)||
-       !ring_fbp_settings::validate(preparedFbp,ringCfg,delays,&fbpError)||
-       (fbp.enabled&&filteredDasCfg.enabled)) {
-        emit svcError(fbpError.isEmpty()?QStringLiteral("改进 FBP 不能与 FilteredDAS 同时启用"):fbpError);return false;
+       !ring_fbp_settings::validate(preparedFbp,ringCfg,delays,&fbpError)) {
+        emit svcError(fbpError);return false;
     }
-    if(filteredDasCfg.enabled && !filtered_das::inputLengths(ringCfg.sampDepth,ringCfg.delayCut!=0,
-            delays,ringCfg.enabledChannels,lengths,&timevarError)) {
-        emit svcError(QString::fromStdString(timevarError)); return false;
-    }
-    FilteredDasPrefilter preparedFiltered;
-    if(!preparedFiltered.configure(filteredDasCfg,ringCfg.daqHz,lengths,&timevarError)) {
-        emit svcError(QString::fromStdString(timevarError)); return false;
-    }
-    m_filteredDasConfig=filteredDasCfg;
     m_fbpSettings=preparedFbp;
     m_ringConfig = ringCfg;
     m_ringTimevarConfig = timevarCfg;
@@ -964,10 +954,7 @@ void ImagingController::sendConfigureAndStart()
         ring["gridSize"]        = m_ringConfig.gridSize;
         ring["fovDeg"]          = m_ringConfig.fovDeg;
         ring["fovTheta0Deg"]    = m_ringConfig.fovTheta0Deg;
-        ring["apodType"]        = m_ringConfig.apodType;
-        ring["distanceWeightExponent"] = m_ringConfig.distanceWeightExponent;
         ring["interpolation"]   = m_ringConfig.interpolation;
-        ring["minDistance"]     = m_ringConfig.minDistance;
         ring["maskOutOfRange"]  = m_ringConfig.maskOutOfRange;
         ring["dbrSigRemove"]    = m_ringConfig.dbrSigRemove;
         ring["maskLength"]      = m_ringConfig.maskLength;
@@ -1000,7 +987,6 @@ void ImagingController::sendConfigureAndStart()
         ring["triggerWlOdd"] = m_ringConfig.triggerWlOdd;
         ring["timeoutResetSec"] = m_ringConfig.timeoutResetSec;
         ring["timevarLowpass"] = ring_timevar::toJson(m_ringTimevarConfig);
-        ring["filteredDas"] = filtered_das::toJson(m_filteredDasConfig);
         ring["exactFbp"] = ring_fbp_settings::toJson(m_fbpSettings);
         ring["fbpPrepareToken"]=QString::number(m_fbpPrepareToken);
 

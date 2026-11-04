@@ -61,10 +61,10 @@ typedef struct RingReconCudaConfig {
     double fovDeg;
     double fovTheta0Deg;
     int    normalizeByW;        // reserved
-    int    apodType;            // 0=none, 1=hann, 2=hamming
-    double distanceWeightExponent;
+    int    reservedApod;        // retired; ignored, ABI layout only
+    double reservedDistanceWeight; // retired; ignored
     int    interpolation;       // 0=linear, 1=nearest
-    double minDistance;         // 0 = auto grid step
+    double reservedMinDistance; // retired; ignored
     int    maskOutOfRange;
 
     // ---- preprocessing ----

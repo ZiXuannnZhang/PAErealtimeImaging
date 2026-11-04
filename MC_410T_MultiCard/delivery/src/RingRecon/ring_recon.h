@@ -28,8 +28,6 @@ struct ReconParams {
     double theta0Deg = 0.0;         // 覆盖起始角 [deg]
     double fovDeg = 360.0;          // 成像扇区角宽 [deg]
     double fovTheta0Deg = 0.0;      // 成像扇区起始角 [deg]
-    double distanceWeightExponent = 1.0;
-    double minDistance = 0.0;       // 0 = 自动取网格步长
     bool   maskOutOfRange = true;
     std::string interpolation = "linear";  // linear / nearest
     std::vector<double> soundSpeedRadii;   // 分层声速边界 [m]（空=单声速）
