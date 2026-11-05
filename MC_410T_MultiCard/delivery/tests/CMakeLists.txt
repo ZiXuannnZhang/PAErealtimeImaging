@@ -27,7 +27,8 @@ target_link_libraries(ring_fbp_service_test PRIVATE Qt6::Core ws2_32 "${RING_TES
     "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a"
     "${CMAKE_CURRENT_SOURCE_DIR}/../libs/imaging/pa_recon_core.lib")
 add_test(NAME ring_fbp_service_test COMMAND ring_fbp_service_test)
-set_tests_properties(ring_fbp_service_test PROPERTIES RUN_SERIAL TRUE)
+add_test(NAME ring_fbp_fusion_two_channel_test COMMAND ring_fbp_service_test --two-channels)
+set_tests_properties(ring_fbp_service_test ring_fbp_fusion_two_channel_test PROPERTIES RUN_SERIAL TRUE)
 add_executable(ring_fbp_controller_test ring_fbp_controller_test.cpp ../src/ImagingController.cpp ../include/ImagingController.h
     ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/RingRecon/ring_recon.cpp)
 target_include_directories(ring_fbp_controller_test PRIVATE ../include ../src/RingRecon ../third_party/zeromq/include)

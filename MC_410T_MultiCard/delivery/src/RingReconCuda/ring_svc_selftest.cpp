@@ -105,6 +105,7 @@ int main(int argc, char** argv) {
     const bool exactFbp=argInt(args,"--exact-fbp",0)!=0;
     const std::string timevarMode = argStr(args, "--timevar-lowpass");
     const std::string timevarBackend=argStr(args,"--timevar-backend","auto");
+    const std::string fbpPreprocessBackend=argStr(args,"--fbp-preprocess-backend","auto");
     const double fbpShift=argDouble(args,"--fbp-shift",0.0);
     const int roundsArg = argInt(args, "--rounds", 2);
     const int benchmarkBlocks = argInt(args,"--benchmark-blocks",0);
@@ -126,7 +127,7 @@ int main(int argc, char** argv) {
             "[--sos-radii-mm 3] [--sos 1490,1540] "
             "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...] "
             "[--identity-jump-at N] [--drop-block N] "
-            "[--exact-fbp 1] [--mask-length N] [--benchmark-blocks N] [--frame-timeout-ms 20000] [--timevar-lowpass off|on|high] [--rounds N] [--synthetic 1] [--samples N] [--no-save 1]\n");
+            "[--exact-fbp 1] [--mask-length N] [--benchmark-blocks N] [--frame-timeout-ms 20000] [--timevar-lowpass off|on|high] [--fbp-preprocess-backend auto|cuda|staged] [--rounds N] [--synthetic 1] [--samples N] [--no-save 1]\n");
         return 2;
     }
     if (!timevarMode.empty() && timevarMode != "off" && timevarMode != "on" && timevarMode != "high") {
@@ -260,6 +261,7 @@ int main(int argc, char** argv) {
     auto exactSettings=ring["exactFbp"].toObject();exactSettings["delayOffsetSamples"]=shiftOffsets;
     ring["exactFbp"]=exactSettings;
     ring["timevarBackend"]=QString::fromStdString(timevarBackend);
+    ring["fbpPreprocessBackend"]=QString::fromStdString(fbpPreprocessBackend);
     ring["reconDepth"] = sampDepth;
     ring["alinesPerFrame"] = alinesPerFrame;
     ring["alinesPerBlock"] = perChBlock;
@@ -513,9 +515,10 @@ int main(int argc, char** argv) {
                     if(obj.contains("fbp_prepare_us"))
                         std::printf("[fbp-metrics] prepare_us=%.0f\n",obj["fbp_prepare_us"].toDouble());
                     if(obj.contains("fbp_preprocess_us"))
-                        std::printf("[fbp-stages] backend=%s preprocess_ms=%.9f accumulate_ms=%.9f\n",
+                        std::printf("[fbp-stages] backend=%s preprocess_ms=%.9f accumulate_ms=%.9f fbp_preprocess=%s\n",
                             obj["timevar_backend"].toString().toUtf8().constData(),
-                            obj["fbp_preprocess_us"].toDouble()/1000.,obj["fbp_accumulate_us"].toDouble()/1000.);
+                            obj["fbp_preprocess_us"].toDouble()/1000.,obj["fbp_accumulate_us"].toDouble()/1000.,
+                            obj["fbp_preprocess_backend"].toString("staged").toUtf8().constData());
                     got = true;
                     break;
                 }

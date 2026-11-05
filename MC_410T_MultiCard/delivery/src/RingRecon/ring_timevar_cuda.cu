@@ -1,4 +1,5 @@
 #include "ring_timevar_cuda.h"
+#include "ring_fbp_device.h"
 #include <cuda_runtime.h>
 #include <cufft.h>
 #include <algorithm>
@@ -181,6 +182,46 @@ extern "C" RING_RECON_CUDA_API int ring_timevar_cuda_create(const RingTimevarCud
     }catch(const std::exception& e){lastError=e.what();return -1;}
     catch(...){lastError="Unknown GPU STFT preparation failure";return -1;}
 }
+const double* ring_timevar_device(void* opaque,const double* input,int lines,int* invalid){
+    auto* c=static_cast<Context*>(opaque);
+    if(!c||c->failed||!input||!invalid||lines<1||lines>c->capacity)
+        throw std::runtime_error("Invalid GPU STFT device input");
+    const size_t signalCount=size_t(lines)*c->samples;
+    validateInput<<<blocks(signalCount),256,0,c->stream>>>(input,signalCount,invalid);
+    check(cudaGetLastError());
+    packWindows<<<blocks(c->spectra),256,0,c->stream>>>(c->spectrum.ptr,input,c->window.ptr,
+        c->samples,c->windowLength,c->nfft,c->hop,c->frames,lines,c->spectra);
+    check(cudaGetLastError());
+    fftCheck(cufftExecZ2Z(c->fft,c->spectrum.ptr,c->spectrum.ptr,CUFFT_FORWARD));
+    const int bins=c->nfft/2+1;
+    const size_t positiveCount=size_t(c->capacity)*c->frames*bins;
+    maskPositive<<<blocks(positiveCount),256,0,c->stream>>>(c->spectrum.ptr,c->mask.ptr,c->nfft,c->frames,bins,positiveCount);
+    check(cudaGetLastError());
+    const size_t negativeCount=size_t(c->capacity)*c->frames*(c->nfft-bins);
+    if(negativeCount){
+        restoreNegative<<<blocks(negativeCount),256,0,c->stream>>>(c->spectrum.ptr,c->nfft,bins,negativeCount);
+        check(cudaGetLastError());
+    }
+    fftCheck(cufftExecZ2Z(c->fft,c->spectrum.ptr,c->spectrum.ptr,CUFFT_INVERSE));
+    const size_t normalizedCount=size_t(lines)*c->length;
+    overlapAdd<<<blocks(normalizedCount),256,0,c->stream>>>(c->spectrum.ptr,c->window.ptr,c->norm.ptr,
+        c->normalized.ptr,c->windowLength,c->nfft,c->hop,c->frames,c->length,normalizedCount,invalid);
+    check(cudaGetLastError());
+    interpolate<<<blocks(signalCount),256,0,c->stream>>>(c->normalized.ptr,c->index.ptr,c->weight.ptr,
+        c->output.ptr,c->samples,c->length,signalCount,invalid);
+    check(cudaGetLastError());
+    return c->output.ptr;
+}
+
+cudaStream_t ring_timevar_stream(void* opaque){
+    return static_cast<Context*>(opaque)->stream;
+}
+
+int ring_timevar_capacity(void* opaque,int samples){
+    const auto* c=static_cast<const Context*>(opaque);
+    return c&&!c->failed&&c->samples==samples?c->capacity:0;
+}
+
 extern "C" RING_RECON_CUDA_API int ring_timevar_cuda_apply(void* opaque,const double* input,int lines,double* output){
     auto* c=static_cast<Context*>(opaque);
     if(!c||c->failed||!input||!output||lines<1||lines>c->capacity){
@@ -190,29 +231,7 @@ extern "C" RING_RECON_CUDA_API int ring_timevar_cuda_apply(void* opaque,const do
         const size_t signalCount=size_t(lines)*c->samples;
         check(cudaMemsetAsync(c->invalid.ptr,0,sizeof(int),c->stream));
         check(cudaMemcpyAsync(c->input.ptr,input,signalCount*sizeof(double),cudaMemcpyHostToDevice,c->stream));
-        validateInput<<<blocks(signalCount),256,0,c->stream>>>(c->input.ptr,signalCount,c->invalid.ptr);
-        check(cudaGetLastError());
-        packWindows<<<blocks(c->spectra),256,0,c->stream>>>(c->spectrum.ptr,c->input.ptr,c->window.ptr,
-            c->samples,c->windowLength,c->nfft,c->hop,c->frames,lines,c->spectra);
-        check(cudaGetLastError());
-        fftCheck(cufftExecZ2Z(c->fft,c->spectrum.ptr,c->spectrum.ptr,CUFFT_FORWARD));
-        const int bins=c->nfft/2+1;
-        const size_t positiveCount=size_t(c->capacity)*c->frames*bins;
-        maskPositive<<<blocks(positiveCount),256,0,c->stream>>>(c->spectrum.ptr,c->mask.ptr,c->nfft,c->frames,bins,positiveCount);
-        check(cudaGetLastError());
-        const size_t negativeCount=size_t(c->capacity)*c->frames*(c->nfft-bins);
-        if(negativeCount){
-            restoreNegative<<<blocks(negativeCount),256,0,c->stream>>>(c->spectrum.ptr,c->nfft,bins,negativeCount);
-            check(cudaGetLastError());
-        }
-        fftCheck(cufftExecZ2Z(c->fft,c->spectrum.ptr,c->spectrum.ptr,CUFFT_INVERSE));
-        const size_t normalizedCount=size_t(lines)*c->length;
-        overlapAdd<<<blocks(normalizedCount),256,0,c->stream>>>(c->spectrum.ptr,c->window.ptr,c->norm.ptr,
-            c->normalized.ptr,c->windowLength,c->nfft,c->hop,c->frames,c->length,normalizedCount,c->invalid.ptr);
-        check(cudaGetLastError());
-        interpolate<<<blocks(signalCount),256,0,c->stream>>>(c->normalized.ptr,c->index.ptr,c->weight.ptr,
-            c->output.ptr,c->samples,c->length,signalCount,c->invalid.ptr);
-        check(cudaGetLastError());
+        ring_timevar_device(c,c->input.ptr,lines,c->invalid.ptr);
         int invalid=0;
         check(cudaMemcpyAsync(&invalid,c->invalid.ptr,sizeof(invalid),cudaMemcpyDeviceToHost,c->stream));
         check(cudaStreamSynchronize(c->stream));

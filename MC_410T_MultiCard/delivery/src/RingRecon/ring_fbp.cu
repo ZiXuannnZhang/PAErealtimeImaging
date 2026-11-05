@@ -1,4 +1,5 @@
 #include "ring_fbp.h"
+#include "ring_fbp_device.h"
 #include "ring_fbp_math.h"
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
@@ -7,7 +8,6 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 namespace {
 thread_local std::string lastError;
@@ -126,24 +126,40 @@ extern "C" RING_RECON_CUDA_API int ring_fbp_create(const RingReconCudaConfig* cf
         *out=h.release();return 0;
     }catch(const std::exception&e){lastError=e.what();return -1;}
 }
-extern "C" RING_RECON_CUDA_API int ring_fbp_append(void* p,const float* data,int nt,int nd,const float* angles,double R,double sec,double width){
+static int append(void* p,const float* data,int nt,int nd,const float* angles,double R,double sec,double width,
+                  bool device,cudaStream_t stream){
     auto* h=static_cast<Core*>(p);
+    float2 trig[256];
     try{
         if(!h||h->failed||!data||!angles||nt<128||nt>h->fbp.maxNt||nd<1||!std::isfinite(R)||R<=0||!std::isfinite(sec)||!std::isfinite(width))throw std::runtime_error("Invalid FBP append or failed context");
         for(int j=0;j<nd;++j)if(!std::isfinite(angles[j]))throw std::runtime_error("Nonfinite FBP angle");
         auto& K=getKernel(*h,nt);
         Table*t=getTable(*h,R);
+        blas(cublasSetStream(h->blasHandle,stream));
         // Bound matrix workspace independent of acquisition block size.
         for(int start=0;start<nd;start+=256){int n=std::min(256,nd-start);
-            h->P.resize(size_t(nt)*n);h->Q.resize(size_t(nt)*n);h->angles.resize(n);
-            check(cudaMemcpy(h->P.p,data+size_t(start)*nt,size_t(nt)*n*4,cudaMemcpyHostToDevice));
-            std::vector<float2> trig(n);for(int j=0;j<n;++j){double a=angles[start+j]*ring_fbp_math::pi/180;trig[j]=make_float2(float(cos(a)),float(sin(a)));}
-            check(cudaMemcpy(h->angles.p,trig.data(),n*sizeof(float2),cudaMemcpyHostToDevice));
-            float one=1,zero=0;blas(cublasSgemm(h->blasHandle,CUBLAS_OP_N,CUBLAS_OP_N,nt,n,nt,&one,K.p,nt,h->P.p,nt,&zero,h->Q.p,nt));
-            backproject<<<(h->nx*h->nx+255)/256,256>>>(h->acc.p,h->Q.p,nt,n,h->angles.p,h->nx,float(h->cfg.fov),float(h->cfg.daqHz),float(R),float(R*h->fbp.angularStepRad),t?t->data.p:nullptr,t?t->nr:0,t?t->na:0,t?t->dr:0,h->cfg.spliceMode,float(sec),float(width),float(h->cfg.spliceBlendDeg),float(h->cfg.fovTheta0Deg),float(h->cfg.fovDeg),h->medium,homogeneous(*h));
+            h->Q.resize(size_t(nt)*n);h->angles.resize(n);
+            const float* P=data+size_t(start)*nt;
+            if(!device){
+                h->P.resize(size_t(nt)*n);
+                check(cudaMemcpy(h->P.p,P,size_t(nt)*n*sizeof(float),cudaMemcpyHostToDevice));
+                P=h->P.p;
+            }
+            for(int j=0;j<n;++j){double a=angles[start+j]*ring_fbp_math::pi/180;trig[j]=make_float2(float(cos(a)),float(sin(a)));}
+            if(device)check(cudaMemcpyAsync(h->angles.p,trig,n*sizeof(float2),cudaMemcpyHostToDevice,stream));
+            else check(cudaMemcpy(h->angles.p,trig,n*sizeof(float2),cudaMemcpyHostToDevice));
+            float one=1,zero=0;blas(cublasSgemm(h->blasHandle,CUBLAS_OP_N,CUBLAS_OP_N,nt,n,nt,&one,K.p,nt,P,nt,&zero,h->Q.p,nt));
+            backproject<<<(h->nx*h->nx+255)/256,256,0,stream>>>(h->acc.p,h->Q.p,nt,n,h->angles.p,h->nx,float(h->cfg.fov),float(h->cfg.daqHz),float(R),float(R*h->fbp.angularStepRad),t?t->data.p:nullptr,t?t->nr:0,t?t->na:0,t?t->dr:0,h->cfg.spliceMode,float(sec),float(width),float(h->cfg.spliceBlendDeg),float(h->cfg.fovTheta0Deg),float(h->cfg.fovDeg),h->medium,homogeneous(*h));
             check(cudaGetLastError());
-        }check(cudaDeviceSynchronize());return 0;
-    }catch(const std::exception&e){lastError=e.what();if(h)h->failed=true;return -1;}
+            if(device)check(cudaStreamSynchronize(stream)); // trig has automatic storage
+        }if(!device)check(cudaDeviceSynchronize());return 0;
+    }catch(const std::exception&e){if(device)cudaStreamSynchronize(stream);lastError=e.what();if(h)h->failed=true;return -1;}
+}
+extern "C" RING_RECON_CUDA_API int ring_fbp_append(void* p,const float* data,int nt,int nd,const float* angles,double R,double sec,double width){
+    return append(p,data,nt,nd,angles,R,sec,width,false,nullptr);
+}
+int ring_fbp_append_device(void* p,const float* data,int nt,int nd,const float* angles,double R,double sec,double width,cudaStream_t stream){
+    return append(p,data,nt,nd,angles,R,sec,width,true,stream);
 }
 extern "C" RING_RECON_CUDA_API int ring_fbp_snapshot(void*p,float*out){
     try{auto*h=static_cast<Core*>(p);if(!h||h->failed||!out)throw std::runtime_error("Invalid FBP snapshot");check(cudaMemcpy(out,h->acc.p,h->acc.n*4,cudaMemcpyDeviceToHost));return 0;}catch(const std::exception&e){lastError=e.what();return -1;}

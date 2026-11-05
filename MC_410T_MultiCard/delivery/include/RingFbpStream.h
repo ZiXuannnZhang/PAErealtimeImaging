@@ -21,6 +21,12 @@ inline void fractionalAdvance(std::vector<double>& x,double late){
     for(size_t i=0;i<x.size();++i)x[i]=float(a[i].real());
 }
 struct Line {std::vector<float> data;float angle=0;};
+inline bool adjacent(float previous,float next,double step){
+    const double delta=std::remainder(double(next)-previous,360.);
+    // Missing block: never median across a gap or count a duplicate angle twice.
+    if(std::abs(delta)<std::abs(step)*1e-4)throw std::runtime_error("Duplicate FBP trajectory position");
+    return std::abs(delta-step)<=std::abs(step)*.02+1e-4;
+}
 struct Stream {
     Line left,pending;
     void reset(){left={};pending={};}
@@ -32,10 +38,7 @@ struct Stream {
     }
     void push(Line line,double step,bool median,std::vector<Line>& out){
         if(pending.data.empty()){left=line;pending=std::move(line);return;}
-        const double delta=std::remainder(double(line.angle)-pending.angle,360.);
-        // Missing block: never median across a gap or count a duplicate angle twice.
-        if(std::abs(delta)<std::abs(step)*1e-4)throw std::runtime_error("Duplicate FBP trajectory position");
-        if(std::abs(delta-step)>std::abs(step)*.02+1e-4){out.push_back(prepared(left,pending,pending,median));left=line;pending=std::move(line);return;}
+        if(!adjacent(pending.angle,line.angle,step)){out.push_back(prepared(left,pending,pending,median));left=line;pending=std::move(line);return;}
         out.push_back(prepared(left,pending,line,median));left=std::move(pending);pending=std::move(line);
     }
     void finish(bool median,std::vector<Line>&out){if(!pending.data.empty())out.push_back(prepared(left,pending,pending,median));reset();}

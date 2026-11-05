@@ -4,6 +4,8 @@
 `21d60c0aead10b7d19c159feb03c0bdee777b821`。不推送远端；本次不是实机验收。
 最终源码SHA、构建身份、依赖哈希以测试交付目录的manifest/validation为准。
 
+本文保留首轮候选的结果。后续 GPU 预处理与 FBP 直接衔接见 [融合实现与验证](fusion.md)。
+
 ## 实现
 
 - 亚采样校正抽为独立 `RingFractionalDelay.cpp`，逐文件-O2、double计算、缓存当前FFT长度的位反转/旋转因子/工作区及当前相移频响。保持原nextpow2(N+64)、正频Nyquist、逆归一化及最后float舍入；零偏移严格旁路。

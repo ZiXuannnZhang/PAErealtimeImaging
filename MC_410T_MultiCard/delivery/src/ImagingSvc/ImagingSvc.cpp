@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstring>
 #include <chrono>
+#include <limits>
 
 // ZMQ IPC 端点（与主进程 ImagingController 约定一致）
 static const char *ZMQ_IPC_ENDPOINT = "tcp://127.0.0.1:5555";
@@ -522,10 +523,19 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     if(backend!="auto"&&backend!="cpu"&&backend!="cuda"){
         sendError("Invalid timevar backend",2016);return;
     }
+    const QString fbpBackend=ring.value("fbpPreprocessBackend").toString("auto");
+    if((fbpBackend!="auto"&&fbpBackend!="staged"&&fbpBackend!="cuda")||
+       (fbpSettings.enabled&&timevarCfg.enabled&&backend=="cpu"&&fbpBackend=="cuda")){
+        sendError("Invalid FBP preprocessing backend combination",2016);return;
+    }
+    const auto blockLines=int64_t(cnt)*cfg.alinesPerChannelPerBlock;
+    if(blockLines>std::numeric_limits<int>::max()/cfg.sampDepth){
+        sendError("Ring input block is too large",2016);return;
+    }
     RingTimevarGpu preparedGpu;
     if(fbpSettings.enabled&&timevarCfg.enabled&&backend!="cpu"){
-        if(!preparedGpu.configure(prepared,cfg.daqHz,cnt*cfg.alinesPerChannelPerBlock,&planError)){
-            if(backend=="cuda"){sendError(QString::fromStdString(planError),2016);return;}
+        if(!preparedGpu.configure(prepared,cfg.daqHz,int(blockLines),&planError)){
+            if(backend=="cuda"||fbpBackend=="cuda"){sendError(QString::fromStdString(planError),2016);return;}
             qWarning()<<"GPU STFT prepare unavailable; retaining CPU backend:"<<QString::fromStdString(planError);
         }
     }
@@ -540,13 +550,31 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
             for(auto* p:nextGpu)if(p){if(fbpSettings.enabled)ring_fbp_destroy(p);else ring_recon_cuda_destroy(p);}
             sendError(why,2016);return;}
     }
+    FbpPreprocessPtr preparedFbpDevice(nullptr,ring_fbp_preprocess_destroy);
+    if(fbpSettings.enabled&&fbpBackend!="staged"&&(!timevarCfg.enabled||preparedGpu.active())){
+        const int prefix=fbpSettings.artifact.value("prefixPerWavelength").toInt();
+        // At most one full block can arrive on top of the buffered timing prefix.
+        const auto maxLines=blockLines+int64_t(2)*prefix*cnt;
+        const int tile=preparedGpu.active()?preparedGpu.capacity():int(std::min<int64_t>(blockLines,64));
+        void* device=nullptr;
+        if(ring_fbp_preprocess_create(cfg.sampDepth,tile,int(maxLines),&device)){
+            const auto why=QString::fromUtf8(ring_fbp_preprocess_error());
+            if(fbpBackend=="cuda"){
+                for(auto* p:nextGpu)ring_fbp_destroy(p);
+                sendError(why,2016);return;
+            }
+            qWarning()<<"Fused FBP preprocessing unavailable; retaining staged backend:"<<why;
+        }else preparedFbpDevice.reset(device);
+    }
     // All preparation succeeded: replace both enhancements together.
     for(int w=0;w<2;++w){if(m_fbp[w])ring_fbp_destroy(m_fbp[w]);if(m_ringCuda[w])ring_recon_cuda_destroy(m_ringCuda[w]);
         m_fbp[w]=fbpSettings.enabled?nextGpu[w]:nullptr;m_ringCuda[w]=fbpSettings.enabled?nullptr:nextGpu[w];}
     m_fbpSettings=fbpSettings;
+    m_fbpDevice=std::move(preparedFbpDevice);
     m_ringTimevarGpu=std::move(preparedGpu);
     for(auto& c:m_fbpFractional)for(auto& f:c)f.reset();
     for(auto& c:m_fbpStreams)for(auto& s:c)s.reset();
+    for(auto& c:m_fbpHistoryAngle)for(auto& angle:c)angle.reset();
     m_fbpTimingReady=false;m_fbpPrefixRaw.clear();m_fbpPrefixAngles.clear();m_fbpPrefixChannels.clear();
     std::fill(std::begin(m_fbpCardShift),std::end(m_fbpCardShift),0.);
     m_fbpPrepareUs=fbpSettings.enabled?ring_shm_obs::steadyNowUs()-fbpPrepareStart:0;
@@ -921,15 +949,20 @@ bool ImagingSvc::processFbpBlock(const QVector<float>& input,const QVector<float
             qInfo()<<"FBP card timing (samples):"<<m_fbpCardShift[0]<<m_fbpCardShift[1]<<m_fbpCardShift[2]<<m_fbpCardShift[3];
             raw=std::move(m_fbpPrefixRaw);angles=std::move(m_fbpPrefixAngles);channels=std::move(m_fbpPrefixChannels);m_fbpTimingReady=true;
         }
+        int selected[8],M=0;for(int c=0;c<8;++c)if(m_ringChannels[c])selected[M++]=c;
+        const int depth=m_ringConfig.sampDepth;
+        if(M<1||angles.size()>std::numeric_limits<int>::max()||angles.size()%M||
+           channels.size()!=angles.size()||raw.size()!=qsizetype(depth)*angles.size())
+            throw std::runtime_error("FBP block shape mismatch");
+        const double width=360./M;
+        const double step=(m_ringConfig.sectorCcw?1:-1)*width/m_ringConfig.alinesPerChannelPerFrame;
+        if(m_fbpDevice){
+            processFbpDevice(raw,angles,channels,selected,M,width,step,final,preprocessStart);
+            return true;
+        }
         ring_fbp_stream::Stream staged[8][2];
         std::vector<ring_fbp_stream::Line> ready[8][2];
         for(int c=0;c<8;++c)for(int w=0;w<2;++w)staged[c][w]=m_fbpStreams[c][w];
-        int selected[8],M=0;for(int c=0;c<8;++c)if(m_ringChannels[c])selected[M++]=c;
-        const double width=360./M;
-        const double step=(m_ringConfig.sectorCcw?1:-1)*width/m_ringConfig.alinesPerChannelPerFrame;
-        const int depth=m_ringConfig.sampDepth;
-        if(M<1||angles.size()%M||channels.size()!=angles.size()||raw.size()!=qsizetype(depth)*angles.size())
-            throw std::runtime_error("FBP block shape mismatch");
         const int tile=m_ringTimevarGpu.active()?m_ringTimevarGpu.capacity():1;
         std::vector<double> d(depth),batch(size_t(depth)*tile);
         for(int first=0;first<angles.size();first+=tile){
@@ -980,6 +1013,96 @@ bool ImagingSvc::processFbpBlock(const QVector<float>& input,const QVector<float
     }
 }
 
+void ImagingSvc::processFbpDevice(const QVector<float>& raw,const QVector<float>& angles,
+    const QVector<quint8>& channels,const int* selected,int M,double width,double step,
+    bool final,uint64_t preprocessStart)
+{
+    struct State {
+        int left=-1,pending=-1;
+        float pendingAngle=0;
+        std::vector<RingFbpPreprocessTriplet> ready;
+        std::vector<float> angles;
+        void emitLine(int right){
+            ready.push_back({left,pending,right});
+            angles.push_back(pendingAngle);
+        }
+    };
+    State state[8][2];
+    const auto historySlot=[](int c,int w){return 2*(2*c+w);};
+    for(int c=0;c<8;++c)for(int w=0;w<2;++w)if(m_fbpHistoryAngle[c][w]){
+        auto& s=state[c][w];
+        s.left=historySlot(c,w);s.pending=s.left+1;s.pendingAngle=*m_fbpHistoryAngle[c][w];
+    }
+    const int depth=m_ringConfig.sampDepth;
+    RingFbpPreprocessLine params[8][2]{};
+    for(int k=0;k<M;++k){
+        const int c=selected[k];
+        for(int w=0;w<2;++w){
+            auto& p=params[c][w];
+            p.shift=m_fbpSettings.delayOffset[c][w]+m_fbpCardShift[c/2];
+            p.cut=m_ringConfig.delayCut?m_ringSysDelayCh[c][w]-1:0;
+            const auto extra=w?int64_t(m_ringSysDelayCh[c][1])-m_ringSysDelayCh[c][0]:0;
+            p.zeroRows=m_ringConfig.dbrSigRemove
+                ?int(std::clamp(int64_t(m_ringConfig.maskLength)+extra,int64_t(0),int64_t(depth))):0;
+            p.clip=float(m_ringConfig.imValue[w]);p.clipEnabled=m_ringConfig.singalImpair!=0;
+        }
+    }
+    std::vector<RingFbpPreprocessLine> meta;
+    meta.reserve(angles.size());
+    for(int pos=0;pos<angles.size();++pos){
+        const int c=selected[pos%M],j=pos/M;
+        const int w=((j%2==0)==bool(m_ringConfig.triggerWlOdd))?0:1;
+        if(channels[pos]!=c)throw std::runtime_error("FBP physical channel metadata mismatch");
+        const float angle=float(angles[pos]+m_fbpSettings.angleOffset[c]);
+        if(!std::isfinite(angle))throw std::runtime_error("Nonfinite FBP angle");
+        meta.push_back(params[c][w]);
+        auto& s=state[c][w];
+        const int slot=RingFbpHistorySlots+pos;
+        if(s.pending<0)s.left=slot;
+        else if(ring_fbp_stream::adjacent(s.pendingAngle,angle,step)){
+            s.emitLine(slot);s.left=s.pending;
+        }else{
+            s.emitLine(s.pending);s.left=slot;
+        }
+        s.pending=slot;s.pendingAngle=angle;
+    }
+    if(final)for(auto& c:state)for(auto& s:c)if(s.pending>=0)s.emitLine(s.pending);
+    auto* device=m_fbpDevice.get();
+    if(ring_fbp_preprocess_block(device,raw.constData(),meta.data(),int(meta.size()),
+                                 m_fbpSettings.invert,m_ringTimevarGpu.handle()))
+        throw std::runtime_error(ring_fbp_preprocess_error());
+    m_fbpPreprocessUs=ring_shm_obs::steadyNowUs()-preprocessStart;
+    const auto accumulateStart=ring_shm_obs::steadyNowUs();
+    for(int k=0;k<M;++k){
+        const int c=selected[k];
+        const double sector=m_ringConfig.sectorStartDeg+(m_ringConfig.sectorCcw?k:k-1)*width;
+        for(int w=0;w<2;++w){
+            auto& s=state[c][w];
+            if(s.ready.empty())continue;
+            if(ring_fbp_preprocess_append(device,m_fbp[w],s.ready.data(),depth-params[c][w].cut,
+                    int(s.ready.size()),m_fbpSettings.median,s.angles.data(),
+                    m_ringConfig.radiusPerChannel[c],sector,width))
+                throw std::runtime_error(ring_fbp_preprocess_error());
+        }
+    }
+    if(!final){
+        std::array<int,RingFbpHistorySlots> retained;
+        retained.fill(-1);
+        for(int c=0;c<8;++c)for(int w=0;w<2;++w){
+            const auto& s=state[c][w];
+            const int i=historySlot(c,w);retained[i]=s.left;retained[i+1]=s.pending;
+        }
+        if(ring_fbp_preprocess_retain(device,retained.data()))
+            throw std::runtime_error(ring_fbp_preprocess_error());
+    }
+    for(int c=0;c<8;++c)for(int w=0;w<2;++w){
+        const auto& s=state[c][w];
+        auto& previous=m_fbpHistoryAngle[c][w];
+        if(final||s.pending<0)previous.reset();else previous=s.pendingAngle;
+    }
+    m_fbpAccumulateUs=ring_shm_obs::steadyNowUs()-accumulateStart;
+}
+
 void ImagingSvc::sendRingObservation(const char *kind,
                                      const ring_shm_obs::Snapshot &snapshot,
                                      const QJsonObject &extra)
@@ -1005,6 +1128,7 @@ void ImagingSvc::resetRingRecon()
 {
     for(auto* p:m_fbp)if(p)ring_fbp_reset(p);
     for(auto& c:m_fbpStreams)for(auto& s:c)s.reset();
+    for(auto& c:m_fbpHistoryAngle)for(auto& angle:c)angle.reset();
     m_fbpPrefixRaw.clear();m_fbpPrefixAngles.clear();m_fbpPrefixChannels.clear();m_fbpTimingReady=false;
     std::fill(std::begin(m_fbpCardShift),std::end(m_fbpCardShift),0.);
     if (m_ringCuda[0]) ring_recon_cuda_reset(m_ringCuda[0]);
@@ -1034,6 +1158,7 @@ void ImagingSvc::sendRingSnapshotToHost(uint32_t seq, uint64_t submitIndex,
         msg["fbp_preprocess_us"]=static_cast<qint64>(m_fbpPreprocessUs);
         msg["fbp_accumulate_us"]=static_cast<qint64>(m_fbpAccumulateUs);
         msg["timevar_backend"]=m_ringTimevarConfig.enabled?(m_ringTimevarGpu.active()?"cuda":"cpu"):"off";
+        msg["fbp_preprocess_backend"]=m_fbpDevice?"cuda":"staged";
     }
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact);

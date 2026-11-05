@@ -50,6 +50,7 @@ public:
         }catch(const std::exception& e){if(error)*error=e.what();return false;}
     }
     bool active() const{return m_handle!=nullptr;}
+    void* handle() const{return m_handle;}
     int capacity() const{return m_capacity;}
     void apply(double* data,int lines){
         if(ring_timevar_cuda_apply(m_handle,data,lines,data))

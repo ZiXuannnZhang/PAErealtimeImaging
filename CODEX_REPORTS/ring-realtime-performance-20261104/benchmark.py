@@ -4,6 +4,7 @@ Examples (run from any directory):
   python benchmark.py --quick
   python benchmark.py --full --out artifacts/fbp-performance-work/performance/full
   python benchmark.py --cpu --candidate-bin artifacts/build-delivery/<candidate>/bin
+  python benchmark.py --fusion  # same binary, staged/fused in reversed order on repeat
 
 One new selftest drives both the accepted baseline service and the candidate.
 Run alone: the production service/selftest uses fixed local port 5555 and SHM.
@@ -33,7 +34,7 @@ BASELINE_BIN = ROOT / "artifacts/build-delivery/20261104-133957_21d60c0a_ring_cl
 TZ = timezone(timedelta(hours=8))
 NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 TIMING = re.compile(rf"\[block-timing\] submit=(\d+) roundtrip_ms=({NUMBER}) service_ms=({NUMBER})")
-STAGES = re.compile(rf"\[fbp-stages\] backend=(\w+) preprocess_ms=({NUMBER}) accumulate_ms=({NUMBER})")
+STAGES = re.compile(rf"\[fbp-stages\] backend=(\w+) preprocess_ms=({NUMBER}) accumulate_ms=({NUMBER})(?: fbp_preprocess=(\w+))?")
 PREPARE = re.compile(rf"\[fbp-metrics\] prepare_us=({NUMBER})")
 BLOCKS = 21
 BUDGET_MS = 250.0
@@ -74,7 +75,7 @@ def statistics_ms(values: list[float]) -> dict:
             "over_250ms": sum(v > BUDGET_MS for v in values)}
 
 
-def parse_log(text: str, expected_backend: str | None) -> dict:
+def parse_log(text: str, expected_backend: str | None, expected_preprocess: str | None = None) -> dict:
     samples, pending_stage, preparation = [], None, []
     for line in text.splitlines():
         if match := PREPARE.search(line):
@@ -84,6 +85,8 @@ def parse_log(text: str, expected_backend: str | None) -> dict:
                 raise ValueError("Unpaired duplicate stage record")
             pending_stage = {"backend": match[1], "preprocess_ms": float(match[2]),
                              "accumulate_ms": float(match[3])}
+            if match[4]:
+                pending_stage["fbp_preprocess"] = match[4]
         if match := TIMING.search(line):
             sample = {"submit": int(match[1]), "roundtrip_ms": float(match[2]),
                       "service_ms": float(match[3])}
@@ -102,6 +105,9 @@ def parse_log(text: str, expected_backend: str | None) -> dict:
     if expected_backend is not None:
         if any(s.get("backend") != expected_backend for s in samples):
             raise ValueError(f"Candidate did not report required backend {expected_backend!r}")
+    if expected_preprocess is not None:
+        if any(s.get("fbp_preprocess") != expected_preprocess for s in samples):
+            raise ValueError(f"Candidate did not report required FBP preprocessing {expected_preprocess!r}")
     observation = re.findall(r"\[RingSHMObs\] service kind=final[^\r\n]*", text)
     if not observation:
         raise ValueError("Missing final service observation")
@@ -208,18 +214,21 @@ def run_process(command: list[str], cwd: Path, log_path: Path, timeout: float) -
 
 
 def make_plan(args) -> list[dict]:
-    mode = "cpu" if args.cpu else "full" if args.full else "quick"
-    cases = [(2, "on", .375)] if mode == "quick" else list(itertools.product((2,), ("off", "on"), (0., .375)))
-    if mode == "cpu":
-        cases = [(2, "on", .375)]
+    cases = list(itertools.product((2,), ("off", "on"), (0., .375))) if args.full else [(2, "on", .375)]
+    if args.fusion:
+        cases *= 2
     plan = []
     for index, (channels, timevar, shift) in enumerate(cases):
-        order = ("candidate_cpu",) if mode == "cpu" else (("baseline", "candidate") if index % 2 == 0 else ("candidate", "baseline"))
+        order = ("candidate_cpu",) if args.cpu else (("baseline", "candidate") if index % 2 == 0 else ("candidate", "baseline"))
+        if args.fusion:
+            order = ("staged", "cuda") if index == 0 else ("cuda", "staged")
         for build in order:
             candidate = build != "baseline"
-            backend = "cpu" if build in ("baseline", "candidate_cpu") else "auto"
+            backend = "cuda" if args.fusion else "cpu" if build in ("baseline", "candidate_cpu") else "auto"
             service_bin = args.candidate_bin if candidate else args.baseline_bin
             name = f"c{channels}_tv{timevar}_shift{str(shift).replace('.', 'p')}_{build}"
+            if args.fusion:
+                name += f"_pass{index + 1}"
             command = [str(args.selftest_bin / "ring_svc_selftest.exe"), "--svc", str(service_bin / "ImagingSvc.exe"),
                        "--synthetic", "1", "--id", "14", "--exact-fbp", "1", "--no-save", "1",
                        "--rounds", "2", "--frame-timeout-ms", "120000", "--benchmark-blocks", str(BLOCKS),
@@ -229,9 +238,12 @@ def make_plan(args) -> list[dict]:
                        "--splice", "1", "--splice-blend", "5", "--mask-length", "375",
                        "--sos", "1490,1540", "--sos-radii-mm", "7.5", "--timevar-lowpass", timevar,
                        "--timevar-backend", backend, "--fbp-shift", str(shift), "--out", str(args.out / "selftest-output" / name)]
+            if args.fusion:
+                command += ["--fbp-preprocess-backend", build]
             plan.append({"name": name, "build": build, "channels": channels, "timevar": timevar,
                          "shift_samples": shift, "backend_requested": backend,
                          "backend_expected": ("off" if timevar == "off" else "cpu" if build == "candidate_cpu" else "cuda") if candidate else None,
+                         "preprocess_expected": build if args.fusion else None,
                          "command": command, "cwd": str(args.selftest_bin), "service_bin": str(service_bin)})
     return plan
 
@@ -266,6 +278,7 @@ def main() -> int:
     group.add_argument("--quick", action="store_true", help="2 channels, STFT on, .375 shift; baseline + candidate (default)")
     group.add_argument("--full", action="store_true", help="4 two-channel workload combinations, alternating baseline/candidate order")
     group.add_argument("--cpu", action="store_true", help="candidate CPU STFT override, 2 channels, .375 shift")
+    group.add_argument("--fusion", action="store_true", help="2 channels, same service binary staged vs fused CUDA, two orders")
     parser.add_argument("--candidate-bin", type=absolute, default=DEFAULT_BIN)
     parser.add_argument("--baseline-bin", type=absolute, default=BASELINE_BIN)
     parser.add_argument("--selftest-bin", type=absolute, default=None, help="new harness binary directory; defaults to candidate-bin")
@@ -273,7 +286,7 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=float, default=600, help="whole-run timeout, including preparation")
     parser.add_argument("--dry-run", action="store_true", help="print commands only, do not launch any process or create evidence")
     args = parser.parse_args()
-    mode = "cpu" if args.cpu else "full" if args.full else "quick"
+    mode = "fusion" if args.fusion else "cpu" if args.cpu else "full" if args.full else "quick"
     args.selftest_bin = args.selftest_bin or args.candidate_bin
     args.out = args.out or ROOT / "artifacts/fbp-performance-work/performance" / (datetime.now(TZ).strftime("%Y%m%d-%H%M%S") + "_" + mode)
     if not math.isfinite(args.timeout_seconds) or args.timeout_seconds < 1:
@@ -325,7 +338,8 @@ def main() -> int:
             row.update(returncode=code, timed_out=timed_out)
             if timed_out or code != 0:
                 raise RuntimeError(f"Selftest {'timed out' if timed_out else 'failed'}; exit={code}")
-            row["measurement"] = parse_log(Path(row["log"]).read_text(encoding="utf-8", errors="replace"), row["backend_expected"])
+            row["measurement"] = parse_log(Path(row["log"]).read_text(encoding="utf-8", errors="replace"),
+                                           row["backend_expected"], row["preprocess_expected"])
             row["status"] = "passed"
         except Exception as error:
             row.update(status="failed", error=str(error))

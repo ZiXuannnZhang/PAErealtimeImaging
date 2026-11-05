@@ -5,6 +5,8 @@
 #include <QVector>
 #include <QTimer>
 #include <QJsonObject>
+#include <memory>
+#include <optional>
 #include <vector>
 #include "ImagingParams.h"
 #include "RingShmObservability.h"
@@ -17,6 +19,7 @@
 #include "RingFbpStream.h"
 #include "RingFractionalDelay.h"
 #include "RingTimevarGpu.h"
+#include "ring_fbp_preprocess_cuda.h"
 
 namespace zmq { class context_t; class socket_t; }
 namespace pa_recon_qt { class PAReconstructor; struct Config; }
@@ -58,6 +61,9 @@ private:
                           const paimage::RoundIdentity &round, bool sourceRoundComplete);
     void resetRingRecon();        // 圈末/超时共用：清空 CUDA 累积与跨圈边界状态
     bool processFbpBlock(const QVector<float>&, const QVector<float>&, const QVector<quint8>&, bool final);
+    void processFbpDevice(const QVector<float>&, const QVector<float>&, const QVector<quint8>&,
+                          const int* selected, int channelCount, double width, double step,
+                          bool final, uint64_t preprocessStart);
     void sendRingObservation(const char *kind,
                              const ring_shm_obs::Snapshot &snapshot,
                              const QJsonObject &extra = QJsonObject());
@@ -88,6 +94,9 @@ private:
     ring_fbp_stream::Stream m_fbpStreams[8][2];
     ring_fbp_stream::FractionalDelay m_fbpFractional[8][2];
     RingTimevarGpu m_ringTimevarGpu;
+    using FbpPreprocessPtr = std::unique_ptr<void, decltype(&ring_fbp_preprocess_destroy)>;
+    FbpPreprocessPtr m_fbpDevice{nullptr,ring_fbp_preprocess_destroy};
+    std::optional<float> m_fbpHistoryAngle[8][2];
     uint64_t m_fbpPreprocessUs=0,m_fbpAccumulateUs=0;
     QVector<float> m_fbpPrefixRaw,m_fbpPrefixAngles;
     QVector<quint8> m_fbpPrefixChannels;
