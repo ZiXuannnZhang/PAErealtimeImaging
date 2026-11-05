@@ -49,6 +49,9 @@ if(BUILD_RINGRECON_VIEW)
                         "${RING_RECON_CUDA_BIN}/ring_recon_cuda.dll" "$<TARGET_FILE_DIR:ring_recon_view>"
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different
                         "${RING_RECON_CUDA_BIN}/cudart64_12.dll" "$<TARGET_FILE_DIR:ring_recon_view>"
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${RING_RECON_CUDA_BIN}/cublas64_12.dll" "${RING_RECON_CUDA_BIN}/cublasLt64_12.dll"
+                        "${RING_RECON_CUDA_BIN}/cufft64_11.dll" "$<TARGET_FILE_DIR:ring_recon_view>"
                     COMMENT "Deploying ring_recon_cuda runtime for viewer")
             endif()
         else()

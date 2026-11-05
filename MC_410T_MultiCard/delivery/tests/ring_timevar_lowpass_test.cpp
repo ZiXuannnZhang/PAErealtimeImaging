@@ -1,6 +1,9 @@
 #include "RingTimevarLowpass.h"
 #include "RingTimevarLowpassSettings.h"
 #include "RingTimevarPreprocess.h"
+#ifdef RING_TIMEVAR_CUDA_REFERENCE
+#include "RingTimevarGpu.h"
+#endif
 #include <QCoreApplication>
 #include <QFile>
 #include <QJsonDocument>
@@ -67,6 +70,9 @@ int main(int argc,char** argv) {
             RingTimevarLowpassConfig c;QString e;const int n=item["N"].toInt();
             require(ring_timevar::fromJson(item["config"],250e6,n,c,&e),qPrintable(e));
             std::string err;require(filter.configure(c,250e6,n,&err),err.c_str());
+#ifdef RING_TIMEVAR_CUDA_REFERENCE
+            RingTimevarGpu gpu;require(gpu.configure(filter,250e6,1,&err),err.c_str());
+#endif
             const QString base=QString(TIMEVAR_FIXTURES)+"/"+item["name"].toString();
             const auto x=csv(base+"_x.csv"), y=csv(base+"_y.csv");
             for(size_t col=0;col<x[0].size();++col) {
@@ -74,6 +80,9 @@ int main(int argc,char** argv) {
                 for(int i=0;i<n;++i){input[i]=x[i][col];ref[i]=y[i][col];}
                 auto actual=input;require(filter.apply(actual,&err),err.c_str());
                 compare(actual,ref,1e-8,worst);
+#ifdef RING_TIMEVAR_CUDA_REFERENCE
+                if(c.enabled){auto gpuActual=input;gpu.apply(gpuActual.data(),1);compare(gpuActual,ref,1e-8,worst);}
+#endif
                 auto repeat=input;require(filter.apply(repeat),"repeat");
                 require(std::memcmp(actual.data(),repeat.data(),n*sizeof(double))==0,"state crossed A-lines");
                 for(int flags=0;flags<8;++flags)for(int delay:{1,7,17}) {

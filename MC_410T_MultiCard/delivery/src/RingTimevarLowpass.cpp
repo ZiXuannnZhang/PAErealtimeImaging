@@ -186,6 +186,10 @@ bool RingTimevarLowpass::apply(std::vector<double>& line,std::string* e) {
     std::copy(m->result.begin(),m->result.end(),line.begin());return true;
 }
 const RingTimevarLowpassConfig& RingTimevarLowpass::config() const{return m->c;}
+RingTimevarPlanView RingTimevarLowpass::planView() const {
+    return {m->samples,m->c.windowLength,m->nfft,m->step,m->frames,m->length,
+            m->window.data(),m->mask.data(),m->norm.data()};
+}
 size_t RingTimevarLowpass::cachedBytes() const {
     return (m->window.size()+m->mask.size()+m->norm.size()+m->temp.size()+m->result.size())*sizeof(double)
         +(m->spectrum.size()+m->fft.kernel.size()+m->fft.chirp.size()+m->fft.work.size()+m->fft.plan.roots.size())*sizeof(Complex)

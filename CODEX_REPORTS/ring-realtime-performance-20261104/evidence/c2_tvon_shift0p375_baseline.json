@@ -1,0 +1,233 @@
+{
+  "name": "c2_tvon_shift0p375_baseline",
+  "build": "baseline",
+  "channels": 2,
+  "timevar": "on",
+  "shift_samples": 0.375,
+  "backend_requested": "cpu",
+  "backend_expected": null,
+  "command": [
+    "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+    "--svc",
+    "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\build-delivery\\20261104-133957_21d60c0a_ring_cleanup_local\\bin\\ImagingSvc.exe",
+    "--synthetic",
+    "1",
+    "--id",
+    "14",
+    "--exact-fbp",
+    "1",
+    "--no-save",
+    "1",
+    "--rounds",
+    "2",
+    "--frame-timeout-ms",
+    "120000",
+    "--benchmark-blocks",
+    "21",
+    "--samples",
+    "7500",
+    "--block",
+    "10",
+    "--grid-mm",
+    "0.01",
+    "--channels",
+    "3",
+    "--radius-per-ch",
+    "6.48,6.48,6.57,6.57,6.57,6.57,6.57,6.57",
+    "--sys-delay-per-ch",
+    "448,464,448,464,358,371,358,371,358,371,358,371,358,371,358,371",
+    "--splice",
+    "1",
+    "--splice-blend",
+    "5",
+    "--mask-length",
+    "375",
+    "--sos",
+    "1490,1540",
+    "--sos-radii-mm",
+    "7.5",
+    "--timevar-lowpass",
+    "on",
+    "--timevar-backend",
+    "cpu",
+    "--fbp-shift",
+    "0.375",
+    "--out",
+    "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\fbp-performance-work\\performance\\two-channel-quick-ready\\selftest-output\\c2_tvon_shift0p375_baseline"
+  ],
+  "cwd": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin",
+  "service_bin": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\build-delivery\\20261104-133957_21d60c0a_ring_cleanup_local\\bin",
+  "started_at": "2026-11-05T09:31:29.790+08:00",
+  "status": "passed",
+  "log": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\fbp-performance-work\\performance\\two-channel-quick-ready\\c2_tvon_shift0p375_baseline.log",
+  "returncode": 0,
+  "timed_out": false,
+  "measurement": {
+    "cold": {
+      "submit": 1,
+      "roundtrip_ms": 159.1376,
+      "service_ms": 151.001
+    },
+    "samples": [
+      {
+        "submit": 1,
+        "roundtrip_ms": 159.1376,
+        "service_ms": 151.001
+      },
+      {
+        "submit": 2,
+        "roundtrip_ms": 113.8904,
+        "service_ms": 105.97
+      },
+      {
+        "submit": 3,
+        "roundtrip_ms": 112.8506,
+        "service_ms": 103.231
+      },
+      {
+        "submit": 4,
+        "roundtrip_ms": 111.1505,
+        "service_ms": 105.118
+      },
+      {
+        "submit": 5,
+        "roundtrip_ms": 111.2336,
+        "service_ms": 105.18
+      },
+      {
+        "submit": 6,
+        "roundtrip_ms": 111.3849,
+        "service_ms": 102.467
+      },
+      {
+        "submit": 7,
+        "roundtrip_ms": 116.3998,
+        "service_ms": 105.417
+      },
+      {
+        "submit": 8,
+        "roundtrip_ms": 122.6711,
+        "service_ms": 108.135
+      },
+      {
+        "submit": 9,
+        "roundtrip_ms": 118.2436,
+        "service_ms": 106.195
+      },
+      {
+        "submit": 10,
+        "roundtrip_ms": 139.5188,
+        "service_ms": 129.035
+      },
+      {
+        "submit": 11,
+        "roundtrip_ms": 142.8231,
+        "service_ms": 133.75
+      },
+      {
+        "submit": 12,
+        "roundtrip_ms": 141.2587,
+        "service_ms": 130.296
+      },
+      {
+        "submit": 13,
+        "roundtrip_ms": 153.1593,
+        "service_ms": 134.505
+      },
+      {
+        "submit": 14,
+        "roundtrip_ms": 155.7531,
+        "service_ms": 136.482
+      },
+      {
+        "submit": 15,
+        "roundtrip_ms": 155.5137,
+        "service_ms": 142.615
+      },
+      {
+        "submit": 16,
+        "roundtrip_ms": 156.7941,
+        "service_ms": 141.506
+      },
+      {
+        "submit": 17,
+        "roundtrip_ms": 158.0646,
+        "service_ms": 141.151
+      },
+      {
+        "submit": 18,
+        "roundtrip_ms": 162.7862,
+        "service_ms": 144.846
+      },
+      {
+        "submit": 19,
+        "roundtrip_ms": 157.4775,
+        "service_ms": 146.262
+      },
+      {
+        "submit": 20,
+        "roundtrip_ms": 165.5687,
+        "service_ms": 153.945
+      },
+      {
+        "submit": 21,
+        "roundtrip_ms": 167.7267,
+        "service_ms": 152.938
+      }
+    ],
+    "warm_count": 20,
+    "warm": {
+      "roundtrip_ms": {
+        "count": 20,
+        "mean": 138.71345,
+        "median": 142.04090000000002,
+        "p95": 165.5687,
+        "min": 111.1505,
+        "max": 167.7267,
+        "over_250ms": 0
+      },
+      "service_ms": {
+        "count": 20,
+        "mean": 126.4522,
+        "median": 132.023,
+        "p95": 152.938,
+        "min": 102.467,
+        "max": 153.945,
+        "over_250ms": 0
+      }
+    },
+    "prepare_ms_reported": [
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839,
+      4369.839
+    ],
+    "service_counters": {
+      "notifications": 21,
+      "consumed": 21,
+      "mismatch": 0,
+      "ready_zero": 0,
+      "duplicate": 0,
+      "gap": 0
+    }
+  },
+  "finished_at": "2026-11-05T09:31:44.963+08:00",
+  "wall_seconds": 15.17100000000005
+}

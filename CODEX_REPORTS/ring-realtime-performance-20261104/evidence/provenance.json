@@ -1,0 +1,225 @@
+{
+  "created_at": "2026-11-05T09:31:29.673+08:00",
+  "repository": "D:\\ChatGPT\\PAERealtimeImaging",
+  "source_sha": "21d60c0aead10b7d19c159feb03c0bdee777b821",
+  "branch": "codex/ring-realtime-performance-20261104",
+  "tracked_changes": "M BUILD_STANDARD.md\n M MC_410T_MultiCard/delivery/include/RingTimevarLowpass.h\n M MC_410T_MultiCard/delivery/src/ImagingSvc/CMakeLists.txt\n M MC_410T_MultiCard/delivery/src/ImagingSvc/ImagingSvc.cpp\n M MC_410T_MultiCard/delivery/src/ImagingSvc/ImagingSvc.h\n M MC_410T_MultiCard/delivery/src/RingRecon/CMakeLists.txt\n M MC_410T_MultiCard/delivery/src/RingReconCuda/CMakeLists.txt\n M MC_410T_MultiCard/delivery/src/RingReconCuda/ring_svc_selftest.cpp\n M MC_410T_MultiCard/delivery/src/RingTimevarLowpass.cpp\n M MC_410T_MultiCard/delivery/tests/CMakeLists.txt\n M MC_410T_MultiCard/delivery/tests/mainwindow_start_integration.cmake\n M MC_410T_MultiCard/delivery/tests/ring_fbp_service_test.cpp\n M MC_410T_MultiCard/delivery/tests/ring_timevar_lowpass_test.cpp",
+  "binary_receipts": [
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\build-delivery\\20261104-133957_21d60c0a_ring_cleanup_local\\bin\\cublas64_12.dll",
+      "bytes": 113716224,
+      "mtime_ns": 1793727936842652400,
+      "sha256": "9513540e4ec4c51ee9e7304138c2cc255c29a8c181f9e80c38efa25738becd99"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\build-delivery\\20261104-133957_21d60c0a_ring_cleanup_local\\bin\\cublasLt64_12.dll",
+      "bytes": 674667520,
+      "mtime_ns": 1793727939129321600,
+      "sha256": "b199d1ff892a81b7fd3d57ba1781549609b41500b36008fef326038393ad46c7"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\build-delivery\\20261104-133957_21d60c0a_ring_cleanup_local\\bin\\cudart64_12.dll",
+      "bytes": 573952,
+      "mtime_ns": 1792129083324737400,
+      "sha256": "c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\build-delivery\\20261104-133957_21d60c0a_ring_cleanup_local\\bin\\cufft64_12.dll",
+      "bytes": 297245296,
+      "mtime_ns": 1792129083113665400,
+      "sha256": "2480d8ab849d7e9a375275f6c0278b8764c14ac0c1a3bdacaf256ae4a93c5590"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\build-delivery\\20261104-133957_21d60c0a_ring_cleanup_local\\bin\\ImagingSvc.exe",
+      "bytes": 4820949,
+      "mtime_ns": 1793770631601395000,
+      "sha256": "a26880eadf91c6151bdcd1f10c2838036930c938e18d7f97e8b68d891e193888"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\build-delivery\\20261104-133957_21d60c0a_ring_cleanup_local\\bin\\ring_recon_cuda.dll",
+      "bytes": 628224,
+      "mtime_ns": 1793770126190963500,
+      "sha256": "4e9d9a240357acdac68699d9e8354d2271920dfcb1a7a4a94f6ff8273686db0c"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\cublas64_12.dll",
+      "bytes": 113716224,
+      "mtime_ns": 1793727936842652400,
+      "sha256": "9513540e4ec4c51ee9e7304138c2cc255c29a8c181f9e80c38efa25738becd99"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\cublasLt64_12.dll",
+      "bytes": 674667520,
+      "mtime_ns": 1793727939129321600,
+      "sha256": "b199d1ff892a81b7fd3d57ba1781549609b41500b36008fef326038393ad46c7"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\cudart64_12.dll",
+      "bytes": 573952,
+      "mtime_ns": 1792129083324737400,
+      "sha256": "c2c9a9c22a9bcba90e261825968836787b331038047a26770cffb7a583c28344"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\cufft64_11.dll",
+      "bytes": 276121600,
+      "mtime_ns": 1793841420852662600,
+      "sha256": "f4fea9227b14843894ad5436725f9638b172171142c95291fc6ae7a493248221"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\cufft64_12.dll",
+      "bytes": 297245296,
+      "mtime_ns": 1792129083113665400,
+      "sha256": "2480d8ab849d7e9a375275f6c0278b8764c14ac0c1a3bdacaf256ae4a93c5590"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ImagingSvc.exe",
+      "bytes": 4999259,
+      "mtime_ns": 1793841749281481800,
+      "sha256": "19de2187ec7ac4e612da9172d7303f195a6867b7436c4edee04bad62f922bd54"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_recon_cuda.dll",
+      "bytes": 688128,
+      "mtime_ns": 1793841418176053300,
+      "sha256": "2e41c9b9c6939b302e4dd1a557c78e13751e7bbff36a18392df289555e7f7599"
+    },
+    {
+      "path": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+      "bytes": 2145220,
+      "mtime_ns": 1793842277145326600,
+      "sha256": "b2642aff1b944c2a6031d6a6762237898930f6869b85dcbc63bb9d08884dc850"
+    }
+  ],
+  "harness_source": {
+    "path": "D:\\ChatGPT\\PAERealtimeImaging\\CODEX_REPORTS\\ring-realtime-performance-20261104\\benchmark.py",
+    "bytes": 19271,
+    "mtime_ns": 1793842053356550600,
+    "sha256": "e69ceb805b1014cdcc93c068f6be0ace9303ce5115c139c91b21a8c93b53bb84"
+  },
+  "plan": [
+    {
+      "name": "c2_tvon_shift0p375_baseline",
+      "build": "baseline",
+      "channels": 2,
+      "timevar": "on",
+      "shift_samples": 0.375,
+      "backend_requested": "cpu",
+      "backend_expected": null,
+      "command": [
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+        "--svc",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\build-delivery\\20261104-133957_21d60c0a_ring_cleanup_local\\bin\\ImagingSvc.exe",
+        "--synthetic",
+        "1",
+        "--id",
+        "14",
+        "--exact-fbp",
+        "1",
+        "--no-save",
+        "1",
+        "--rounds",
+        "2",
+        "--frame-timeout-ms",
+        "120000",
+        "--benchmark-blocks",
+        "21",
+        "--samples",
+        "7500",
+        "--block",
+        "10",
+        "--grid-mm",
+        "0.01",
+        "--channels",
+        "3",
+        "--radius-per-ch",
+        "6.48,6.48,6.57,6.57,6.57,6.57,6.57,6.57",
+        "--sys-delay-per-ch",
+        "448,464,448,464,358,371,358,371,358,371,358,371,358,371,358,371",
+        "--splice",
+        "1",
+        "--splice-blend",
+        "5",
+        "--mask-length",
+        "375",
+        "--sos",
+        "1490,1540",
+        "--sos-radii-mm",
+        "7.5",
+        "--timevar-lowpass",
+        "on",
+        "--timevar-backend",
+        "cpu",
+        "--fbp-shift",
+        "0.375",
+        "--out",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\fbp-performance-work\\performance\\two-channel-quick-ready\\selftest-output\\c2_tvon_shift0p375_baseline"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin",
+      "service_bin": "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\build-delivery\\20261104-133957_21d60c0a_ring_cleanup_local\\bin"
+    },
+    {
+      "name": "c2_tvon_shift0p375_candidate",
+      "build": "candidate",
+      "channels": 2,
+      "timevar": "on",
+      "shift_samples": 0.375,
+      "backend_requested": "auto",
+      "backend_expected": "cuda",
+      "command": [
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ring_svc_selftest.exe",
+        "--svc",
+        "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin\\ImagingSvc.exe",
+        "--synthetic",
+        "1",
+        "--id",
+        "14",
+        "--exact-fbp",
+        "1",
+        "--no-save",
+        "1",
+        "--rounds",
+        "2",
+        "--frame-timeout-ms",
+        "120000",
+        "--benchmark-blocks",
+        "21",
+        "--samples",
+        "7500",
+        "--block",
+        "10",
+        "--grid-mm",
+        "0.01",
+        "--channels",
+        "3",
+        "--radius-per-ch",
+        "6.48,6.48,6.57,6.57,6.57,6.57,6.57,6.57",
+        "--sys-delay-per-ch",
+        "448,464,448,464,358,371,358,371,358,371,358,371,358,371,358,371",
+        "--splice",
+        "1",
+        "--splice-blend",
+        "5",
+        "--mask-length",
+        "375",
+        "--sos",
+        "1490,1540",
+        "--sos-radii-mm",
+        "7.5",
+        "--timevar-lowpass",
+        "on",
+        "--timevar-backend",
+        "auto",
+        "--fbp-shift",
+        "0.375",
+        "--out",
+        "D:\\ChatGPT\\PAERealtimeImaging\\artifacts\\fbp-performance-work\\performance\\two-channel-quick-ready\\selftest-output\\c2_tvon_shift0p375_candidate"
+      ],
+      "cwd": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin",
+      "service_bin": "D:\\ChatGPT\\PAERealtimeImaging\\MC_410T_MultiCard\\delivery\\build\\mingw_debug\\bin"
+    }
+  ],
+  "environment_overrides": {
+    "QT_FORCE_STDERR_LOGGING": "1"
+  },
+  "process_cleanup": "Windows kill-on-close Job Object scoped to each launched selftest and descendants"
+}

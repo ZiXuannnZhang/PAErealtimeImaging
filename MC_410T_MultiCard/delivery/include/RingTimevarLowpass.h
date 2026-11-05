@@ -2,6 +2,12 @@
 #include "RingTimevarLowpassConfig.h"
 #include <memory>
 #include <vector>
+// Read-only view of the accepted CPU design, valid until reconfiguration.
+// The GPU backend consumes these coefficients rather than redesigning the filter.
+struct RingTimevarPlanView {
+    int samples, windowLength, fftLength, hop, frames, outputLength;
+    const double *window, *mask, *norm;
+};
 class RingTimevarLowpass {
 public:
     RingTimevarLowpass();
@@ -13,6 +19,7 @@ public:
     bool apply(std::vector<double>& line,std::string* error=nullptr);
     const RingTimevarLowpassConfig& config() const;
     size_t cachedBytes() const;
+    RingTimevarPlanView planView() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> m;

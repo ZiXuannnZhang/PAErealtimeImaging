@@ -12,6 +12,7 @@ target_compile_definitions(mainwindow_start_integration_test PRIVATE MAINWINDOW_
 set_target_properties(mainwindow_start_integration_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/startup-isolated")
 add_dependencies(mainwindow_start_integration_test ImagingSvc)
+set_property(TARGET mainwindow_start_integration_test APPEND PROPERTY LINK_DEPENDS "$<TARGET_FILE:ImagingSvc>")
 add_custom_command(TARGET mainwindow_start_integration_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "$<TARGET_FILE:ImagingSvc>"
@@ -22,6 +23,7 @@ add_custom_command(TARGET mainwindow_start_integration_test POST_BUILD
         "${RING_RECON_CUDA_BIN}/cudart64_12.dll"
         "${RING_RECON_CUDA_BIN}/cublas64_12.dll"
         "${RING_RECON_CUDA_BIN}/cublasLt64_12.dll"
+        "${RING_RECON_CUDA_BIN}/cufft64_11.dll"
         "$<TARGET_FILE_DIR:mainwindow_start_integration_test>")
 enable_testing()
 add_test(NAME mainwindow_start_integration_test COMMAND mainwindow_start_integration_test)

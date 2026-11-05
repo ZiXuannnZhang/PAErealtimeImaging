@@ -290,6 +290,14 @@ pa_recon_core.dll SHA256
 `cublasLt64_12.dll`，依赖回执追加两者来源与 SHA256。
 本条是该任务分支的构建要求，不重标 main 的既有验收包。
 
+### 8.5 环形实时性能优化候选的 cuFFT 依赖
+
+`codex/ring-realtime-performance-20261104` 的批量 GPU STFT 链接本机 CUDA 12.8 的
+`cufft.lib`，运行时实际文件名为 **`cufft64_11.dll`**。必须从同一 CUDA 12.8 toolkit 的
+`bin` 部署并记录 SHA256；CUDA toolkit 主版本与 cuFFT DLL 主版本不能混为一谈。
+既有线性成像依赖 `delivery/libs/imaging/cufft64_12.dll` 按原验收来源保持，二者并存，
+不可重命名或互相覆盖。主 bin、独立测试目录及最终交付包均须包含新增的 `cufft64_11.dll`。
+
 ---
 
 ## 9. Qt runtime 部署

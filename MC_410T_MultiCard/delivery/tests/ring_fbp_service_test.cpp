@@ -11,7 +11,7 @@
 static void need(bool b,const char*s){if(!b)throw std::runtime_error(s);}
 static void close(const std::vector<float>&a,const std::vector<float>&b){double d=0,s=0;for(size_t i=0;i<a.size();++i){need(std::isfinite(a[i]),"nonfinite image");d+=pow(double(a[i])-b[i],2);s+=double(b[i])*b[i];}need(s>0&&sqrt(d/s)<1e-5,"service vs all-at-once FBP mismatch");}
 struct RingTimevarServiceTest {
-static void run(){
+static void run(bool twoOnly=false){
     QTemporaryDir calibrationDir;need(calibrationDir.isValid(),"temporary calibration directory");
     QJsonArray offsets,delaysFbp;
     for(int c=0;c<8;++c){offsets.append(.15*c);delaysFbp.append(QJsonArray{.375+c*.1,-.625-c*.1});}
@@ -21,7 +21,8 @@ static void run(){
     auto writeCalibration=[&]{QFile f(calibrationPath);need(f.open(QIODevice::WriteOnly),"write calibration");
         auto bytes=QJsonDocument(calibration).toJson();need(f.write(bytes)==bytes.size(),"calibration write size");};
     writeCalibration();
-    for(int M:{4,8})for(int ccw:{0,1})for(bool splice:{false,true})for(bool layered:{false,true}){
+    const std::vector<int> testedChannels=twoOnly?std::vector<int>{2}:std::vector<int>{4,8};
+    for(int M:testedChannels)for(int ccw:{0,1})for(bool splice:{false,true})for(bool layered:{false,true})for(bool timevar:{false,true}){
         const int depth=256,perCh=6,nx=20,frame=nx*nx,lines=M*perCh;
         QSharedMemory shm("MC_410T_RingShm");need(shm.create(int(ringImagingShmTotalSizeV2(depth*lines,frame,lines,frame))),"isolated SHM");
         shm.lock();memset(shm.data(),0,shm.size());auto*h=static_cast<RingImagingShmHeader*>(shm.data());
@@ -32,7 +33,9 @@ static void run(){
             {"radius",.004},{"radiusPerChannel",radii},{"multiRadius",1},{"spliceMode",int(splice)},{"spliceBlendDeg",1.5},
             {"sectorCcw",ccw},{"sectorStartDeg",0},{"delayCut",1},{"shiftWL2",1},{"dbrSigRemove",0},{"singalImpair",0},
             {"soundSpeedRadiiCount",layered?1:0},{"soundSpeedRadii",QJsonArray{.007}},{"soundSpeeds",QJsonArray{1490.,1560.}},
-            {"timevarLowpass",QJsonObject{{"enabled",false},{"fcMaxMhz",4.},{"fcMinMhz",1.}}},
+            {"timevarLowpass",QJsonObject{{"enabled",timevar},{"fcMaxMhz",4.},{"fcMinMhz",1.},
+                {"p1",10},{"p2",200},{"windowLength",32},{"fftLength",48}}},
+            {"timevarBackend","cuda"},
             {"exactFbp",QJsonObject{{"enabled",true},{"invert",false},{"angularSamples",129}}}};
         if(layered){RingFbpSettings settings;settings.enabled=true;settings.invert=false;settings.angularSamples=129;
             settings.calibrationFile=calibrationPath;QString error;
@@ -40,6 +43,9 @@ static void run(){
             need(settings.delayOffset[3][1]==delaysFbp[3].toArray()[1].toDouble(),"fractional offset lost on import");
             ring["exactFbp"]=ring_fbp_settings::toJson(settings);}
         ImagingSvc svc;svc.processRingConfigure(ring);need(svc.m_fbp[0]&&svc.m_fbp[1],"FBP configure failed");svc.m_running=true;
+        need(svc.m_ringTimevarGpu.active()==timevar,"GPU STFT selection mismatch");
+        RingTimevarLowpass referenceFilter;std::string filterError;
+        need(referenceFilter.configure(svc.m_ringTimevarConfig,10e6,depth,&filterError),"reference filter configure");
         std::vector<ring_fbp_stream::Line> full[8][2];
         for(int block=0;block<3;++block){
             shm.lock();h->block_seq=block+1;h->block_ready=1;auto* raw=reinterpret_cast<float*>(h+1);
@@ -52,6 +58,7 @@ static void run(){
                 for(int t=0;t<depth;++t){float v=float(sin(t*.27+c*.13+w*.5+k*.09)*exp(-pow((t-80.)/33,2)));
                     if(k==4&&t==50)v+=3;raw[pos*depth+t]=v;uncut.push_back(v);}
                 ring_fbp_stream::fractionalAdvance(uncut,svc.m_fbpSettings.delayOffset[c][w]);
+                need(referenceFilter.apply(uncut,&filterError),"reference STFT");
                 for(int t=cut;t<depth;++t)l.data.push_back(float(uncut[t]));
                 full[c][w].push_back(l);
             }
@@ -71,7 +78,7 @@ static void run(){
         auto* before=svc.m_fbp[0];auto invalid=ring;invalid["exactFbp"]=QJsonObject{{"enabled",true},{"angularSamples",1}};
         svc.processRingConfigure(invalid);need(svc.m_fbp[0]==before,"invalid config destroyed accepted context");
         for(auto&c:svc.m_fbpStreams)for(auto&s:c)need(s.pending.data.empty(),"cross-round median state");
-        std::cout<<"service PASS M="<<M<<" ccw="<<ccw<<" splice="<<splice<<" layered="<<layered<<'\n';
+        std::cout<<"service PASS M="<<M<<" ccw="<<ccw<<" splice="<<splice<<" layered="<<layered<<" timevar="<<timevar<<'\n';
     }
     std::vector<double> tmpl(401);std::vector<float>x(401);for(int i=0;i<401;++i){tmpl[i]=exp(-pow((i-180.)/7,2))*cos((i-180)*.6);x[i]=float(exp(-pow((i-182.)/7,2))*cos((i-182)*.6));}
     need(fabs(ring_fbp_artifact::delay(x.data(),tmpl)-2)<.01,"card timing sign");
@@ -108,4 +115,4 @@ static void run(){
     std::cout<<"timing prefix / card shift / round reset / invalid schema PASS\n";
 }
 };
-int main(int argc,char**argv){QCoreApplication app(argc,argv);try{RingTimevarServiceTest::run();return 0;}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(int argc,char**argv){QCoreApplication app(argc,argv);try{RingTimevarServiceTest::run(app.arguments().contains("--two-channels"));return 0;}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

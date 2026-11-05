@@ -517,6 +517,18 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
        !ring_fbp_settings::validate(fbpSettings,cfg,nextSysDelayCh,&fbpError)){
         sendError(fbpError,2016);return;
     }
+    // Optional diagnostic override; UI/normal protocol uses automatic selection.
+    const QString backend=ring.value("timevarBackend").toString("auto");
+    if(backend!="auto"&&backend!="cpu"&&backend!="cuda"){
+        sendError("Invalid timevar backend",2016);return;
+    }
+    RingTimevarGpu preparedGpu;
+    if(fbpSettings.enabled&&timevarCfg.enabled&&backend!="cpu"){
+        if(!preparedGpu.configure(prepared,cfg.daqHz,cnt*cfg.alinesPerChannelPerBlock,&planError)){
+            if(backend=="cuda"){sendError(QString::fromStdString(planError),2016);return;}
+            qWarning()<<"GPU STFT prepare unavailable; retaining CPU backend:"<<QString::fromStdString(planError);
+        }
+    }
     // Prepare BOTH GPU contexts before committing configuration or destroying old ones.
     void* nextGpu[2]={nullptr,nullptr};
     for(int w=0;w<2;++w){
@@ -532,6 +544,8 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     for(int w=0;w<2;++w){if(m_fbp[w])ring_fbp_destroy(m_fbp[w]);if(m_ringCuda[w])ring_recon_cuda_destroy(m_ringCuda[w]);
         m_fbp[w]=fbpSettings.enabled?nextGpu[w]:nullptr;m_ringCuda[w]=fbpSettings.enabled?nullptr:nextGpu[w];}
     m_fbpSettings=fbpSettings;
+    m_ringTimevarGpu=std::move(preparedGpu);
+    for(auto& c:m_fbpFractional)for(auto& f:c)f.reset();
     for(auto& c:m_fbpStreams)for(auto& s:c)s.reset();
     m_fbpTimingReady=false;m_fbpPrefixRaw.clear();m_fbpPrefixAngles.clear();m_fbpPrefixChannels.clear();
     std::fill(std::begin(m_fbpCardShift),std::end(m_fbpCardShift),0.);
@@ -877,6 +891,8 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
 bool ImagingSvc::processFbpBlock(const QVector<float>& input,const QVector<float>& inputAngles,
                                 const QVector<quint8>& inputChannels,bool final)
 {
+    const auto preprocessStart=ring_shm_obs::steadyNowUs();
+    m_fbpPreprocessUs=0;m_fbpAccumulateUs=0;
     try{
         QVector<float> raw=input,angles=inputAngles;QVector<quint8> channels=inputChannels;
         if(!m_fbpTimingReady&&!m_fbpSettings.artifact.isEmpty()){
@@ -884,7 +900,7 @@ bool ImagingSvc::processFbpBlock(const QVector<float>& input,const QVector<float
             int M=m_ringChannelCount,depth=m_ringConfig.sampDepth;
             int count=m_fbpSettings.artifact.value("prefixPerWavelength").toInt();
             int pulses=m_fbpPrefixAngles.size()/M;
-            if(pulses<2*count&&!final)return true; // bounded startup latency, no invented frame completion
+            if(pulses<2*count&&!final){m_fbpPreprocessUs=ring_shm_obs::steadyNowUs()-preprocessStart;return true;} // no invented completion
             if(pulses<16)throw std::runtime_error("Insufficient timing prefix in completed round");
             auto templates=m_fbpSettings.artifact.value("templates").toArray();int start=m_fbpSettings.artifact.value("startSample").toInt()-1;
             std::vector<double> values[8];
@@ -911,24 +927,43 @@ bool ImagingSvc::processFbpBlock(const QVector<float>& input,const QVector<float
         int selected[8],M=0;for(int c=0;c<8;++c)if(m_ringChannels[c])selected[M++]=c;
         const double width=360./M;
         const double step=(m_ringConfig.sectorCcw?1:-1)*width/m_ringConfig.alinesPerChannelPerFrame;
-        for(int j=0;j<angles.size()/M;++j)for(int k=0;k<M;++k){
-            int pos=j*M+k,c=selected[k],w=((j%2==0)==bool(m_ringConfig.triggerWlOdd))?0:1;
-            if(channels[pos]!=c)throw std::runtime_error("FBP physical channel metadata mismatch");
-            const float* src=raw.constData()+size_t(pos)*m_ringConfig.sampDepth;
-            std::vector<double> d(src,src+m_ringConfig.sampDepth);
-            for(auto& v:d){if(!std::isfinite(v))v=0;if(m_fbpSettings.invert)v=-v;}
-            ring_fbp_stream::fractionalAdvance(d,m_fbpSettings.delayOffset[c][w]+m_fbpCardShift[c/2]);
-            ringrecon::PreprocessParams pp;
-            pp.systemDelay=m_ringSysDelayCh[c][w];pp.dbrmaskExtra=w?m_ringSysDelayCh[c][1]-m_ringSysDelayCh[c][0]:0;
-            pp.maskLength=m_ringConfig.maskLength;pp.dbrRemove=m_ringConfig.dbrSigRemove!=0;
-            pp.delayCut=m_ringConfig.delayCut!=0;pp.signalImpair=m_ringConfig.singalImpair!=0;pp.imValue=m_ringConfig.imValue[w];
-            ring_fbp_stream::Line line;std::string error;
-            if(!ringTimevarPreprocess(m_ringTimevar,d,pp,line.data,&error))throw std::runtime_error(error);
-            line.angle=float(angles[pos]+m_fbpSettings.angleOffset[c]);
-            staged[c][w].push(std::move(line),step,m_fbpSettings.median,ready[c][w]);
+        const int depth=m_ringConfig.sampDepth;
+        if(M<1||angles.size()%M||channels.size()!=angles.size()||raw.size()!=qsizetype(depth)*angles.size())
+            throw std::runtime_error("FBP block shape mismatch");
+        const int tile=m_ringTimevarGpu.active()?m_ringTimevarGpu.capacity():1;
+        std::vector<double> d(depth),batch(size_t(depth)*tile);
+        for(int first=0;first<angles.size();first+=tile){
+            const int count=std::min(tile,int(angles.size())-first);
+            for(int l=0;l<count;++l){
+                const int pos=first+l,c=selected[pos%M],j=pos/M;
+                const int w=((j%2==0)==bool(m_ringConfig.triggerWlOdd))?0:1;
+                if(channels[pos]!=c)throw std::runtime_error("FBP physical channel metadata mismatch");
+                const float* src=raw.constData()+size_t(pos)*depth;
+                std::copy(src,src+depth,d.begin());
+                for(auto& v:d){if(!std::isfinite(v))v=0;if(m_fbpSettings.invert)v=-v;}
+                m_fbpFractional[c][w].apply(d,m_fbpSettings.delayOffset[c][w]+m_fbpCardShift[c/2]);
+                std::copy(d.begin(),d.end(),batch.begin()+size_t(l)*depth);
+            }
+            if(m_ringTimevarGpu.active())m_ringTimevarGpu.apply(batch.data(),count);
+            for(int l=0;l<count;++l){
+                const int pos=first+l,c=selected[pos%M],j=pos/M;
+                const int w=((j%2==0)==bool(m_ringConfig.triggerWlOdd))?0:1;
+                std::copy_n(batch.data()+size_t(l)*depth,depth,d.begin());
+                ringrecon::PreprocessParams pp;
+                pp.systemDelay=m_ringSysDelayCh[c][w];pp.dbrmaskExtra=w?m_ringSysDelayCh[c][1]-m_ringSysDelayCh[c][0]:0;
+                pp.maskLength=m_ringConfig.maskLength;pp.dbrRemove=m_ringConfig.dbrSigRemove!=0;
+                pp.delayCut=m_ringConfig.delayCut!=0;pp.signalImpair=m_ringConfig.singalImpair!=0;pp.imValue=m_ringConfig.imValue[w];
+                ring_fbp_stream::Line line;std::string error;
+                if(m_ringTimevarGpu.active())line.data=ringrecon::preprocessBlock(d,depth,1,pp);
+                else if(!ringTimevarPreprocess(m_ringTimevar,d,pp,line.data,&error))throw std::runtime_error(error);
+                line.angle=float(angles[pos]+m_fbpSettings.angleOffset[c]);
+                staged[c][w].push(std::move(line),step,m_fbpSettings.median,ready[c][w]);
+            }
         }
         if(final)for(int c=0;c<8;++c)for(int w=0;w<2;++w)staged[c][w].finish(m_fbpSettings.median,ready[c][w]);
-        // All CPU work succeeds before touching either wavelength accumulator.
+        m_fbpPreprocessUs=ring_shm_obs::steadyNowUs()-preprocessStart;
+        const auto accumulateStart=ring_shm_obs::steadyNowUs();
+        // The complete CPU/GPU preprocessing transaction succeeds before FBP.
         for(int k=0;k<M;++k){int c=selected[k];double sector=m_ringConfig.sectorStartDeg+(m_ringConfig.sectorCcw?k:k-1)*width;
             for(int w=0;w<2;++w){auto& lines=ready[c][w];if(lines.empty())continue;
                 int nt=int(lines[0].data.size());std::vector<float> flat,ang;
@@ -937,6 +972,7 @@ bool ImagingSvc::processFbpBlock(const QVector<float>& input,const QVector<float
             }
         }
         for(int c=0;c<8;++c)for(int w=0;w<2;++w)m_fbpStreams[c][w]=std::move(staged[c][w]);
+        m_fbpAccumulateUs=ring_shm_obs::steadyNowUs()-accumulateStart;
         return true;
     }catch(const std::exception& e){
         // A failed batch never publishes a half-updated wavelength pair.
@@ -993,7 +1029,12 @@ void ImagingSvc::sendRingSnapshotToHost(uint32_t seq, uint64_t submitIndex,
         seq, submitIndex, round, reconstructionComplete);
     msg["process_us"] = static_cast<qint64>(processUs);
     msg["recon_algorithm"]=m_fbpSettings.enabled?"exact_fbp":"das";
-    if(m_fbpSettings.enabled)msg["fbp_prepare_us"]=static_cast<qint64>(m_fbpPrepareUs);
+    if(m_fbpSettings.enabled){
+        msg["fbp_prepare_us"]=static_cast<qint64>(m_fbpPrepareUs);
+        msg["fbp_preprocess_us"]=static_cast<qint64>(m_fbpPreprocessUs);
+        msg["fbp_accumulate_us"]=static_cast<qint64>(m_fbpAccumulateUs);
+        msg["timevar_backend"]=m_ringTimevarConfig.enabled?(m_ringTimevarGpu.active()?"cuda":"cpu"):"off";
+    }
     QJsonDocument doc(msg);
     QByteArray data = doc.toJson(QJsonDocument::Compact);
     zmq::message_t zmsg(static_cast<size_t>(data.size()));

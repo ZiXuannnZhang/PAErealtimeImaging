@@ -15,6 +15,8 @@
 #include "ring_recon_cuda.h"
 #include "RingFbpSettings.h"
 #include "RingFbpStream.h"
+#include "RingFractionalDelay.h"
+#include "RingTimevarGpu.h"
 
 namespace zmq { class context_t; class socket_t; }
 namespace pa_recon_qt { class PAReconstructor; struct Config; }
@@ -84,6 +86,9 @@ private:
     RingFbpSettings m_fbpSettings;
     void* m_fbp[2]={nullptr,nullptr};
     ring_fbp_stream::Stream m_fbpStreams[8][2];
+    ring_fbp_stream::FractionalDelay m_fbpFractional[8][2];
+    RingTimevarGpu m_ringTimevarGpu;
+    uint64_t m_fbpPreprocessUs=0,m_fbpAccumulateUs=0;
     QVector<float> m_fbpPrefixRaw,m_fbpPrefixAngles;
     QVector<quint8> m_fbpPrefixChannels;
     bool m_fbpTimingReady=false;

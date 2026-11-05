@@ -17,6 +17,7 @@ add_executable(ImagingSvc
     main.cpp
     ProcessScheduling.cpp
     ImagingSvc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../RingFractionalDelay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../RingRecon/ring_recon.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../RingTimevarLowpass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../RingTimevarLowpassSettings.cpp)
@@ -101,11 +102,12 @@ if(RING_RECON_CUDA_BIN)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${RING_RECON_CUDA_BIN}/cudart64_12.dll" $<TARGET_FILE_DIR:ImagingSvc>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${RING_RECON_CUDA_BIN}/cublas64_12.dll" "${RING_RECON_CUDA_BIN}/cublasLt64_12.dll" $<TARGET_FILE_DIR:ImagingSvc>
+            "${RING_RECON_CUDA_BIN}/cublas64_12.dll" "${RING_RECON_CUDA_BIN}/cublasLt64_12.dll" "${RING_RECON_CUDA_BIN}/cufft64_11.dll" $<TARGET_FILE_DIR:ImagingSvc>
         COMMENT "Deploying ring_recon_cuda runtime")
 endif()
 
 # Keep the CPU DSP kernel optimized in Debug too; preserve symbols and no fast-math.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../RingTimevarLowpass.cpp PROPERTIES COMPILE_OPTIONS "-O2")
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../RingFractionalDelay.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 endif()

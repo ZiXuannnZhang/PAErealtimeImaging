@@ -54,8 +54,8 @@ bool sendJson(zmq::socket_t& sock, const QJsonObject& obj) {
     zmq::message_t msg(static_cast<size_t>(data.size()));
     std::memcpy(msg.data(), data.constData(), static_cast<size_t>(data.size()));
     try {
-        sock.send(msg, zmq::send_flags::dontwait);
-        return true;
+        // cppzmq reports EAGAIN as an empty optional, not necessarily an exception.
+        return static_cast<bool>(sock.send(msg, zmq::send_flags::dontwait));
     } catch (...) {
         return false;
     }
@@ -104,6 +104,8 @@ int main(int argc, char** argv) {
     const std::string sysDelayPerCh = argStr(args, "--sys-delay-per-ch");   // 空=各通道统一默认
     const bool exactFbp=argInt(args,"--exact-fbp",0)!=0;
     const std::string timevarMode = argStr(args, "--timevar-lowpass");
+    const std::string timevarBackend=argStr(args,"--timevar-backend","auto");
+    const double fbpShift=argDouble(args,"--fbp-shift",0.0);
     const int roundsArg = argInt(args, "--rounds", 2);
     const int benchmarkBlocks = argInt(args,"--benchmark-blocks",0);
     const int frameTimeoutMs = argInt(args,"--frame-timeout-ms",kTimeoutMs);
@@ -253,6 +255,11 @@ int main(int argc, char** argv) {
     QJsonObject ring;
     ring["sampDepth"] = sampDepth;
     ring["exactFbp"]=QJsonObject{{"enabled",exactFbp},{"invert",true},{"median",true}};
+    QJsonArray shiftOffsets;
+    for(int c=0;c<8;++c)shiftOffsets.append(QJsonArray{fbpShift,fbpShift});
+    auto exactSettings=ring["exactFbp"].toObject();exactSettings["delayOffsetSamples"]=shiftOffsets;
+    ring["exactFbp"]=exactSettings;
+    ring["timevarBackend"]=QString::fromStdString(timevarBackend);
     ring["reconDepth"] = sampDepth;
     ring["alinesPerFrame"] = alinesPerFrame;
     ring["alinesPerBlock"] = perChBlock;
@@ -382,7 +389,24 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "ImagingSvc never accepted configure (ZMQ pair)\n");
         return 2;
     }
-    QThread::msleep(50);
+    if(exactFbp){
+        // Match production: acquisition submissions start only after preparation.
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(frameTimeoutMs);
+        bool ready=false;
+        while(std::chrono::steady_clock::now()<deadline){
+            QCoreApplication::processEvents();
+            zmq::message_t reply;
+            if(sock.recv(reply,zmq::recv_flags::dontwait)){
+                const auto obj=QJsonDocument::fromJson(QByteArray(static_cast<const char*>(reply.data()),int(reply.size()))).object();
+                if(obj["cmd"].toString()=="ring_fbp_configured"){ready=true;std::printf("[selftest] FBP preparation ready\n");std::fflush(stdout);break;}
+                if(obj["cmd"].toString()=="error"){
+                    std::fprintf(stderr,"FBP prepare error: %s\n",QJsonDocument(obj).toJson().constData());return 2;
+                }
+            }
+            QThread::msleep(5);
+        }
+        if(!ready){std::fprintf(stderr,"FBP prepare acknowledgement timeout\n");return 2;}
+    }else QThread::msleep(50);
     sendJson(sock, {{"cmd", "start"}});
     QThread::msleep(200);
 
@@ -488,6 +512,10 @@ int main(int argc, char** argv) {
                     serviceMs=obj["process_us"].toDouble()/1000.0;
                     if(obj.contains("fbp_prepare_us"))
                         std::printf("[fbp-metrics] prepare_us=%.0f\n",obj["fbp_prepare_us"].toDouble());
+                    if(obj.contains("fbp_preprocess_us"))
+                        std::printf("[fbp-stages] backend=%s preprocess_ms=%.9f accumulate_ms=%.9f\n",
+                            obj["timevar_backend"].toString().toUtf8().constData(),
+                            obj["fbp_preprocess_us"].toDouble()/1000.,obj["fbp_accumulate_us"].toDouble()/1000.);
                     got = true;
                     break;
                 }
