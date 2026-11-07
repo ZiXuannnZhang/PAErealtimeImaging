@@ -148,7 +148,6 @@ private:
 public slots:
     void reject() override;
 private:
-    QCheckBox       *m_chkMaskOob;
     // 显示掩膜（工作一）：仅显示层参数，不入 RingReconCudaConfig/JSON/ImagingSvc；
     // 持久化于 RingConfigDialog/Defaults（displayMaskEnabled / displayMaskRadiusMm），
     // Apply/OK 成功后经 displayMaskChanged 下发（MainWindow → 显示窗口）。

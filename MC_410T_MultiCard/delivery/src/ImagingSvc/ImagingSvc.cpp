@@ -435,7 +435,6 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     cfg.fovDeg                 = ring["fovDeg"].toDouble(cfg.fovDeg);
     cfg.fovTheta0Deg           = ring["fovTheta0Deg"].toDouble(cfg.fovTheta0Deg);
     cfg.interpolation          = ring["interpolation"].toInt(cfg.interpolation);
-    cfg.maskOutOfRange         = ring["maskOutOfRange"].toInt(cfg.maskOutOfRange);
     cfg.dbrSigRemove           = ring["dbrSigRemove"].toInt(cfg.dbrSigRemove);
     cfg.maskLength             = ring["maskLength"].toInt(cfg.maskLength);
     cfg.delayCut               = ring["delayCut"].toInt(cfg.delayCut);

@@ -350,14 +350,12 @@ void RingConfigDialog::buildUi()
     m_spnFovDeg = new QDoubleSpinBox; m_spnFovDeg->setRange(1, 360); m_spnFovDeg->setValue(360);
     m_spnFovTheta0 = new QDoubleSpinBox; m_spnFovTheta0->setRange(-360, 360); m_spnFovTheta0->setDecimals(1); m_spnFovTheta0->setValue(0.0);
     m_spnFovTheta0->setToolTip("成像扇区起始角，0° = 九点钟，正值在画面中顺时针偏转。");
-    m_chkMaskOob = new QCheckBox("越界置零"); m_chkMaskOob->setChecked(true);
     // 注：CoverageDeg/Theta0Deg 仅用于离线整帧文件重建脚本，实时链路逐 A-line 角度由扇区模型给出，故不在界面提供；
     // 插值固定为 linear（DAS 反投影需要分数采样点插值，nearest 仅调试用）。
     fGrid->addRow("FOV(mm)", m_spnFovMm);
     fGrid->addRow("GridSize(mm)", m_spnGridMm);
     fGrid->addRow("成像扇区角宽(°)", m_spnFovDeg);
     fGrid->addRow("成像扇区起始角(°,0=9点钟)", m_spnFovTheta0);
-    fGrid->addRow("", m_chkMaskOob);
     // 显示掩膜（工作一）：环阵内相干图像无意义但不得限制环内反演——仅在显示
     // 输出上以零值圆形掩膜遮蔽环内。仅显示层参数：不写 RingReconCudaConfig、
     // 不进 ring JSON / ImagingSvc；Apply/OK 成功后经 displayMaskChanged 下发。
@@ -420,7 +418,6 @@ void RingConfigDialog::buildUi()
         m_edtFbpDensities->setEnabled(i==1);m_edtFbpCalibration->setEnabled(i==1);
         m_chkShiftWL2->setEnabled(i==0);
         m_chkShiftWL2->setToolTip(i==1?QStringLiteral("FBP 使用每条 A-line 的实际角度，无需复制第二波长的跨块历史数据"):QString());
-        m_chkMaskOob->setEnabled(i==0);
     });
     reconLayout->addWidget(grpEnhance);
 
@@ -610,7 +607,6 @@ void RingConfigDialog::restoreDefaults()
     m_chkFbpInvert->setChecked(val("exactFbpInvert",true).toBool());
     m_edtFbpDensities->setText(val("exactFbpDensities","1000,1100,1100,1100,1100,1100,1100,1100").toString());
     m_edtFbpCalibration->setText(val("exactFbpCalibration",QString()).toString());
-    m_chkMaskOob->setChecked(val("maskOob", true).toBool());
     // 显示掩膜（工作一）：与既有键同一 Defaults group、同一读写路径；
     // 无历史键时回退出厂默认（不启用、6.57mm）。
     m_chkDisplayMask->setChecked(val("displayMaskEnabled", false).toBool());
@@ -674,7 +670,6 @@ void RingConfigDialog::saveDefaults()
     s.setValue("exactFbpDensities",m_edtFbpDensities->text());s.setValue("exactFbpCalibration",m_edtFbpCalibration->text());
     for(const auto& key:s.childKeys())
         if(key=="apod"||key=="distWeight"||key=="minDistMm"||key.startsWith("filteredDas"))s.remove(key);
-    s.setValue("maskOob", m_chkMaskOob->isChecked());
     // 显示掩膜（工作一）与其他默认参数同一次“设为默认”落盘（同一 Defaults group）
     s.setValue("displayMaskEnabled", m_chkDisplayMask->isChecked());
     s.setValue("displayMaskRadiusMm", m_spnDisplayMaskRadiusMm->value());
@@ -758,7 +753,6 @@ RingReconCudaConfig RingConfigDialog::config() const
     // 成像扇区起始角 UI 语义：0 = 9 点钟方向（标准角度 180°），正值逆时针
     cfg.fovTheta0Deg = 180.0 + m_spnFovTheta0->value();
     cfg.interpolation = 0;   // 固定 linear（DAS 分数采样点插值）
-    cfg.maskOutOfRange = m_chkMaskOob->isChecked() ? 1 : 0;
     cfg.dbrSigRemove = m_chkDbr->isChecked() ? 1 : 0;
     cfg.maskLength = m_spnMaskLen->value();
     cfg.delayCut = m_chkDelayCut->isChecked() ? 1 : 0;

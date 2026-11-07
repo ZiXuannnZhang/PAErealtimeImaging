@@ -65,7 +65,7 @@ typedef struct RingReconCudaConfig {
     double reservedDistanceWeight; // retired; ignored
     int    interpolation;       // 0=linear, 1=nearest
     double reservedMinDistance; // retired; ignored
-    int    maskOutOfRange;
+    int    reservedSamplingPolicy; // retired; ignored, ABI layout only
 
     // ---- preprocessing ----
     int    trigdejit;           // reserved

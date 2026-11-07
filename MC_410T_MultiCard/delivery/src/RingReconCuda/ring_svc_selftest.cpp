@@ -327,7 +327,6 @@ int main(int argc, char** argv) {
     ring["fovDeg"] = fovDeg;
     ring["fovTheta0Deg"] = 0.0;
     ring["interpolation"] = 0;
-    ring["maskOutOfRange"] = 1;
     ring["dbrSigRemove"] = 1;
     ring["maskLength"] = argInt(args,"--mask-length",300);
     ring["delayCut"] = 1;

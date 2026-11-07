@@ -174,7 +174,6 @@ void dasReconAppend(const std::vector<float>& bscan, int Nt, int nd,
     const float wscale = -arc;
 
     const bool linear = (rp.interpolation == "linear");
-    const bool maskOob = rp.maskOutOfRange;
     const bool useFovMask = rp.fovDeg < 359.9999;
     const float fovRad = static_cast<float>(rp.fovDeg * deg2rad);
     const float fovTh0Rad = static_cast<float>(rp.fovTheta0Deg * deg2rad);
@@ -233,27 +232,19 @@ void dasReconAppend(const std::vector<float>& bscan, int Nt, int nd,
                     const float i0f = std::floor(tf);
                     const float frac = tf - i0f;
                     const int i0 = static_cast<int>(i0f) + 1;  // 1-based
-                    const bool valid = (i0 >= 1) && (i0 <= Nt - 1);
-                    int i0c = i0;
-                    i0c = std::max(i0c, 1);
-                    i0c = std::min(i0c, Nt - 1);
-                    const float v0 = bscan[static_cast<size_t>(i0c - 1) +
-                                           static_cast<size_t>(j) * Nt];
-                    const float v1 = bscan[static_cast<size_t>(i0c) +
-                                           static_cast<size_t>(j) * Nt];
-                    vv = v0 + frac * (v1 - v0);
-                    if (maskOob && !valid) vv = 0.0f;
+                    if (i0 >= 1 && i0 <= Nt - 1) {
+                        const auto base = static_cast<size_t>(j) * Nt;
+                        const float v0 = bscan[base + i0 - 1];
+                        const float v1 = bscan[base + i0];
+                        vv = v0 + frac * (v1 - v0);
+                    }
                 } else {
                     const int i0n = static_cast<int>(std::floor(tf + 0.5f)) + 1;
-                    const bool valid = (i0n >= 1) && (i0n <= Nt);
-                    int i0c = i0n;
-                    i0c = std::max(i0c, 1);
-                    i0c = std::min(i0c, Nt);
-                    vv = bscan[static_cast<size_t>(i0c - 1) +
-                               static_cast<size_t>(j) * Nt];
-                    if (maskOob && !valid) vv = 0.0f;
+                    if (i0n >= 1 && i0n <= Nt)
+                        vv = bscan[static_cast<size_t>(j) * Nt + i0n - 1];
                 }
 
+                // Out-of-range samples contribute zero signal but retain their DAS normalization weight.
                 const float w = wscale * dotp / (R * dist);
                 acc += w * vv;
                 accw += std::fabs(w);

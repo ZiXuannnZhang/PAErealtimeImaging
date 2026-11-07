@@ -973,7 +973,6 @@ void ImagingController::sendConfigureAndStart()
         ring["fovDeg"]          = m_ringConfig.fovDeg;
         ring["fovTheta0Deg"]    = m_ringConfig.fovTheta0Deg;
         ring["interpolation"]   = m_ringConfig.interpolation;
-        ring["maskOutOfRange"]  = m_ringConfig.maskOutOfRange;
         ring["dbrSigRemove"]    = m_ringConfig.dbrSigRemove;
         ring["maskLength"]      = m_ringConfig.maskLength;
         ring["delayCut"]        = m_ringConfig.delayCut;

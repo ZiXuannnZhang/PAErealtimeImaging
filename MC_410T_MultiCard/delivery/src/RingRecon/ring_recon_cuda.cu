@@ -38,7 +38,6 @@ struct Handle {
     float sectorStartRad = 0.0f;      // 全局首扇区起点（rad）
     int   sectorCount = 0;            // 扇区数（启用通道数）
     int   linear = 1;
-    int   maskOob = 1;
     int   nBound = 0;                 // 分层声速边界数
     float preOuter = 0.0f;            // fs/c_outer（分层）或 fs/c（单声速）
     float preCoeff[8] = {0.0f};       // fs*(1/c_i - 1/c_{i+1})
@@ -110,7 +109,7 @@ extern "C" RING_RECON_CUDA_API void ring_recon_cuda_set_defaults(RingReconCudaCo
     cfg->fovTheta0Deg = 0.0;
     cfg->normalizeByW = 0;
     cfg->interpolation = 0;     // linear
-    cfg->maskOutOfRange = 1;
+    cfg->reservedSamplingPolicy = 1; // old binaries interpret 1 as zero outside the sample window
 
     // ---- preprocessing ----
     cfg->trigdejit = 0;
@@ -228,7 +227,7 @@ __global__ void ring_das_kernel(
         const float* __restrict__ xv, const float* __restrict__ yv,
         int nx, int ny,
         float pre,
-        int linear, int maskOob, int useFovMask, float fovRad, float fovTh0Rad,
+        int linear, int useFovMask, float fovRad, float fovTh0Rad,
         int nBound, float preOuter,
         const float* __restrict__ preCoeff, const float* __restrict__ rb2s,
         float* __restrict__ acc, float* __restrict__ accW) {
@@ -314,21 +313,19 @@ __global__ void ring_das_kernel(
             const float i0f = floorf(tf);
             const float frac = tf - i0f;
             const int i0 = static_cast<int>(i0f) + 1;
-            const int valid = (i0 >= 1) && (i0 <= nt - 1);
-            int i0c = i0 < 1 ? 1 : (i0 > nt - 1 ? nt - 1 : i0);
-            const size_t base = static_cast<size_t>(j) * nt;
-            const float v0 = bscan[base + i0c - 1];
-            const float v1 = bscan[base + i0c];
-            vv = v0 + frac * (v1 - v0);
-            if (maskOob && !valid) vv = 0.0f;
+            if (i0 >= 1 && i0 <= nt - 1) {
+                const size_t base = static_cast<size_t>(j) * nt;
+                const float v0 = bscan[base + i0 - 1];
+                const float v1 = bscan[base + i0];
+                vv = v0 + frac * (v1 - v0);
+            }
         } else {
             const int i0n = static_cast<int>(floorf(tf + 0.5f)) + 1;
-            const int valid = (i0n >= 1) && (i0n <= nt);
-            int i0c = i0n < 1 ? 1 : (i0n > nt ? nt : i0n);
-            vv = bscan[static_cast<size_t>(j) * nt + i0c - 1];
-            if (maskOob && !valid) vv = 0.0f;
+            if (i0n >= 1 && i0n <= nt)
+                vv = bscan[static_cast<size_t>(j) * nt + i0n - 1];
         }
 
+        // Out-of-range samples contribute zero signal but retain their DAS normalization weight.
         // Only geometric normal projection remains; no aperture window or distance power.
         const float wBase = wscale[j] * dotp / (Rj * dist);
         const float w = blendMask ? wBase * blendW : wBase;
@@ -440,7 +437,6 @@ extern "C" RING_RECON_CUDA_API int ring_recon_cuda_create(const RingReconCudaCon
     h->fovRad = static_cast<float>(cfg->fovDeg * kPi / 180.0);
     h->fovTh0Rad = static_cast<float>(cfg->fovTheta0Deg * kPi / 180.0);
     h->linear = (cfg->interpolation == 0) ? 1 : 0;
-    h->maskOob = cfg->maskOutOfRange ? 1 : 0;
 
     std::vector<float> xv(h->nx), yv(h->ny);
     for (int i = 0; i < h->nx; ++i) {
@@ -704,7 +700,7 @@ static int appendImpl(void* handle, const float* bscan,
         blendMask, h->d_blendPrevW, h->d_blendNextW,
         h->d_xv, h->d_yv, h->nx, h->ny,
         h->pre,
-        h->linear, h->maskOob, h->useFovMask, h->fovRad, h->fovTh0Rad,
+        h->linear, h->useFovMask, h->fovRad, h->fovTh0Rad,
         h->nBound, h->preOuter, h->d_preCoeff, h->d_rb2s,
         h->d_acc, h->d_accW);
     err = cudaDeviceSynchronize();
