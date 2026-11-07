@@ -3,8 +3,8 @@
 > 更新时间：2026-11-07（UTC+8）。新开发基准仍为 latest `origin/main`。
 
 用户于 2026-11-07 确认此前未验收的环形实时成像工作通过实机验收。
-已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。实现与验收文档通过
-`codex/ring-realtime-performance-20261104` 发布；canonical 开发基线仍是 `origin/main`。
+已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。用户另行确认将
+`codex/ring-realtime-performance-20261104` 普通快进到远端 `main`；后续开发从最新 `origin/main` 开始。
 
 本轮包括同心圆折射精确核 FBP、分段和融合 GPU 预处理、按轮次和触发序号有界多卡配对、
 顺逆九点钟起步，以及方向联动按物理轮生效、纯换向不重启成像服务。退役旧 FilteredDAS 和可选
@@ -14,7 +14,7 @@ DAS 权重控件；时变低通仍可用。实机验收按用户测试范围记�
 ## 接手要点
 
 先读 [PROJECT_STATUS.md](PROJECT_STATUS.md)、[REPOSITORY_BASELINE.md](REPOSITORY_BASELINE.md)
-和 [BUILD_STANDARD.md](BUILD_STANDARD.md)，再读协作指南。查看实现分支时明确与 canonical 主线的差别。
+和 [BUILD_STANDARD.md](BUILD_STANDARD.md)，再读协作指南。实现分支保留为验收与接入追溯。
 
 - 成像队列使用有界 FIFO。组包按 RoundIdentity 和逻辑触发序号配对；缺失超过窗口时跳过不完整块，
   保留后续角度及双波长相位。直存队列、raw/save ownership 与成像分离。

@@ -50,16 +50,16 @@ git show origin/codex/task-docs:TASKS/<任务文件名>
 ## 2. Current project state
 
 用户于 2026-11-07 确认此前未验收的环形实时成像工作通过实机验收。
-已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。实现与验收文档通过
-`codex/ring-realtime-performance-20261104` 发布；canonical 开发基线仍是 `origin/main`。
+已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。用户另行确认将
+`codex/ring-realtime-performance-20261104` 普通快进到远端 `main`；后续开发从最新 `origin/main` 开始。
 
 本轮包括同心圆折射精确核 FBP、分段和融合 GPU 预处理、按轮次和触发序号有界多卡配对、
 顺逆九点钟起步，以及方向联动按物理轮生效、纯换向不重启成像服务。退役旧 FilteredDAS 和可选
 DAS 权重控件；时变低通仍可用。实机验收按用户测试范围记录，八通道性能专项仍暂缓。
 详见 [验收记录](CODEX_REPORTS/ring-realtime-acceptance-20261107/README.md)。
 
-`PROJECT_STATUS.md` 记录验收与 canonical 状态的区别。实现分支发布时保持已验收子树；
-如需接入 `main`，按 `REPOSITORY_BASELINE.md` 记录授权范围及集成方式。
+`PROJECT_STATUS.md` 记录当前基线及验收范围。本轮两个远端引用快进到同一文档后代，
+保持已验收的生产/测试子树；授权和集成方式见 `REPOSITORY_BASELINE.md`。
 本地旧 `main`（`d3054d5`）含独有文档/开发配置提交，保留原样，不作为实施基线。
 
 ## 3. New implementation task

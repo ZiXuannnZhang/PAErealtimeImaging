@@ -16,4 +16,6 @@
 - 最终包以 exact `4c83ecf`、tracked-clean 执行标准 CUDA 12.8.93 和 Qt 6.8/MinGW Debug configure/build，完整核对依赖及 66 个 ZIP 条目。包内 `validation/` 保留编译和测试回执；57/57 CTest 与 1/1 MainWindow 集成测试执行于 `54ba3b4e3857eccdfc20d11aa1901d736e6225e8`，到 `4c83ecf` 只更新模块 README。最终包的程序另通过 2-A、4-A 顺逆 × 分段/融合 FBP 四组自检，每组 3 块。
 - 不重标原交付包的 BuildIdentity，也不改写包中当时的 local-only / 待实机说明。八通道性能测试仍暂缓；Layer 2b T_arr、发现早退 B 及额外 trigger 的 FPGA/LabVIEW 来源沿用原验证边界。
 
+用户随后明确选择“推送实现分支，并快进 main”。发布时远端 `main` 的祖先基点为 `6ae7e89`，实现分支先发布于 `c1adbd8`。两条远端引用以普通快进到达同一文档后代，保持验收子树不变；本地分叉的 `main`（`d3054d5`）保留，不纳入本次发布。
+
 此前阶段资料：[精确 FBP](../ring-exact-fbp-20261104/README.md)、[界面与 DAS 清理](../ring-ui-cleanup-20261104/README.md)、[性能优化、融合与起点修正](../ring-realtime-performance-20261104/README.md)。当前状态以 [PROJECT_STATUS.md](../../PROJECT_STATUS.md) 为准。

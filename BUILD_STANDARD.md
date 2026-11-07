@@ -79,15 +79,16 @@ artifacts/build-delivery/20261029-213219_1fb9478e_lowpass_motor_local_direction/
 入口 1/1 和合成服务自检。包打包时按用户要求仅本地，旧回执的 local_only 和旧远端状态保持原样；
 用户于 2026-11-04 另行授权发布，确认与包清单核查见 CODEX_REPORTS/main-acceptance-20261104/。
 
-本次 main 收尾只更新文档，不生成新二进制，不将 1fb9478 的 BuildIdentity 改成文档提交 SHA。
+2026-11-04 的 main 收尾只更新文档，未生成新二进制，也未替换 1fb9478 的 BuildIdentity。
 实机接受覆盖用户实测范围，未补充 Layer 2b T_arr 正式测量。以后生成 main 新包仍须取
 latest origin/main exact SHA，tracked-clean，重新 configure/build 并记录独立 BuildIdentity。
 历史 Session C/D、3c6323d、bd69785 仅保留原阶段追溯，不作为当前默认交付身份。
 
-2026-11-07 实现分支验收：用户确认环形实时成像分支 `codex/ring-realtime-performance-20261104` 的未验收工作通过。
+2026-11-07 环形实时成像接入：用户确认环形实时成像分支 `codex/ring-realtime-performance-20261104` 的未验收工作通过。
 已验收 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`，本地 ZIP 为
 `artifacts/build-delivery/20261107-215839_4c83ecf7_ring_queue_direction_local.zip`；见 [验收记录](CODEX_REPORTS/ring-realtime-acceptance-20261107/README.md)。
-当前发布实现分支，默认构建目标仍由 latest `origin/main` 决定。文档收尾不替换已验收 BuildIdentity。
+用户授权将已验收实现分支普通快进接入远端 `main`。默认构建目标仍为 latest `origin/main`；
+文档收尾不替换已验收 BuildIdentity。
 
 ### 2.3 最终交付构建必须在最终 commit 上重新 configure
 

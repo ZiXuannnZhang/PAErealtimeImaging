@@ -5,19 +5,19 @@
 ## 1. 当前结论
 
 用户于 2026-11-07 确认此前未验收的环形实时成像工作通过实机验收。
-已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。实现与验收文档通过
-`codex/ring-realtime-performance-20261104` 发布；canonical 开发基线仍是 `origin/main`。
+已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。用户另行确认将
+`codex/ring-realtime-performance-20261104` 普通快进到远端 `main`；后续开发从最新 `origin/main` 开始。
 
 本轮包括同心圆折射精确核 FBP、分段和融合 GPU 预处理、按轮次和触发序号有界多卡配对、
 顺逆九点钟起步，以及方向联动按物理轮生效、纯换向不重启成像服务。退役旧 FilteredDAS 和可选
 DAS 权重控件；时变低通仍可用。实机验收按用户测试范围记录，八通道性能专项仍暂缓。
 详见 [验收记录](CODEX_REPORTS/ring-realtime-acceptance-20261107/README.md)。
 
-- canonical `main`：`6ae7e8940ca7088bb4ea01415da9e303f301a24a`，保留 2026-11-04 联合低通 / FilteredDAS / 电机联动基线。旧已验收包 `1fb9478` 及 [验收记录](CODEX_REPORTS/main-acceptance-20261104/README.md) 继续作为历史追溯。
+- 本轮以普通快进将实现分支接入 canonical `main`；接入前的远端 `main` 是 `6ae7e8940ca7088bb4ea01415da9e303f301a24a`，为验收源码的祖先。2026-11-04 已验收包 `1fb9478` 及 [验收记录](CODEX_REPORTS/main-acceptance-20261104/README.md) 保留历史追溯。
 - 本轮验收发布分支：`codex/ring-realtime-performance-20261104`。验收子树 `MC_410T_MultiCard` 为 `8da942be1a382bfff8e6b4520424a58b0a461a7c`；文档收尾保持该子树不变。
 - A/B/C/D 及发现早退 A / count-boundary 的实机结论沿用原已测范围。Layer 2b T_arr 未独立测量，发现早退 B 待决定，额外 trigger 的 FPGA/LabVIEW 来源未证明。
 
-## 2. 本轮已验收实现
+## 2. 当前 main 的环形成像实现
 
 - 在保留 START-admission、PhysicalRoundNormalizer、RoundIdentity、超时/保存隔离及前端链的基础上，新增同心圆折射精确核 FBP。
 - 保留分段和融合 FBP 两条路径，复用同一精确核和反投影；FBP 优先使用融合 GPU 预处理，分段路径保留。GPU STFT 使用批量 cuFFT；DAS 保留可选 STFT，旧 FilteredDAS 和可选权重控件退出生产。

@@ -5,8 +5,8 @@ Windows 多卡实时光声采集与成像项目。当前正式源码与开发基
 ## Current status
 
 用户于 2026-11-07 确认此前未验收的环形实时成像工作通过实机验收。
-已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。实现与验收文档通过
-`codex/ring-realtime-performance-20261104` 发布；canonical 开发基线仍是 `origin/main`。
+已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。用户另行确认将
+`codex/ring-realtime-performance-20261104` 普通快进到远端 `main`；后续开发从最新 `origin/main` 开始。
 
 本轮包括同心圆折射精确核 FBP、分段和融合 GPU 预处理、按轮次和触发序号有界多卡配对、
 顺逆九点钟起步，以及方向联动按物理轮生效、纯换向不重启成像服务。退役旧 FilteredDAS 和可选
@@ -68,6 +68,7 @@ RoundIdentity = (measurementSession, roundGeneration)
 
 ```powershell
 Set-Location <repo>\MC_410T_MultiCard\delivery
+cmd /c build_ring_fbp_cuda.cmd
 cmd /c build_mingw_debug.cmd
 ```
 
