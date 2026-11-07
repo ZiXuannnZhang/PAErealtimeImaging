@@ -332,7 +332,7 @@ void testMonitorTriggerLatch(Runner &r)
     }
 }
 
-// RingBlockAssembler 顺时针角度：行 k 的角度 = 扇区起点 − k*step（镜像）。
+// RingBlockAssembler：正负步进关于九点钟轴对称。
 void testAssemblerCcwCw(Runner &r)
 {
     r.test = "assembler_ccw_cw";
@@ -357,15 +357,13 @@ void testAssemblerCcwCw(Runner &r)
         return angles;
     };
 
-    const std::vector<float> ccw = anglesOf(1);
-    const std::vector<float> cw = anglesOf(0);
+    const std::vector<float> cw = anglesOf(1);
+    const std::vector<float> ccw = anglesOf(0);
     // triggerWlOdd=1：g=0(wl1,k=0) g=1(wl2,kNext=1) g=2(wl1,k=1) g=3(wl2,kNext=2)
     // 既有组包器语义：首圈末行 wl2 的 kNext 不回绕（kRaw < perChannelFrame 时
     // kNext = kRaw+1），角度越过一圈起点（360）；后续圈才经 % 回绕。
-    // CCW 期望角：0→180, 1→270, 2→270, 3→360
-    const std::vector<float> expectCcw = {180.0f, 270.0f, 270.0f, 360.0f};
-    // CW 期望角：k 项取负（扇区 s 项不变）：0→180, 1→90, 2→90, 3→0
-    const std::vector<float> expectCw = {180.0f, 90.0f, 90.0f, 0.0f};
+    const std::vector<float> expectCw = {180.0f, 270.0f, 270.0f, 360.0f};
+    const std::vector<float> expectCcw = {180.0f, 90.0f, 90.0f, 0.0f};
     auto nearEqual = [](const std::vector<float> &a, const std::vector<float> &b) {
         if (a.size() != b.size()) return false;
         for (size_t i = 0; i < a.size(); ++i)
@@ -373,8 +371,8 @@ void testAssemblerCcwCw(Runner &r)
                 return false;
         return true;
     };
-    r.check(nearEqual(ccw, expectCcw), "CCW angles match legacy formula");
-    r.check(nearEqual(cw, expectCw), "CW angles are mirrored (sign flip on k)");
+    r.check(nearEqual(cw, expectCw), "screen CW advances from nine o'clock");
+    r.check(nearEqual(ccw, expectCcw), "screen CCW retreats from nine o'clock");
     r.check(!nearEqual(cw, ccw), "CW differs from CCW");
     // 镜像不变量（本测例 sectorStart=180）：CCW 与 CW 逐元素关于起点轴对称，
     // 即 ccw[i] + cw[i] ≡ 2*sectorStart ≡ 0 (mod 360)，与边界回绕策略无关。
@@ -386,6 +384,42 @@ void testAssemblerCcwCw(Runner &r)
             mirrorOk = false;
     }
     r.check(mirrorOk, "CW is the exact mirror of CCW (sum == 0 mod 360)");
+}
+
+void testSparseChannelSectors(Runner &r)
+{
+    r.test = "assembler_sparse_channel_sectors";
+    const int enabled[8] = {1, 0, 1, 0, 0, 1, 0, 0}; // UI channels 1, 3, 6
+    const std::vector<uint8_t> expectedChannels{0,2,5, 0,2,5, 0,2,5, 0,2,5};
+    for (int positive : {1, 0}) {
+        RingBlockAssembler assembler;
+        assembler.configure(enabled, 4, 8, 180.0, 120.0, 60.0, 2, 1, 0.0, positive);
+        const std::vector<float> expected = positive
+            ? std::vector<float>{180,300,420, 240,360,480, 240,360,480, 300,420,540}
+            : std::vector<float>{180,60,-60, 120,0,-120, 120,0,-120, 60,-60,-180};
+        int emitted = 0;
+        assembler.setBlockCallback(
+            [&](std::vector<float> &&raw, std::vector<float> &&angles,
+                std::vector<uint8_t> &&channels, int, const paimage::RoundIdentity &round, bool final) {
+                r.check(round == (paimage::RoundIdentity{1, static_cast<uint64_t>(emitted)}) && final,
+                        "block belongs to the completed physical round");
+                r.check(channels == expectedChannels, "physical channel order independent of packet order");
+                r.check(angles == expected, "signed sector offsets and both wavelengths restart at each round");
+                for (size_t i = 0; i < channels.size(); ++i)
+                    r.check(raw[i*8] == float(channels[i]+1), "A-line stays paired with physical channel");
+                ++emitted;
+            });
+        for (uint64_t generation : {0, 1}) {
+            for (int trigger = 0; trigger < 4; ++trigger) {
+                for (int ch : {5, 2, 0}) {
+                    const std::vector<float> line(8, float(ch+1));
+                    assembler.pushChannelLine(ch, uint16_t(generation*4+trigger), {1,generation},
+                                              line.data(), 8, trigger==3);
+                }
+            }
+        }
+        r.check(emitted == 2, "one complete block per round");
+    }
 }
 
 void testProductionRoundLatch(Runner &r)
@@ -493,6 +527,7 @@ int main(int argc, char **argv)
     testMonitor(runner);
     testMonitorTriggerLatch(runner);
     testAssemblerCcwCw(runner);
+    testSparseChannelSectors(runner);
     testProductionRoundLatch(runner);
     testRetryAndSerializedApply(runner);
 

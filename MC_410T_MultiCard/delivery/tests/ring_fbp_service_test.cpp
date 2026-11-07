@@ -11,7 +11,67 @@
 static void need(bool b,const char*s){if(!b)throw std::runtime_error(s);}
 static void close(const std::vector<float>&a,const std::vector<float>&b){double d=0,s=0;for(size_t i=0;i<a.size();++i){need(std::isfinite(a[i]),"nonfinite image");d+=pow(double(a[i])-b[i],2);s+=double(b[i])*b[i];}need(s>0&&sqrt(d/s)<1e-5,"service vs all-at-once FBP mismatch");}
 struct RingTimevarServiceTest {
+static void checkDasSectors(){
+    constexpr int depth=512,nx=40,frame=nx*nx,perCh=4;
+    constexpr double pi=3.14159265358979323846, first=180.;
+    for(const auto& physical: {std::vector<int>{0,2,5},std::vector<int>{0,1,2,3,5,6,7}})
+    for(int positive: {0,1}){
+        const int M=int(physical.size()),lines=M*perCh;
+        const int sign=positive?1:-1;
+        const double width=360./M;
+        QSharedMemory shm("MC_410T_RingShm");
+        need(shm.create(int(ringImagingShmTotalSizeV2(depth*lines,frame,lines,frame))),"isolated DAS SHM");
+        shm.lock();
+        std::memset(shm.data(),0,shm.size());
+        auto* h=static_cast<RingImagingShmHeader*>(shm.data());
+        h->magic=0x52494e47;h->version=2;h->block_size=depth*lines;h->alines=lines;
+        h->frame_size=frame;h->nx=nx;h->ny=nx;h->display_nx=nx;h->display_ny=nx;
+        h->display_frame_size=frame;h->snapshot_step=1;
+        h->block_seq=1;h->block_ready=1;
+        auto* raw=reinterpret_cast<float*>(h+1);
+        auto* angles=reinterpret_cast<float*>(reinterpret_cast<char*>(h+1)+ringAnglesOffset(depth*lines));
+        auto* channels=reinterpret_cast<uint8_t*>(h+1)+ringChannelsOffset(depth*lines,lines);
+        for(int j=0;j<perCh;++j)for(int rank=0;rank<M;++rank){
+            const int pos=j*M+rank,c=physical[rank],w=j%2;
+            angles[pos]=float(first+sign*(rank+(j/2+w)*.5)*width);channels[pos]=c;
+            std::fill_n(raw+pos*depth,depth,float(c+1+10*w));
+        }
+        shm.unlock();
+        QJsonArray enabled,radii;
+        for(int c=0;c<8;++c){
+            enabled.append(std::find(physical.begin(),physical.end(),c)!=physical.end()?1:0);
+            radii.append(.02);
+        }
+        QJsonObject ring{{"sampDepth",depth},{"daqHz",10e6},{"fov",.02},{"gridSize",.0005},{"fovDeg",360.},
+            {"alinesPerChannelPerBlock",perCh},{"alinesPerChannelPerFrame",2},{"alinesPerFrame",lines},
+            {"enabledChannels",enabled},{"radiusPerChannel",radii},{"multiRadius",1},{"spliceMode",1},{"spliceBlendDeg",0.},
+            {"sectorStartDeg",first},{"sectorCcw",positive},{"delayCut",0},{"dbrSigRemove",0},{"singalImpair",0},
+            {"timevarLowpass",QJsonObject{{"enabled",false},{"fcMaxMhz",4.}}},
+            {"soundSpeedRadiiCount",0},{"soundSpeeds",QJsonArray{1490.}}};
+        ImagingSvc svc;
+        svc.processRingConfigure(ring);
+        need(svc.m_ringCuda[0]&&svc.m_ringCuda[1],"DAS configure failed");
+        svc.m_running=true;
+        svc.processRingPulse(1,1,0,true,{1,0},true);
+        need(h->frame_seq==1,"DAS did not publish a frame");
+        std::vector<int> seen(M);
+        for(int x=0;x<nx;++x)for(int y=0;y<nx;++y){
+            const double angle=std::atan2(y-(nx-1)*.5,x-(nx-1)*.5)*180/pi;
+            const double directed=std::fmod(sign*(angle-first)+720.,360.);
+            if(std::abs(std::remainder(directed,width))<1.)continue; // exclude the pixel boundary
+            const int rank=int(directed/width);
+            for(int w=0;w<2;++w){
+                const auto& image=w?svc.m_ringDisplay1:svc.m_ringDisplay0;
+                need(std::abs(image[x*nx+y]-(physical[rank]+1+10*w))<1e-4,"DAS pixel has wrong channel owner");
+            }
+            ++seen[rank];
+        }
+        need(std::all_of(seen.begin(),seen.end(),[](int n){return n>20;}),"DAS did not sample every sector");
+        std::cout<<"DAS sector ownership PASS M="<<M<<" sectorCcw="<<positive<<'\n';
+    }
+}
 static void run(bool twoOnly=false){
+    if(!twoOnly)checkDasSectors();
     QTemporaryDir calibrationDir;need(calibrationDir.isValid(),"temporary calibration directory");
     QJsonArray offsets,delaysFbp;
     for(int c=0;c<8;++c){offsets.append(.15*c);delaysFbp.append(QJsonArray{.375+c*.1,-.625-c*.1});}
@@ -21,25 +81,34 @@ static void run(bool twoOnly=false){
     auto writeCalibration=[&]{QFile f(calibrationPath);need(f.open(QIODevice::WriteOnly),"write calibration");
         auto bytes=QJsonDocument(calibration).toJson();need(f.write(bytes)==bytes.size(),"calibration write size");};
     writeCalibration();
-    const std::vector<int> testedChannels=twoOnly?std::vector<int>{2}:std::vector<int>{4,8};
-    for(int M:testedChannels)for(int ccw:{0,1})for(bool splice:{false,true})for(bool layered:{false,true})for(bool timevar:{false,true}){
+    const std::vector<int> testedChannels=twoOnly?std::vector<int>{2}:std::vector<int>{3,4,8};
+    for(int M:testedChannels)for(bool staged:(M==3?std::vector<bool>{false,true}:std::vector<bool>{false}))
+    for(int ccw:{0,1})for(bool splice:{false,true})for(bool layered:{false,true})for(bool timevar:{false,true}){
         const int depth=256,perCh=6,nx=20,frame=nx*nx,lines=M*perCh;
+        const double width=360./M, first=180.;
+        const int sign=ccw?1:-1;
+        std::vector<int> physical;
+        if(M==3)physical={0,2,5};
+        else for(int c=0;c<M;++c)physical.push_back(c);
         const bool median=!twoOnly||splice, gap=twoOnly&&splice, invert=twoOnly&&ccw;
         const bool mask=twoOnly&&layered, clip=twoOnly&&ccw, cutEnabled=!twoOnly||splice;
         QSharedMemory shm("MC_410T_RingShm");need(shm.create(int(ringImagingShmTotalSizeV2(depth*lines,frame,lines,frame))),"isolated SHM");
         shm.lock();memset(shm.data(),0,shm.size());auto*h=static_cast<RingImagingShmHeader*>(shm.data());
         h->magic=0x52494e47;h->version=2;h->block_size=depth*lines;h->alines=lines;h->frame_size=frame;h->nx=nx;h->ny=nx;h->display_nx=nx;h->display_ny=nx;h->display_frame_size=frame;h->snapshot_step=1;shm.unlock();
-        QJsonArray enabled,delays,radii;for(int c=0;c<8;++c){enabled.append(c<M?1:0);delays.append(QJsonArray{5+c,7+c});radii.append(.004+c*.00001);}
+        QJsonArray enabled,delays,radii;for(int c=0;c<8;++c){
+            enabled.append(std::find(physical.begin(),physical.end(),c)!=physical.end()?1:0);
+            delays.append(QJsonArray{5+c,7+c});radii.append(.004+c*.00001);
+        }
         QJsonObject ring{{"sampDepth",depth},{"daqHz",10e6},{"alinesPerChannelPerBlock",perCh},{"alinesPerChannelPerFrame",9},
             {"alinesPerFrame",M*18},{"enabledChannels",enabled},{"sysDelayPerChannel",delays},{"fov",.02},{"gridSize",.001},
             {"radius",.004},{"radiusPerChannel",radii},{"multiRadius",1},{"spliceMode",int(splice)},{"spliceBlendDeg",1.5},
-            {"sectorCcw",ccw},{"sectorStartDeg",0},{"delayCut",int(cutEnabled)},{"shiftWL2",1},
+            {"sectorCcw",ccw},{"sectorStartDeg",first},{"delayCut",int(cutEnabled)},{"shiftWL2",1},
             {"dbrSigRemove",int(mask)},{"maskLength",56},{"singalImpair",int(clip)},{"imValue",QJsonArray{.25,.125}},
             {"soundSpeedRadiiCount",layered?1:0},{"soundSpeedRadii",QJsonArray{.007}},{"soundSpeeds",QJsonArray{1490.,1560.}},
             {"timevarLowpass",QJsonObject{{"enabled",timevar},{"fcMaxMhz",4.},{"fcMinMhz",1.},
                 {"p1",10},{"p2",200},{"windowLength",32},{"fftLength",48}}},
             {"timevarBackend","cuda"},
-            {"fbpPreprocessBackend",twoOnly?"cuda":"auto"},
+            {"fbpPreprocessBackend",staged?"staged":(twoOnly?"cuda":"auto")},
             {"exactFbp",QJsonObject{{"enabled",true},{"invert",invert},{"median",median},{"angularSamples",129}}}};
         if(layered){RingFbpSettings settings;settings.enabled=true;settings.invert=invert;settings.median=median;settings.angularSamples=129;
             settings.calibrationFile=calibrationPath;QString error;
@@ -48,7 +117,7 @@ static void run(bool twoOnly=false){
             ring["exactFbp"]=ring_fbp_settings::toJson(settings);}
         ImagingSvc svc;svc.processRingConfigure(ring);need(svc.m_fbp[0]&&svc.m_fbp[1],"FBP configure failed");svc.m_running=true;
         need(svc.m_ringTimevarGpu.active()==timevar,"GPU STFT selection mismatch");
-        need(bool(svc.m_fbpDevice),"Fused FBP preprocessing not selected");
+        need(bool(svc.m_fbpDevice)!=staged,"Unexpected FBP preprocessing path");
         RingTimevarLowpass referenceFilter;std::string filterError;
         need(referenceFilter.configure(svc.m_ringTimevarConfig,10e6,depth,&filterError),"reference filter configure");
         std::vector<ring_fbp_stream::Line> full[8][2];
@@ -56,8 +125,8 @@ static void run(bool twoOnly=false){
             shm.lock();h->block_seq=block+1;h->block_ready=1;auto* raw=reinterpret_cast<float*>(h+1);
             auto* ang=reinterpret_cast<float*>(reinterpret_cast<char*>(h+1)+ringAnglesOffset(depth*lines));
             auto* ch=reinterpret_cast<uint8_t*>(h+1)+ringChannelsOffset(depth*lines,lines);
-            for(int j=0;j<perCh;++j)for(int c=0;c<M;++c){int pos=j*M+c,w=j%2,k=block*3+j/2;
-                ang[pos]=float(c*360./M+(ccw?1:-1)*(k+w+(gap&&k>=3))*360./M/9);ch[pos]=c;
+            for(int j=0;j<perCh;++j)for(int rank=0;rank<M;++rank){int c=physical[rank],pos=j*M+rank,w=j%2,k=block*3+j/2;
+                ang[pos]=float(first+sign*(rank+(k+w+(gap&&k>=3))/9.)*width);ch[pos]=c;
                 ring_fbp_stream::Line l;l.angle=float(ang[pos]+svc.m_fbpSettings.angleOffset[c]);int cut=cutEnabled?(w?7:5)+c-1:0;
                 std::vector<double> uncut;
                 for(int t=0;t<depth;++t){float v=float(sin(t*.27+c*.13+w*.5+k*.09)*exp(-pow((t-80.)/33,2)));
@@ -79,13 +148,15 @@ static void run(bool twoOnly=false){
         need(svc.m_ringBlockIndex==0,"source final did not reset");
         for(int w=0;w<2;++w){void*ref=nullptr;auto f=ring_fbp_settings::native(svc.m_fbpSettings,svc.m_ringConfig);
             need(!ring_fbp_create(&svc.m_ringConfig,&f,&ref),ring_fbp_error());
-            for(int c=0;c<M;++c){std::vector<float> flat,ang;auto& seq=full[c][w];
+            for(int rank=0;rank<M;++rank){int c=physical[rank];std::vector<float> flat,ang;auto& seq=full[c][w];
                 for(int j=0;j<9;++j){
                     const int left=gap&&j==3?j:std::max(0,j-1),right=gap&&j==2?j:std::min(8,j+1);
                     auto l=ring_fbp_stream::Stream::prepared(seq[left],seq[j],seq[right],median);
                     flat.insert(flat.end(),l.data.begin(),l.data.end());ang.push_back(l.angle);
                 }
-                need(!ring_fbp_append(ref,flat.data(),int(seq[0].data.size()),9,ang.data(),radii[c].toDouble(),(ccw?c:c-1)*360./M,360./M),ring_fbp_error());
+                const double start=first+sign*rank*width, end=first+sign*(rank+1)*width;
+                need(!ring_fbp_append(ref,flat.data(),int(seq[0].data.size()),9,ang.data(),
+                                      radii[c].toDouble(),std::min(start,end),width),ring_fbp_error());
             }std::vector<float> image(frame);ring_fbp_snapshot(ref,image.data());close(w?svc.m_ringDisplay1:svc.m_ringDisplay0,image);ring_fbp_destroy(ref);
         }
         auto* before=svc.m_fbp[0];auto invalid=ring;invalid["exactFbp"]=QJsonObject{{"enabled",true},{"angularSamples",1}};
@@ -109,7 +180,8 @@ static void run(bool twoOnly=false){
             }
             for(auto& c:svc.m_fbpHistoryAngle)for(auto& a:c)need(!a,"GPU error left median history");
         }
-        std::cout<<"service PASS M="<<M<<" ccw="<<ccw<<" splice="<<splice<<" layered="<<layered<<" timevar="<<timevar<<'\n';
+        std::cout<<"service PASS M="<<M<<" ccw="<<ccw<<" splice="<<splice<<" layered="<<layered
+                 <<" timevar="<<timevar<<" staged="<<staged<<'\n';
     }
     std::vector<double> tmpl(401);std::vector<float>x(401);for(int i=0;i<401;++i){tmpl[i]=exp(-pow((i-180.)/7,2))*cos((i-180)*.6);x[i]=float(exp(-pow((i-182.)/7,2))*cos((i-182)*.6));}
     need(fabs(ring_fbp_artifact::delay(x.data(),tmpl)-2)<.01,"card timing sign");

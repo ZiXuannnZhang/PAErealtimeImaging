@@ -100,10 +100,7 @@ private:
     bool m_acquisitionKnown = false;
     double m_daqHz = FPGA_ADC_FREQ_HZ;   // 采样率只读值（Hz，真实采集固定 250 MHz）
     int    m_motorSectorCcw = 1;  // 重建方向位：1=正角步进、0=负角步进；不等同面板文字
-    // 起点角联动覆盖（标准角度）：仅在 setMotorScanDirection（=联动方向已应用）后生效，
-    // 逆时针=180°（九点钟，与未联动时 UI 默认 0 位一致）、顺时针=0°（三点钟）；
-    // 未联动时保持 UI 原逻辑（spinbox 默认 0 → 180° → 九点钟起点，逆时针重建）。
-    double m_motorStartDeg = 180.0;
+    // 方向联动已应用时，两种方向均固定从九点钟开始；否则使用手动偏移。
     bool   m_motorStartLinked = false;
     QString m_motorParamsFile;
     QPushButton *m_btnMotorParamsFile = nullptr;

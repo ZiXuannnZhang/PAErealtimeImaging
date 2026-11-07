@@ -1,6 +1,7 @@
 #include <array>
 #include "ImagingSvc.h"
 #include "RingSampleWindow.h"
+#include "RingSectorGeometry.h"
 #include "RingTimevarLowpassSettings.h"
 #include "RingTimevarPreprocess.h"
 #include "RingFbpArtifact.h"
@@ -758,15 +759,8 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
         std::vector<float> angs[2];
         std::vector<float> rads[2];
         std::vector<float> secs[2];
-        // 拼接扇区锚点必须跟随扫描方向（sectorCcw，电机联动）：
-        // 逆时针（默认）通道 s 的 A-line 覆盖 [φs, φs+w) → 锚点 φs；
-        // 顺时针覆盖 [φs−w, φs) → 锚点 φs−w（CUDA 按 floor((φ−start)/w)
-        // 划分像素扇区，取 s−1 才能把本通道数据投进其实际覆盖的扇区，
-        // 否则拼接掩膜会把整段数据裁掉；φs−w 对 selIdx=0 自动回绕到 M−1）。
-        const int sectorAnchorIdx = m_ringConfig.sectorCcw
-            ? selIdx[c] : (selIdx[c] - 1);
-        const double chSectorStartDeg =
-            m_ringConfig.sectorStartDeg + static_cast<double>(sectorAnchorIdx) * sectorWidthDeg;
+        const double chSectorStartDeg = ring_sector::maskStartDeg(
+            m_ringConfig.sectorStartDeg, sectorWidthDeg, selIdx[c], m_ringConfig.sectorCcw);
 
         for (int j = 0; j < perCh; ++j) {
             const int pos = j * M + selIdx[c];
@@ -955,7 +949,7 @@ bool ImagingSvc::processFbpBlock(const QVector<float>& input,const QVector<float
            channels.size()!=angles.size()||raw.size()!=qsizetype(depth)*angles.size())
             throw std::runtime_error("FBP block shape mismatch");
         const double width=360./M;
-        const double step=(m_ringConfig.sectorCcw?1:-1)*width/m_ringConfig.alinesPerChannelPerFrame;
+        const double step=ring_sector::directionSign(m_ringConfig.sectorCcw)*width/m_ringConfig.alinesPerChannelPerFrame;
         if(m_fbpDevice){
             processFbpDevice(raw,angles,channels,selected,M,width,step,final,preprocessStart);
             return true;
@@ -997,7 +991,8 @@ bool ImagingSvc::processFbpBlock(const QVector<float>& input,const QVector<float
         m_fbpPreprocessUs=ring_shm_obs::steadyNowUs()-preprocessStart;
         const auto accumulateStart=ring_shm_obs::steadyNowUs();
         // The complete CPU/GPU preprocessing transaction succeeds before FBP.
-        for(int k=0;k<M;++k){int c=selected[k];double sector=m_ringConfig.sectorStartDeg+(m_ringConfig.sectorCcw?k:k-1)*width;
+        for(int k=0;k<M;++k){int c=selected[k];
+            const double sector=ring_sector::maskStartDeg(m_ringConfig.sectorStartDeg,width,k,m_ringConfig.sectorCcw);
             for(int w=0;w<2;++w){auto& lines=ready[c][w];if(lines.empty())continue;
                 int nt=int(lines[0].data.size());std::vector<float> flat,ang;
                 flat.reserve(size_t(nt)*lines.size());for(auto& l:lines){flat.insert(flat.end(),l.data.begin(),l.data.end());ang.push_back(l.angle);}
@@ -1075,7 +1070,7 @@ void ImagingSvc::processFbpDevice(const QVector<float>& raw,const QVector<float>
     const auto accumulateStart=ring_shm_obs::steadyNowUs();
     for(int k=0;k<M;++k){
         const int c=selected[k];
-        const double sector=m_ringConfig.sectorStartDeg+(m_ringConfig.sectorCcw?k:k-1)*width;
+        const double sector=ring_sector::maskStartDeg(m_ringConfig.sectorStartDeg,width,k,m_ringConfig.sectorCcw);
         for(int w=0;w<2;++w){
             auto& s=state[c][w];
             if(s.ready.empty())continue;

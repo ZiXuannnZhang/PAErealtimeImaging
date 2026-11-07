@@ -1,4 +1,5 @@
 #include "RingBlockAssembler.h"
+#include "RingSectorGeometry.h"
 
 #include <algorithm>
 #include <cstring>
@@ -372,11 +373,8 @@ void RingBlockAssembler::appendCompletedTrigger(const PendingTrigger &pt)
         std::memcpy(m_raw.data() + (static_cast<size_t>(base) + s) * m_sampDepth,
                     pt.lines[ch].data(),
                     static_cast<size_t>(m_sampDepth) * sizeof(float));
-        // 扫描方向（电机联动）：逆时针 k 项取 +（历史唯一取值），顺时针取 −，
-        // 即顺时针扫描的整圈图像为逆时针结果的镜像；扇区分配 s 项与方向无关。
-        const double dirSign = m_sectorCcw ? 1.0 : -1.0;
-        const double angle = m_sectorStartDeg + s * m_sectorWidthDeg
-                           + dirSign * (isWl1 ? k : kNext) * m_stepDeg;
+        const double angle = ring_sector::scanStartDeg(m_sectorStartDeg, m_sectorWidthDeg, s, m_sectorCcw)
+                           + ring_sector::directionSign(m_sectorCcw) * (isWl1 ? k : kNext) * m_stepDeg;
         m_angles[base + s] = static_cast<float>(angle);
         m_channels[base + s] = static_cast<uint8_t>(ch);
     }

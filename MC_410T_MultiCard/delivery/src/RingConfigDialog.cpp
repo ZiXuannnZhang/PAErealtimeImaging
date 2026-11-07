@@ -1,6 +1,7 @@
 #include "PaimageAcquisition/SettingsPath.h"
 #include "RingConfigDialog.h"
 #include "RingSampleWindow.h"
+#include "RingSectorGeometry.h"
 #include "RingTimevarLowpassSettings.h"
 #include <QDialogButtonBox>
 #include <QTimer>
@@ -284,7 +285,7 @@ void RingConfigDialog::buildUi()
     motorLinkageRow->addWidget(m_btnMotorParamsFile);
     m_spnSectorStart = new QDoubleSpinBox; m_spnSectorStart->setRange(-360, 360);
     m_spnSectorStart->setDecimals(1); m_spnSectorStart->setValue(0.0);
-    m_spnSectorStart->setToolTip("0° = 9 点钟方向，正值逆时针偏转。");
+    m_spnSectorStart->setToolTip("手动设置：0° = 九点钟，正值在画面中顺时针偏转。电机联动时固定从九点钟开始。");
     fCh->addRow("单圈总A-line数(含双波长)", m_spnTotalAlines);
     fCh->addRow("电机联动(方向/步数)", motorLinkageRow);
     fCh->addRow("首通道扇区起点(°,0=9点钟)", m_spnSectorStart);
@@ -348,7 +349,7 @@ void RingConfigDialog::buildUi()
     m_spnGridMm = new QDoubleSpinBox; m_spnGridMm->setRange(0.005, 5); m_spnGridMm->setDecimals(3); m_spnGridMm->setValue(0.01);
     m_spnFovDeg = new QDoubleSpinBox; m_spnFovDeg->setRange(1, 360); m_spnFovDeg->setValue(360);
     m_spnFovTheta0 = new QDoubleSpinBox; m_spnFovTheta0->setRange(-360, 360); m_spnFovTheta0->setDecimals(1); m_spnFovTheta0->setValue(0.0);
-    m_spnFovTheta0->setToolTip("成像扇区起始角，0° = 9 点钟方向，正值逆时针偏转（与首通道扇区起点一致）。");
+    m_spnFovTheta0->setToolTip("成像扇区起始角，0° = 九点钟，正值在画面中顺时针偏转。");
     m_chkMaskOob = new QCheckBox("越界置零"); m_chkMaskOob->setChecked(true);
     // 注：CoverageDeg/Theta0Deg 仅用于离线整帧文件重建脚本，实时链路逐 A-line 角度由扇区模型给出，故不在界面提供；
     // 插值固定为 linear（DAS 反投影需要分数采样点插值，nearest 仅调试用）。
@@ -719,11 +720,9 @@ RingReconCudaConfig RingConfigDialog::config() const
     // 单圈总A-line数(含双波长) → 每通道每波长每圈A-line数
     cfg.alinesPerChannelPerFrame = (cnt > 0) ? m_spnTotalAlines->value() / (cnt * 2) : 0;
     cfg.alinesPerFrame = m_spnTotalAlines->value();
-    // 扇区起点 UI 语义：0 = 9 点钟方向（标准角度 180°），正值逆时针偏转；
-    // 电机联动方向已应用时起点随方向同步：逆=九点钟(180°)、顺=三点钟(0°)，
-    // 未联动时保持 UI 原逻辑（默认 0 → 九点钟，逆时针重建 = 历史固定行为）。
-    cfg.sectorStartDeg = m_motorStartLinked
-        ? m_motorStartDeg : (180.0 + m_spnSectorStart->value());
+    // 电机联动顺、逆均固定在九点钟；手动起点仍以九点钟为零偏移。
+    cfg.sectorStartDeg = ring_sector::kNineOClockDeg
+        + (m_motorStartLinked ? 0.0 : m_spnSectorStart->value());
     // 重建角度步进方向位：1=正向、0=负向；电机面板输入经实机校正映射写入。
     // 无联动输入时保持默认 1，不改变原有手动重建路径。
     cfg.sectorCcw = m_motorSectorCcw;
@@ -977,14 +976,12 @@ bool RingConfigDialog::applyMotorScanParams(bool hasDirection, bool ccw,
         if (!reason.isEmpty()) { if (error) *error = reason; return false; }
     }
     const auto oldDirection = m_motorSectorCcw;
-    const auto oldStart = m_motorStartDeg;
     const auto oldLinked = m_motorStartLinked;
     const auto oldTotal = m_spnTotalAlines->value();
     if (hasDirection) setMotorScanDirection(ccw);
     if (totalAlines > 0) setMotorScanTotalAlines(totalAlines);
     if (applyConfig(error)) return true;
     m_motorSectorCcw = oldDirection;
-    m_motorStartDeg = oldStart;
     m_motorStartLinked = oldLinked;
     m_spnTotalAlines->setValue(oldTotal);
     return false;
@@ -1001,10 +998,8 @@ int RingConfigDialog::enabledChannelCount() const
 void RingConfigDialog::setMotorScanDirection(bool ccw)
 {
     // 2026-10-29 实机观察：旧 CCW->1 / CW->0 的视觉方向与面板相反。
-    // 只反转重建步进方向，保留面板方向文字、输入文件语义及原有起点角。
+    // 保留实机校正的步进方向；联动起点与方向无关。
     m_motorSectorCcw = ccw ? 0 : 1;
-    // 面板逆=九点钟(180°)、面板顺=三点钟(0°)，本次不改起点位置。
-    m_motorStartDeg = ccw ? 180.0 : 0.0;
     m_motorStartLinked = true;
 }
 

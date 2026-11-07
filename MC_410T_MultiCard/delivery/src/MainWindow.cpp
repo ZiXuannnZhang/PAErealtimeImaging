@@ -5636,9 +5636,7 @@ void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &para
                    .arg(applyTotal ? QString::number(totalAlines)
                                    : QStringLiteral("(未变)"))
                    .arg(params.hasDirection
-                            ? (params.directionCcw
-                                   ? QStringLiteral("180°（九点钟）")
-                                   : QStringLiteral("0°（三点钟）"))
+                            ? QStringLiteral("%1°").arg(m_imagingController->ringConfig().sectorStartDeg)
                             : QStringLiteral("(未变)"))
                    .arg(m_imagingController->ringConfig().sectorCcw));
 }

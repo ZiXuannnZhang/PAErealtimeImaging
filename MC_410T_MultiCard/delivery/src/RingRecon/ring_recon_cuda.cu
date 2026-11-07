@@ -617,10 +617,10 @@ static int appendImpl(void* handle, const float* bscan,
         if (sectorMask) {
             double delta = std::fmod(static_cast<double>(sectorTheta0Deg[j]) - sectorStartDeg, 360.0);
             if (delta < 0.0) delta += 360.0;
-            int idx = static_cast<int>(delta / widthDeg + 1e-9);
-            if (idx < 0) idx = 0;
-            if (idx >= h->sectorCount) idx = h->sectorCount - 1;
-            sectorIdx[j] = idx;
+            // The caller supplies a sector boundary, not an arbitrary point inside
+            // it. Round to its index: float degrees can put an exact boundary just
+            // below the integer (notably for seven channels or a fractional origin).
+            sectorIdx[j] = static_cast<int>(std::lround(delta / widthDeg)) % h->sectorCount;
         } else {
             sectorIdx[j] = 0;
         }

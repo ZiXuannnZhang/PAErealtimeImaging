@@ -45,7 +45,7 @@ typedef struct RingReconCudaConfig {
     int    alinesPerChannelPerBlock;
     int    alinesPerChannelPerFrame;
     double sectorStartDeg;      // first selected channel sector start (deg)
-    int    sectorCcw;           // 1 = counterclockwise
+    int    sectorCcw;           // 1 = increasing reconstruction angle (clockwise on screen)
     int    triggerWlOdd;        // 1 = odd trigger is wavelength 1
     double timeoutResetSec;     // 超时重置：超过该秒数无新触发时，下一触发视为新一圈并重置旧图像（0=关闭）
 

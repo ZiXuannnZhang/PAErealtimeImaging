@@ -66,6 +66,7 @@ public:
             settings.setValue("RingConfigDialog/Defaults/totalAlines", 8);
             settings.setValue("RingConfigDialog/Defaults/fovMm", 4.0);
             settings.setValue("RingConfigDialog/Defaults/gridMm", 0.1);
+            settings.setValue("RingConfigDialog/Defaults/sectorStart", 25.0);
             settings.setValue("MotorScanLinkage/ParamsFile", motorFile);
             settings.setValue("MotorScanLinkage/TotalAlinesRule", "directionOnly");
             for (int channel = 0; channel < 8; ++channel)
@@ -80,6 +81,7 @@ public:
             const auto earlyStatus = window.m_motorScanMonitor->lastStatus();
             window.ensureRingConfigDialog();
             auto& dialog = *window.m_ringConfigDialog;
+            check(dialog.config().sectorStartDeg == 205.0, "manual sector start was not preserved");
             check(widget<QLabel>(dialog, "motorScanLinkageStatus")->text() == earlyStatus,
                   "lazy dialog did not recover the monitor status");
             auto* depth = widget<QLineEdit>(window, "edtDataTime");
@@ -257,10 +259,10 @@ public:
                 normalizer.timeoutBoundary(1); window.m_motorScanMonitor->tick();
                 waitFor([&]{return controller.isRunning() && window.m_imagingServiceReady.load()
                     && controller.m_testSvcStarts > startsBeforeMotor;}, "motor boundary restart failed");
-                check(controller.ringConfig().sectorCcw == 1 && controller.ringConfig().sectorStartDeg == 0
+                check(controller.ringConfig().sectorCcw == 1 && controller.ringConfig().sectorStartDeg == 180
                     && ring_timevar::toJson(controller.ringTimevarConfig()) == acceptedTv
                     && ring_fbp_settings::toJson(controller.m_fbpSettings) == acceptedFbp,
-                      "motor direction restart lost either STFT/FBP snapshot");
+                      "motor direction restart moved the nine-o'clock start or lost a filter snapshot");
                 // A service stopping inside another active round must not reopen the motor gate.
                 normalizer.classify(1, 101); stop();
                 check(!window.m_motorScanMonitor->applyGateOpen(), "service stop reopened an active physical round");
@@ -269,11 +271,13 @@ public:
             std::cout<<"PASS FBP real rejection, four-combination motor CW restart with STFT/FBP snapshots, service-stop latch\n";
             QString motorError;
             const auto oldDirection = controller.ringConfig().sectorCcw;
+            const auto oldStart = controller.ringConfig().sectorStartDeg;
             widget<QComboBox>(dialog,"ringReconAlgorithm")->setCurrentIndex(1);
             widget<QLineEdit>(dialog,"fbpDensities")->setText("0");
             check(!dialog.applyMotorScanParams(true, true, 0, &motorError) && !motorError.isEmpty(),
                   "invalid filter draft did not reject motor update without a modal dialog");
-            check(controller.ringConfig().sectorCcw == oldDirection && dialog.config().sectorCcw == oldDirection,
+            check(controller.ringConfig().sectorCcw == oldDirection && dialog.config().sectorCcw == oldDirection
+                && controller.ringConfig().sectorStartDeg == oldStart && dialog.config().sectorStartDeg == oldStart,
                   "rejected motor update left hidden direction/anchor changes");
             dialog.reject();
             dialog.show();

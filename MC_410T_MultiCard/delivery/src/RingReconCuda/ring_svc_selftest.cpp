@@ -90,6 +90,7 @@ int main(int argc, char** argv) {
     const int perChBlock = argInt(args, "--block", 200);      // 每通道每块 A-line 数
     const int chMask = argInt(args, "--channels", 0xFF);      // 勾选通道位图
     const double sectorStart = argDouble(args, "--sector-start", 180.0);
+    const int sectorCcw = argInt(args, "--sector-ccw", 1);
     const std::string outDir = argStr(args, "--out", "ring_svc_out");
     const std::string svcPath = argStr(args, "--svc");
     const std::string sosRadiiMm = argStr(args, "--sos-radii-mm");   // 空=单一声速
@@ -122,12 +123,16 @@ int main(int argc, char** argv) {
         std::fprintf(stderr,
             "usage: ring_svc_selftest --data <11.dat> --svc <ImagingSvc.exe> "
             "[--id 11] [--grid-mm 0.1] [--block 200] [--channels 255] "
-            "[--sector-start 180] [--out <dir>] "
+            "[--sector-start 180] [--sector-ccw 0|1] [--out <dir>] "
             "[--radius-per-ch 6.57,6.55,...] [--splice 1] [--splice-blend 1.5] "
             "[--sos-radii-mm 3] [--sos 1490,1540] "
             "[--sys-delay-per-ch d0w1,d0w2,d1w1,d1w2,...] "
             "[--identity-jump-at N] [--drop-block N] "
             "[--exact-fbp 1] [--mask-length N] [--benchmark-blocks N] [--frame-timeout-ms 20000] [--timevar-lowpass off|on|high] [--fbp-preprocess-backend auto|cuda|staged] [--rounds N] [--synthetic 1] [--samples N] [--no-save 1]\n");
+        return 2;
+    }
+    if (sectorCcw != 0 && sectorCcw != 1) {
+        std::fprintf(stderr, "--sector-ccw must be 0 (screen CCW) or 1 (screen CW)\n");
         return 2;
     }
     if (!timevarMode.empty() && timevarMode != "off" && timevarMode != "on" && timevarMode != "high") {
@@ -366,7 +371,7 @@ int main(int argc, char** argv) {
     ring["alinesPerChannelPerBlock"] = perChBlock;
     ring["alinesPerChannelPerFrame"] = K;
     ring["sectorStartDeg"] = sectorStart;
-    ring["sectorCcw"] = 1;
+    ring["sectorCcw"] = sectorCcw;
     ring["triggerWlOdd"] = 1;
 
     QJsonObject timevar;
@@ -615,7 +620,7 @@ int main(int argc, char** argv) {
         std::printf("block %3d/%d: %.2f ms\n", blockSeq + 1, nBlocks, ms);
     });
     assembler.configure(channels, perChBlock, sampDepth, sectorStart,
-                        sectorWidth, step, K, 1, timeoutResetSec);
+                        sectorWidth, step, K, 1, timeoutResetSec, sectorCcw);
     assembler.setTimeoutCallback([&]() {
         // 模拟接收端：触发级超时判定新一圈，通知 svc 清空重建累积
         sendJson(sock, {{"cmd", "ring_reset"}});
