@@ -602,12 +602,12 @@ MainWindow::MainWindow(QWidget *parent)
                const paimage::RoundIdentity &round, bool sourceRoundComplete) {
             // 回调运行在独立成像 worker；只提交成像服务并更新 per-round 统计。
             m_roundUi.onBlock();
-            QVector<float> rawQ(raw.begin(), raw.end());
-            QVector<float> angQ(angles.begin(), angles.end());
-            QVector<quint8> chQ(channels.begin(), channels.end());
             bool submitted = false;
             std::uint64_t submitIndex = 0;
             try {
+                QVector<float> rawQ(raw.begin(), raw.end());
+                QVector<float> angQ(angles.begin(), angles.end());
+                QVector<quint8> chQ(channels.begin(), channels.end());
                 submitted = m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire)
                     && m_imagingController->submitRingBlock(
                         rawQ, angQ, chQ, round, blockSeq, &submitIndex, sourceRoundComplete);
@@ -665,7 +665,7 @@ MainWindow::MainWindow(QWidget *parent)
         }, Qt::QueuedConnection);
     });
     m_imagingBypass->setConsumer([this](const TriggerGroupConstPtr& frame,
-                                        const std::array<bool, 8>& enabled) {
+                                        const std::array<bool, 8>&) {
         if (!frame || !m_ringAssembler || !m_ringAssemblerConfigured) return false;
         std::lock_guard<std::mutex> assemblerLock(m_ringAssemblerMutex);
         if (!m_ringAssemblerConfigured) return false;
@@ -686,26 +686,7 @@ MainWindow::MainWindow(QWidget *parent)
             }
             return false;
         }
-        const int chA = frame->cardId * 2;
-        const int chB = chA + 1;
-        if (chA < 0 || chB >= 8) return false;
-        const paimage::RoundIdentity round = frame->physicalRoundIdentity();
-        bool fed = false;
-        // Ring final marker sources the stable terminal data property, so the
-        // round end survives even when the first classified card of the final
-        // trigger is Ring-disabled. The one-shot roundComplete pulse is not
-        // used here.
-        if (enabled[chA])
-            m_ringAssembler->pushChannelLine(chA, frame->triggerSeq, round,
-                                              frame->freqA.data(),
-                                              static_cast<int>(frame->freqA.size()), frame->isFinalLogicalTrigger);
-        fed = fed || enabled[chA];
-        if (enabled[chB])
-            m_ringAssembler->pushChannelLine(chB, frame->triggerSeq, round,
-                                             frame->freqB.data(),
-                                             static_cast<int>(frame->freqB.size()), frame->isFinalLogicalTrigger);
-        fed = fed || enabled[chB];
-        return true;
+        return m_ringAssembler->pushCardGroup(frame);
     });
     connect(m_imagingController, &ImagingController::svcStopped, this, [this]() {
         m_imagingServiceReady.store(false, std::memory_order_release);
@@ -3426,6 +3407,11 @@ void MainWindow::onUpdateStatistics()
     if (m_imagingBypass) {
         const auto s = m_imagingBypass->snapshot();
         if (auto *recorder = DiagnosticRecorder::instance()) {
+            RingBlockAssembler::Snapshot assembly;
+            {
+                std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+                if (m_ringAssembler) assembly = m_ringAssembler->snapshot();
+            }
             recorder->recordEvent(QStringLiteral("imaging.bypass"),
                                   QStringLiteral("imaging_queue_snapshot"),
                                   DiagnosticRecorder::Severity::Info,
@@ -3450,6 +3436,9 @@ void MainWindow::onUpdateStatistics()
                  {QStringLiteral("blocksSubmitted"), QString::number(s.blocksSubmitted)},
                  {QStringLiteral("blocksSkipped"), QString::number(s.blocksSkipped)},
                  {QStringLiteral("blockExceptions"), QString::number(s.blockExceptions)},
+                 {QStringLiteral("reorderPendingTriggers"), QString::number(assembly.pendingCount)},
+                 {QStringLiteral("reorderEvictedTriggers"), QString::number(assembly.pendingEvictions)},
+                 {QStringLiteral("reorderIncompleteBlocks"), QString::number(assembly.incompleteBlocks)},
                  {QStringLiteral("maxSubmitNs"), QString::number(s.maxSubmitNs)},
                  {QStringLiteral("maxWorkerNs"), QString::number(s.maxWorkerNs)}});
         }

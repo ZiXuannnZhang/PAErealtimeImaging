@@ -23,12 +23,14 @@ void RingBlockAssembler::configure(const int enabledChannels[8],
 {
     m_channelCount = 0;
     m_allMask = 0;
+    m_cardMask = 0;
     for (int c = 0; c < 8; ++c) {
         m_enabled[c] = enabledChannels[c] ? 1 : 0;
         m_physOfSel[c] = -1;
         if (m_enabled[c]) {
             m_physOfSel[m_channelCount] = c;
             m_allMask |= (1u << c);
+            m_cardMask |= (1u << (c / 2));
             ++m_channelCount;
         }
     }
@@ -49,6 +51,8 @@ void RingBlockAssembler::configure(const int enabledChannels[8],
 void RingBlockAssembler::reset()
 {
     m_pending.clear();
+    m_orderedPending.clear();
+    m_nextLogicalTrigger = m_highLogicalTrigger = 0;
     m_blockSeq = 0;
     m_blockTriggers.store(0, std::memory_order_relaxed);
     m_globalTrigger = 0;
@@ -68,6 +72,7 @@ void RingBlockAssembler::reset()
     m_invalidIdentityDrops = 0;
     m_blockIdentityViolations = 0;
     m_pendingEvictions = 0;
+    m_incompleteBlocks = 0;
     if (m_configured) {
         const size_t alines = static_cast<size_t>(m_channelCount) * m_perChannelBlock;
         m_raw.assign(alines * static_cast<size_t>(m_sampDepth), 0.0f);
@@ -89,7 +94,7 @@ void RingBlockAssembler::beginMeasurementSession(std::uint64_t measurementSessio
 
 bool RingBlockAssembler::completeLogicalRound()
 {
-    if (!m_configured || !m_pending.empty() ||
+    if (!m_configured || !m_pending.empty() || !m_orderedPending.empty() ||
         m_blockTriggers.load(std::memory_order_relaxed) != 0)
         return false;
 
@@ -129,7 +134,7 @@ void RingBlockAssembler::resetRoundState(bool requireNewIdentity)
 
 void RingBlockAssembler::resetPhaseAndResidual(bool countResidual)
 {
-    const std::size_t pendingCount = m_pending.size();
+    const std::size_t pendingCount = m_pending.size() + m_orderedPending.size();
     const int blockTriggers = m_blockTriggers.load(std::memory_order_relaxed);
     if (countResidual && hasResidual(pendingCount, blockTriggers)) {
         ++m_residualTransitions;
@@ -137,16 +142,12 @@ void RingBlockAssembler::resetPhaseAndResidual(bool countResidual)
         m_residualBlockTriggers += static_cast<std::uint64_t>(blockTriggers);
     }
     m_pending.clear();
+    m_orderedPending.clear();
+    m_nextLogicalTrigger = m_highLogicalTrigger = 0;
     m_blockTriggers.store(0, std::memory_order_relaxed);
     m_globalTrigger = 0;
     m_nextPendingOrder = 0;
     m_blockRound.reset();
-    if (m_configured) {
-        const size_t alines = static_cast<size_t>(m_channelCount) * m_perChannelBlock;
-        m_raw.assign(alines * static_cast<size_t>(m_sampDepth), 0.0f);
-        m_angles.assign(alines, 0.0f);
-        m_channels.assign(alines, 0);
-    }
 }
 
 void RingBlockAssembler::notifyRoundTransition(const RoundTransition &event) const
@@ -201,7 +202,7 @@ bool RingBlockAssembler::acceptRound(const paimage::RoundIdentity &round)
             event.kind = RoundTransition::Kind::StaleDrop;
             event.oldRound = active;
             event.incomingRound = round;
-            event.pendingCount = m_pending.size();
+            event.pendingCount = m_pending.size() + m_orderedPending.size();
             event.blockTriggers = m_blockTriggers.load(std::memory_order_relaxed);
             notifyRoundTransition(event);
         }
@@ -220,14 +221,14 @@ bool RingBlockAssembler::acceptRound(const paimage::RoundIdentity &round)
             event.kind = RoundTransition::Kind::StaleDrop;
             event.oldRound = active;
             event.incomingRound = round;
-            event.pendingCount = m_pending.size();
+            event.pendingCount = m_pending.size() + m_orderedPending.size();
             event.blockTriggers = m_blockTriggers.load(std::memory_order_relaxed);
             notifyRoundTransition(event);
         }
         return false;
     }
 
-    const std::size_t pendingCount = m_pending.size();
+    const std::size_t pendingCount = m_pending.size() + m_orderedPending.size();
     const int blockTriggers = m_blockTriggers.load(std::memory_order_relaxed);
     const bool residual = hasResidual(pendingCount, blockTriggers);
     const bool generationGap = active.measurementSession == round.measurementSession &&
@@ -264,6 +265,79 @@ bool RingBlockAssembler::acceptRound(const paimage::RoundIdentity &round)
     m_requireNewIdentityAfterTimeout = false;
     notifyRoundTransition(event);
     return true;
+}
+
+bool RingBlockAssembler::pushCardGroup(const TriggerGroupConstPtr &group)
+{
+    if (!m_configured || !group || group->logicalTriggerIndex < 0 ||
+        group->cardId < 0 || group->cardId >= 4)
+        return false;
+    const auto card = static_cast<unsigned>(group->cardId);
+    const auto bit = 1u << card;
+    const auto round = group->physicalRoundIdentity();
+    if (!(m_cardMask & bit) || !acceptRound(round))
+        return false;
+    const auto index = static_cast<std::uint64_t>(group->logicalTriggerIndex);
+    if (index < m_nextLogicalTrigger)
+        return false; // Duplicate or arrived after the reorder window closed.
+    auto &pending = m_orderedPending[index];
+    if (pending.mask & bit)
+        return false;
+    pending.cards[card] = group;
+    pending.mask |= bit;
+    pending.sourceRoundComplete |= group->isFinalLogicalTrigger;
+    m_highLogicalTrigger = std::max(m_highLogicalTrigger, index);
+    m_lastTriggerUs.store(std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count(), std::memory_order_relaxed);
+    drainOrderedTriggers();
+    return true;
+}
+
+void RingBlockAssembler::drainOrderedTriggers()
+{
+    const auto blockSize = static_cast<std::uint64_t>(m_perChannelBlock);
+    // Don't hold several otherwise ready blocks behind one missing trigger.
+    const auto window = std::min<std::uint64_t>(kMaxPendingTriggers, blockSize);
+    for (;;) {
+        auto it = m_orderedPending.find(m_nextLogicalTrigger);
+        if (it != m_orderedPending.end() && it->second.mask == m_cardMask) {
+            auto trigger = std::move(it->second);
+            m_orderedPending.erase(it);
+            Lines lines{};
+            for (int s = 0; s < m_channelCount; ++s) {
+                const int ch = m_physOfSel[s];
+                const auto &card = *trigger.cards[ch / 2];
+                const auto &data = ch % 2 ? card.freqB : card.freqA;
+                lines[ch] = {data.data(), data.size()};
+            }
+            const auto index = m_nextLogicalTrigger++;
+            appendCompletedTrigger(*m_activeRound, lines, index, trigger.sourceRoundComplete);
+            if (trigger.sourceRoundComplete)
+                return;
+            continue;
+        }
+        if (m_highLogicalTrigger - std::min(m_highLogicalTrigger, m_nextLogicalTrigger)
+            < window)
+            return;
+
+        // A hole older than the window invalidates its configured block.
+        // Never compact across a hole: the service demuxes the two
+        // wavelengths by row parity and angles must stay at physical indices.
+        auto next = (m_nextLogicalTrigger / blockSize + 1) * blockSize;
+        auto end = m_orderedPending.lower_bound(next);
+        m_pendingEvictions += static_cast<std::uint64_t>(std::distance(m_orderedPending.begin(), end));
+        m_orderedPending.erase(m_orderedPending.begin(), end);
+        // Skip wholly absent blocks in one step, but keep the trailing window
+        // open for late arrivals.
+        const auto expired = m_highLogicalTrigger - window;
+        const auto earliest = m_orderedPending.empty()
+            ? expired : std::min(expired, m_orderedPending.begin()->first);
+        next = std::max(next, (earliest / blockSize) * blockSize);
+        m_incompleteBlocks += (next / blockSize) - (m_nextLogicalTrigger / blockSize);
+        m_nextLogicalTrigger = next;
+        m_blockTriggers.store(0, std::memory_order_relaxed);
+        m_blockRound.reset();
+    }
 }
 
 void RingBlockAssembler::pushChannelLine(int channelId, uint16_t triggerSeq,
@@ -332,7 +406,10 @@ void RingBlockAssembler::pushChannelLine(int channelId, uint16_t triggerSeq,
     if (it != m_pending.end() && it->second.mask == m_allMask) {
         PendingTrigger done = std::move(it->second);
         m_pending.erase(it);
-        appendCompletedTrigger(done);
+        Lines lines{};
+        for (int c = 0; c < 8; ++c)
+            lines[c] = {done.lines[c].data(), done.lines[c].size()};
+        appendCompletedTrigger(done.round, lines, m_globalTrigger++, done.sourceRoundComplete);
     }
 }
 
@@ -345,34 +422,44 @@ void RingBlockAssembler::pushChannelLine(int channelId, uint16_t triggerSeq,
                     paimage::RoundIdentity{1, 0}, line, length);
 }
 
-void RingBlockAssembler::appendCompletedTrigger(const PendingTrigger &pt)
+void RingBlockAssembler::appendCompletedTrigger(const paimage::RoundIdentity &round,
+                                                 const Lines &lines, std::uint64_t g,
+                                                 bool sourceRoundComplete)
 {
-    if (!m_activeRound.has_value() || pt.round != *m_activeRound) {
+    if (!m_activeRound.has_value() || round != *m_activeRound) {
         ++m_blockIdentityViolations;
         resetPhaseAndResidual(false);
         return;
     }
     if (!m_blockRound.has_value())
-        m_blockRound = pt.round;
-    if (*m_blockRound != pt.round) {
+        m_blockRound = round;
+    if (*m_blockRound != round) {
         ++m_blockIdentityViolations;
         resetPhaseAndResidual(false);
         return;
     }
 
-    const uint64_t g = m_globalTrigger++;
     const bool isWl1 = (m_triggerWlOdd ? (g % 2 == 0) : (g % 2 == 1));
     const int kRaw = static_cast<int>(g / 2);
     const int k = (m_perChannelFrame > 0) ? (kRaw % m_perChannelFrame) : kRaw;
     const int kNext = (m_perChannelFrame > 0 && kRaw >= m_perChannelFrame)
                       ? ((kRaw + 1) % m_perChannelFrame) : (kRaw + 1);
     const int base = m_blockTriggers.load(std::memory_order_relaxed) * m_channelCount;
+    if (base == 0) {
+        // A callback may take ownership. Reuse the arrays otherwise: every
+        // row, including the short-line padding, is overwritten before publish.
+        const auto alines = static_cast<std::size_t>(m_channelCount) * m_perChannelBlock;
+        m_raw.resize(alines * m_sampDepth);
+        m_angles.resize(alines);
+        m_channels.resize(alines);
+    }
 
     for (int s = 0; s < m_channelCount; ++s) {
         const int ch = m_physOfSel[s];
-        std::memcpy(m_raw.data() + (static_cast<size_t>(base) + s) * m_sampDepth,
-                    pt.lines[ch].data(),
-                    static_cast<size_t>(m_sampDepth) * sizeof(float));
+        auto *dest = m_raw.data() + (static_cast<size_t>(base) + s) * m_sampDepth;
+        const auto count = std::min(lines[ch].second, static_cast<std::size_t>(m_sampDepth));
+        if (count) std::copy_n(lines[ch].first, count, dest);
+        std::fill(dest + count, dest + m_sampDepth, 0.0f);
         const double angle = ring_sector::scanStartDeg(m_sectorStartDeg, m_sectorWidthDeg, s, m_sectorCcw)
                            + ring_sector::directionSign(m_sectorCcw) * (isWl1 ? k : kNext) * m_stepDeg;
         m_angles[base + s] = static_cast<float>(angle);
@@ -383,18 +470,19 @@ void RingBlockAssembler::appendCompletedTrigger(const PendingTrigger &pt)
 
     if (m_blockTriggers.load(std::memory_order_relaxed) == m_perChannelBlock) {
         const paimage::RoundIdentity blockRound = *m_blockRound;
-        if (m_callback)
-            m_callback(std::move(m_raw), std::move(m_angles),
-                       std::move(m_channels), m_blockSeq, blockRound, pt.sourceRoundComplete);
-        ++m_blockSeq;
+        const int seq = m_blockSeq++;
         m_blockTriggers.store(0, std::memory_order_relaxed);
         m_blockRound.reset();
-        const size_t alines = static_cast<size_t>(m_channelCount) * m_perChannelBlock;
-        m_raw.assign(alines * static_cast<size_t>(m_sampDepth), 0.0f);
-        m_angles.assign(alines, 0.0f);
-        m_channels.assign(alines, 0);
+        if (sourceRoundComplete) {
+            resetPhaseAndResidual(true);
+            m_requireNewIdentityAfterTimeout = true;
+        }
+        if (m_callback)
+            m_callback(std::move(m_raw), std::move(m_angles),
+                       std::move(m_channels), seq, blockRound, sourceRoundComplete);
+        return;
     }
-    if (pt.sourceRoundComplete) {
+    if (sourceRoundComplete) {
         // A final trigger in a partial block cannot produce a complete image.
         // Close this identity so late channels cannot complete the residual.
         resetPhaseAndResidual(true);
@@ -409,7 +497,7 @@ RingBlockAssembler::Snapshot RingBlockAssembler::snapshot() const
     if (result.hasActiveRound) result.activeRound = *m_activeRound;
     result.hasMinimumRound = m_minimumRound.has_value();
     if (result.hasMinimumRound) result.minimumRound = *m_minimumRound;
-    result.pendingCount = m_pending.size();
+    result.pendingCount = m_pending.size() + m_orderedPending.size();
     result.blockTriggers = m_blockTriggers.load(std::memory_order_relaxed);
     result.cleanTransitions = m_cleanTransitions;
     result.residualTransitions = m_residualTransitions;
@@ -420,5 +508,6 @@ RingBlockAssembler::Snapshot RingBlockAssembler::snapshot() const
     result.invalidIdentityDrops = m_invalidIdentityDrops;
     result.blockIdentityViolations = m_blockIdentityViolations;
     result.pendingEvictions = m_pendingEvictions;
+    result.incompleteBlocks = m_incompleteBlocks;
     return result;
 }

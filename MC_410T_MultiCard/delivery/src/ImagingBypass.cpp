@@ -30,7 +30,7 @@ const char *imagingSubmitResultName(ImagingSubmitResult result) noexcept
 }
 
 ImagingBypass::ImagingBypass(std::size_t capacity)
-    : capacity_(std::max<std::size_t>(1, capacity))
+    : capacity_(std::max<std::size_t>(1, capacity)), queue_(capacity_)
 {
 }
 
@@ -41,8 +41,9 @@ ImagingBypass::~ImagingBypass()
 
 void ImagingBypass::setConsumer(Consumer consumer)
 {
+    auto next = consumer ? std::make_shared<const Consumer>(std::move(consumer)) : nullptr;
     std::lock_guard<std::mutex> lock(mutex_);
-    consumer_ = std::move(consumer);
+    consumer_.swap(next);
 }
 
 void ImagingBypass::setEnabledChannels(const std::array<bool, 8> &channels)
@@ -64,14 +65,8 @@ void ImagingBypass::setServiceReady(bool ready)
 void ImagingBypass::beginSession(std::uint64_t session)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    const std::uint64_t discarded = queue_.size();
-    queue_.clear();
-    depth_.store(0, std::memory_order_relaxed);
+    clearLocked(ImagingSubmitResult::StaleSession);
     activeSession_.store(session, std::memory_order_release);
-    if (discarded) {
-        droppedOnClear_.fetch_add(discarded, std::memory_order_relaxed);
-        droppedStaleSession_.fetch_add(discarded, std::memory_order_relaxed);
-    }
 }
 
 void ImagingBypass::start()
@@ -100,8 +95,17 @@ void ImagingBypass::stop()
 void ImagingBypass::clear(ImagingSubmitResult reason)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    const std::uint64_t discarded = queue_.size();
-    queue_.clear();
+    clearLocked(reason);
+}
+
+void ImagingBypass::clearLocked(ImagingSubmitResult reason)
+{
+    const auto discarded = size_;
+    while (size_ != 0) {
+        queue_[head_] = {};
+        head_ = (head_ + 1) % capacity_;
+        --size_;
+    }
     depth_.store(0, std::memory_order_relaxed);
     if (discarded) {
         droppedOnClear_.fetch_add(discarded, std::memory_order_relaxed);
@@ -133,25 +137,28 @@ ImagingSubmitResult ImagingBypass::tryPush(const TriggerGroupConstPtr &frame) no
         return finish(ImagingSubmitResult::Disabled);
     if (!serviceReady_.load(std::memory_order_acquire))
         return finish(ImagingSubmitResult::ServiceNotReady);
-    std::unique_lock<std::mutex> lock(mutex_, std::try_to_lock);
-    if (!lock.owns_lock()) return finish(ImagingSubmitResult::QueueBusy);
+    std::unique_lock<std::mutex> lock(mutex_);
+    // The gate may have closed while this producer was waiting for the FIFO.
+    if (stopping_.load(std::memory_order_acquire))
+        return finish(ImagingSubmitResult::Stopping);
+    if (!enabled_.load(std::memory_order_acquire))
+        return finish(ImagingSubmitResult::Disabled);
+    if (!serviceReady_.load(std::memory_order_acquire))
+        return finish(ImagingSubmitResult::ServiceNotReady);
+    if ((enabledMask_.load(std::memory_order_relaxed) & (3u << channelA)) == 0)
+        return finish(ImagingSubmitResult::Disabled);
     std::uint64_t active = activeSession_.load(std::memory_order_acquire);
     const std::uint64_t incoming = frame->measurementSession;
     if (incoming != 0 && active != 0 && incoming < active)
         return finish(ImagingSubmitResult::StaleSession);
     if (incoming != 0 && incoming > active) {
-        const std::uint64_t discarded = queue_.size();
-        queue_.clear();
-        depth_.store(0, std::memory_order_relaxed);
+        clearLocked(ImagingSubmitResult::StaleSession);
         activeSession_.store(incoming, std::memory_order_release);
-        if (discarded) {
-            droppedOnClear_.fetch_add(discarded, std::memory_order_relaxed);
-            droppedStaleSession_.fetch_add(discarded, std::memory_order_relaxed);
-        }
     }
-    if (queue_.size() >= capacity_) return finish(ImagingSubmitResult::QueueFull);
+    if (size_ == capacity_) return finish(ImagingSubmitResult::QueueFull);
 
-    queue_.push_back(Item{frame, incoming});
+    queue_[(head_ + size_) % capacity_] = Item{frame, incoming};
+    ++size_;
     const auto depth = depth_.fetch_add(1, std::memory_order_relaxed) + 1;
     updateMax(peakDepth_, depth);
     accepted_.fetch_add(1, std::memory_order_relaxed);
@@ -165,20 +172,25 @@ void ImagingBypass::workerLoop() noexcept
 {
     for (;;) {
         Item item;
-        Consumer consumer;
+        std::shared_ptr<const Consumer> consumer;
         std::array<bool, 8> channels{};
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            ready_.wait(lock, [this] { return stopping_.load() || !queue_.empty(); });
-            if (stopping_.load() && queue_.empty()) break;
-            item = std::move(queue_.front());
-            queue_.pop_front();
+            ready_.wait(lock, [this] { return stopping_.load() || size_ != 0; });
+            if (stopping_.load() && size_ == 0) break;
+            item = std::move(queue_[head_]);
+            head_ = (head_ + 1) % capacity_;
+            --size_;
             depth_.fetch_sub(1, std::memory_order_relaxed);
             consumer = consumer_;
             channels = enabledChannels_;
         }
         dequeued_.fetch_add(1, std::memory_order_relaxed);
         const auto begin = Clock::now();
+        if (stopping_.load(std::memory_order_acquire) || !enabled_.load(std::memory_order_acquire)) {
+            countDrop(stopping_.load() ? ImagingSubmitResult::Stopping : ImagingSubmitResult::Disabled);
+            continue;
+        }
         if (item.session != 0 && item.session != activeSession_.load(std::memory_order_acquire)) {
             countDrop(ImagingSubmitResult::StaleSession);
             continue;
@@ -188,7 +200,7 @@ void ImagingBypass::workerLoop() noexcept
             continue;
         }
         try {
-            if (consumer && consumer(item.frame, channels))
+            if (consumer && (*consumer)(item.frame, channels))
                 processed_.fetch_add(1, std::memory_order_relaxed);
             else
                 processFailed_.fetch_add(1, std::memory_order_relaxed);

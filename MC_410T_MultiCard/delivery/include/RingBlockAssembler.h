@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 #include "RoundIdentity.h"
+#include "DataTypes.h"
 
 // =====================================================================
 // RingBlockAssembler — 环形扫描真实采集组包器（阶段 B）
@@ -67,6 +68,7 @@ public:
         std::uint64_t invalidIdentityDrops = 0;
         std::uint64_t blockIdentityViolations = 0;
         std::uint64_t pendingEvictions = 0;
+        std::uint64_t incompleteBlocks = 0;
     };
 
     // sourceRoundComplete: the block contains the final logical trigger of its
@@ -91,6 +93,10 @@ public:
                    double timeoutResetSec, int sectorCcw = 1);
 
     void reset();
+
+    // Production path. The normalizer supplies a common, non-wrapping index
+    // for all cards; the worker retains immutable frontend groups until paired.
+    bool pushCardGroup(const TriggerGroupConstPtr &group);
 
     // 一个物理通道在某触发的一根 A-line（取前 sampDepth 点）。
     // 所有启用通道同一 triggerSeq 到达后立即按触发顺序组块；物理轮次
@@ -158,7 +164,15 @@ private:
         uint64_t firstSeenOrder = 0;
     };
 
-    void appendCompletedTrigger(const PendingTrigger &pt);
+    struct PendingCards {
+        std::array<TriggerGroupConstPtr, 4> cards;
+        std::uint32_t mask = 0;
+        bool sourceRoundComplete = false;
+    };
+    using Lines = std::array<std::pair<const float *, std::size_t>, 8>;
+    void drainOrderedTriggers();
+    void appendCompletedTrigger(const paimage::RoundIdentity &round, const Lines &lines,
+                                std::uint64_t logicalIndex, bool sourceRoundComplete);
     void resetRoundState(bool requireNewIdentity); // physical timeout reset
     void resetPhaseAndResidual(bool countResidual);
     bool acceptRound(const paimage::RoundIdentity &round);
@@ -190,6 +204,10 @@ private:
     uint64_t m_nextPendingOrder = 0;
     uint32_t m_allMask = 0;
     std::map<uint16_t, PendingTrigger> m_pending;
+    std::map<std::uint64_t, PendingCards> m_orderedPending;
+    std::uint64_t m_nextLogicalTrigger = 0;
+    std::uint64_t m_highLogicalTrigger = 0;
+    std::uint32_t m_cardMask = 0;
 
     std::optional<paimage::RoundIdentity> m_activeRound;
     std::optional<paimage::RoundIdentity> m_minimumRound;
@@ -205,6 +223,7 @@ private:
     std::uint64_t m_invalidIdentityDrops = 0;
     std::uint64_t m_blockIdentityViolations = 0;
     std::uint64_t m_pendingEvictions = 0;
+    std::uint64_t m_incompleteBlocks = 0;
 
     std::vector<float> m_raw;
     std::vector<float> m_angles;

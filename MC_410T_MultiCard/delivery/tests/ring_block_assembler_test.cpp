@@ -494,6 +494,54 @@ bool testNormalGoldenRegression(Runner &r)
     return true;
 }
 
+bool testOrderedCardGroups(Runner &r)
+{
+    Fixture f;
+    f.configure({0,0,1,1,0,0,1,0}, 2, 1, 180., 120., 1., 128);
+    auto push = [&](int card, int index, int generation) {
+        auto group = std::make_shared<TriggerGroup>();
+        group->cardId = card;
+        group->measurementSession = 1;
+        group->roundGeneration = generation;
+        group->logicalTriggerIndex = index;
+        group->triggerSeq = uint16_t(65535 + index);
+        group->freqA = {float(100 * index + card * 2)};
+        group->freqB = {float(100 * index + card * 2 + 1)};
+        std::weak_ptr<TriggerGroup> ref(group);
+        f.assembler.pushCardGroup(group);
+        return ref;
+    };
+    auto retained = push(3, 1, 0);
+    push(1, 1, 0);
+    r.check(!retained.expired() && f.progress == 0, "later complete trigger overtook first");
+    push(1, 0, 0);
+    push(3, 0, 0);
+    r.check(retained.expired() && f.blocks.size() == 1, "pending card ownership was not released");
+    if (f.blocks.empty()) return false;
+    r.equal(f.blocks.front().raw, {2.f,3.f,6.f,102.f,103.f,106.f}, "wire wrap / cross-card order");
+    r.equal(f.blocks.front().channels, {2,3,6,2,3,6}, "sparse physical channel order");
+    r.equal(f.blocks.front().angles, {180.f,300.f,420.f,181.f,301.f,421.f}, "positive angles");
+
+    auto lost = push(1, 2, 0); // The other card never delivers this trigger.
+    for (int i = 3; i <= 35; ++i) {
+        push(3, i, 0);
+        push(1, i, 0);
+    }
+    r.check(lost.expired() && f.assembler.snapshot().incompleteBlocks == 1, "unbounded or silent hole");
+    if (f.blocks.size() < 2) return false;
+    r.equal(f.blocks[1].raw, {402.f,403.f,406.f,502.f,503.f,506.f}, "lost block compacted wavelength parity");
+    r.equal(f.blocks[1].angles, {182.f,302.f,422.f,183.f,303.f,423.f}, "lost block compacted angles");
+    const auto before = f.blocks.size();
+    push(1, 0, 1);
+    push(3, 0, 0); // stale card must not complete the new trigger
+    push(3, 0, 1);
+    push(1, 1, 1);
+    push(3, 1, 1);
+    r.check(f.blocks.size() == before + 1, "new round did not start cleanly");
+    r.equal(f.blocks.back().angles, {180.f,300.f,420.f,181.f,301.f,421.f}, "new round starts at original sectors");
+    return r.ok;
+}
+
 } // namespace
 
 int main()
@@ -517,6 +565,7 @@ int main()
         {"R3 stale round drop", testStaleRoundDrop},
         {"R4 generation gap/session floor", testGenerationGapAndSessionFloor},
         {"R10 measurement session restart", testMeasurementSessionRestart},
+        {"multi-card order, ownership and gap", testOrderedCardGroups},
     };
 
     for (const auto &test : tests) {
@@ -526,6 +575,6 @@ int main()
             std::cout << "PASS " << test.first << '\n';
     }
     if (!runner.ok) return 1;
-    std::cout << "PASS all RingBlockAssembler tests (T1-T12,R1-R4,R10)\n";
+    std::cout << "PASS all RingBlockAssembler tests\n";
     return 0;
 }

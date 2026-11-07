@@ -797,7 +797,10 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
         }
 
         // wl2 通道内跨块对齐：首块不偏移，后续块前插上一块末根
-        if (m_ringConfig.shiftWL2 && m_ringBlockIndex > 0 && !nextPrevWL2[c].empty()) {
+        // After a missing acquisition block the previous WL2 line belongs to
+        // a different angular position. Only carry it across adjacent blocks.
+        if (m_ringConfig.shiftWL2 && m_ringBlockIndex > 0 && !nextPrevWL2[c].empty()
+            && !angs[0].empty() && std::abs(nextPrevAngle[c] - angs[0].front()) < 1e-3f) {
             lists[1].insert(lists[1].begin(), nextPrevWL2[c]);
             lists[1].pop_back();
             angs[1].insert(angs[1].begin(), nextPrevAngle[c]);

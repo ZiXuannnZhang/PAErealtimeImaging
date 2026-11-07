@@ -27,5 +27,27 @@ int main(){
  require(bypass.tryPush(makeFrame(0,17,11))==ImagingSubmitResult::Stopping,"stopping");const auto s=bypass.snapshot();
  require(s.accepted==4,"accepted count");require(s.droppedQueueFull>=1&&s.droppedServiceNotReady>=2,"drop reasons");require(s.droppedStaleSession>=1&&s.droppedInvalidFrame>=2,"filters");
  require(s.peakDepth==2&&s.currentDepth==0,"depth");require(s.maxSubmitNs>0&&s.maxWorkerNs>0,"timing");
+
+ // All producers may overlap the consumer, but capacity exceeds the total
+ // workload. Each card must retain its own FIFO order without a busy drop.
+ constexpr int perCard=1200;
+ ImagingBypass concurrent(4*perCard);
+ channels.fill(true);concurrent.setEnabledChannels(channels);
+ std::array<int,4> next{};std::atomic<int> handled{0},errors{0};
+ concurrent.setConsumer([&](const TriggerGroupConstPtr& f,const std::array<bool,8>&){
+    if(f->triggerSeq!=next[f->cardId]++)++errors;
+    ++handled;return true;
+ });
+ concurrent.start();concurrent.setEnabled(true);concurrent.setServiceReady(true);
+ std::array<std::thread,4> producers;
+ std::atomic<bool> go{false};
+ for(int card=0;card<4;++card)producers[card]=std::thread([&,card]{
+    while(!go.load())std::this_thread::yield();
+    for(int i=0;i<perCard;++i)if(concurrent.tryPush(makeFrame(card,i,1))!=ImagingSubmitResult::Accepted)++errors;
+ });
+ go=true;for(auto& producer:producers)producer.join();
+ const bool drained=until([&]{return handled==4*perCard;});
+ concurrent.stop();
+ require(drained&&errors==0&&concurrent.snapshot().droppedQueueBusy==0,"concurrent card FIFO lost or reordered data");
  std::cout<<"PASS imaging bypass: bounded admission, explicit drops, session/service isolation, early filters, saving independence\n";
 }

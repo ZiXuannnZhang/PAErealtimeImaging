@@ -7,10 +7,11 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
+#include <memory>
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 enum class ImagingSubmitResult : std::uint8_t {
     Accepted = 0,
@@ -26,8 +27,8 @@ enum class ImagingSubmitResult : std::uint8_t {
 
 const char *imagingSubmitResultName(ImagingSubmitResult result) noexcept;
 
-// Bounded best-effort imaging branch. Producers never wait for queue space or
-// for the imaging service. Frames are shared read-only with the saving path.
+// Bounded FIFO. The mutex protects only queue/metadata operations; producers
+// never wait for queue space or the imaging service.
 class ImagingBypass final
 {
 public:
@@ -84,14 +85,16 @@ private:
     struct Item { TriggerGroupConstPtr frame; std::uint64_t session = 0; };
 
     void workerLoop() noexcept;
+    void clearLocked(ImagingSubmitResult reason);
     void countDrop(ImagingSubmitResult result, std::uint64_t count = 1) noexcept;
     static void updateMax(std::atomic<std::uint64_t> &target, std::uint64_t value) noexcept;
 
     const std::size_t capacity_;
     mutable std::mutex mutex_;
     std::condition_variable ready_;
-    std::deque<Item> queue_;
-    Consumer consumer_;
+    std::vector<Item> queue_;
+    std::size_t head_ = 0, size_ = 0;
+    std::shared_ptr<const Consumer> consumer_;
     std::array<bool, 8> enabledChannels_{};
     std::atomic<std::uint32_t> enabledMask_{0};
     std::thread worker_;

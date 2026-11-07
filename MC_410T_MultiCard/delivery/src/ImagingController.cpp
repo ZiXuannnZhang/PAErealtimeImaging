@@ -820,11 +820,15 @@ void ImagingController::onSvcErrorOccurred(QProcess::ProcessError error)
 // =====================================================================
 void ImagingController::pollControlMessages()
 {
-    if (!m_zmqSocket) return;
-    std::lock_guard<std::mutex> lk(m_zmqMutex);
     try {
-        zmq::message_t msg;
-        while (m_zmqSocket->recv(msg, zmq::recv_flags::dontwait)) {
+        for (;;) {
+            zmq::message_t msg;
+            {
+                std::lock_guard<std::mutex> lk(m_zmqMutex);
+                if (!m_zmqSocket || !m_zmqSocket->recv(msg, zmq::recv_flags::dontwait)) break;
+            }
+            // UI status slots can read the assembler while its worker is
+            // submitting a block. Never invoke them with the socket locked.
             QByteArray data(static_cast<const char *>(msg.data()),
                             static_cast<int>(msg.size()));
             QJsonDocument doc = QJsonDocument::fromJson(data);
