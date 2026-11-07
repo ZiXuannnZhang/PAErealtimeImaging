@@ -260,7 +260,6 @@ private:
     std::uint64_t m_startupFilterTriggerCount = 1;
     bool m_disableCountBoundary = false;
     void recordPaimageSnapshot();
-    void writeSystemCaptureNotification(quint64 epoch, qint64 burstNs);
 
     // UDP 控制命令底层实现
     bool initControlSocket();

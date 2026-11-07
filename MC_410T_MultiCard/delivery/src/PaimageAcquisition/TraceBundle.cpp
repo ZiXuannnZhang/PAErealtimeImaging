@@ -141,14 +141,9 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     {"lastIncludedMs",anchorKnown?QJsonValue(double(lastMs)):QJsonValue()}});
             }
             for(const auto& name:{QString("paimage_trace_analyze.py"),QString("paimage-trace-schema.md"),
-                                   QString("startup-looplog-schema.md"),QString("receiver_system_capture.ps1"),
-                                   QString("startup_ingress_capture.ps1"),QString("startup_ingress_capture_stop.ps1"),
-                                   QString("system_capture_common.ps1"),QString("start_system_capture_admin.ps1"),
-                                   QString("stop_system_capture_admin.ps1"),QString("Open-AdminCapture.cmd"),
-                                   QString("startup_diagnostics_analyze.py")}){
+                                   QString("startup-looplog-schema.md"),QString("startup_diagnostics_analyze.py")}){
                 auto bytes=read(QDir(toolsDirectory).filePath(name));
-                // Optional system helpers are not evidence of lost records.
-                if(bytes.isEmpty()){if(!name.endsWith(".ps1"))bundleIncomplete=true;}else if(!write("paimage/tools/"+name,bytes))return false;
+                if(bytes.isEmpty())bundleIncomplete=true;else if(!write("paimage/tools/"+name,bytes))return false;
             }
             QJsonObject manifest{{"schemaVersion",2},{"backendId","paimage-derived"},
                 {"requestedStartMs",double(start)},{"fixedEndMs",double(end)},{"traceIncomplete",bundleIncomplete},

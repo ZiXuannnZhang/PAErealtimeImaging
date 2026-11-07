@@ -134,19 +134,20 @@ target_sources(${PROJECT_NAME} PRIVATE
     src/PaimageAcquisition/NetworkControllerPaimage.cpp)
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools"
+    COMMAND ${CMAKE_COMMAND} -E rm -f
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools/receiver_system_capture.ps1"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools/startup_ingress_capture.ps1"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools/startup_ingress_capture_stop.ps1"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools/system_capture_common.ps1"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools/start_system_capture_admin.ps1"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools/stop_system_capture_admin.ps1"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools/Open-AdminCapture.cmd"
+        "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools/receiver-scheduling.wprp"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/paimage_trace_analyze.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/paimage-trace-schema.md"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/startup-looplog-schema.md"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/receiver_system_capture.ps1"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/startup_ingress_capture.ps1"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/startup_ingress_capture_stop.ps1"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/system_capture_common.ps1"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/start_system_capture_admin.ps1"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/stop_system_capture_admin.ps1"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/Open-AdminCapture.cmd"
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/startup_diagnostics_analyze.py"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/receiver-scheduling.wprp"
         "$<TARGET_FILE_DIR:${PROJECT_NAME}>/diagnostic-tools")
 
 # ============================================================

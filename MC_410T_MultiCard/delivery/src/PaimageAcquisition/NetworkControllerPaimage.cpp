@@ -119,7 +119,7 @@ bool NetworkController::createPaimageBackend(QString& error){
             {"wallAnchorMs",double(QDateTime::currentMSecsSinceEpoch())},{"monotonicAnchorNs",QString::number(paimage::SocketReceiver::now())},
             {"cpuTopology",processorTopology()},{"affinityRequested",false},{"diagnosticTraceEnabled",m_config.diagnosticTraceEnabled},
             {"diagnosticLevel",m_config.diagnosticLevel},{"timingEnabled",m_config.diagnosticLevel>=1},
-            {"diagnosticModes",QJsonObject{{"0","raw-ingress only"},{"1","raw-ingress plus lightweight timing"},{"2","lightweight timing plus externally managed system capture index"}}},
+            {"diagnosticModes",QJsonObject{{"0","raw-ingress only"},{"1","raw-ingress plus lightweight timing"},{"2","legacy alias of detailed application diagnostics"}}},
             {"listenId",m_diagnosticListenId},{"configId",m_currentConfigId},{"samples",m_config.samplesPerTrig()},
             {"bits",m_config.bitsPerChannel},{"cards",m_config.nCards},{"dataPort",8001},{"feedbackPort",8000},
              {"configuredLogicalTriggersPerRound",m_config.logicalTriggersPerRound},
@@ -399,13 +399,6 @@ void NetworkController::pollPaimageLoopMonitor(){
             {{"freezeEpoch",QString::number(epoch)},{"trialId",QString::fromStdString(startupTrialId())},
              {"runId",m_paimageRunId},{"detectMonotonicNs",QString::number(nowNs)},
              {"note","burst marker only; session handling, assembly cleanup and round attribution are unchanged"}});
-        // The notification is emitted 10 s after the burst so a system
-        // capture keeps covering the burst itself. The receive thread only
-        // writes its loop stream and never waits for any script response.
-        QTimer::singleShot(10000,this,[this,epoch,nowNs]{
-            if(!m_paimageLoopLog||m_paimageLoopLog->freezeEpoch()<epoch)return;
-            writeSystemCaptureNotification(epoch,nowNs);
-        });
     }
     if(m_paimageSaveGeneration&&!m_paimageSaveAppliedLogged&&
        m_paimage->output().savingApplied(m_paimageSaveGeneration)){
@@ -415,49 +408,6 @@ void NetworkController::pollPaimageLoopMonitor(){
              {"appliedMonotonicNs",QString::number(nowNs)},
              {"directory",m_paimageSaveDir}});
     }
-}
-
-void NetworkController::writeSystemCaptureNotification(quint64 epoch, qint64 burstNs){
-    const QString channel=QString::fromStdString(systemCaptureChannelDir());
-    QString trial=QString::fromStdString(startupTrialId());
-    QString trialSource=QStringLiteral("command_line");
-    QString captureSessionToken;
-    QString listenId=m_diagnosticListenId;
-    QString measurementSessionId=m_measurementSessionId;
-    const qint64 nowWallMs=QDateTime::currentMSecsSinceEpoch();
-    QFile activeTrial(QDir(channel).filePath(QStringLiteral("active-trial.json")));
-    if(activeTrial.open(QIODevice::ReadOnly)){
-        const QJsonObject active=QJsonDocument::fromJson(activeTrial.readAll()).object();
-        const qint64 started=active.value(QStringLiteral("startedWallMs")).toVariant().toLongLong();
-        const qint64 expires=active.value(QStringLiteral("expiresWallMs")).toVariant().toLongLong();
-        const QString requested=active.value(QStringLiteral("trialId")).toString().trimmed();
-        const QString activeRunId=active.value(QStringLiteral("runId")).toString().trimmed();
-        if(!requested.isEmpty()&&started>0&&started<=nowWallMs&&expires>=nowWallMs
-           &&(activeRunId.isEmpty()||activeRunId==m_paimageRunId)){
-            trial=requested;trialSource=QStringLiteral("active_system_capture");
-            captureSessionToken=active.value(QStringLiteral("captureSessionToken")).toString().trimmed();
-            listenId=active.value(QStringLiteral("listenId")).toString().trimmed();
-            measurementSessionId=active.value(QStringLiteral("measurementSessionId")).toString().trimmed();
-        }
-    }
-    QDir().mkpath(channel);
-    const QJsonObject note{{"kind","burst"},{"trialId",trial},{"runId",m_paimageRunId},
-        {"captureSessionToken",captureSessionToken},{"listenId",listenId},
-        {"measurementSessionId",measurementSessionId},
-        {"freezeEpoch",QString::number(epoch)},{"burstMonotonicNs",QString::number(burstNs)},
-        {"notifiedMonotonicNs",QString::number(paimage::SocketReceiver::now())},
-        {"notifiedWallMs",nowWallMs},{"trialIdSource",trialSource},
-        {"commandLineTrialId",QString::fromStdString(startupTrialId())}};
-    const QString path=QDir(channel).filePath(QString("burst-%1-%2.json").arg(qulonglong(epoch)).arg(m_paimageRunId));
-    QFile file(path);
-    const bool wrote=file.open(QIODevice::WriteOnly|QIODevice::Truncate)&&
-        file.write(QJsonDocument(note).toJson(QJsonDocument::Compact))>=0;
-    if(wrote)file.close();
-    recordDiagnosticEvent("paimage.loop",wrote?"burst_notification_written":"burst_notification_write_failed",
-        DiagnosticRecorder::Severity::Info,
-        {{"freezeEpoch",QString::number(epoch)},{"trialId",trial},{"runId",m_paimageRunId},
-         {"captureSessionToken",captureSessionToken},{"listenId",listenId},
-         {"trialIdSource",trialSource},{"path",path},{"written",wrote}});
 }
 
 void NetworkController::stopPaimage(){

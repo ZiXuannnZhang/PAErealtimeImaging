@@ -90,7 +90,6 @@ private slots:
     void onStartMeasureClicked();
     void onConfigParamsClicked(bool fromStartMeasure = false);
     void onExportDiagnosticClicked();
-    void onPrepareSystemCaptureClicked();
     void onSelectDirClicked();
     void onToggleSaveClicked();
     void onAutoSaveToggled(bool checked);   // 自动保存勾选切换（环形：触发开始/圈末或超时重置停止）
@@ -111,7 +110,6 @@ private slots:
     void onImagingError(const QString &error);
     void setImagingParamControlsEnabled(bool enable); // 实时成像期间锁定成像参数/采集控制，svcStopped 后恢复
     void onDiagnosticStatusTick();
-    void onSystemCaptureStatusTick();
     // 电机参数联动（LabVIEW → 本程序）：MotorScanLinkageMonitor 检测到参数文件
     // 有效变化后由此消费（方向 → 环形参数对话框；步数 → 换算单圈总A-line数）。
     void onMotorScanLinkageParams(const motor_scan_linkage::Params &params);
@@ -163,9 +161,6 @@ private:
     // targetSourceKind: "explicit_target_ips" 或 "config_ack_discovery"
     void startListeningWithIPs(const QVector<QString>& onlineIPs,
                                const QString& targetSourceKind); // 发现/显式目标完成后：创建 controller 并启动监听（主线程）
-    void updateSystemCaptureStatus(const QString &status,
-                                   const QJsonObject &fields = QJsonObject());
-    bool invalidateSystemCaptureRequest();
     // 电机参数联动：构造时按 INI（MotorScanLinkage group）创建监视器并接线。
     void startMotorScanLinkage();
 
@@ -216,7 +211,6 @@ private:
     // 定时器
     QTimer *m_statsTimer;
     QTimer *m_diagnosticStatusTimer;
-    QTimer *m_systemCaptureStatusTimer;
     QTimer *m_displayTimer;   // 30fps pull 定时器
 
     // 状态标志
@@ -241,12 +235,6 @@ private:
     quint64 m_diagnosticLastNoiseDropped = 0;
     quint64 m_diagnosticLastFallbackDropped = 0;
     int m_diagnosticStatusNoticeCount = 0;
-    QLabel *m_systemCaptureStatusLabel = nullptr;
-    QString m_systemCaptureRequestPath;
-    QString m_systemCaptureOutputDirectory;
-    QString m_systemCaptureTrialId;
-    QString m_systemCaptureSessionToken;
-    QString m_systemCaptureLastState;
 
     // 存储队列溢出告警跟踪
     uint64_t m_prevSaveDiscards[MAX_CARDS];  // 上次 onUpdateStatistics 时各卡的 saveQueueDiscards 值

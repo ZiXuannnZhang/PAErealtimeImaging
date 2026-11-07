@@ -30,5 +30,4 @@ inline bool parseStartupPolicy(const std::string& value, StartupPolicy* out)
 // the UI configuration path and the diagnostic identity read one source.
 StartupPolicy        startupPolicy();
 const std::string&   startupTrialId();
-const std::string&   systemCaptureChannelDir();
-void configureStartupDiagnostics(StartupPolicy,std::string trialId,std::string captureChannel);
+void configureStartupDiagnostics(StartupPolicy,std::string trialId);
