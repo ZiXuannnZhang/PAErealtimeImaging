@@ -1,8 +1,10 @@
 # Repository Baseline and Branch Governance
 
-> Updated 2026-11-04 (UTC+8). The canonical source/docs and next development baseline are latest origin/main.
+> Updated 2026-11-07 (UTC+8). The canonical source/docs and next development baseline are latest origin/main.
 
 ## Canonical integration
+
+### 2026-11-04 lowpass and motor integration
 
 On 2026-11-04 the user confirmed successful hardware testing of the latest local delivery and
 preceding work on codex/ring-lowpass-motor-linkage-20261029, and authorized publishing local
@@ -22,11 +24,21 @@ commit onto 6ff0e02 because those refs had diverged. Its old subtree constraint
 ff2e987a3f44565496ff57f8467e891ea04757d0 applies only to that historical integration,
 not today's source. That content import never made bd69785 itself an ancestor of main.
 
+### 2026-11-07 ring realtime acceptance
+
+The user confirmed hardware acceptance for the tested scope of `codex/ring-realtime-performance-20261104`.
+The accepted build is `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`; the accepted `MC_410T_MultiCard` tree is
+`8da942be1a382bfff8e6b4520424a58b0a461a7c`. The closeout preserves that tree and publishes the implementation branch;
+`main` remains the canonical baseline at `6ae7e8940ca7088bb4ea01415da9e303f301a24a` at this publication.
+See [the acceptance receipt](CODEX_REPORTS/ring-realtime-acceptance-20261107/README.md). Historical refs and the divergent local `main` stay unchanged.
+
 ## Current branch roles
 
 | Branch | Role |
 |---|---|
 | main | Canonical source/docs; accepted lowpass/FilteredDAS/motor integration and next baseline |
+| codex/ring-realtime-performance-20261104 | Published hardware-accepted ring realtime implementation and closeout |
+| codex/ring-exact-fbp-20261104 | Local exact-FBP phase tip `21d60c0`, contained by the published implementation branch |
 | codex/ring-lowpass-motor-linkage-20261029 | Hardware-accepted integration; retained at the main closeout revision |
 | codex/ring-timevar-lowpass-20261016 | Original ref retained at 3340fbf; contained by main |
 | codex/ring-reconstruction-enhancement-20260926-181824 | Content imported from bd69785; original implementation history retained |
@@ -68,8 +80,8 @@ Local main follows origin/main only by fast-forward. New implementation tasks no
 from latest origin/main. If refs diverge, inventory and resolve the method explicitly; do not reset,
 force-push, or silently replay accepted histories. Keep old histories for provenance.
 Local main d3054d51e19570a6ef38774b8a82326738dce53b has one unique documentation/development
-configuration commit and is left unchanged. It is not the accepted main baseline. Remote main
-is fast-forwarded directly from the active branch; do not reset or silently import local main.
+configuration commit and is left unchanged. It is not the accepted main baseline. When explicitly authorized, remote main can be fast-forwarded directly from the accepted branch;
+do not reset or silently import local main.
 
 ## Local cleanup authorized 2026-10-13
 

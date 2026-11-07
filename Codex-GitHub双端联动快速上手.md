@@ -49,24 +49,18 @@ git show origin/codex/task-docs:TASKS/<任务文件名>
 
 ## 2. Current project state
 
-截至 2026-11-04，用户确认本地最新交付包及本分支此前工作均已通过实机测试，并授权将
-`codex/ring-lowpass-motor-linkage-20261029` 普通 fast-forward 接入 `main`。
-已验收源码为 `1fb9478e71c95815671c5e1a2c1b3d6a302746d1`；本次只追加治理文档，不修改已验收源码。
+用户于 2026-11-07 确认此前未验收的环形实时成像工作通过实机验收。
+已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。实现与验收文档通过
+`codex/ring-realtime-performance-20261104` 发布；canonical 开发基线仍是 `origin/main`。
 
-当前能力包括原采集/前端/轮次链、圆形掩膜与毫米坐标、发现早退 A、count-boundary 前端刷新解耦，
-以及 Ring STFT 时变低通、FilteredDAS、电机方向/步数参数联动、参数文件选择与持久化、物理轮内冻结及方向映射修正。
-旧双极/低频补偿已移除；两项新滤波默认关闭。面板“逆”映射 `sectorCcw=0`、起点 180°，
-“顺”映射 `sectorCcw=1`、起点 0°；桥接配置保持 `DirectionInverted=false`。
+本轮包括同心圆折射精确核 FBP、分段和融合 GPU 预处理、按轮次和触发序号有界多卡配对、
+顺逆九点钟起步，以及方向联动按物理轮生效、纯换向不重启成像服务。退役旧 FilteredDAS 和可选
+DAS 权重控件；时变低通仍可用。实机验收按用户测试范围记录，八通道性能专项仍暂缓。
+详见 [验收记录](CODEX_REPORTS/ring-realtime-acceptance-20261107/README.md)。
 
-验收包保留 `1fb9478` 的 BuildIdentity；本次文档提交不产生新二进制。
-Layer 2b T_arr 未取得独立实测记录，discovery B 待决定；7 / 4007 仍是现场观察而非协议常量，
-额外 trigger 的精确 FPGA/LabVIEW 来源未证明。验收追溯见 `CODEX_REPORTS/main-acceptance-20261104/README.md`。
-
-已验收包为 artifacts/build-delivery/20261029-213219_1fb9478e_lowpass_motor_local_direction/，
-旧 local-only 回执保持原样，由 2026-11-04 的实机接受与发布授权补充。不重标旧 binary identity。
-原低通分支 tip 3340fbf 保留；本次是祖先链直接快进，无 merge commit/force/rebase。
-本地旧 main d3054d5 含独有文档/开发配置提交，保留原样，未混入远端 main。
-若旧 local main 不能 ff-only，按下节停止该本地同步；可从已核对的 latest origin/main 新建任务分支。
+`PROJECT_STATUS.md` 记录验收与 canonical 状态的区别。实现分支发布时保持已验收子树；
+如需接入 `main`，按 `REPOSITORY_BASELINE.md` 记录授权范围及集成方式。
+本地旧 `main`（`d3054d5`）含独有文档/开发配置提交，保留原样，不作为实施基线。
 
 ## 3. New implementation task
 

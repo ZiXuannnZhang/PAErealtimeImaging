@@ -84,6 +84,11 @@ artifacts/build-delivery/20261029-213219_1fb9478e_lowpass_motor_local_direction/
 latest origin/main exact SHA，tracked-clean，重新 configure/build 并记录独立 BuildIdentity。
 历史 Session C/D、3c6323d、bd69785 仅保留原阶段追溯，不作为当前默认交付身份。
 
+2026-11-07 实现分支验收：用户确认环形实时成像分支 `codex/ring-realtime-performance-20261104` 的未验收工作通过。
+已验收 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`，本地 ZIP 为
+`artifacts/build-delivery/20261107-215839_4c83ecf7_ring_queue_direction_local.zip`；见 [验收记录](CODEX_REPORTS/ring-realtime-acceptance-20261107/README.md)。
+当前发布实现分支，默认构建目标仍由 latest `origin/main` 决定。文档收尾不替换已验收 BuildIdentity。
+
 ### 2.3 最终交付构建必须在最终 commit 上重新 configure
 
 项目 CMake 会把 Git SHA 和 tracked dirty 状态写入 BuildIdentity。若代码提交后没有重新 configure，产物内的 build identity 可能仍对应旧 SHA。
@@ -281,18 +286,18 @@ cufft64_12.dll SHA256
 pa_recon_core.dll SHA256
 ```
 
-### 8.4 改进 FBP 候选分支的额外依赖
+### 8.4 含改进 FBP 的构建依赖
 
-`codex/ring-exact-fbp-20261104` 修改了 CUDA 核心，先执行
+构建包含改进 FBP 的源码时，先执行
 `MC_410T_MultiCard/delivery/build_ring_fbp_cuda.cmd` 生成本地 DLL 及 MinGW 导入库，
-再执行标准主工程脚本。旧 prebuilt 不包含 FBP 导出接口，不能用于本候选分支。
+再执行标准主工程脚本。旧 prebuilt 不包含 FBP 导出接口，不能用于此类构建。
 完整 bin 还必须包含同一 CUDA 12.8 toolkit 的 `cublas64_12.dll` 和
 `cublasLt64_12.dll`，依赖回执追加两者来源与 SHA256。
-本条是该任务分支的构建要求，不重标 main 的既有验收包。
+本条不改变早期未包含改进 FBP 的验收包及其 BuildIdentity。
 
-### 8.5 环形实时性能优化候选的 cuFFT 依赖
+### 8.5 批量 GPU STFT 的 cuFFT 依赖
 
-`codex/ring-realtime-performance-20261104` 的批量 GPU STFT 链接本机 CUDA 12.8 的
+改进 FBP 的批量 GPU STFT 链接本机 CUDA 12.8 的
 `cufft.lib`，运行时实际文件名为 **`cufft64_11.dll`**。必须从同一 CUDA 12.8 toolkit 的
 `bin` 部署并记录 SHA256；CUDA toolkit 主版本与 cuFFT DLL 主版本不能混为一谈。
 既有线性成像依赖 `delivery/libs/imaging/cufft64_12.dll` 按原验收来源保持，二者并存，

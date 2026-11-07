@@ -13,6 +13,7 @@
 | `hardware-env-20260914/` | Realtek USB 10GbE 网卡高级属性快照(只读) |
 | `motor-scan-linkage-20261014/` | LabVIEW 电机参数联动初版接入（解析/方向/步数消费点、构建与冒烟证据） |
 | `motor-scan-linkage-direction-20261026/` | 电机联动后续：触发闩锁、计数重置开闸、起点角随方向、方向映射统一 |
+| `ring-realtime-acceptance-20261107/` | 环形精确 FBP、实时队列和方向联动的用户实机验收与交付追溯 |
 
 ## 适合放入本目录
 

@@ -1,45 +1,38 @@
 # HANDOFF — PAERealtimeImaging 当前接力入口
 
-> 更新时间：2026-11-04（UTC+8）。当前基准为 latest origin/main。
+> 更新时间：2026-11-07（UTC+8）。新开发基准仍为 latest `origin/main`。
 
-截至 2026-11-04，用户确认本地最新交付包及本分支此前工作均已通过实机测试，并授权将
-`codex/ring-lowpass-motor-linkage-20261029` 普通 fast-forward 接入 `main`。
-已验收源码为 `1fb9478e71c95815671c5e1a2c1b3d6a302746d1`；本次只追加治理文档，不修改已验收源码。
+用户于 2026-11-07 确认此前未验收的环形实时成像工作通过实机验收。
+已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。实现与验收文档通过
+`codex/ring-realtime-performance-20261104` 发布；canonical 开发基线仍是 `origin/main`。
 
-当前能力包括原采集/前端/轮次链、圆形掩膜与毫米坐标、发现早退 A、count-boundary 前端刷新解耦，
-以及 Ring STFT 时变低通、FilteredDAS、电机方向/步数参数联动、参数文件选择与持久化、物理轮内冻结及方向映射修正。
-旧双极/低频补偿已移除；两项新滤波默认关闭。面板“逆”映射 `sectorCcw=0`、起点 180°，
-“顺”映射 `sectorCcw=1`、起点 0°；桥接配置保持 `DirectionInverted=false`。
-
-验收包保留 `1fb9478` 的 BuildIdentity；本次文档提交不产生新二进制。
-Layer 2b T_arr 未取得独立实测记录，discovery B 待决定；7 / 4007 仍是现场观察而非协议常量，
-额外 trigger 的精确 FPGA/LabVIEW 来源未证明。验收追溯见 `CODEX_REPORTS/main-acceptance-20261104/README.md`。
+本轮包括同心圆折射精确核 FBP、分段和融合 GPU 预处理、按轮次和触发序号有界多卡配对、
+顺逆九点钟起步，以及方向联动按物理轮生效、纯换向不重启成像服务。退役旧 FilteredDAS 和可选
+DAS 权重控件；时变低通仍可用。实机验收按用户测试范围记录，八通道性能专项仍暂缓。
+详见 [验收记录](CODEX_REPORTS/ring-realtime-acceptance-20261107/README.md)。
 
 ## 接手要点
 
-先读 PROJECT_STATUS.md、REPOSITORY_BASELINE.md、BUILD_STANDARD.md，再读本文件与协作指南。
-新任务默认从 latest origin/main 新建分支。原低通 tip 3340fbf 和全部历史分支保留追溯。
-电机物理轮首触发冻结参数，计数/超时边界后允许应用；startupFilter=0 生效，服务停止不解除闩锁，
-窗口编辑暂缓，拒绝后保留重试。参数文件选择后记忆路径，不解除当前物理轮冻结。
+先读 [PROJECT_STATUS.md](PROJECT_STATUS.md)、[REPOSITORY_BASELINE.md](REPOSITORY_BASELINE.md)
+和 [BUILD_STANDARD.md](BUILD_STANDARD.md)，再读协作指南。查看实现分支时明确与 canonical 主线的差别。
 
-Ring 服务先对完整 A-line 做时变低通，再做既有 DBR/限幅/DelayCut，随后 FilteredDAS 和既有对齐/几何/CUDA DAS。
-raw/save 与 frontend clone 隔离；成像 cap 后前端信号可持续刷新，publisher/Ring 冻结。
-旧 MultiPortReceiver/PacketAssemblyBuffer 不是生产入口。CONFIG 仍需当前事务全卡 60-byte ACK。
-RoundIdentity、timeout/save/reset 顺序与统计语义以 PROJECT_STATUS.md §4 为准；CUDA/SHM ABI 未改变。
-修改 RingReconCudaConfig 时仍须核对全部 DLL/consumer ABI。RadiusCalibration 仍需真实全孔径校准数据，
-不对 raw Bscan 做 circshift。
-ring-zero-phase 仅作数值参考，DAS B-tier 已停维护，尚无全孔径 8 通道正式校准完成结论。
+- 成像队列使用有界 FIFO。组包按 RoundIdentity 和逻辑触发序号配对；缺失超过窗口时跳过不完整块，
+  保留后续角度及双波长相位。直存队列、raw/save ownership 与成像分离。
+- 电机只联动 `direction`；每圈总 A-line 数由成像参数设定。顺逆均从九点钟起步，按物理通道升序划分扇区。
+  首个物理触发锁定本轮方向；纯换向在下一物理轮生效，成像服务、共享内存及重建资源保留。
+- 改进 FBP 默认尝试 GPU 融合预处理，保留分段路径；两条路径使用相同精确核和同心圆反投影。
+  DAS 与可选 STFT 保留，旧 FilteredDAS 已退出本轮实现。
+- 轮次、超时、保存顺序和诊断定义见 PROJECT_STATUS §4。旧 MultiPortReceiver/PacketAssemblyBuffer 不是生产入口。
+  Layer 2b T_arr、额外 trigger 的精确来源及正式全孔径校准保持原验证边界。
 
 ## 已验收交付
 
-artifacts/build-delivery/20261029-213219_1fb9478e_lowpass_motor_local_direction/，
-BuildIdentity 为 1fb9478e71c95815671c5e1a2c1b3d6a302746d1、tracked-clean；
-标准构建、56/56 回归、真实 MainWindow 1/1、合成服务自检通过。
-包内旧 local-only/UNVERIFIED 回执保留原样，由本次验收记录补充；不重标旧二进制。
-将来正式新交付仍须在目标 exact SHA configure/build，记录 runtime 来源、SHA256 与完整 bin。
+本轮本地包：`artifacts/build-delivery/20261107-215839_4c83ecf7_ring_queue_direction_local.zip`，BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。
+标准构建、57/57 CTest、MainWindow 1/1、包内顺逆 × 分段/融合 FBP 四组自检通过。
+发布验收文档不会生成新二进制；后续交付仍须针对目标 exact SHA 重新 configure/build。
 
 ## 本地工作区
 
 本地旧 main d3054d5 含一份独有文档/开发配置提交，与已验收链分叉，保留不改；
-当前联合分支在发布后对应远端 main。不要 reset/rebase 或隐式接入旧 main 内容。
+不要 reset/rebase 或隐式接入旧 main 内容。
 未跟踪文件、frozen _migration_pack 和旧 _pending_delete 保持原样，最终删除仅由用户执行。

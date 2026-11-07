@@ -1,84 +1,41 @@
 # PAERealtimeImaging 当前项目状态
 
-> 更新时间：2026-11-04（UTC+8）。canonical 源码、文档与下一步开发基准为 latest origin/main。
-> 分支治理见 REPOSITORY_BASELINE.md，构建交付见 BUILD_STANDARD.md；用户当前明确要求优先。
+> 更新时间：2026-11-07（UTC+8）。分支治理见 [REPOSITORY_BASELINE.md](REPOSITORY_BASELINE.md)，构建交付见 [BUILD_STANDARD.md](BUILD_STANDARD.md)。
 
 ## 1. 当前结论
 
-截至 2026-11-04，用户确认本地最新交付包及本分支此前工作均已通过实机测试，并授权将
-`codex/ring-lowpass-motor-linkage-20261029` 普通 fast-forward 接入 `main`。
-已验收源码为 `1fb9478e71c95815671c5e1a2c1b3d6a302746d1`；本次只追加治理文档，不修改已验收源码。
+用户于 2026-11-07 确认此前未验收的环形实时成像工作通过实机验收。
+已验收源码及测试包 BuildIdentity 为 `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a`。实现与验收文档通过
+`codex/ring-realtime-performance-20261104` 发布；canonical 开发基线仍是 `origin/main`。
 
-当前能力包括原采集/前端/轮次链、圆形掩膜与毫米坐标、发现早退 A、count-boundary 前端刷新解耦，
-以及 Ring STFT 时变低通、FilteredDAS、电机方向/步数参数联动、参数文件选择与持久化、物理轮内冻结及方向映射修正。
-旧双极/低频补偿已移除；两项新滤波默认关闭。面板“逆”映射 `sectorCcw=0`、起点 180°，
-“顺”映射 `sectorCcw=1`、起点 0°；桥接配置保持 `DirectionInverted=false`。
+本轮包括同心圆折射精确核 FBP、分段和融合 GPU 预处理、按轮次和触发序号有界多卡配对、
+顺逆九点钟起步，以及方向联动按物理轮生效、纯换向不重启成像服务。退役旧 FilteredDAS 和可选
+DAS 权重控件；时变低通仍可用。实机验收按用户测试范围记录，八通道性能专项仍暂缓。
+详见 [验收记录](CODEX_REPORTS/ring-realtime-acceptance-20261107/README.md)。
 
-验收包保留 `1fb9478` 的 BuildIdentity；本次文档提交不产生新二进制。
-Layer 2b T_arr 未取得独立实测记录，discovery B 待决定；7 / 4007 仍是现场观察而非协议常量，
-额外 trigger 的精确 FPGA/LabVIEW 来源未证明。验收追溯见 `CODEX_REPORTS/main-acceptance-20261104/README.md`。
+- canonical `main`：`6ae7e8940ca7088bb4ea01415da9e303f301a24a`，保留 2026-11-04 联合低通 / FilteredDAS / 电机联动基线。旧已验收包 `1fb9478` 及 [验收记录](CODEX_REPORTS/main-acceptance-20261104/README.md) 继续作为历史追溯。
+- 本轮验收发布分支：`codex/ring-realtime-performance-20261104`。验收子树 `MC_410T_MultiCard` 为 `8da942be1a382bfff8e6b4520424a58b0a461a7c`；文档收尾保持该子树不变。
+- A/B/C/D 及发现早退 A / count-boundary 的实机结论沿用原已测范围。Layer 2b T_arr 未独立测量，发现早退 B 待决定，额外 trigger 的 FPGA/LabVIEW 来源未证明。
 
-用户此次确认覆盖该分支已交付工作，包含最新方向修正；取代此前“仅本地、不推送”的限制。
-旧远端 main a8c15cf 是已验收源码 1fb9478 的祖先，本次直接快进，无需内容重接或 merge commit。
-实机结论来自用户确认；本轮没有新增现场日志或截图，不补写未提供的操作参数、时序数字或根因结论。
-历史报告的“待实机/未合 main/仅本地”保留原时间语境，当前接受状态以本文件为准。
+## 2. 本轮已验收实现
 
-    CANONICAL_BRANCH                     = main
-    CANONICAL_MAIN_HEAD                  = latest origin/main
-    ACCEPTED_SOURCE_SHA                  = 1fb9478e71c95815671c5e1a2c1b3d6a302746d1
-    MC_410T_MULTICARD_TREE                = f178261cbf95cfdf937af01ee705f26f7c034f5a
-    PREVIOUS_REMOTE_MAIN                 = a8c15cff203da959bd935120605e69dc32ff7145
-    INTEGRATION_METHOD                   = normal fast-forward; documentation-only closeout
-    LOWPASS_FILTEREDDAS_MOTOR_HARDWARE    = PASS_FOR_USER_TESTED_SCOPE (confirmed 2026-11-04)
-    A_B_C_D_HARDWARE_VALIDATION           = PASS_FOR_CURRENT_SCOPE
-    DISCOVERY_A_COUNT_BOUNDARY_HARDWARE   = PASS_FOR_CURRENT_SCOPE (2026-10-01)
-    LAYER_2B_T_ARR_MEASUREMENT            = NOT_EXECUTED
-    LEGACY_BIPOLAR_LOWFREQ_ENHANCEMENT    = REMOVED_FROM_PRODUCTION
-    DISCOVERY_B_DISPOSITION              = PENDING_USER_DECISION
-    FPGA_LABVIEW_EXTRA_TRIGGER_SOURCE    = NOT_PROVEN
-
-## 2. 当前 main 的内容
-
-- 保留 START-admission、PhysicalRoundNormalizer、RoundIdentity、timeout、成像 cap、AutoSave
-  binding、Ring/CUDA reset/stale barrier，以及前端异步预处理、显示裁切、滤波、保存和卡片状态链。
-- 保留发现早退 A、count-boundary 前端解耦、圆形显示掩膜与毫米坐标。
-- 移除旧双极/低频补偿及其控件、配置和生产算法，使用 Ring STFT 时变低通；它在完整 A-line 的
-  DBR/限幅/DelayCut 前执行，默认关闭。旧增强专用 FFT 优化不再列为当前生产能力。
-- 新增独立 FilteredDAS 预滤波；两种滤波可独立组合，配置原子接受，失败不提交半块 CUDA/WL2 历史。
-- 修复配置被拒绝后 MainWindow 仍启动 Ring 的问题；修复 Normalizer newest-first 缓存遍历。
-- 电机参数文件联动方向、起点及配置允许的圈长规则；“参数文件选择”可浏览 JSON，
-  路径写入 INI 并在启动恢复。物理轮首触发冻结，CountBoundary/TimeoutBoundary 后允许应用，
-  startupFilter=0 同样生效；服务停止不冒充物理轮结束，失败保留待重试，编辑窗口开启时暂缓。
-- 实机方向修正：逆/CCW → sectorCcw=0、180°（九点钟）；顺/CW → sectorCcw=1、0°（三点钟）。
-  DirectionInverted=false，输入文字和桥接含义不反转，无联动手动路径保持。验收包使用 directionOnly，
-  不将本次用户确认写成全部步数规则组合的逐项实机测量。
-- raw/save、共享 frontend、CUDA/SHM ABI 和既有轮次 ownership 保持；本次接入不新增源码改动。
+- 在保留 START-admission、PhysicalRoundNormalizer、RoundIdentity、超时/保存隔离及前端链的基础上，新增同心圆折射精确核 FBP。
+- 保留分段和融合 FBP 两条路径，复用同一精确核和反投影；FBP 优先使用融合 GPU 预处理，分段路径保留。GPU STFT 使用批量 cuFFT；DAS 保留可选 STFT，旧 FilteredDAS 和可选权重控件退出生产。
+- 多物理卡按物理轮次与逻辑触发序号有界配对，按物理通道升序组块。瞬时队列锁竞争不再产生 `QueueBusy` 丢弃；真正的缺口由 `reorderIncompleteBlocks` 记录，直存链路不变。
+- 顺、逆均从九点钟起步，启用通道沿电机方向等分扇区。电机文件只联动 `direction`，其他字段不改成像配置；纯换向在下一物理轮生效，不重启成像服务，前端反馈等待下一轮和首帧。首次联动若改变手动起点，仍按起点变化重新配置。
 
 ## 3. 验收、构建身份与追溯
 
 | 对象 | 身份 / 状态 |
-|---|---|
-| 原 canonical main | a8c15cff203da959bd935120605e69dc32ff7145 |
-| 原低通/FilteredDAS 分支 tip | 3340fbff5ed93ff2ba87b496275e663e877fa693（保留） |
-| 电机 bundle 原始实现 / 报告 | 04e348b / 50f41e5，移植为 20c46e9 / a16264a |
-| 联合修复 / 文件选择 | 0c5147a / 39b8ec9 |
-| 实机已验收源码 / BuildIdentity | 1fb9478e71c95815671c5e1a2c1b3d6a302746d1 |
-| 验收包 | artifacts/build-delivery/20261029-213219_1fb9478e_lowpass_motor_local_direction/ |
-| 本次确认与核查记录 | CODEX_REPORTS/main-acceptance-20261104/ |
+| --- | --- |
+| 已验收源码 / 包内 BuildIdentity | `4c83ecf7b0dc0e0be8ca901ca952b7521f79393a` |
+| 本地验收 ZIP | `artifacts/build-delivery/20261107-215839_4c83ecf7_ring_queue_direction_local.zip` |
+| 软件回归 | 57/57 CTest、1/1 MainWindow；包内 2-A、4-A 顺逆 × 分段/融合 FBP 四组自检 |
+| 实机结论 | 用户确认此前未验收工作全部通过；限实际测试范围 |
+| 追溯 | [本轮验收与包校验](CODEX_REPORTS/ring-realtime-acceptance-20261107/README.md) |
 
-上述 exact 1fb9478、tracked-clean 的标准 configure/build、56/56 CTest、真实 MainWindow
-入口 1/1 与合成服务 selftest 均已通过。32 组服务矩阵覆盖 4/8 通道、两个方向、拼接和两滤波开关。
-既有 MATLAB 数值、旧 OFF 字节一致性及性能证据分别保留在 ring-timevar-lowpass、ring-filtered-das 报告，
-不改写为本轮重新执行的性能实验。用户此次确认覆盖该分支已交付功能的实机测试范围。
-
-本次仅文档收尾，生产/测试子树与 1fb9478 一致；不重新构建、不修改验收包或旧回执。
-包内 local_only=true、旧远端 SHA 和当时 UNVERIFIED 文案保持原样，当前验收/发布状态由本次记录补充。
-将来若交付新的 main exact SHA，仍须重新 configure/build 并记录新 BuildIdentity。
-
-历史 START 6313540、PhysicalRound 52cf771、A/B eb283f6/676df4a、C d9daa2d7、D 69a7606f、
-前端链 491aa34、count-boundary aa9097e、旧轻量包 3c6323d、旧增强内容输入 bd69785 保留追溯。
-2026-10-13 曾将 bd69785 内容线性接入 main；原 tip 并非因此成为 main 祖先。本次则为真实祖先链快进。
-旧 count-boundary 部分 .log 未归档 .txt 的证据缺口继续保留。
+本次文档收尾不重标旧包，不重建二进制。无新增现场日志或逐圈计数，八通道性能专项仍暂缓；
+既有 7 / 4007 继续作为现场观察而非协议常量。
 
 ## 4. 冻结语义
 
@@ -98,16 +55,15 @@ Layer 2b T_arr 未取得独立实测记录，discovery B 待决定；7 / 4007 �
 
 ## 5. 分支角色与下一步
 
-新工作默认从 latest origin/main 新建任务分支。联合功能分支作为本次已验收集成追溯保留；
-原低通分支 codex/ring-timevar-lowpass-20261016@3340fbf 已被 main 祖先链包含，原 ref 不移动。
-发现早退 B（本地绑定默认值和 tooltip）仍待用户决定；task-docs 派发不能当作生产实现。
-ring-zero-phase-pa-inversion 仅作数值参考，不维护；B1→B2 起点约定作废。
-DAS B-tier 实验继续不维护，其旧结论不因本次独立 FilteredDAS 实现进入 main 而被接受。
-Layer 2b T_arr、额外 trigger 根因和全孔径 8 通道正式校准仍各自保留原边界。
+新任务默认从 latest `origin/main` 新建任务分支。本轮实现发布分支为 `codex/ring-realtime-performance-20261104`；
+已包含原低通分支 tip `3340fbf` 和精确 FBP 阶段 tip `21d60c0`，历史 refs 保留。
+发现早退 B（本地绑定默认值和 tooltip）仍待决定；`codex/task-docs` 不是生产实现。
+ring-zero-phase 仅作数值参考，DAS B-tier 继续停维护。Layer 2b T_arr、额外 trigger 根因
+及全孔径八通道正式校准保留原验证边界。
 
 ## 6. 本地工作区与保留
 
-本地旧 main d3054d51e19570a6ef38774b8a82326738dce53b 含一份独有文档/开发配置提交，
-与本次实现分叉，按治理规则原样保留，不 reset/rebase、不隐式接入。远端 main 独立正常快进；
-当前联合分支在发布后与 origin/main 同步。其他未跟踪文件和 frozen handoff 均不改动。
-旧 _pending_delete 最终删除仅由用户执行；原始数据、校准和硬件证据保持保护，不新增清理授权。
+本地旧 `main`（`d3054d51e19570a6ef38774b8a82326738dce53b`）有独有文档/开发配置提交，
+与 canonical 链分叉，原样保留，不 reset/rebase、不隐式接入。
+未跟踪文件和 frozen handoff 保持原样；原始数据、校准和硬件证据不随本轮源码推送。
+旧 `_pending_delete` 的最终删除仅由用户执行。
