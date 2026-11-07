@@ -146,7 +146,8 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
         // to the UI. Missing field fails closed.
         processRingPulse(ready.seq, ready.submitIndex, ready.submitWallUs,
                          ready.hasSeq, ready.roundIdentity,
-                         msg.value(QStringLiteral("source_round_complete")).toBool(false));
+                         msg.value(QStringLiteral("source_round_complete")).toBool(false),
+                         msg.value(QStringLiteral("sector_ccw")).toInt(m_ringConfig.sectorCcw));
     } else if (cmd == "ring_reset") {
         // 停机超时判定新一圈：清空重建累积（与圈末重置同一函数）
         sendRingObservation("epoch_reset", m_ringObs.snapshot());
@@ -648,7 +649,8 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
 
 void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
                                   uint64_t submitWallUs, bool notifySeqValid,
-                                  const paimage::RoundIdentity &round, bool sourceRoundComplete)
+                                  const paimage::RoundIdentity &round, bool sourceRoundComplete,
+                                  int sectorCcw)
 {
     const uint64_t processStartUs = ring_shm_obs::steadyNowUs();
     if (!round.valid()) {
@@ -709,6 +711,15 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
     }
 
     const auto oldRound = m_ringRound.active();
+    if (sectorCcw == -1) sectorCcw = m_ringConfig.sectorCcw; // standalone fixture callers
+    if ((sectorCcw != 0 && sectorCcw != 1)
+        || (oldRound == round && sectorCcw != m_ringConfig.sectorCcw)) {
+        QJsonObject extra{{QStringLiteral("sector_ccw"), sectorCcw},
+                          {QStringLiteral("active_sector_ccw"), m_ringConfig.sectorCcw}};
+        ring_round_identity::add(extra, round);
+        sendRingObservation("round_direction_rejected", m_ringObs.snapshot(), extra);
+        return;
+    }
     const auto admission = m_ringRound.admit(round);
     using Admission = paimage::RingReconRoundState::Admission;
     QJsonObject roundDiagnostic;
@@ -722,7 +733,11 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
         return;
     }
     if (admission == Admission::First || admission == Admission::Transition) {
+        // Direction changes the signed step and sector assignments only.
+        // Travel-time tables, exact kernel and preprocessing plans are reused.
+        m_ringConfig.sectorCcw = sectorCcw;
         resetRingRecon();
+        roundDiagnostic[QStringLiteral("sector_ccw")] = sectorCcw;
         sendRingObservation("round_barrier_reset", m_ringObs.snapshot(), roundDiagnostic);
     }
 

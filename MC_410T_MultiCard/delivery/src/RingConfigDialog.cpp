@@ -963,68 +963,27 @@ quint64 RingConfigDialog::startupFilterTriggerCount() const
 
 // ══ 电机参数联动（LabVIEW → 本程序）：读取/校验/写入接口 ══
 
-bool RingConfigDialog::applyMotorScanParams(bool hasDirection, bool ccw,
-                                           int totalAlines, QString *error)
+bool RingConfigDialog::applyMotorScanDirection(bool ccw, QString *error)
 {
-    // 不提交正在编辑的滤波/几何草稿；保留待应用文件，关闭参数窗口后重试。
     if (isVisible()) {
-        if (error) *error = QStringLiteral("参数窗口正在编辑，关闭后应用电机参数");
+        if (error) *error = QStringLiteral("参数窗口正在编辑，关闭后应用电机方向");
         return false;
-    }
-    if (totalAlines > 0) {
-        const auto reason = validateMotorScanTotalAlines(totalAlines);
-        if (!reason.isEmpty()) { if (error) *error = reason; return false; }
     }
     const auto oldDirection = m_motorSectorCcw;
     const auto oldLinked = m_motorStartLinked;
-    const auto oldTotal = m_spnTotalAlines->value();
-    if (hasDirection) setMotorScanDirection(ccw);
-    if (totalAlines > 0) setMotorScanTotalAlines(totalAlines);
+    m_motorSectorCcw = ccw ? 0 : 1; // 实机校正：顺时针为正向
+    m_motorStartLinked = true;
+    // The first link can also move a previously manual origin to nine o'clock.
+    // Subsequent reversals only change the direction on the next round.
+    if (m_controller && m_controller->isRingMode() && m_controller->isRunning()) {
+        m_controller->applyMotorRingDirection(m_motorSectorCcw);
+        if (error) error->clear();
+        return true;
+    }
     if (applyConfig(error)) return true;
     m_motorSectorCcw = oldDirection;
     m_motorStartLinked = oldLinked;
-    m_spnTotalAlines->setValue(oldTotal);
     return false;
-}
-
-int RingConfigDialog::enabledChannelCount() const
-{
-    int cnt = 0;
-    for (int c = 0; c < 8; ++c)
-        if (m_chkCh[c]->isChecked()) ++cnt;
-    return cnt;
-}
-
-void RingConfigDialog::setMotorScanDirection(bool ccw)
-{
-    // 2026-10-29 实机观察：旧 CCW->1 / CW->0 的视觉方向与面板相反。
-    // 保留实机校正的步进方向；联动起点与方向无关。
-    m_motorSectorCcw = ccw ? 0 : 1;
-    m_motorStartLinked = true;
-}
-
-QString RingConfigDialog::validateMotorScanTotalAlines(int totalAlines) const
-{
-    if (totalAlines < m_spnTotalAlines->minimum() || totalAlines > m_spnTotalAlines->maximum())
-        return QStringLiteral("单圈总A-line数 %1 超出界面允许范围").arg(totalAlines);
-    const int cnt = enabledChannelCount();
-    if (cnt == 0)
-        return QStringLiteral("未勾选任何通道");
-    if (totalAlines % (cnt * 2) != 0)
-        return QStringLiteral("单圈总A-line数 %1 无法按 %2 个通道 × 2 个波长整除")
-                   .arg(totalAlines).arg(cnt);
-    const int k = totalAlines / (cnt * 2);
-    if (k < 2)
-        return QStringLiteral("换算后每通道每波长每圈A-line数 K=%1 过小（至少 2）").arg(k);
-    const int blockWl = m_spnBlock->value() / 2;   // 每块单波长A-line数
-    if (k % blockWl != 0)
-        return QStringLiteral("K=%1 需能被每块单波长A-line数 %2 整除").arg(k).arg(blockWl);
-    return QString();
-}
-
-void RingConfigDialog::setMotorScanTotalAlines(int totalAlines)
-{
-    m_spnTotalAlines->setValue(totalAlines);
 }
 
 void RingConfigDialog::setMotorScanLinkageStatus(const QString &status)

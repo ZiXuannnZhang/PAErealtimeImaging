@@ -96,7 +96,8 @@ public:
 
     // Production path. The normalizer supplies a common, non-wrapping index
     // for all cards; the worker retains immutable frontend groups until paired.
-    bool pushCardGroup(const TriggerGroupConstPtr &group);
+    bool pushCardGroup(const TriggerGroupConstPtr &group, int sectorCcw);
+    int activeSectorCcw() const noexcept { return m_sectorCcw; } // assembler worker/lock only
 
     // 一个物理通道在某触发的一根 A-line（取前 sampDepth 点）。
     // 所有启用通道同一 triggerSeq 到达后立即按触发顺序组块；物理轮次

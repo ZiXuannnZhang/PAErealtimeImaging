@@ -30,6 +30,7 @@
 #include "ImagingParams.h"
 #include "MotorScanLinkage.h"
 #include "RingRoundUiState.h"
+#include "RingRoundDirection.h"
 #include "RingRoundPresentation.h"
 #include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 
@@ -297,14 +298,15 @@ private:
 
     // ══ 电机参数联动（LabVIEW → 本程序）══
     // 监视器：定时读参数文件（默认 <exe目录>/motor_scan_params.json，由 LabVIEW
-    // 侧桥接写入）。方向/步数消费见 onMotorScanLinkageParams。
+    // 侧桥接写入）。当前仅消费扫描方向。
     MotorScanLinkageMonitor *m_motorScanMonitor = nullptr;
-    motor_scan_linkage::TotalAlinesRule m_motorTotalAlinesRule =
-        motor_scan_linkage::TotalAlinesRule::PerEnabledChannel;
     // 最近一次已下发到对话框的联动值（变化检测：避免每 tick 重复 applyConfig）
     bool m_motorDirectionApplied = false;
     bool m_motorDirectionCcw = true;
-    int  m_motorTotalAlinesApplied = 0;
+    paimage::RingRoundDirection m_ringRoundDirection;
+    void bindRingRoundDirection(const paimage::RoundIdentity &round);
+    std::uint64_t m_pendingRingDirectionRevision = 0; // UI thread
+    paimage::RoundIdentity m_ringDirectionTarget;    // UI thread
     ImagingDisplayWindow *m_imagingDisplayWindow = nullptr;   // 线性扫描实时成像独立弹窗
     RingBlockAssembler *m_ringAssembler = nullptr;   // 阶段B：真实采集组包器
     mutable std::mutex m_ringAssemblerMutex;          // 仅保护成像组包器，不与采集/保存共享

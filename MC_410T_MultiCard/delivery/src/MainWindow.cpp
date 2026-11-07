@@ -432,6 +432,13 @@ MainWindow::MainWindow(QWidget *parent)
         // 物理轮次准入：submit_index 只负责 producer snapshot 的 stale/duplicate
         // cutoff；物理轮次 presentation 决策完全由下方 RoundIdentity 精确匹配。
         m_roundUi.onFrame();
+        if (m_pendingRingDirectionRevision != 0) {
+            const auto direction = m_ringRoundDirection.find(round);
+            if (direction && direction->revision == m_pendingRingDirectionRevision) {
+                m_pendingRingDirectionRevision = 0;
+                m_ringDirectionTarget = {};
+            }
+        }
         const int frameIdx = int(m_roundUi.frameCount());
         updateRingImagingStatus();
         const bool frameEnd = m_roundUi.noteSnapshot(roundComplete);
@@ -610,7 +617,8 @@ MainWindow::MainWindow(QWidget *parent)
                 QVector<quint8> chQ(channels.begin(), channels.end());
                 submitted = m_imagingController && m_imagingServiceReady.load(std::memory_order_acquire)
                     && m_imagingController->submitRingBlock(
-                        rawQ, angQ, chQ, round, blockSeq, &submitIndex, sourceRoundComplete);
+                        rawQ, angQ, chQ, round, blockSeq, &submitIndex, sourceRoundComplete,
+                        m_ringAssembler->activeSectorCcw());
                 // submit_index is the producer identity domain. Record it
                 // even when dontwait send returned false: the missing
                 // notification is a gap, never an attempt-count alias.
@@ -686,10 +694,13 @@ MainWindow::MainWindow(QWidget *parent)
             }
             return false;
         }
-        return m_ringAssembler->pushCardGroup(frame);
+        const auto direction = m_ringRoundDirection.find(frame->physicalRoundIdentity());
+        return direction && m_ringAssembler->pushCardGroup(frame, direction->sectorCcw);
     });
     connect(m_imagingController, &ImagingController::svcStopped, this, [this]() {
         m_imagingServiceReady.store(false, std::memory_order_release);
+        m_pendingRingDirectionRevision = 0;
+        m_ringDirectionTarget = {};
         m_ringSnapshotAdmissionBlocked.store(true, std::memory_order_release);
         m_ringResetCommandSent.store(false, std::memory_order_release);
         // 服务停止不代表物理轮结束；闩锁仍由采集轮次/监听生命周期拥有。
@@ -713,12 +724,18 @@ MainWindow::MainWindow(QWidget *parent)
             QSignalBlocker blocker(m_chkRealtimeImaging);
             m_chkRealtimeImaging->setChecked(false);
         }
+        if (m_imagingEnabled && m_imagingController && m_imagingController->isRingMode()) {
+            m_imagingEnabled = false;
+            m_lblImagingStatus->setText(QStringLiteral("成像已停止"));
+        }
         setImagingParamControlsEnabled(true);   // 服务已完全停止：恢复成像参数/采集控制
     });
     connect(m_imagingController, &ImagingController::ringConfigChangedWhileRunning,
             this, [this]() {
         if (!m_imagingController || !m_imagingController->isRingMode()) return;
         m_restartRingOnSvcStop = true;
+        m_imagingServiceReady.store(false, std::memory_order_release);
+        updateRingImagingStatus();
         // 先停馈送线程并清空组包器，避免重启期间继续提交旧尺寸的块
         stopRingFeedWorker();
         m_ringAssemblerConfigured = false;
@@ -726,6 +743,13 @@ MainWindow::MainWindow(QWidget *parent)
           m_ringPresentation.reset();
           if (m_ringAssembler) m_ringAssembler->reset(); }
         m_imagingController->stopSvc();
+    });
+    connect(m_imagingController, &ImagingController::ringDirectionChanged,
+            this, [this](int sectorCcw) {
+        const auto direction = m_ringRoundDirection.request(sectorCcw);
+        m_pendingRingDirectionRevision = direction.revision;
+        m_ringDirectionTarget = {};
+        updateRingImagingStatus();
     });
     connect(m_imagingController, &ImagingController::svcReady, this, [this]() {
         m_imagingServiceReady.store(true, std::memory_order_release);
@@ -740,6 +764,7 @@ MainWindow::MainWindow(QWidget *parent)
             QSignalBlocker blocker(m_chkRealtimeImaging);
             m_chkRealtimeImaging->setChecked(m_imagingController->isRunning());
         }
+        updateRingImagingStatus();
     });
 
     connect(m_statsTimer, &QTimer::timeout, this, &MainWindow::onUpdateStatistics);
@@ -2322,6 +2347,10 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
         [this](const paimage::PhysicalRoundEvent& event) {
             // RoundStarted 不依赖 startupFilter 数量，首物理触发返回前关闸。
             if (m_motorScanMonitor) m_motorScanMonitor->onPhysicalRoundEvent(event);
+            if (event.kind == paimage::PhysicalRoundEvent::Kind::RoundStarted) {
+                bindRingRoundDirection({event.measurementSession, event.roundGeneration});
+                return;
+            }
             if (event.kind == paimage::PhysicalRoundEvent::Kind::CountBoundary) {
                 // Allocate and publish the next data binding synchronously on
                 // the source boundary.  The old-round identity is the key of
@@ -3040,6 +3069,8 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
                 updateRingImagingStatus();   // 环形模式：服务就绪后先显示“成像中，等待重建数据…”
                 return;
             }
+            if (m_imagingController->isRingMode())
+                m_lblImagingStatus->setText(QStringLiteral("环形成像服务准备中…"));
             auto conn = std::make_shared<QMetaObject::Connection>();
             *conn = connect(m_imagingController, &ImagingController::svcReady,
                             this, [this, conn]() {
@@ -4423,6 +4454,7 @@ void MainWindow::pushRingDisplayGridGeometry()
 {
     if (!m_imagingDisplayWindow || !m_imagingController) return;
     const RingReconCudaConfig &cfg = m_imagingController->ringConfig();
+    m_ringRoundDirection.request(cfg.sectorCcw);
     const int nx = m_imagingController->ringDisplayNx();
     if (nx <= 1 || cfg.fov <= 0.0) return;
     const double fovMm = cfg.fov * 1e3;
@@ -5492,8 +5524,6 @@ void MainWindow::startMotorScanLinkage()
     //   Enabled         默认 true（文件不存在只提示、不报错）
     //   ParamsFile      默认 <exe目录>/motor_scan_params.json
     //   DirectionInverted 默认 false（true = 写入方布尔语义与 逆/顺 相反）
-    //   TotalAlinesRule 默认 perEnabledChannel（单圈总A-line数 = XStepsNum ×
-    //                    启用通道数；备选 perPeriod / directionOnly）
     //   TriggerLatch    默认 true（触发闩锁：收到本轮首个触发后冻结联动参数，
     //                    源空闲超时/未成像时才应用；false = 旧行为，读到变化即应用）
     QSettings s(paimageSettingsPath(), QSettings::IniFormat);
@@ -5506,9 +5536,6 @@ void MainWindow::startMotorScanLinkage()
     st.directionInverted = s.value(QStringLiteral("DirectionInverted"), false).toBool();
     st.pollMs = s.value(QStringLiteral("PollMs"), 500).toInt();
     st.triggerLatch = s.value(QStringLiteral("TriggerLatch"), true).toBool();
-    m_motorTotalAlinesRule = motor_scan_linkage::totalAlinesRuleFromKey(
-        s.value(QStringLiteral("TotalAlinesRule"),
-                QStringLiteral("perEnabledChannel")).toString());
     s.endGroup();
 
     m_motorScanMonitor = new MotorScanLinkageMonitor(st, this);
@@ -5530,112 +5557,54 @@ void MainWindow::startMotorScanLinkage()
 
 void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &params)
 {
+    if (!params.hasDirection) return;
     if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() != 1) {
         m_motorScanMonitor->retryPendingApply(QStringLiteral("等待环形成像模式"));
         return;
     }
-    // 对话框是这些参数的唯一权威载体：联动值推入对话框控件，之后与用户手改
-    // 参数完全同路径（applyConfig 校验+下发；含每圈设计触发数与运行中自动重启）。
-    ensureRingConfigDialog();
-    if (m_ringConfigDialog->isVisible()) {
-        m_motorScanMonitor->retryPendingApply(QStringLiteral("参数窗口正在编辑，关闭后应用电机参数"));
+    if (m_motorDirectionApplied && params.directionCcw == m_motorDirectionCcw)
         return;
-    }
+
+    ensureRingConfigDialog();
     m_ringConfigDialog->setAcquisitionParams(m_sampleIntervalNs, ui->edtDataTime->text().toInt());
 
-    QJsonObject fields;
-    fields[QStringLiteral("seq")] = static_cast<double>(params.seq);
-    fields[QStringLiteral("writtenAt")] = params.writtenAt;
-    fields[QStringLiteral("paramsSource")] = params.source;
-
-    // 面板方向由 RingConfigDialog 按实机校正映射到重建方向位：逆->0，顺->1。
-    if (params.hasDirection) {
-        fields[QStringLiteral("direction")] = motor_scan_linkage::describeDirection(
-            params.directionCcw);
-    }
-
-    // 步数：按规则换算单圈总A-line数；换算结果先过对话框同口径预校验，
-    // 不通过只记录+提示、不下发（避免 applyConfig 弹窗打扰）。
-    int totalAlines = 0;
-    if (params.hasXStepsNum) {
-        totalAlines = motor_scan_linkage::deriveTotalAlines(
-            m_motorTotalAlinesRule, params.xStepsNum, params.xStepsPerPeriod,
-            m_ringConfigDialog->enabledChannelCount());
-        fields[QStringLiteral("xStepsNum")] = params.xStepsNum;
-        fields[QStringLiteral("xStepsPerPeriod")] = params.xStepsPerPeriod;
-        fields[QStringLiteral("totalAlinesRule")] =
-            motor_scan_linkage::totalAlinesRuleKey(m_motorTotalAlinesRule);
-        if (m_motorTotalAlinesRule != motor_scan_linkage::TotalAlinesRule::DirectionOnly
-                && totalAlines <= 0) {
-            m_motorScanMonitor->retryPendingApply(QStringLiteral("步数换算缺少输入或超出整数范围"));
-            return;
-        }
-    }
-
-    bool applyDirection = params.hasDirection
-        && (!m_motorDirectionApplied || params.directionCcw != m_motorDirectionCcw);
-    bool applyTotal = false;
-    if (totalAlines > 0) {
-        const QString err = m_ringConfigDialog->validateMotorScanTotalAlines(totalAlines);
-        if (!err.isEmpty()) {
-            fields[QStringLiteral("rejectReason")] = err;
-            recordDiagnosticAction(QStringLiteral("motor_linkage_rejected"), fields);
-            logMessage(QStringLiteral("电机联动拒绝单圈总A-line数 %1：%2")
-                           .arg(totalAlines).arg(err));
-            m_motorScanMonitor->retryPendingApply(err);
-            return;
-        } else {
-            applyTotal = totalAlines != m_motorTotalAlinesApplied;
-        }
-    }
-    if (!applyDirection && !applyTotal) {
-        recordDiagnosticAction(QStringLiteral("motor_linkage_unchanged"), fields);
-        return;   // 联动值无变化：不重复下发
-    }
-
-    // 与用户手点“应用”完全同路径：校验+configureRing+每圈触发数/掩膜下发；
-    // 正在成像时由既有 ringConfigChangedWhileRunning 流程自动重启服务。
+    const QString direction = motor_scan_linkage::describeDirection(params.directionCcw);
+    QJsonObject fields{{QStringLiteral("seq"), static_cast<qint64>(params.seq)},
+                       {QStringLiteral("writtenAt"), params.writtenAt},
+                       {QStringLiteral("paramsSource"), params.source},
+                       {QStringLiteral("direction"), direction}};
     QString applyError;
-    if (!m_ringConfigDialog->applyMotorScanParams(params.hasDirection, params.directionCcw,
-                                                applyTotal ? totalAlines : 0, &applyError)) {
+    if (!m_ringConfigDialog->applyMotorScanDirection(params.directionCcw, &applyError)) {
         m_motorScanMonitor->retryPendingApply(applyError);
         fields[QStringLiteral("rejectReason")] = applyError;
         recordDiagnosticAction(QStringLiteral("motor_linkage_apply_failed"), fields);
         return;
     }
-    if (params.hasDirection) {
-        m_motorDirectionApplied = true;
-        m_motorDirectionCcw = params.directionCcw;
-    }
-    if (applyTotal)
-        m_motorTotalAlinesApplied = totalAlines;
-    fields[QStringLiteral("totalAlines")] = totalAlines;
-    fields[QStringLiteral("applied")] = true;
-    // 记录实际下发配置，区分面板方向文字与重建内部方向位。
-    if (params.hasDirection) {
-        fields[QStringLiteral("sectorStartDeg")] =
-            m_imagingController->ringConfig().sectorStartDeg;
-        fields[QStringLiteral("sectorCcw")] = m_imagingController->ringConfig().sectorCcw;
-    }
+    const auto &cfg = m_imagingController->ringConfig();
+    m_ringRoundDirection.request(cfg.sectorCcw);
+    m_motorDirectionApplied = true;
+    m_motorDirectionCcw = params.directionCcw;
+    fields[QStringLiteral("sectorStartDeg")] = cfg.sectorStartDeg;
+    fields[QStringLiteral("sectorCcw")] = cfg.sectorCcw;
     recordDiagnosticAction(QStringLiteral("motor_linkage_applied"), fields);
-    logMessage(QStringLiteral("电机联动已下发：面板方向=%1 单圈总A-line数=%2 起点角=%3 sectorCcw=%4")
-                   .arg(params.hasDirection
-                            ? motor_scan_linkage::describeDirection(params.directionCcw)
-                            : QStringLiteral("(未变)"))
-                   .arg(applyTotal ? QString::number(totalAlines)
-                                   : QStringLiteral("(未变)"))
-                   .arg(params.hasDirection
-                            ? QStringLiteral("%1°").arg(m_imagingController->ringConfig().sectorStartDeg)
-                            : QStringLiteral("(未变)"))
-                   .arg(m_imagingController->ringConfig().sectorCcw));
+    logMessage(QStringLiteral("电机方向已下发：%1 起点角=%2° sectorCcw=%3")
+                   .arg(direction).arg(cfg.sectorStartDeg).arg(cfg.sectorCcw));
 }
 
 // =====================================================================
-// updateRingImagingStatus — 环形模式“成像中”状态反馈
-// x = 当前块已收到的触发脉冲数，y = 每通道每块 Aline 数（组包器块进度）；
-// 首个触发脉冲到达即由等待状态切换为计数显示；帧计数沿用 m_roundUi。
-// 仅主线程调用（工作线程通过 QMetaObject::invokeMethod 切回）。
+// 电机方向在采集侧锁定，轮次状态在 UI 线程更新。
 // =====================================================================
+void MainWindow::bindRingRoundDirection(const paimage::RoundIdentity &round)
+{
+    const auto direction = m_ringRoundDirection.bind(round);
+    QMetaObject::invokeMethod(this, [this, round, direction] {
+        if (m_pendingRingDirectionRevision == 0
+            || m_pendingRingDirectionRevision != direction.revision) return;
+        m_ringDirectionTarget = round;
+        updateRingImagingStatus();
+    }, Qt::QueuedConnection);
+}
+
 void MainWindow::updateRingImagingStatus()
 {
     if (!m_lblImagingStatus || !m_imagingEnabled) return;
@@ -5644,6 +5613,18 @@ void MainWindow::updateRingImagingStatus()
     const QString amberStyle =
         "color: #FFAA00; background: transparent; padding: 2px 8px;"
         "font-size: 12px;";
+    if (!m_imagingServiceReady.load(std::memory_order_acquire)) {
+        m_lblImagingStatus->setText(QStringLiteral("环形成像服务准备中…"));
+        m_lblImagingStatus->setStyleSheet(amberStyle);
+        return;
+    }
+    if (m_pendingRingDirectionRevision != 0) {
+        m_lblImagingStatus->setText(m_ringDirectionTarget.valid()
+            ? QStringLiteral("已进入换向轮次，等待首帧…")
+            : QStringLiteral("换向已下发，等待下一轮采集…"));
+        m_lblImagingStatus->setStyleSheet(amberStyle);
+        return;
+    }
     std::pair<int, int> prog;
     { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
       prog = m_ringAssembler->blockProgress(); }

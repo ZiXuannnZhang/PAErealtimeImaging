@@ -147,30 +147,29 @@ CUDA rebuild / dependency / delivery 规则不要在本 README 维护第二套�
 
 ## 8. 电机扫描参数联动（LabVIEW → 本程序）
 
-电机扫描方向与步数由 LabVIEW 前端经外部桥接写入 `motor_scan_params.json`
-（`formatVersion` 1），本程序每 `PollMs`（默认 500 ms）轮询该文件：
+本程序每 `PollMs`（默认 500 ms）读取 LabVIEW 桥接写入的
+`motor_scan_params.json`（`formatVersion` 1）。只有 `direction` 参与成像联动；
+`xStepsNum`、`xStepsPerPeriod` 等字段可以保留，程序忽略它们。
+每圈总 A-line 数继续由环形成像参数设定。
 
 ```text
 motor_scan_params.json -> MotorScanLinkageMonitor
-  -> RingConfigDialog（方向 / 单圈总A-line数）
-  -> applyConfig（与用户手改参数完全同一路径）
-  -> RingBlockAssembler(sectorCcw, sectorStartDeg) / ImagingSvc 拼接锚点
+  -> 轮次开始时锁定 direction
+  -> RingBlockAssembler（A-line 角度）/ ImagingSvc（重建方向和扇区）
 ```
 
-方向消费：`sectorCcw` 决定 A-line 角度按 `+k`（逆）还是 `−k`（顺）递增，
-起点角随方向取 180°（九点钟）/ 0°（三点钟）。未联动时保持历史行为
-（`sectorCcw=1`、起点九点钟、逆时针重建）。
+联动时顺、逆均从九点钟开始，物理通道按序号升序沿旋转方向分配扇区。
+顺时针对应 `sectorCcw=1`，逆时针对应 `sectorCcw=0`。
+纯换向在下一物理轮生效，复用当前成像进程和重建资源。首次从手动起点切到
+九点钟且起点确有变化时，仍需重新配置服务。
 
-触发闩锁：本轮首个触发（`ControlFiltered`）后冻结参数应用，源空闲超时
-（`TimeoutBoundary`）或计数重置（`CountBoundary`）或成像停止后恢复，
-保证同一轮内总 A-line 数/方向不变。冻结期仍读文件并在状态行标注
-「本轮已闩锁」。
+触发闩锁默认开启：收到本轮首个物理触发（`RoundStarted`）后冻结方向应用，
+源空闲超时（`TimeoutBoundary`）或计数边界（`CountBoundary`）后恢复。
+冻结期间继续读文件；已进入重建的数据始终使用所属物理轮绑定的方向。
 
 INI 组 `[MotorScanLinkage]`：`Enabled`、`ParamsFile`（默认 `<exe目录>` 下）、
-`DirectionInverted`、`TotalAlinesRule`（`perEnabledChannel` / `perPeriod` /
-`directionOnly`）、`PollMs`、`TriggerLatch`，全部有默认值，不配置即可启用。
-写入端契约、方向映射与验证证据见
-`../../CODEX_REPORTS/motor-scan-linkage-direction-20261026/README.md`。
+`DirectionInverted`、`PollMs`、`TriggerLatch` 均有默认值。旧配置中的
+`TotalAlinesRule` 不再生效。
 
 ## 9. Build
 

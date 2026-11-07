@@ -8,7 +8,6 @@
 #include <QJsonValue>
 
 #include <utility>
-#include <limits>
 
 namespace motor_scan_linkage {
 namespace {
@@ -56,34 +55,9 @@ ParseStatus parseParamsJson(const QByteArray &json, Params *out, QString *error)
         params.hasDirection = true;
     }
 
-    const QJsonValue steps = obj.value(QStringLiteral("xStepsNum"));
-    if (!steps.isUndefined()) {
-        const double v = steps.toDouble(-1.0);
-        if (v < 1.0 || v > 100000000.0 || v != static_cast<double>(static_cast<qlonglong>(v))) {
-            if (error) *error = QStringLiteral("xStepsNum 取值无效（需为正整数）");
-            return ParseStatus::BadFormat;
-        }
-        params.xStepsNum = static_cast<int>(v);
-        params.hasXStepsNum = true;
-    }
-
-    const QJsonValue perPeriod = obj.value(QStringLiteral("xStepsPerPeriod"));
-    if (!perPeriod.isUndefined()) {
-        const double v = perPeriod.toDouble(-1.0);
-        if (v < 1.0 || v > 1000000.0 || v != static_cast<double>(static_cast<qlonglong>(v))) {
-            if (error) *error = QStringLiteral("xStepsPerPeriod 取值无效（需为正整数）");
-            return ParseStatus::BadFormat;
-        }
-        params.xStepsPerPeriod = static_cast<int>(v);
-    }
-
-    if (!params.hasDirection && !params.hasXStepsNum) {
-        if (error) *error = QStringLiteral("direction 与 xStepsNum 至少需要其一");
-        return ParseStatus::BadFormat;
-    }
-
-    params.seq = static_cast<quint64>(
-        obj.value(QStringLiteral("seq")).toDouble(0.0));
+    // Other motor fields are reserved for the producer's future extensions.
+    const auto seq = obj.value(QStringLiteral("seq")).toInteger();
+    if (seq > 0) params.seq = static_cast<quint64>(seq);
     params.writtenAt = obj.value(QStringLiteral("writtenAt")).toString();
     params.source = obj.value(QStringLiteral("source")).toString();
     if (out) *out = params;
@@ -103,61 +77,6 @@ ParseStatus parseParamsFile(const QString &path, Params *out, QString *error)
         return ParseStatus::ReadFailed;
     }
     return parseParamsJson(file.readAll(), out, error);
-}
-
-QString totalAlinesRuleKey(TotalAlinesRule rule)
-{
-    switch (rule) {
-    case TotalAlinesRule::PerEnabledChannel:
-        return QStringLiteral("perEnabledChannel");
-    case TotalAlinesRule::PerPeriod:
-        return QStringLiteral("perPeriod");
-    case TotalAlinesRule::DirectionOnly:
-        return QStringLiteral("directionOnly");
-    }
-    return QStringLiteral("perEnabledChannel");
-}
-
-TotalAlinesRule totalAlinesRuleFromKey(const QString &key)
-{
-    if (key == QStringLiteral("perPeriod"))
-        return TotalAlinesRule::PerPeriod;
-    if (key == QStringLiteral("directionOnly"))
-        return TotalAlinesRule::DirectionOnly;
-    return TotalAlinesRule::PerEnabledChannel;   // 未知键回退默认
-}
-
-int deriveTotalAlines(TotalAlinesRule rule, int xStepsNum,
-                      int xStepsPerPeriod, int enabledChannelCount)
-{
-    if (xStepsNum <= 0)
-        return 0;
-    qint64 total = 0;
-    switch (rule) {
-    case TotalAlinesRule::PerEnabledChannel:
-        if (enabledChannelCount <= 0)
-            return 0;
-        total = qint64(xStepsNum) * enabledChannelCount;
-        break;
-    case TotalAlinesRule::PerPeriod:
-        if (xStepsPerPeriod <= 0)
-            return 0;
-        total = qint64(xStepsNum) * xStepsPerPeriod;
-        break;
-    case TotalAlinesRule::DirectionOnly:
-        return 0;
-    }
-    return total <= std::numeric_limits<int>::max() ? static_cast<int>(total) : 0;
-}
-
-bool totalAlinesConsistent(int totalAlines, int enabledChannelCount)
-{
-    if (totalAlines <= 0 || enabledChannelCount <= 0)
-        return false;
-    const int divisor = enabledChannelCount * 2;   // 启用通道数 × 激发光波长数
-    if (totalAlines % divisor != 0)
-        return false;
-    return totalAlines / divisor >= 2;
 }
 
 QString describeDirection(bool ccw)
@@ -255,24 +174,18 @@ void MotorScanLinkageMonitor::tick()
 
     // 写入方布尔语义反接（可选）：directionInverted 只翻转方向，
     // 不影响步数。
-    if (m_settings.directionInverted && params.hasDirection)
+    m_fileSeen = true;
+    if (!params.hasDirection) {
+        setStatus(QStringLiteral("未联动（参数文件未提供扫描方向）"));
+        return;
+    }
+    if (m_settings.directionInverted)
         params.directionCcw = !params.directionCcw;
 
-    m_fileSeen = true;
-    const QString dirText = params.hasDirection
-        ? motor_scan_linkage::describeDirection(params.directionCcw)
-        : QStringLiteral("未提供");
-    const QString statusText = QStringLiteral("已联动：%1 | XStepsNum=%2 | seq=%3")
-        .arg(dirText)
-        .arg(params.hasXStepsNum
-                 ? QString::number(params.xStepsNum) : QStringLiteral("未提供"))
-        .arg(params.seq);
+    const QString statusText = QStringLiteral("已联动：%1")
+        .arg(motor_scan_linkage::describeDirection(params.directionCcw));
     const bool observedChanged = !m_haveParams
-        || params.hasDirection != m_lastParams.hasDirection
-        || params.directionCcw != m_lastParams.directionCcw
-        || params.hasXStepsNum != m_lastParams.hasXStepsNum
-        || params.xStepsNum != m_lastParams.xStepsNum
-        || params.xStepsPerPeriod != m_lastParams.xStepsPerPeriod;
+        || params.directionCcw != m_lastParams.directionCcw;
     m_lastParams = params;
     m_haveParams = true;
     if (observedChanged)

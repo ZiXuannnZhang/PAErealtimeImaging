@@ -498,7 +498,7 @@ bool testOrderedCardGroups(Runner &r)
 {
     Fixture f;
     f.configure({0,0,1,1,0,0,1,0}, 2, 1, 180., 120., 1., 128);
-    auto push = [&](int card, int index, int generation) {
+    auto push = [&](int card, int index, int generation, int direction) {
         auto group = std::make_shared<TriggerGroup>();
         group->cardId = card;
         group->measurementSession = 1;
@@ -508,37 +508,37 @@ bool testOrderedCardGroups(Runner &r)
         group->freqA = {float(100 * index + card * 2)};
         group->freqB = {float(100 * index + card * 2 + 1)};
         std::weak_ptr<TriggerGroup> ref(group);
-        f.assembler.pushCardGroup(group);
+        f.assembler.pushCardGroup(group, direction);
         return ref;
     };
-    auto retained = push(3, 1, 0);
-    push(1, 1, 0);
+    auto retained = push(3, 1, 0, 1);
+    push(1, 1, 0, 1);
     r.check(!retained.expired() && f.progress == 0, "later complete trigger overtook first");
-    push(1, 0, 0);
-    push(3, 0, 0);
+    push(1, 0, 0, 1);
+    push(3, 0, 0, 1);
     r.check(retained.expired() && f.blocks.size() == 1, "pending card ownership was not released");
     if (f.blocks.empty()) return false;
     r.equal(f.blocks.front().raw, {2.f,3.f,6.f,102.f,103.f,106.f}, "wire wrap / cross-card order");
     r.equal(f.blocks.front().channels, {2,3,6,2,3,6}, "sparse physical channel order");
     r.equal(f.blocks.front().angles, {180.f,300.f,420.f,181.f,301.f,421.f}, "positive angles");
 
-    auto lost = push(1, 2, 0); // The other card never delivers this trigger.
+    auto lost = push(1, 2, 0, 1); // The other card never delivers this trigger.
     for (int i = 3; i <= 35; ++i) {
-        push(3, i, 0);
-        push(1, i, 0);
+        push(3, i, 0, 1);
+        push(1, i, 0, 1);
     }
     r.check(lost.expired() && f.assembler.snapshot().incompleteBlocks == 1, "unbounded or silent hole");
     if (f.blocks.size() < 2) return false;
     r.equal(f.blocks[1].raw, {402.f,403.f,406.f,502.f,503.f,506.f}, "lost block compacted wavelength parity");
     r.equal(f.blocks[1].angles, {182.f,302.f,422.f,183.f,303.f,423.f}, "lost block compacted angles");
     const auto before = f.blocks.size();
-    push(1, 0, 1);
-    push(3, 0, 0); // stale card must not complete the new trigger
-    push(3, 0, 1);
-    push(1, 1, 1);
-    push(3, 1, 1);
+    push(1, 0, 1, 0);
+    push(3, 0, 0, 1); // stale card must not complete the new trigger
+    push(3, 0, 1, 0);
+    push(1, 1, 1, 0);
+    push(3, 1, 1, 0);
     r.check(f.blocks.size() == before + 1, "new round did not start cleanly");
-    r.equal(f.blocks.back().angles, {180.f,300.f,420.f,181.f,301.f,421.f}, "new round starts at original sectors");
+    r.equal(f.blocks.back().angles, {180.f,60.f,-60.f,179.f,59.f,-61.f}, "reverse sector geometry");
     return r.ok;
 }
 
@@ -565,7 +565,7 @@ int main()
         {"R3 stale round drop", testStaleRoundDrop},
         {"R4 generation gap/session floor", testGenerationGapAndSessionFloor},
         {"R10 measurement session restart", testMeasurementSessionRestart},
-        {"multi-card order, ownership and gap", testOrderedCardGroups},
+        {"multi-card order, ownership, gap and reverse", testOrderedCardGroups},
     };
 
     for (const auto &test : tests) {

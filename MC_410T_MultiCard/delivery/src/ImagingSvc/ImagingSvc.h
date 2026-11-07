@@ -58,7 +58,8 @@ private:
     void processPulse();
     void processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
                           uint64_t submitWallUs, bool notifySeqValid,
-                          const paimage::RoundIdentity &round, bool sourceRoundComplete);
+                          const paimage::RoundIdentity &round, bool sourceRoundComplete,
+                          int sectorCcw = -1);
     void resetRingRecon();        // 圈末/超时共用：清空 CUDA 累积与跨圈边界状态
     bool processFbpBlock(const QVector<float>&, const QVector<float>&, const QVector<quint8>&, bool final);
     void processFbpDevice(const QVector<float>&, const QVector<float>&, const QVector<quint8>&,

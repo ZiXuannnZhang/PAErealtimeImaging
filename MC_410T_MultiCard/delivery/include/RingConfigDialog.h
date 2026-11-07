@@ -35,7 +35,7 @@ public:
     RingFbpSettings fbpSettings() const;
     void sysDelayPerChannel(int out[8][2]) const;   // 每通道双波长延时截断（[通道][波长]）
     bool applyConfig(QString *error = nullptr); // 自动联动传入 error 时不弹出模态窗口
-    bool applyMotorScanParams(bool hasDirection, bool ccw, int totalAlines, QString *error);
+    bool applyMotorScanDirection(bool ccw, QString *error);
 
     // 物理轮次启动策略控件当前值（Session B；持久化见 RoundPolicySettings）
     quint64 startupFilterTriggerCount() const;
@@ -51,16 +51,6 @@ public:
     static frontend_filter::Config loadFrontendFilterDefaults();
 
     // ══ 电机参数联动（LabVIEW → 本程序，只读消费端见 MotorScanLinkage）══
-    // 当前启用通道数（勾选数）：MainWindow 联动换算单圈总A-line数时使用。
-    int enabledChannelCount() const;
-    // 面板方向写入：逆=true -> sectorCcw=0，顺=false -> 1（实机校正映射）。
-    // 起点保持逆=180°、顺=0°。无联动输入时沿用原有默认方向位 1。
-    void setMotorScanDirection(bool ccw);
-    // 联动换算的单圈总A-line数预校验（与 applyConfig 的换算约束同口径）：
-    // 返回空串 = 可接受；否则为具体原因（调用方据此拒绝联动值并记录）。
-    QString validateMotorScanTotalAlines(int totalAlines) const;
-    // 联动写入单圈总A-line数（调用方须先 validateMotorScanTotalAlines 通过）。
-    void setMotorScanTotalAlines(int totalAlines);
     // 联动状态行（“电机联动”标签文本；未联动/已联动/拒绝原因）。
     void setMotorScanLinkageStatus(const QString &status);
     void setMotorScanParamsFile(const QString &path);

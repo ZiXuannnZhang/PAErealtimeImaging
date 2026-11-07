@@ -267,7 +267,7 @@ bool RingBlockAssembler::acceptRound(const paimage::RoundIdentity &round)
     return true;
 }
 
-bool RingBlockAssembler::pushCardGroup(const TriggerGroupConstPtr &group)
+bool RingBlockAssembler::pushCardGroup(const TriggerGroupConstPtr &group, int sectorCcw)
 {
     if (!m_configured || !group || group->logicalTriggerIndex < 0 ||
         group->cardId < 0 || group->cardId >= 4)
@@ -275,8 +275,11 @@ bool RingBlockAssembler::pushCardGroup(const TriggerGroupConstPtr &group)
     const auto card = static_cast<unsigned>(group->cardId);
     const auto bit = 1u << card;
     const auto round = group->physicalRoundIdentity();
+    const bool sameRound = m_activeRound && *m_activeRound == round;
     if (!(m_cardMask & bit) || !acceptRound(round))
         return false;
+    if (!sameRound) m_sectorCcw = sectorCcw;
+    else if (m_sectorCcw != sectorCcw) return false;
     const auto index = static_cast<std::uint64_t>(group->logicalTriggerIndex);
     if (index < m_nextLogicalTrigger)
         return false; // Duplicate or arrived after the reorder window closed.

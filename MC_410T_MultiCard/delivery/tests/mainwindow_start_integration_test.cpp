@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "ImagingController.h"
+#include "ImagingBypass.h"
 #include "RingConfigDialog.h"
 #include "RingBlockAssembler.h"
 #include "RingTimevarLowpassSettings.h"
@@ -68,7 +69,8 @@ public:
             settings.setValue("RingConfigDialog/Defaults/gridMm", 0.1);
             settings.setValue("RingConfigDialog/Defaults/sectorStart", 25.0);
             settings.setValue("MotorScanLinkage/ParamsFile", motorFile);
-            settings.setValue("MotorScanLinkage/TotalAlinesRule", "directionOnly");
+            // Legacy settings must not restore the retired step-count linkage.
+            settings.setValue("MotorScanLinkage/TotalAlinesRule", "perEnabledChannel");
             for (int channel = 0; channel < 8; ++channel)
                 settings.setValue(QString("RingConfigDialog/Defaults/ch%1").arg(channel), channel == 0);
             settings.sync();
@@ -230,17 +232,20 @@ public:
             reject(true,true);
             controller.stopSvc();waitFor([&]{return !controller.isRunning()&&!controller.m_ringSharedMemory;},"FBP resident cleanup");
             widget<QLineEdit>(dialog,"fbpDensities")->setText("1000,1100,1100,1100,1100,1100,1100,1100");
+            std::uint64_t motorTestSession = 0;
             for(bool tv:{false,true})for(bool fbp:{false,true}) {
                 widget<QCheckBox>(dialog,"timevarEnabled")->setChecked(tv);
                 widget<QComboBox>(dialog,"ringReconAlgorithm")->setCurrentIndex(fbp?1:0);
                 check(dialog.applyConfig(), "joint configuration rejected");
                 const auto acceptedTv = ring_timevar::toJson(controller.ringTimevarConfig());
                 const auto acceptedFbp = ring_fbp_settings::toJson(controller.m_fbpSettings);
-                auto writeMotor = [&](const char *direction) {
+                auto writeMotor = [&](const char *direction, const QJsonValue &steps = 2000) {
                     QSaveFile file(motorFile);
                     check(file.open(QIODevice::WriteOnly), "open motor file");
-                    file.write(QJsonDocument(QJsonObject{{"formatVersion",1},{"direction",direction},
-                        {"xStepsNum",2000}}).toJson());
+                    QJsonObject body{{"formatVersion",1},{"xStepsNum",steps},
+                                     {"xStepsPerPeriod",QJsonObject{}},{"speed",2500}};
+                    if (direction) body["direction"] = QString::fromLatin1(direction);
+                    file.write(QJsonDocument(body).toJson());
                     check(file.commit(), "atomic motor file commit");
                 };
                 writeMotor("CCW"); window.m_motorScanMonitor->tick();
@@ -248,40 +253,91 @@ public:
                               "four-combination startup snapshot");
                 paimage::PhysicalRoundNormalizer normalizer(8, [&](const paimage::PhysicalRoundEvent& event) {
                     window.m_motorScanMonitor->onPhysicalRoundEvent(event);
+                    if (event.kind == paimage::PhysicalRoundEvent::Kind::RoundStarted)
+                        window.bindRingRoundDirection({event.measurementSession, event.roundGeneration});
                 });
-                normalizer.setStartupFilterTriggerCount(0); normalizer.beginSession(1);
-                normalizer.classify(1, 100);
+                const auto session = ++motorTestSession;
+                normalizer.setStartupFilterTriggerCount(0); normalizer.beginSession(session);
+                const auto first = normalizer.classify(session, 100);
                 const int startsBeforeMotor = controller.m_testSvcStarts;
-                writeMotor("CW"); window.m_motorScanMonitor->tick();
+                const int stopsBeforeMotor = controller.m_testSvcStops;
+                const auto pid = controller.m_svcProcess->processId();
+                const auto* shm = controller.m_ringSharedMemory;
+                const auto feedStarts = window.m_testFeedStarts;
+                const auto assemblerConfigs = window.m_testAssemblerConfigs;
+                const auto totalAlines = controller.ringConfig().alinesPerFrame;
+                auto feedBlock = [&](const paimage::PhysicalRoundClassification &round) {
+                    for (int j = 0; j < controller.ringConfig().alinesPerChannelPerBlock; ++j) {
+                        auto group = std::make_shared<TriggerGroup>();
+                        group->cardId = 0;
+                        group->triggerSeq = uint16_t(round.triggerSeq + j);
+                        group->measurementSession = round.measurementSession;
+                        group->roundGeneration = round.roundGeneration;
+                        group->logicalTriggerIndex = j;
+                        group->normalizationApplied = group->isComplete = true;
+                        group->physicalDecision = paimage::PhysicalTriggerDecision::LogicalScan;
+                        group->sampleCount = controller.ringConfig().sampDepth;
+                        group->freqA.assign(group->sampleCount, 0.f);
+                        group->freqB.assign(group->sampleCount, 0.f);
+                        group->freqA[1000] = 100.f + j;
+                        check(window.ringFeedSink(group) == ImagingSubmitResult::Accepted,
+                              "direction switch gated the imaging FIFO");
+                    }
+                };
+                writeMotor("CW", QStringLiteral("unused")); window.m_motorScanMonitor->tick();
                 check(controller.ringConfig().sectorCcw == 0 && controller.ringConfig().sectorStartDeg == 180
                     && controller.m_testSvcStarts == startsBeforeMotor,
                       "zero-filter active round changed direction/service");
-                normalizer.timeoutBoundary(1); window.m_motorScanMonitor->tick();
-                waitFor([&]{return controller.isRunning() && window.m_imagingServiceReady.load()
-                    && controller.m_testSvcStarts > startsBeforeMotor;}, "motor boundary restart failed");
+                normalizer.timeoutBoundary(session); window.m_motorScanMonitor->tick();
                 check(controller.ringConfig().sectorCcw == 1 && controller.ringConfig().sectorStartDeg == 180
                     && ring_timevar::toJson(controller.ringTimevarConfig()) == acceptedTv
                     && ring_fbp_settings::toJson(controller.m_fbpSettings) == acceptedFbp,
-                      "motor direction restart moved the nine-o'clock start or lost a filter snapshot");
+                      "live motor switch moved the nine-o'clock start or lost a filter snapshot");
+                check(window.m_lblImagingStatus->text().contains("等待下一轮"),
+                      "direction request not reflected in the status label");
+                feedBlock(first); // Late frontend work must retain its old direction.
+                waitFor([&]{ return window.m_roundUi.frameCount() == 1; }, "old round did not finish in resident service");
+                check(window.m_lblImagingStatus->text().contains("等待下一轮"),
+                      "late old-direction snapshot cleared pending switch");
+                const auto second = normalizer.classify(session, 101);
+                waitFor([&]{return window.m_lblImagingStatus->text().contains("等待首帧");},
+                        "first trigger did not advance direction status");
+                feedBlock(second);
+                waitFor([&]{return window.m_lblImagingStatus->text().contains("输出");},
+                        "new-direction snapshot did not restore normal status");
+                check(controller.isRunning() && window.m_imagingServiceReady.load()
+                    && controller.m_svcProcess->processId() == pid && controller.m_ringSharedMemory == shm
+                    && controller.m_testSvcStarts == startsBeforeMotor && controller.m_testSvcStops == stopsBeforeMotor
+                    && window.m_testFeedStarts == feedStarts && window.m_testAssemblerConfigs == assemblerConfigs,
+                      "direction switch restarted or reconfigured the resident imaging chain");
+                normalizer.timeoutBoundary(session);
+                writeMotor("CW", 4000); window.m_motorScanMonitor->tick();
+                writeMotor(nullptr, 6000); window.m_motorScanMonitor->tick();
+                check(controller.ringConfig().alinesPerFrame == totalAlines
+                    && controller.ringConfig().sectorCcw == 1
+                    && controller.m_testSvcStarts == startsBeforeMotor && controller.m_testSvcStops == stopsBeforeMotor
+                    && controller.m_ringSharedMemory == shm && window.m_pendingRingDirectionRevision == 0,
+                      "unused motor fields changed imaging configuration");
                 // A service stopping inside another active round must not reopen the motor gate.
-                normalizer.classify(1, 101); stop();
+                normalizer.classify(session, 102);
+                stop();
                 check(!window.m_motorScanMonitor->applyGateOpen(), "service stop reopened an active physical round");
-                normalizer.timeoutBoundary(1);
+                normalizer.timeoutBoundary(session);
             }
-            std::cout<<"PASS FBP real rejection, four-combination motor CW restart with STFT/FBP snapshots, service-stop latch\n";
+            std::cout<<"PASS FBP real rejection, four resident DAS/FBP + STFT combinations, direction status and service-stop latch\n";
             QString motorError;
             const auto oldDirection = controller.ringConfig().sectorCcw;
             const auto oldStart = controller.ringConfig().sectorStartDeg;
             widget<QComboBox>(dialog,"ringReconAlgorithm")->setCurrentIndex(1);
             widget<QLineEdit>(dialog,"fbpDensities")->setText("0");
-            check(!dialog.applyMotorScanParams(true, true, 0, &motorError) && !motorError.isEmpty(),
+            check(!dialog.applyMotorScanDirection(true, &motorError) && !motorError.isEmpty(),
                   "invalid filter draft did not reject motor update without a modal dialog");
             check(controller.ringConfig().sectorCcw == oldDirection && dialog.config().sectorCcw == oldDirection
                 && controller.ringConfig().sectorStartDeg == oldStart && dialog.config().sectorStartDeg == oldStart,
                   "rejected motor update left hidden direction/anchor changes");
             dialog.reject();
             dialog.show();
-            check(!dialog.applyMotorScanParams(true, true, 0, &motorError)
+            check(!dialog.applyMotorScanDirection(true, &motorError)
                 && motorError.contains(QStringLiteral("正在编辑")), "motor update consumed a visible filter draft");
             dialog.reject();
 

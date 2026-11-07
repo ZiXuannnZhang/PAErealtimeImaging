@@ -1,5 +1,6 @@
 #include "ImagingController.h"
 #include "RingSampleWindow.h"
+#include "RingSectorGeometry.h"
 #include "RingTimevarLowpassSettings.h"
 #include "ImagingSharedMemory.h"
 #include "RingSnapshotCopy.h"
@@ -357,12 +358,23 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
     return true;
 }
 
+void ImagingController::applyMotorRingDirection(int sectorCcw)
+{
+    if (!m_ringMode) return;
+    const bool directionChanged = m_ringConfig.sectorCcw != sectorCcw;
+    const bool originChanged = m_ringConfig.sectorStartDeg != ring_sector::kNineOClockDeg;
+    m_ringConfig.sectorCcw = sectorCcw;
+    m_ringConfig.sectorStartDeg = ring_sector::kNineOClockDeg;
+    if (originChanged && m_running) emit ringConfigChangedWhileRunning();
+    else if (directionChanged) emit ringDirectionChanged(sectorCcw);
+}
+
 bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
                                   const QVector<float> &anglesDeg,
                                   const QVector<quint8> &channels,
                                   const paimage::RoundIdentity &round,
                                   int blockSeq,
-                                  std::uint64_t *outSubmitIndex, bool sourceRoundComplete)
+                                  std::uint64_t *outSubmitIndex, bool sourceRoundComplete, int sectorCcw)
 {
     if (outSubmitIndex) *outSubmitIndex = 0;
     if (!round.valid()) {
@@ -412,6 +424,8 @@ bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
     // derives ring_snapshot_ready.round_complete (reconstructionComplete)
     // from its own exact consumed block count.
     ready[QStringLiteral("source_round_complete")] = sourceRoundComplete;
+    if (sectorCcw == 0 || sectorCcw == 1)
+        ready[QStringLiteral("sector_ccw")] = sectorCcw;
     if (outSubmitIndex) *outSubmitIndex = event.submitIndex;
     const bool sent = sendCommand(ready);
 
@@ -850,7 +864,7 @@ void ImagingController::processMessage(const QJsonObject &msg)
 
     if(cmd=="ring_fbp_configured"){
         const auto token=msg["token"].toString().toULongLong();
-        // processMessage runs under the receive mutex; send start after releasing it.
+        // Defer the transition and ignore readiness from a superseded startup.
         QTimer::singleShot(0,this,[this,token]{
             if(!m_fbpPreparing||token!=m_fbpPrepareToken||!m_running)return;
             if(!sendCommand({{"cmd","start"}})){emit svcError("FBP 启动命令发送失败");stopSvc();return;}
@@ -926,7 +940,7 @@ void ImagingController::sendConfigureAndStart()
     if (!m_zmqSocket) return;
 
     m_running = true;
-    if(!(m_ringMode&&m_fbpSettings.enabled))emit svcReady();
+    if (!m_ringMode) emit svcReady();
 
     // ══ 环形扫描并行分支：下发完整可配置参数 ══
     if (m_ringMode) {
@@ -998,8 +1012,8 @@ void ImagingController::sendConfigureAndStart()
         params["imagingMode"] = "ring";
         params["ring"] = ring;
         const bool sent=sendCommand({{"cmd", "configure"}, {"params", params}});
+        if (!sent) { emit svcError(QStringLiteral("环形成像配置发送失败")); stopSvc(); return; }
         if(m_fbpSettings.enabled){
-            if(!sent){emit svcError("FBP 配置发送失败");stopSvc();return;}
             emit svcStatus(QStringLiteral("正在准备 FBP 走时表和精确核"),0);
             const auto token=m_fbpPrepareToken;
             QTimer::singleShot(120000,this,[this,token]{if(m_fbpPreparing&&token==m_fbpPrepareToken){
@@ -1007,7 +1021,10 @@ void ImagingController::sendConfigureAndStart()
             return;
         }
         QThread::msleep(10);
-        sendCommand({{"cmd", "start"}});
+        if (!sendCommand({{"cmd", "start"}})) {
+            emit svcError(QStringLiteral("环形成像启动命令发送失败")); stopSvc(); return;
+        }
+        emit svcReady();
         return;
     }
 

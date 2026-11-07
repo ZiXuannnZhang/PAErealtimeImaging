@@ -45,14 +45,14 @@ static void checkDasSectors(){
         QJsonObject ring{{"sampDepth",depth},{"daqHz",10e6},{"fov",.02},{"gridSize",.0005},{"fovDeg",360.},
             {"alinesPerChannelPerBlock",perCh},{"alinesPerChannelPerFrame",2},{"alinesPerFrame",lines},
             {"enabledChannels",enabled},{"radiusPerChannel",radii},{"multiRadius",1},{"spliceMode",1},{"spliceBlendDeg",0.},
-            {"sectorStartDeg",first},{"sectorCcw",positive},{"delayCut",0},{"dbrSigRemove",0},{"singalImpair",0},
+            {"sectorStartDeg",first},{"sectorCcw",1-positive},{"delayCut",0},{"dbrSigRemove",0},{"singalImpair",0},
             {"timevarLowpass",QJsonObject{{"enabled",false},{"fcMaxMhz",4.}}},
             {"soundSpeedRadiiCount",0},{"soundSpeeds",QJsonArray{1490.}}};
         ImagingSvc svc;
         svc.processRingConfigure(ring);
         need(svc.m_ringCuda[0]&&svc.m_ringCuda[1],"DAS configure failed");
         svc.m_running=true;
-        svc.processRingPulse(1,1,0,true,{1,0},true);
+        svc.processRingPulse(1,1,0,true,{1,0},true,positive);
         need(h->frame_seq==1,"DAS did not publish a frame");
         std::vector<int> seen(M);
         for(int x=0;x<nx;++x)for(int y=0;y<nx;++y){
@@ -102,7 +102,7 @@ static void run(bool twoOnly=false){
         QJsonObject ring{{"sampDepth",depth},{"daqHz",10e6},{"alinesPerChannelPerBlock",perCh},{"alinesPerChannelPerFrame",9},
             {"alinesPerFrame",M*18},{"enabledChannels",enabled},{"sysDelayPerChannel",delays},{"fov",.02},{"gridSize",.001},
             {"radius",.004},{"radiusPerChannel",radii},{"multiRadius",1},{"spliceMode",int(splice)},{"spliceBlendDeg",1.5},
-            {"sectorCcw",ccw},{"sectorStartDeg",first},{"delayCut",int(cutEnabled)},{"shiftWL2",1},
+            {"sectorCcw",1-ccw},{"sectorStartDeg",first},{"delayCut",int(cutEnabled)},{"shiftWL2",1},
             {"dbrSigRemove",int(mask)},{"maskLength",56},{"singalImpair",int(clip)},{"imValue",QJsonArray{.25,.125}},
             {"soundSpeedRadiiCount",layered?1:0},{"soundSpeedRadii",QJsonArray{.007}},{"soundSpeeds",QJsonArray{1490.,1560.}},
             {"timevarLowpass",QJsonObject{{"enabled",timevar},{"fcMaxMhz",4.},{"fcMinMhz",1.},
@@ -116,6 +116,8 @@ static void run(bool twoOnly=false){
             need(settings.delayOffset[3][1]==delaysFbp[3].toArray()[1].toDouble(),"fractional offset lost on import");
             ring["exactFbp"]=ring_fbp_settings::toJson(settings);}
         ImagingSvc svc;svc.processRingConfigure(ring);need(svc.m_fbp[0]&&svc.m_fbp[1],"FBP configure failed");svc.m_running=true;
+        const auto *prepared0=svc.m_fbp[0], *prepared1=svc.m_fbp[1];
+        const auto *preparedPreprocessing=svc.m_fbpDevice.get();
         need(svc.m_ringTimevarGpu.active()==timevar,"GPU STFT selection mismatch");
         need(bool(svc.m_fbpDevice)!=staged,"Unexpected FBP preprocessing path");
         RingTimevarLowpass referenceFilter;std::string filterError;
@@ -141,10 +143,12 @@ static void run(bool twoOnly=false){
                 full[c][w].push_back(l);
             }
             std::vector<float> saved(raw,raw+depth*lines);shm.unlock();
-            svc.processRingPulse(block+1,block+1,0,true,{1,0},block==2);
+            svc.processRingPulse(block+1,block+1,0,true,{1,0},block==2,ccw);
             need(!memcmp(saved.data(),h+1,saved.size()*4),"raw input changed");
             need(svc.m_running,"FBP service stopped");
         }
+        need(svc.m_ringConfig.sectorCcw==ccw && svc.m_fbp[0]==prepared0 && svc.m_fbp[1]==prepared1
+             && svc.m_fbpDevice.get()==preparedPreprocessing,"live direction did not reuse prepared FBP state");
         need(svc.m_ringBlockIndex==0,"source final did not reset");
         for(int w=0;w<2;++w){void*ref=nullptr;auto f=ring_fbp_settings::native(svc.m_fbpSettings,svc.m_ringConfig);
             need(!ring_fbp_create(&svc.m_ringConfig,&f,&ref),ring_fbp_error());

@@ -57,6 +57,7 @@ public:
                        const int (*sysDelayCh)[2] = nullptr,
                        const RingFbpSettings &fbp = RingFbpSettings{});
     bool isRingMode() const { return m_ringMode; }
+    void applyMotorRingDirection(int sectorCcw);
     const RingReconCudaConfig &ringConfig() const { return m_ringConfig; }
     const RingTimevarLowpassConfig &ringTimevarConfig() const { return m_ringTimevarConfig; }
 
@@ -69,7 +70,7 @@ public:
                          const paimage::RoundIdentity &round,
                          int blockSeq,
                          std::uint64_t *outSubmitIndex = nullptr,
-                         bool sourceRoundComplete = false);
+                         bool sourceRoundComplete = false, int sectorCcw = -1);
     // 超时判定新一圈：通知子进程清空重建累积（RingBlockAssembler 超时回调调用）
     bool sendRingReset();
 
@@ -111,6 +112,7 @@ signals:
     void svcReady();                   // 子进程就绪（配置已下发）
     void svcStopped();                 // 异步停止完成通知
     void ringConfigChangedWhileRunning();  // 运行中环形参数变更（需重启子进程生效）
+    void ringDirectionChanged(int sectorCcw);
 
 private slots:
     void onSvcStarted();

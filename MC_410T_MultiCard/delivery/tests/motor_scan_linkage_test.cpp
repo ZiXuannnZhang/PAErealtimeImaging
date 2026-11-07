@@ -1,6 +1,5 @@
 // 电机参数联动（LabVIEW → 本程序）单元测试：
 //   1) motor_scan_linkage::parseParamsJson  —— 参数文件 JSON 解析/取值约束；
-//   2) deriveTotalAlines / totalAlinesConsistent —— 单圈总A-line数换算规则；
 //   3) MotorScanLinkageMonitor —— 轮询解析/变化检测/状态语义；
 //   4) MotorScanLinkageMonitor 触发闩锁 —— 闸门冻结/补发/开关语义；
 //   5) RingBlockAssembler sectorCcw —— 顺时针扫描的角度镜像与扇区回绕。
@@ -14,7 +13,6 @@
 #include <future>
 #include <thread>
 #include <chrono>
-#include <limits>
 
 #include <cmath>
 #include <cstdint>
@@ -54,8 +52,6 @@ void testParseParamsJson(Runner &r)
         const ParseStatus st = motor_scan_linkage::parseParamsJson(json, &p, &err);
         r.check(st == ParseStatus::Ok, "valid json should parse");
         r.check(p.hasDirection && p.directionCcw, "CCW -> directionCcw=true");
-        r.check(p.hasXStepsNum && p.xStepsNum == 2000, "xStepsNum=2000");
-        r.check(p.xStepsPerPeriod == 2, "xStepsPerPeriod=2");
         r.check(p.seq == 3, "seq=3");
     }
     {
@@ -66,7 +62,6 @@ void testParseParamsJson(Runner &r)
             &p, nullptr);
         r.check(st == ParseStatus::Ok, "chinese direction should parse");
         r.check(p.hasDirection && !p.directionCcw, "顺 -> directionCcw=false");
-        r.check(p.hasXStepsNum && p.xStepsNum == 100, "xStepsNum=100");
     }
     {
         Params p;
@@ -74,7 +69,7 @@ void testParseParamsJson(Runner &r)
                     "{\"formatVersion\":1,\"direction\":\"逆\"}", &p, nullptr)
                     == ParseStatus::Ok,
                 "direction-only file is valid");
-        r.check(p.hasDirection && p.directionCcw && !p.hasXStepsNum,
+        r.check(p.hasDirection && p.directionCcw,
                 "direction-only flags");
     }
     {
@@ -93,62 +88,19 @@ void testParseParamsJson(Runner &r)
                     "{\"formatVersion\":1,\"direction\":\"left\"}", &p, nullptr)
                     == ParseStatus::BadFormat,
                 "invalid direction rejected");
-        // 非法 xStepsNum
         r.check(motor_scan_linkage::parseParamsJson(
-                    "{\"formatVersion\":1,\"xStepsNum\":0}", &p, nullptr)
-                    == ParseStatus::BadFormat,
-                "xStepsNum=0 rejected");
-        // 两者都缺
+                    "{\"formatVersion\":1,\"direction\":\"CW\",\"xStepsNum\":0,\"xStepsPerPeriod\":{}}", &p, nullptr)
+                    == ParseStatus::Ok && p.hasDirection && !p.directionCcw,
+                "unused field values cannot block valid direction");
         r.check(motor_scan_linkage::parseParamsJson(
-                    "{\"formatVersion\":1,\"seq\":1}", &p, nullptr)
-                    == ParseStatus::BadFormat,
-                "empty linkage rejected");
+                    "{\"formatVersion\":1,\"xStepsNum\":1000}", &p, nullptr)
+                    == ParseStatus::Ok && !p.hasDirection,
+                "extras-only file carries no direction");
         // JSON 语法错误
         r.check(motor_scan_linkage::parseParamsJson("{oops", &p, nullptr)
                     == ParseStatus::ParseFailed,
                 "syntax error rejected");
     }
-}
-
-void testDeriveTotalAlines(Runner &r)
-{
-    r.test = "derive_total_alines";
-    using motor_scan_linkage::TotalAlinesRule;
-    // 现场口径：XStepsNum=2000、启用通道=2 → 4000（与既有实机配置一致）
-    r.check(motor_scan_linkage::deriveTotalAlines(
-                TotalAlinesRule::PerEnabledChannel, 2000, 2, 2) == 4000,
-            "perEnabledChannel: 2000*2=4000");
-    r.check(motor_scan_linkage::deriveTotalAlines(
-                TotalAlinesRule::PerPeriod, 2000, 2, 2) == 4000,
-            "perPeriod: 2000*2=4000");
-    r.check(motor_scan_linkage::deriveTotalAlines(
-                TotalAlinesRule::DirectionOnly, 2000, 2, 2) == 0,
-            "directionOnly: no derivation");
-    r.check(motor_scan_linkage::deriveTotalAlines(
-                TotalAlinesRule::PerEnabledChannel, 2000, 2, 0) == 0,
-            "no channels -> no derivation");
-    r.check(motor_scan_linkage::deriveTotalAlines(
-                TotalAlinesRule::PerPeriod, 2000, 0, 2) == 0,
-            "perPeriod without period -> no derivation");
-
-    // totalAlinesConsistent：与 RingConfigDialog::applyConfig 换算约束同口径
-    r.check(motor_scan_linkage::totalAlinesConsistent(4000, 2),
-            "4000 with 2 channels consistent");
-    r.check(!motor_scan_linkage::totalAlinesConsistent(4001, 2),
-            "4001 not divisible by 4");
-    r.check(!motor_scan_linkage::totalAlinesConsistent(2, 2),
-            "K too small (2/(2*2)=0)");
-    r.check(!motor_scan_linkage::totalAlinesConsistent(4, 2),
-            "K=1 too small");
-
-    // 规则键回退：未知键回退 perEnabledChannel
-    using motor_scan_linkage::totalAlinesRuleFromKey;
-    r.check(totalAlinesRuleFromKey(QStringLiteral("perPeriod"))
-                == TotalAlinesRule::PerPeriod, "perPeriod key");
-    r.check(totalAlinesRuleFromKey(QStringLiteral("directionOnly"))
-                == TotalAlinesRule::DirectionOnly, "directionOnly key");
-    r.check(totalAlinesRuleFromKey(QStringLiteral("bogus"))
-                == TotalAlinesRule::PerEnabledChannel, "unknown key falls back");
 }
 
 // 轮询监视器：手写参数文件 → tick → 捕获信号（不进事件循环，直接驱动）。
@@ -188,12 +140,21 @@ void testMonitor(Runner &r)
     monitor.tick();
     r.check(changedCount == 1, "first appearance emits once");
     r.check(lastCaptured.hasDirection && lastCaptured.directionCcw, "CCW captured");
-    r.check(lastCaptured.hasXStepsNum && lastCaptured.xStepsNum == 2000, "2000 captured");
     r.check(lastStatus.contains(QStringLiteral("已联动")), "linked status");
 
     // 相同内容重复 tick：不再发信号（内容一致）
     monitor.tick();
     r.check(changedCount == 1, "unchanged params: no extra signal");
+
+    {
+        QFile f(path);
+        r.check(f.open(QIODevice::WriteOnly), "rewrite extra motor fields");
+        f.write("{\"formatVersion\":1,\"seq\":42,\"direction\":\"CCW\",\"xStepsNum\":-1,\"speed\":200}");
+    }
+    monitor.tick();
+    r.check(changedCount == 1 && !monitor.applyPending() && monitor.fileSeen(),
+            "extras and seq changes must not emit linkage");
+
 
     // 方向翻转：顺
     {
@@ -252,8 +213,8 @@ void testMonitorTriggerLatch(Runner &r)
         "write initial params");
     monitor.tick();
     r.check(changedCount == 1, "gate open: first read applies");
-    r.check(lastCaptured.hasXStepsNum && lastCaptured.xStepsNum == 2000,
-            "gate open: 2000 applied");
+    r.check(lastCaptured.hasDirection && lastCaptured.directionCcw,
+            "gate open: CCW applied");
 
     // 2) 冻结（模拟收到本轮首个触发）：文件改动不再应用，但记为待应用
     monitor.setApplyGate(false);
@@ -277,7 +238,7 @@ void testMonitorTriggerLatch(Runner &r)
     monitor.setApplyGate(true);
     monitor.tick();
     r.check(changedCount == 2, "unfreeze: deferred change applied exactly once");
-    r.check(lastCaptured.hasXStepsNum && lastCaptured.xStepsNum == 4000,
+    r.check(lastCaptured.directionCcw && lastCaptured.seq == 3,
             "unfreeze: latest value applied");
     r.check(!monitor.applyPending(), "pending cleared after apply");
     monitor.tick();
@@ -302,7 +263,7 @@ void testMonitorTriggerLatch(Runner &r)
         r.check(n2 == 0, "never-applied + frozen: no emit");
         m2.setApplyGate(true);
         m2.tick();
-        r.check(n2 == 1 && c2.hasXStepsNum && c2.xStepsNum == 1000,
+        r.check(n2 == 1 && c2.hasDirection && c2.directionCcw,
                 "first apply deferred until unfreeze");
     }
 
@@ -505,12 +466,6 @@ void testRetryAndSerializedApply(Runner &r)
     monitor.tick(); source.join();
     r.check(attempts == 2 && !monitor.applyPending() && !monitor.applyGateOpen(),
             "same file retries after rejection, then source closes the gate");
-    using namespace motor_scan_linkage;
-    r.check(deriveTotalAlines(TotalAlinesRule::PerPeriod, 100000000, 1000000, 8) == 0,
-            "valid JSON magnitude cannot overflow int conversion");
-    r.check(deriveTotalAlines(TotalAlinesRule::PerEnabledChannel,
-                            std::numeric_limits<int>::max(), 1, 8) == 0,
-            "channel multiplication rejects overflow");
 }
 
 } // namespace
@@ -523,7 +478,6 @@ int main(int argc, char **argv)
     runner.ok = true;
 
     testParseParamsJson(runner);
-    testDeriveTotalAlines(runner);
     testMonitor(runner);
     testMonitorTriggerLatch(runner);
     testAssemblerCcwCw(runner);
