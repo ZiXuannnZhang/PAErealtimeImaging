@@ -1,3 +1,4 @@
+#include "ZipTestPayload.h"
 #include "DiagnosticRecorder.h"
 
 #include <QCoreApplication>
@@ -52,7 +53,7 @@ quint32 crc32(const QByteArray &data)
     return crc ^ 0xffffffffU;
 }
 
-QHash<QString, QByteArray> readStoredZip(const QString &path, QString *error)
+QHash<QString, QByteArray> readZip(const QString &path, QString *error)
 {
     QHash<QString, QByteArray> result;
     QFile file(path);
@@ -78,9 +79,10 @@ QHash<QString, QByteArray> readStoredZip(const QString &path, QString *error)
             return {};
         }
         const QString name = QString::fromUtf8(bytes.constData() + offset + 30, nameSize);
-        const QByteArray data = bytes.mid(dataOffset, static_cast<int>(compressedSize));
-        if (compressedSize != uncompressedSize || crc32(data) != expectedCrc) {
-            if (error) *error = QStringLiteral("ZIP CRC or stored size mismatch for %1").arg(name);
+        QByteArray data;
+        if (!decodeZipPayload(bytes.mid(dataOffset, static_cast<int>(compressedSize)),
+                              readU16(bytes, offset + 8), uncompressedSize, data) || crc32(data) != expectedCrc) {
+            if (error) *error = QStringLiteral("ZIP CRC, method or size mismatch for %1").arg(name);
             return {};
         }
         result.insert(name, data);
@@ -240,7 +242,7 @@ bool testTimeWindowAcrossRuns()
                QStringLiteral("before/after boundary context missing"))) return false;
 
     QString error;
-    const auto files = readStoredZip(zipPath, &error);
+    const auto files = readZip(zipPath, &error);
     if (!check(error.isEmpty(), error)) return false;
     const QJsonObject manifest = QJsonDocument::fromJson(files.value(QStringLiteral("manifest.json"))).object();
     const QJsonArray ids = manifest.value(QStringLiteral("sourceRunIds")).toArray();
@@ -259,7 +261,7 @@ bool testTimeWindowAcrossRuns()
     const QString emptyZip = QDir(temp.path()).filePath(QStringLiteral("empty-window.zip"));
     const auto emptyResult = DiagnosticRecorder::exportTimeWindow(request, emptyZip);
     if (!check(emptyResult.success && emptyResult.noRecords, QStringLiteral("empty window not reported explicitly"))) return false;
-    const auto emptyFiles = readStoredZip(emptyZip, &error);
+    const auto emptyFiles = readZip(emptyZip, &error);
     if (!check(error.isEmpty() && QString::fromUtf8(emptyFiles.value(QStringLiteral("summary.txt"))).contains(QStringLiteral("该时间段没有日志")),
                QStringLiteral("empty window summary text missing"))) return false;
     return true;
@@ -286,7 +288,7 @@ bool testActiveImmutableBoundary()
     const auto result = DiagnosticRecorder::exportTimeWindow(request, zipPath);
     if (!check(result.success, QStringLiteral("active immutable export failed: %1").arg(result.error))) return false;
     QString error;
-    const auto files = readStoredZip(zipPath, &error);
+    const auto files = readZip(zipPath, &error);
     if (!check(error.isEmpty(), error)) return false;
     const QByteArray events = files.value(QStringLiteral("events.jsonl"));
     return check(events.contains("before-boundary") && !events.contains("after-boundary"),

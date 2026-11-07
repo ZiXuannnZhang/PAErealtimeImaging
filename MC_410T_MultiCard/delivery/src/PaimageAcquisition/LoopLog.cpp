@@ -95,6 +95,7 @@ void LoopLog::stop() {
 }
 
 std::uint64_t LoopLog::push(LoopRecord record) noexcept {
+    if(paused_.load(std::memory_order_relaxed)) return 0;
     record.sequence=sequence_.fetch_add(1,std::memory_order_relaxed)+1;
     auto position=write_.load(std::memory_order_relaxed);
     for (int attempt=0;attempt<8;++attempt) {
@@ -128,6 +129,7 @@ void LoopLog::noteThreadStart(std::uint64_t nowNs) noexcept {
 }
 
 void LoopLog::noteSampleData(std::uint64_t nowNs) noexcept {
+    if(paused_.load(std::memory_order_relaxed)) return;
     const auto previous=lastSampleNs_.exchange(nowNs,std::memory_order_acq_rel);
     if (!previous || nowNs<previous || nowNs-previous<2ull*1000000000ull) return;
     const auto epoch=freezeEpoch_.fetch_add(1,std::memory_order_acq_rel)+1;

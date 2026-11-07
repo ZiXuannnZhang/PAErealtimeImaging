@@ -18,6 +18,7 @@ option(USE_ZEROMQ "Enable ZeroMQ FramePublisher extension" OFF)
 # Qt 6 组件
 # ============================================================
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets PrintSupport OpenGL OpenGLWidgets Svg Concurrent)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/DiagnosticZlib.cmake)
 execute_process(COMMAND git -c safe.directory=${CMAKE_CURRENT_SOURCE_DIR}/../.. rev-parse HEAD WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     OUTPUT_VARIABLE PAIMAGE_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND git -c safe.directory=${CMAKE_CURRENT_SOURCE_DIR}/../.. status --porcelain --untracked-files=no WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -153,6 +154,8 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
 # ============================================================
 # 头文件搜索路径
 # ============================================================
+target_link_libraries(${PROJECT_NAME} PRIVATE PAimageDiagnosticZlib)
+
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}/generated
     ${CMAKE_CURRENT_SOURCE_DIR}/include

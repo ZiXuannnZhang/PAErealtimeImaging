@@ -527,21 +527,34 @@
          </property>
          <layout class="QVBoxLayout" name="verticalLayout_5">
           <item>
-           <widget class="QPushButton" name="btnExportDiagnostic">
-            <property name="text">
-             <string>导出诊断日志…</string>
-            </property>
-            <property name="toolTip">
-             <string>选择当前或历史运行并导出诊断日志 ZIP</string>
-            </property>
+           <widget class="QTextEdit" name="txtLog">
+            <property name="minimumHeight"><number>112</number></property>
+            <property name="maximumHeight"><number>112</number></property>
+            <property name="readOnly"><bool>true</bool></property>
            </widget>
           </item>
           <item>
-           <widget class="QTextEdit" name="txtLog">
-            <property name="readOnly">
-             <bool>true</bool>
-            </property>
-           </widget>
+           <layout class="QHBoxLayout" name="logActionsLayout">
+            <item>
+             <widget class="QPushButton" name="btnExportDiagnostic">
+              <property name="maximumWidth"><number>104</number></property>
+              <property name="text"><string>导出日志</string></property>
+              <property name="toolTip"><string>按时间范围导出诊断日志 ZIP</string></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QCheckBox" name="chkDiagnosticMode">
+              <property name="text"><string>诊断模式</string></property>
+              <property name="toolTip"><string>下次开始监听时启用限时详细诊断；不影响当前监听</string></property>
+             </widget>
+            </item>
+            <item>
+             <spacer name="logActionsSpacer">
+              <property name="orientation"><enum>Qt::Horizontal</enum></property>
+              <property name="sizeHint" stdset="0"><size><width>8</width><height>0</height></size></property>
+             </spacer>
+            </item>
+           </layout>
           </item>
          </layout>
         </widget>

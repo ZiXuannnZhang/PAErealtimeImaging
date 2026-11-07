@@ -369,6 +369,7 @@ NetworkController::~NetworkController() {
     if(m_stopThread.joinable())m_stopThread.join();
     if(m_paimage){m_paimage->stop();m_paimage.reset();}
     if(m_paimageTrace){m_paimageTrace->stop();m_paimageTrace.reset();}
+    m_paimageTiming.reset();m_paimageLoopLog.reset();m_paimageTraceLease.reset();m_paimageDetailLease.reset();
     // 析构时需要同步等待后台停止线程（不能留 this 指针悬空）
     if (m_running) {
         // 析构路径不会经过 stop()，因此这里也要先留存一次接近关闭时刻的

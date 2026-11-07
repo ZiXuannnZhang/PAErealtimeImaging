@@ -32,6 +32,7 @@ public:
     TimingWriter(std::filesystem::path,Budget);
     ~TimingWriter();
     void observe(TimingRecord,bool keepDetail) noexcept;
+    void pause() noexcept { paused_.store(true, std::memory_order_relaxed); }
     void stop();
     bool incomplete()const{return dropped_.load()!=0||writeFailed_.load();}
     std::uint64_t dropped()const{return dropped_.load();}
@@ -42,6 +43,7 @@ private:
     std::shared_ptr<ExportProgress> exportProgress_=std::make_shared<ExportProgress>();
     struct Aggregate {std::atomic<std::uint64_t> count{0},totalNs{0},maxNs{0};std::array<std::atomic<std::uint64_t>,5> buckets{};};
     struct alignas(64) Slot {std::atomic<std::size_t> sequence;TimingRecord record;};
+    std::atomic<bool> paused_{false};
     void run();
     std::filesystem::path root_;Budget budget_;std::unique_ptr<Slot[]> slots_;
     std::atomic<std::size_t> write_{0},consumed_{0};std::size_t read_=0;

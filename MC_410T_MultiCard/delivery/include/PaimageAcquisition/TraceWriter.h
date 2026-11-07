@@ -25,6 +25,7 @@ public:
     TraceWriter(std::filesystem::path,Budget);
     ~TraceWriter();
     std::uint64_t push(TraceRecord) noexcept;
+    void pause() noexcept { paused_.store(true, std::memory_order_relaxed); }
     void stop(); // callers must stop producers first
     std::uint64_t boundary() const{return sequence_.load();}
     std::uint64_t dropped()const{return dropped_.load();}
@@ -35,6 +36,7 @@ private:
     struct ExportProgress {std::atomic<std::size_t> requested{0},flushed{0};std::atomic<bool> failed{false},done{false};};
     std::shared_ptr<ExportProgress> exportProgress_=std::make_shared<ExportProgress>();
     struct alignas(64) Slot {std::atomic<std::size_t> sequence;TraceRecord record;};
+    std::atomic<bool> paused_{false};
     void run();
     std::filesystem::path root_;Budget budget_;std::unique_ptr<Slot[]> slots_;
     std::atomic<std::size_t> write_{0};std::size_t read_=0;

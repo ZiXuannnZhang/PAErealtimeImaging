@@ -58,9 +58,9 @@ struct AcqConfig {
     // Single source of truth for both Backend Settings and diagnostic logs.
     int  startupIdleMs   = 0;
     bool enablePublisher = false;    // 是否启用 ZeroMQ FramePublisher
-    bool diagnosticTraceEnabled = true; // Production default; deterministic replay comparison may disable.
+    bool diagnosticTraceEnabled = false; // Detailed acquisition diagnostics are opt-in.
     // 0=原始入口轨迹，1=轻量接收时序，2=轻量时序+外部系统抓取索引。
-    int diagnosticLevel = 1;
+    int diagnosticLevel = 0;
     // Experimental per-socket timestamping: 0=off (default), 1=software,
     // 2=hardware, 3=auto (hardware then explicit software fallback).
     int socketTimestampMode = 0;

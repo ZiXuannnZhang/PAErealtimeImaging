@@ -1,3 +1,4 @@
+#include "ZipTestPayload.h"
 #include "DiagnosticRecorder.h"
 
 #include <QCoreApplication>
@@ -49,7 +50,7 @@ quint32 crc32(const QByteArray &data)
     return crc ^ 0xffffffffU;
 }
 
-QHash<QString, QByteArray> readStoredZip(const QString &path, QString *error)
+QHash<QString, QByteArray> readZip(const QString &path, QString *error)
 {
     QHash<QString, QByteArray> result;
     QFile file(path);
@@ -75,9 +76,10 @@ QHash<QString, QByteArray> readStoredZip(const QString &path, QString *error)
             return {};
         }
         const QString name = QString::fromUtf8(bytes.constData() + offset + 30, nameSize);
-        const QByteArray data = bytes.mid(dataOffset, static_cast<int>(compressedSize));
-        if (compressedSize != uncompressedSize || crc32(data) != expectedCrc) {
-            if (error) *error = QStringLiteral("ZIP CRC or stored size mismatch for %1").arg(name);
+        QByteArray data;
+        if (!decodeZipPayload(bytes.mid(dataOffset, static_cast<int>(compressedSize)),
+                              readU16(bytes, offset + 8), uncompressedSize, data) || crc32(data) != expectedCrc) {
+            if (error) *error = QStringLiteral("ZIP CRC, method or size mismatch for %1").arg(name);
             return {};
         }
         result.insert(name, data);
@@ -121,7 +123,7 @@ bool testZipBoundaryAndSummary()
     const DiagnosticRecorder::ExportResult result = recorder.exportRun(zipPath, boundary, QStringLiteral("现场说明"));
     if (!check(result.success, QStringLiteral("boundary export failed: %1").arg(result.error))) return false;
     QString error;
-    const QHash<QString, QByteArray> files = readStoredZip(zipPath, &error);
+    const QHash<QString, QByteArray> files = readZip(zipPath, &error);
     if (!check(error.isEmpty(), error)) return false;
     const QStringList expected = {QStringLiteral("runtime.log"), QStringLiteral("events.jsonl"), QStringLiteral("network.json"),
                                   QStringLiteral("settings.json"), QStringLiteral("summary.txt"), QStringLiteral("manifest.json")};
@@ -173,7 +175,7 @@ bool testRuntimeCardCountersExport()
     const DiagnosticRecorder::ExportResult result = recorder.exportRun(zipPath);
     if (!check(result.success, QStringLiteral("runtime counter export failed: %1").arg(result.error))) return false;
     QString error;
-    const QHash<QString, QByteArray> files = readStoredZip(zipPath, &error);
+    const QHash<QString, QByteArray> files = readZip(zipPath, &error);
     if (!check(error.isEmpty(), error)) return false;
     const QJsonObject network = QJsonDocument::fromJson(files.value(QStringLiteral("network.json"))).object();
     bool ingressFound = false;
@@ -235,7 +237,7 @@ bool testDiskHistoryAndWriteFallback()
     const DiagnosticRecorder::ExportResult historyResult = recorder.exportRun(historyZip);
     if (!check(historyResult.success, QStringLiteral("history export failed: %1").arg(historyResult.error))) return false;
     QString error;
-    const QHash<QString, QByteArray> historyFiles = readStoredZip(historyZip, &error);
+    const QHash<QString, QByteArray> historyFiles = readZip(historyZip, &error);
     if (!check(error.isEmpty(), error)) return false;
     const QJsonObject network = QJsonDocument::fromJson(historyFiles.value(QStringLiteral("network.json"))).object();
     if (!check(network.value(QStringLiteral("snapshots")).toArray().size() == 4, QStringLiteral("disk snapshot history was truncated"))) return false;
@@ -248,7 +250,7 @@ bool testDiskHistoryAndWriteFallback()
     const DiagnosticRecorder::ExportResult failResult = failing.exportRun(failZip);
     if (!check(failing.status().writeError, QStringLiteral("write capacity failure was not reported"))) return false;
     if (!check(failResult.success, QStringLiteral("write-fallback export failed: %1").arg(failResult.error))) return false;
-    const QHash<QString, QByteArray> failFiles = readStoredZip(failZip, &error);
+    const QHash<QString, QByteArray> failFiles = readZip(failZip, &error);
     return check(QString::fromUtf8(failFiles.value(QStringLiteral("events.jsonl"))).contains("kept in memory"),
                  QStringLiteral("fallback event missing from export"));
 }
@@ -304,7 +306,7 @@ bool testStaticHistoricalExportAndProducers()
     const DiagnosticRecorder::ExportResult result = DiagnosticRecorder::exportRequest(request, zipPath);
     if (!check(result.success, QStringLiteral("static historical export failed: %1").arg(result.error))) return false;
     QString error;
-    const QHash<QString, QByteArray> files = readStoredZip(zipPath, &error);
+    const QHash<QString, QByteArray> files = readZip(zipPath, &error);
     if (!check(error.isEmpty(), error)) return false;
     if (!check(files.value(QStringLiteral("events.jsonl")).count('\n') == 8, QStringLiteral("historical event count mismatch"))) return false;
     const QJsonObject network = QJsonDocument::fromJson(files.value(QStringLiteral("network.json"))).object();
@@ -334,7 +336,7 @@ bool testConcurrentProducers()
     const DiagnosticRecorder::ExportResult result = recorder.exportRun(zipPath);
     if (!check(result.success, QStringLiteral("concurrent export failed: %1").arg(result.error))) return false;
     QString error;
-    const QHash<QString, QByteArray> files = readStoredZip(zipPath, &error);
+    const QHash<QString, QByteArray> files = readZip(zipPath, &error);
     if (!check(error.isEmpty(), error)) return false;
     return check(files.value(QStringLiteral("events.jsonl")).count('\n') == producerCount * eventsPerProducer,
                  QStringLiteral("concurrent producer events were lost before export"));
@@ -355,7 +357,7 @@ bool testUnavailableDirectoryAndExistingExport()
     auto result = DiagnosticRecorder::exportRequest(request, target);
     if (!check(result.success, "memory-only export failed: " + result.error)) return false;
     QString error;
-    const auto files = readStoredZip(target, &error);
+    const auto files = readZip(target, &error);
     if (!check(files.value("events.jsonl").contains("memory-only evidence"), "memory evidence missing")) return false;
     if (!check(!QJsonDocument::fromJson(files.value("manifest.json")).object().value("complete").toBool(), "missing directory marked complete")) return false;
     QFile original(target);
@@ -393,10 +395,32 @@ bool testAbnormalHistory()
     const QString target = QDir(temp.path()).filePath("abnormal.zip");
     const auto result = DiagnosticRecorder::exportRequest(request, target);
     QString error;
-    const auto files = readStoredZip(target, &error);
+    const auto files = readZip(target, &error);
     return check(result.success && files.value("events.jsonl").contains("last persisted event")
         && !QJsonDocument::fromJson(files.value("manifest.json")).object().value("complete").toBool(),
         "abnormal history evidence/completeness incorrect");
+}
+
+bool testLiveHistoryRotation()
+{
+    QTemporaryDir temp;
+    DiagnosticRecorder::Options options;
+    options.rootDirectory=temp.path();
+    options.maxHistorySegmentBytes=4096;
+    options.noiseBurst=1000;
+    DiagnosticRecorder recorder(options);
+    for(int i=0;i<64;++i)
+        recorder.recordEvent("rotation",QString("%1:%2").arg(i).arg(QString(256,'x')));
+    if(!check(recorder.flush()&&!recorder.status().writeError,"rotation stopped logging"))return false;
+    const QDir run(recorder.runDirectory());
+    if(!check(run.exists("events.jsonl.previous")&&run.exists("history-retention.json"),"rotation receipt missing"))return false;
+    const auto target=temp.filePath("rotated.zip");
+    auto cut=recorder.captureExportRequest();
+    const auto result=DiagnosticRecorder::exportRequest(cut,target);
+    QString error;
+    const auto events=readZip(target,&error).value("events.jsonl");
+    return check(result.success&&!result.truncationReasons.isEmpty()&&events.contains("63:xxx")&&
+        !events.contains("\"message\":\"0:xxx"),"latest evidence or eviction indication lost");
 }
 
 } // namespace
@@ -413,5 +437,6 @@ int main(int argc, char **argv)
     ok = testConcurrentProducers() && ok;
     ok = testUnavailableDirectoryAndExistingExport() && ok;
     ok = testAbnormalHistory() && ok;
+    ok = testLiveHistoryRotation() && ok;
     return ok ? 0 : 1;
 }

@@ -49,6 +49,7 @@ public:
     LoopLog(std::filesystem::path,Budget);
     ~LoopLog();
     std::uint64_t push(LoopRecord) noexcept;
+    void pause() noexcept { paused_.store(true, std::memory_order_relaxed); }
     void stop(); // callers must stop producers first
 
     // Called from the receive thread for every acquisition sample datagram.
@@ -87,6 +88,7 @@ private:
     };
     struct ActiveWindow {WindowMeta meta;std::vector<LoopRecord> records;};
 
+    std::atomic<bool> paused_{false};
     void run();
     void consumeRecord(const LoopRecord&);
     void openWindow(const LoopRecord&);

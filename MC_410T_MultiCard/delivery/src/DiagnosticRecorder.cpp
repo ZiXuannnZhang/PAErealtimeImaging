@@ -1,4 +1,5 @@
 #include "DiagnosticRecorder.h"
+#include "DiagnosticStorage.h"
 
 #include <QCryptographicHash>
 #include <QDateTime>
@@ -27,6 +28,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <zlib.h>
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -333,10 +335,40 @@ QByteArray summaryBytes(const QString &runId,
     return (lines.join(QStringLiteral("\n")) + QStringLiteral("\n")).toUtf8();
 }
 
+// Read the older segment first while exposing the original logical file.
+class HistoryReader
+{
+public:
+    explicit HistoryReader(const QString &path)
+        : previous(path+QStringLiteral(".previous")), current(path) {}
+    bool exists() const { return current.exists() || previous.exists(); }
+    bool open(QIODevice::OpenMode mode) {
+        if (previous.exists() && !previous.open(mode)) { error = previous.errorString(); return false; }
+        if (current.exists() && !current.open(mode)) { error = current.errorString(); return false; }
+        return previous.isOpen() || current.isOpen();
+    }
+    bool atEnd() const { return (!previous.isOpen() || previous.atEnd()) && (!current.isOpen() || current.atEnd()); }
+    QByteArray readLine() { return previous.isOpen() && !previous.atEnd() ? previous.readLine() : current.readLine(); }
+    QString errorString() const { return error; }
+private:
+    QFile previous, current;
+    QString error;
+};
+
+void appendRetentionReason(const QString &directory, QStringList *reasons, qint64 start = std::numeric_limits<qint64>::min())
+{
+    QByteArray bytes;
+    if (!readAllBytes(QDir(directory).filePath(QStringLiteral("history-retention.json")), &bytes)) return;
+    const auto stamp = parseObject(bytes);
+    const auto until = QDateTime::fromString(stamp.value(QStringLiteral("evictedAt")).toString(),Qt::ISODateWithMs);
+    if (!until.isValid() || start <= until.toMSecsSinceEpoch())
+        reasons->append(QStringLiteral("部分旧结构化日志已按容量轮转，仅保留近期分段"));
+}
+
 QJsonArray readHistoryArray(const QString &path, quint64 boundary, QStringList *truncationReasons, bool *exists)
 {
     QJsonArray result;
-    QFile file(path);
+    HistoryReader file(path);
     if (!file.exists()) {
         if (exists) *exists = false;
         return result;
@@ -401,7 +433,7 @@ FilteredEvents readFilteredEvents(const QString &directory, quint64 boundary, co
     QMap<quint64, QByteArray> eventLines;
     QMap<quint64, QByteArray> runtimeLines;
     const QString eventPath = QDir(directory).filePath(QStringLiteral("events.jsonl"));
-    QFile eventFile(eventPath);
+    HistoryReader eventFile(eventPath);
     if (!eventFile.exists()) {
         if (missing) missing->append(QStringLiteral("events.jsonl"));
     } else if (!eventFile.open(QIODevice::ReadOnly)) {
@@ -422,7 +454,7 @@ FilteredEvents readFilteredEvents(const QString &directory, quint64 boundary, co
         }
     }
     const QString runtimePath = QDir(directory).filePath(QStringLiteral("runtime.log"));
-    QFile runtimeFile(runtimePath);
+    HistoryReader runtimeFile(runtimePath);
     if (!runtimeFile.exists()) {
         if (missing) missing->append(QStringLiteral("runtime.log"));
     } else if (!runtimeFile.open(QIODevice::ReadOnly)) {
@@ -519,19 +551,40 @@ public:
         if (error) *error = QStringLiteral("open ZIP: %1").arg(m_file.errorString());
         return false;
     }
-    bool addStored(const QString &name, const QByteArray &data, QString *error)
+    bool add(const QString &name, const QByteArray &data, QString *error)
     {
         const QByteArray nameBytes = name.toUtf8();
-        if (nameBytes.isEmpty() || nameBytes.size() > std::numeric_limits<quint16>::max() || static_cast<quint64>(data.size()) > std::numeric_limits<quint32>::max()) {
-            if (error) *error = QStringLiteral("invalid ZIP entry: %1").arg(name);
+        constexpr auto limit = std::numeric_limits<quint32>::max();
+        if (nameBytes.isEmpty() || nameBytes.size() > std::numeric_limits<quint16>::max()
+            || static_cast<quint64>(data.size()) >= limit || m_file.pos() >= limit
+            || m_entries.size() >= std::numeric_limits<quint16>::max() - 1) {
+            if (error) *error = QStringLiteral("诊断 ZIP 超出格式上限：%1；请缩短导出时间范围").arg(name);
             return false;
         }
         CentralEntry entry;
-        entry.name = nameBytes; entry.crc = crc32(data); entry.size = static_cast<quint32>(data.size()); entry.offset = static_cast<quint32>(m_file.pos());
+        entry.name = nameBytes;
+        entry.crc = ::crc32(0, reinterpret_cast<const Bytef *>(data.constData()), static_cast<uInt>(data.size()));
+        entry.size = static_cast<quint32>(data.size());
+        entry.offset = static_cast<quint32>(m_file.pos());
+        entry.method = data.size() >= 1024 ? 8 : 0;
         QByteArray header;
-        appendU32(&header, 0x04034b50U); appendU16(&header, 20); appendU16(&header, 0x0800); appendU16(&header, 0); appendU16(&header, 0); appendU16(&header, 0);
-        appendU32(&header, entry.crc); appendU32(&header, entry.size); appendU32(&header, entry.size); appendU16(&header, static_cast<quint16>(nameBytes.size())); appendU16(&header, 0);
-        if (!write(header, error) || !write(nameBytes, error) || !write(data, error)) return false;
+        appendU32(&header, 0x04034b50U); appendU16(&header, 20); appendU16(&header, 0x0800); appendU16(&header, entry.method); appendU16(&header, 0); appendU16(&header, 0);
+        appendU32(&header, entry.crc); appendU32(&header, 0); appendU32(&header, entry.size); appendU16(&header, static_cast<quint16>(nameBytes.size())); appendU16(&header, 0);
+        if (!write(header, error) || !write(nameBytes, error)) return false;
+        const qint64 payload = m_file.pos();
+        if (entry.method ? !writeDeflate(data, error) : !write(data, error)) return false;
+        const qint64 end = m_file.pos();
+        if (end >= limit || end < payload) {
+            if (error) *error = QStringLiteral("诊断 ZIP 超出格式上限，请缩短导出时间范围");
+            return false;
+        }
+        entry.compressedSize = static_cast<quint32>(end - payload);
+        QByteArray compressed;
+        appendU32(&compressed, entry.compressedSize);
+        if (!m_file.seek(qint64(entry.offset) + 18) || !write(compressed, error) || !m_file.seek(end)) {
+            if (error && error->isEmpty()) *error = QStringLiteral("更新诊断 ZIP 文件头失败");
+            return false;
+        }
         m_entries.append(entry);
         return true;
     }
@@ -540,10 +593,14 @@ public:
         const quint32 centralOffset = static_cast<quint32>(m_file.pos());
         for (const CentralEntry &entry : m_entries) {
             QByteArray central;
-            appendU32(&central, 0x02014b50U); appendU16(&central, 20); appendU16(&central, 20); appendU16(&central, 0x0800); appendU16(&central, 0); appendU16(&central, 0); appendU16(&central, 0);
-            appendU32(&central, entry.crc); appendU32(&central, entry.size); appendU32(&central, entry.size); appendU16(&central, static_cast<quint16>(entry.name.size()));
+            appendU32(&central, 0x02014b50U); appendU16(&central, 20); appendU16(&central, 20); appendU16(&central, 0x0800); appendU16(&central, entry.method); appendU16(&central, 0); appendU16(&central, 0);
+            appendU32(&central, entry.crc); appendU32(&central, entry.compressedSize); appendU32(&central, entry.size); appendU16(&central, static_cast<quint16>(entry.name.size()));
             appendU16(&central, 0); appendU16(&central, 0); appendU16(&central, 0); appendU16(&central, 0); appendU32(&central, 0); appendU32(&central, entry.offset);
             if (!write(central, error) || !write(entry.name, error)) return false;
+        }
+        if (m_file.pos() + 22 >= std::numeric_limits<quint32>::max()) {
+            if (error) *error = QStringLiteral("诊断 ZIP 超出格式上限，请缩短导出时间范围");
+            return false;
         }
         const quint32 centralSize = static_cast<quint32>(m_file.pos()) - centralOffset;
         QByteArray end;
@@ -557,15 +614,34 @@ public:
         return true;
     }
 private:
-    struct CentralEntry { QByteArray name; quint32 crc = 0; quint32 size = 0; quint32 offset = 0; };
+    struct CentralEntry { QByteArray name; quint32 crc = 0, size = 0, compressedSize = 0, offset = 0; quint16 method = 0; };
     static void appendU16(QByteArray *bytes, quint16 value) { bytes->append(static_cast<char>(value & 0xff)); bytes->append(static_cast<char>((value >> 8) & 0xff)); }
     static void appendU32(QByteArray *bytes, quint32 value) { appendU16(bytes, static_cast<quint16>(value & 0xffff)); appendU16(bytes, static_cast<quint16>((value >> 16) & 0xffff)); }
-    static quint32 crc32(const QByteArray &data)
+    bool writeDeflate(const QByteArray &data, QString *error)
     {
-        static const std::array<quint32, 256> table = [] { std::array<quint32, 256> values{}; for (quint32 i = 0; i < values.size(); ++i) { quint32 value = i; for (int bit = 0; bit < 8; ++bit) value = (value & 1U) ? (0xedb88320U ^ (value >> 1)) : (value >> 1); values[i] = value; } return values; }();
-        quint32 crc = 0xffffffffU;
-        for (char byte : data) crc = table[(crc ^ static_cast<unsigned char>(byte)) & 0xffU] ^ (crc >> 8);
-        return crc ^ 0xffffffffU;
+        z_stream stream{};
+        if (deflateInit2(&stream, Z_BEST_SPEED, Z_DEFLATED, -MAX_WBITS, 8, Z_DEFAULT_STRATEGY) != Z_OK) {
+            if (error) *error = QStringLiteral("初始化 ZIP 压缩失败");
+            return false;
+        }
+        stream.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(data.constData()));
+        stream.avail_in = static_cast<uInt>(data.size());
+        std::array<Bytef, 64 * 1024> buffer{};
+        int result;
+        bool ok = true;
+        do {
+            stream.next_out = buffer.data();
+            stream.avail_out = static_cast<uInt>(buffer.size());
+            result = deflate(&stream, Z_FINISH);
+            const auto count = static_cast<qint64>(buffer.size() - stream.avail_out);
+            if ((result != Z_OK && result != Z_STREAM_END) ||
+                m_file.write(reinterpret_cast<const char *>(buffer.data()), count) != count) {
+                ok = false; break;
+            }
+        } while (result != Z_STREAM_END);
+        deflateEnd(&stream);
+        if (!ok && error) *error = QStringLiteral("ZIP 压缩或写入失败：%1").arg(m_file.errorString());
+        return ok;
     }
     bool write(const QByteArray &bytes, QString *error)
     {
@@ -624,17 +700,19 @@ bool runIsActive(const QString &directory)
     // The marker is deliberately only informational. A process crash leaves
     // it behind, while QLockFile can validate/reclaim the stale PID lock.
     QLockFile lock(QDir(directory).filePath(QStringLiteral(".active.lock")));
+    lock.setStaleLockTime(0);
     if (!lock.tryLock(0)) return true;
     lock.unlock();
     return false;
 }
 
-void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &options)
+void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &options, qint64 reserve=0)
 {
     QDir root(rootDirectory);
     if (!root.exists()) return;
-    QLockFile retentionLock(root.filePath(QStringLiteral(".retention.lock")));
-    if (!retentionLock.tryLock(0)) return;
+    if (QFileInfo(rootDirectory).isSymLink() || QFileInfo(rootDirectory).isJunction()) return;
+    const auto retentionLock = diagnostic_storage::lease(rootDirectory);
+    if (!retentionLock) return;
     const QString rootCanonical = root.canonicalPath();
     struct Run { QString path; qint64 bytes = 0; QDateTime modified; bool active = false; };
     QVector<Run> runs;
@@ -642,16 +720,19 @@ void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &
     for (const QFileInfo &info : entries) {
         QByteArray manifestBytes;
         const QString canonical = info.canonicalFilePath();
-        if (info.isSymLink() || info.isJunction() || canonical.isEmpty() || !canonical.startsWith(rootCanonical + QDir::separator())
+        if (info.isSymLink() || info.isJunction() || canonical.isEmpty() || QFileInfo(canonical).absolutePath() != rootCanonical
             || !readAllBytes(QDir(info.absoluteFilePath()).filePath(QStringLiteral("manifest.json")), &manifestBytes)) continue;
         const QJsonObject manifest = parseObject(manifestBytes);
         const QString id = manifest.value(QStringLiteral("runId")).toString();
         if (manifest.value(QStringLiteral("formatVersion")).toInt(0) != 1 || id.isEmpty()
             || !info.fileName().endsWith(QLatin1Char('-') + id)) continue;
-        // Recorder directories contain only files. Leave unexpected user content alone.
+        // Do not prune historical captures or unexpected user files.
         bool unexpected = false;
-        for (const auto &child : QDir(info.absoluteFilePath()).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot))
-            if (child.isDir() || child.isSymLink() || child.isJunction()) { unexpected = true; break; }
+        static const QRegularExpression known(QStringLiteral(
+            "^(\\.active\\.lock|\\.active|manifest\\.json|summary\\.txt|network\\.json|settings\\.json|"
+            "history-retention\\.json|(?:runtime\\.log|events\\.jsonl|(?:network|settings|card)_history\\.jsonl)(?:\\.previous)?)$"));
+        for (const auto &child : QDir(info.absoluteFilePath()).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot))
+            if (!child.isFile() || child.isSymLink() || child.isJunction() || !known.match(child.fileName()).hasMatch()) { unexpected = true; break; }
         if (unexpected) continue;
         runs.append({info.absoluteFilePath(), directoryBytes(info.absoluteFilePath()), info.lastModified(), runIsActive(info.absoluteFilePath())});
     }
@@ -661,24 +742,20 @@ void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &
     for (const Run &run : runs) { total += run.bytes; if (!run.active) ++ended; }
     for (const Run &run : runs) {
         if (run.active) continue;
-        if (ended <= options.maxRetainedRuns && total <= options.maxRetainedBytes) break;
+        if (ended <= options.maxRetainedRuns && total <= qMax<qint64>(0,options.maxRetainedBytes-reserve) &&
+            run.modified >= QDateTime::currentDateTimeUtc().addDays(-diagnostic_storage::RetainDays)) break;
         QLockFile runLock(QDir(run.path).filePath(QStringLiteral(".active.lock")));
+        runLock.setStaleLockTime(0);
         if (!runLock.tryLock(0)) continue;
         bool removed = true;
-        const QFileInfoList children = QDir(run.path).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot);
-        for (const QFileInfo &child : children) {
+        const auto children = QDir(run.path).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot);
+        for (const auto &child : children) {
             if (child.fileName() == QStringLiteral(".active.lock")) continue;
-            if (child.isSymLink()) {
-                if (!QFile::remove(child.absoluteFilePath())) { removed = false; break; }
-            } else if (child.isDir()) {
-                if (!QDir(child.absoluteFilePath()).removeRecursively()) { removed = false; break; }
-            } else if (!QFile::remove(child.absoluteFilePath())) {
-                removed = false;
-                break;
-            }
+            if (!child.isFile() || child.isSymLink() || child.isJunction() ||
+                !QFile::remove(child.absoluteFilePath())) { removed = false; break; }
         }
         runLock.unlock();
-        if (removed && QDir(run.path).removeRecursively()) { total -= run.bytes; --ended; }
+        if (removed && root.rmdir(QFileInfo(run.path).fileName())) { total -= run.bytes; --ended; }
     }
 }
 
@@ -688,7 +765,7 @@ quint64 maxSequenceOnDisk(const QString &directory)
     const QStringList lineFiles = {QStringLiteral("events.jsonl"), QStringLiteral("network_history.jsonl"),
                                    QStringLiteral("settings_history.jsonl"), QStringLiteral("card_history.jsonl")};
     for (const QString &name : lineFiles) {
-        QFile file(QDir(directory).filePath(name));
+        HistoryReader file(QDir(directory).filePath(name));
         if (!file.open(QIODevice::ReadOnly)) continue;
         while (!file.atEnd()) {
             QJsonParseError parseError;
@@ -723,6 +800,7 @@ struct DiagnosticRecorder::State
     explicit State(const Options &input) : options(input), monoStart(Clock::now())
     {
         options.maxQueueEntries = qMax(1, options.maxQueueEntries); options.maxFallbackEntries = qMax(1, options.maxFallbackEntries); options.maxSnapshotEntries = qMax(1, options.maxSnapshotEntries);
+        options.maxHistorySegmentBytes=qMax<qint64>(1,options.maxHistorySegmentBytes);
         options.noiseWindowMs = qMax(1, options.noiseWindowMs); options.noiseBurst = qMax(0, options.noiseBurst); options.maxNoiseBuckets = qMax(1, options.maxNoiseBuckets);
         options.maxRetainedRuns = qMax(1, options.maxRetainedRuns); options.maxRetainedBytes = qMax<qint64>(1, options.maxRetainedBytes);
         rootDirectory = options.rootDirectory.trimmed(); if (rootDirectory.isEmpty()) rootDirectory = defaultRootDirectoryLocal();
@@ -744,11 +822,13 @@ struct DiagnosticRecorder::State
         QFile marker(activeMarkerPath);
         if (marker.open(QIODevice::WriteOnly | QIODevice::Truncate)) { marker.write(runId.toUtf8()); marker.close(); } else setWriteError(QStringLiteral("创建运行标记失败：%1").arg(marker.errorString()));
         activeLock = std::make_unique<QLockFile>(activeMarkerPath + QStringLiteral(".lock"));
+        activeLock->setStaleLockTime(0);
         if (!activeLock->tryLock(0)) setWriteError(QStringLiteral("获取运行锁失败：%1").arg(activeLock->error()));
         runtimeFile.setFileName(QDir(runDirectory).filePath(QStringLiteral("runtime.log"))); eventsFile.setFileName(QDir(runDirectory).filePath(QStringLiteral("events.jsonl"))); networkHistoryFile.setFileName(QDir(runDirectory).filePath(QStringLiteral("network_history.jsonl"))); settingsHistoryFile.setFileName(QDir(runDirectory).filePath(QStringLiteral("settings_history.jsonl"))); cardHistoryFile.setFileName(QDir(runDirectory).filePath(QStringLiteral("card_history.jsonl")));
         ensureFile(runtimeFile.fileName(), QStringLiteral("runtime.log")); ensureFile(eventsFile.fileName(), QStringLiteral("events.jsonl")); ensureFile(networkHistoryFile.fileName(), QStringLiteral("network_history.jsonl")); ensureFile(settingsHistoryFile.fileName(), QStringLiteral("settings_history.jsonl")); ensureFile(cardHistoryFile.fileName(), QStringLiteral("card_history.jsonl"));
         { std::lock_guard<std::mutex> guard(mutex); active = true; accepting = true; }
-        writeInitialArtifacts(); worker = std::thread([this] { workerLoop(); }); pruneRuns(rootDirectory, options);
+        writeInitialArtifacts(); worker = std::thread([this] { workerLoop(); });
+        pruneRuns(rootDirectory,options,qMin(options.maxRetainedBytes,2*options.maxHistorySegmentBytes));
     }
 
     void stopRun()
@@ -813,10 +893,6 @@ struct DiagnosticRecorder::State
     {
         CardSnapshot snapshot; bool notify = false; { std::lock_guard<std::mutex> guard(mutex); if (!accepting) return 0; snapshot.sequence = nextSequence++; snapshot.runId = runId; snapshot.isoTime = nowIso(); snapshot.monotonicMs = monotonicMs(); snapshot.card = card; snapshot.ip = ip; snapshot.state = state; snapshot.fields = fields; appendSnapshot(cardSnapshots, snapshot); if (writeError) { completeLocked(snapshot.sequence); return snapshot.sequence; } QueueItem item; item.kind = QueueItem::Kind::CardSnapshot; item.critical = true; item.card = snapshot; notify = enqueueLocked(std::move(item)); } if (notify) condition.notify_one(); return snapshot.sequence;
     }
-    qint64 diskBytes() const
-    {
-        qint64 total = 0; for (const QFile *file : {&runtimeFile, &eventsFile, &networkHistoryFile, &settingsHistoryFile, &cardHistoryFile}) { const QFileInfo info(file->fileName()); if (info.exists()) total += info.size(); } return total;
-    }
     qint64 itemBytes(const QueueItem &item) const
     {
         switch (item.kind) { case QueueItem::Kind::Event: return eventJsonBytes(item.event).size() + runtimeLineBytes(item.event).size(); case QueueItem::Kind::NetworkSnapshot: case QueueItem::Kind::SettingsSnapshot: return snapshotJson(item.snapshot).size() + 1; case QueueItem::Kind::CardSnapshot: return cardSnapshotJson(item.card).size() + 1; } return 0;
@@ -831,10 +907,41 @@ struct DiagnosticRecorder::State
     {
         const QByteArray bytes = jsonBytes(object) + '\n'; if (!file.isOpen() || file.write(bytes) != bytes.size()) { if (error) *error = QStringLiteral("写入 %1 失败：%2").arg(label, file.errorString()); return false; } return true;
     }
-    bool writeItem(const QueueItem &item, QString *error)
+    qint64 segmentBytes = 0;
+    QString previousSegmentEnd;
+    bool rotateHistory(QString *error, bool *deferred)
+    {
+        const auto guard = diagnostic_storage::lease(rootDirectory);
+        if (!guard) { *deferred = true; return false; }
+        if (!flushFiles(error)) return false;
+        const std::array<QFile *, 5> files{&runtimeFile,&eventsFile,&networkHistoryFile,&settingsHistoryFile,&cardHistoryFile};
+        bool evicted = false;
+        for (auto *file : files) {
+            file->close();
+            const auto previous=file->fileName()+QStringLiteral(".previous");
+            if (QFileInfo::exists(previous)) {
+                evicted = true;
+                if (!QFile::remove(previous)) { if(error)*error=QStringLiteral("旧诊断分段无法移除"); return false; }
+            }
+            if (!QFile::rename(file->fileName(),previous) || !file->open(QIODevice::ReadWrite|QIODevice::Append)) {
+                if(error)*error=QStringLiteral("诊断分段轮转失败：%1").arg(file->fileName());
+                return false;
+            }
+        }
+        if (evicted && !writeAtomicBytes(QDir(runDirectory).filePath(QStringLiteral("history-retention.json")),
+                jsonBytes(QJsonObject{{"evictedAt",previousSegmentEnd}}),error)) return false;
+        previousSegmentEnd=nowIso();
+        segmentBytes=0;
+        return true;
+    }
+    bool writeItem(const QueueItem &item, QString *error, bool *deferred)
     {
         { std::lock_guard<std::mutex> guard(mutex); if (writeError) { if (error) *error = writeErrorText; return false; } }
-        if (diskBytes() + itemBytes(item) > options.maxRetainedBytes) { if (error) *error = QStringLiteral("单次运行日志达到容量上限，后续记录转入内存回退"); return false; }
+        const auto limit=qMin(options.maxHistorySegmentBytes,options.maxRetainedBytes/2);
+        const auto bytes=itemBytes(item);
+        if (bytes>limit) { if(error)*error=QStringLiteral("单条诊断记录超出分段容量"); return false; }
+        if (segmentBytes+bytes>limit && !rotateHistory(error,deferred)) return false;
+        segmentBytes+=bytes;
         switch (item.kind) { case QueueItem::Kind::Event: return writeEvent(item.event, error); case QueueItem::Kind::NetworkSnapshot: return writeSnapshotHistory(networkHistoryFile, snapshotJson(item.snapshot), QStringLiteral("network_history.jsonl"), error); case QueueItem::Kind::SettingsSnapshot: return writeSnapshotHistory(settingsHistoryFile, snapshotJson(item.snapshot), QStringLiteral("settings_history.jsonl"), error); case QueueItem::Kind::CardSnapshot: return writeSnapshotHistory(cardHistoryFile, cardSnapshotJson(item.card), QStringLiteral("card_history.jsonl"), error); } if (error) *error = QStringLiteral("未知诊断队列项"); return false;
     }
     bool flushFiles(QString *error)
@@ -849,7 +956,7 @@ struct DiagnosticRecorder::State
         for (;;) {
             QueueItem item; bool haveItem = false, flushNow = false, finish = false;
             { std::unique_lock<std::mutex> lock(mutex); if (queue.empty() && !stopping && !flushRequested) condition.wait_for(lock, std::chrono::milliseconds(1000)); if (!queue.empty()) { item = queue.front(); queue.pop_front(); inFlight = item; hasInFlight = true; haveItem = true; } else { const bool targetReached = flushRequested && processedSequence >= flushTarget; const bool timedFlush = Clock::now() - lastFlush >= std::chrono::seconds(1); if (stopping || targetReached || timedFlush) { flushNow = true; finish = stopping; if (targetReached || stopping) flushRequested = false; } } }
-            if (haveItem) { QString error; const bool ok = writeItem(item, &error); { std::lock_guard<std::mutex> guard(mutex); if (!ok) { setWriteErrorLocked(error.isEmpty() ? QStringLiteral("诊断日志写入失败") : error); if (item.kind == QueueItem::Kind::Event) appendFallbackLocked(item.event); } else writtenSequence = qMax(writtenSequence, item.sequence()); completeLocked(item.sequence()); hasInFlight = false; if (flushRequested && processedSequence >= flushTarget) { flushNow = true; flushRequested = false; } if (stopping && queue.empty()) { flushNow = true; finish = true; flushRequested = false; } } progress.notify_all(); if (Clock::now() - lastFlush >= std::chrono::seconds(1)) flushNow = true; }
+            if (haveItem) { QString error; bool deferred = false; const bool ok = writeItem(item, &error, &deferred); { std::lock_guard<std::mutex> guard(mutex); if (!ok) { if(deferred) { ++drops.queueDropped; if(item.critical)++drops.criticalQueueDropped; } else setWriteErrorLocked(error.isEmpty() ? QStringLiteral("诊断日志写入失败") : error); if (item.kind == QueueItem::Kind::Event) appendFallbackLocked(item.event); } else writtenSequence = qMax(writtenSequence, item.sequence()); completeLocked(item.sequence()); hasInFlight = false; if (flushRequested && processedSequence >= flushTarget) { flushNow = true; flushRequested = false; } if (stopping && queue.empty()) { flushNow = true; finish = true; flushRequested = false; } } progress.notify_all(); if (Clock::now() - lastFlush >= std::chrono::seconds(1)) flushNow = true; }
             if (flushNow) { QString error; const bool ok = flushFiles(&error); { std::lock_guard<std::mutex> guard(mutex); if (!ok) setWriteErrorLocked(error); flushedSequence = processedSequence; } lastFlush = Clock::now(); progress.notify_all(); if (finish) break; }
         }
         runtimeFile.close(); eventsFile.close(); networkHistoryFile.close(); settingsHistoryFile.close(); cardHistoryFile.close(); progress.notify_all();
@@ -872,6 +979,7 @@ struct DiagnosticRecorder::State
         if (!writeAtomicBytes(QDir(runDirectory).filePath(QStringLiteral("settings.json")), jsonBytes(settings) + '\n', &error)) { missing.append(QStringLiteral("settings.json")); setWriteError(error); }
         QVector<Event> fallback; DropCounters dropCopy; bool writeErrorCopy = false; QString writeErrorTextCopy, startCopy, endCopy;
         { std::lock_guard<std::mutex> guard(mutex); fallback = fallbackEvents; dropCopy = drops; writeErrorCopy = writeError; writeErrorTextCopy = writeErrorText; startCopy = startIsoTime; endCopy = endIsoTime; }
+        appendRetentionReason(runDirectory,&truncationReasons);
         appendDropReasons(dropCopy, &truncationReasons); const FilteredEvents events = readFilteredEvents(runDirectory, boundary, fallback, &missing, &truncationReasons); const bool complete = missing.isEmpty() && truncationReasons.isEmpty() && !writeErrorCopy;
         if (!writeAtomicBytes(QDir(runDirectory).filePath(QStringLiteral("summary.txt")), summaryBytes(runId, startCopy, endCopy, boundary, activeState, complete, writeErrorCopy, writeErrorTextCopy, dropCopy, network, settings, events.count, note, truncationReasons), &error)) { missing.append(QStringLiteral("summary.txt")); setWriteError(error); }
         { std::lock_guard<std::mutex> guard(mutex); writeErrorCopy = writeError; writeErrorTextCopy = writeErrorText; dropCopy = drops; }
@@ -963,7 +1071,7 @@ JsonWindowScan scanJsonHistoryFile(const QString &path,
 {
     Q_UNUSED(kind);
     JsonWindowScan result;
-    QFile file(path);
+    HistoryReader file(path);
     if (!file.exists()) return result;
     result.exists = true;
     if (!file.open(QIODevice::ReadOnly)) {
@@ -1044,7 +1152,7 @@ JsonWindowScan scanEventHistoryFile(const QString &path,
                                     quint64 boundary)
 {
     JsonWindowScan result;
-    QFile file(path);
+    HistoryReader file(path);
     if (!file.exists()) return result;
     result.exists = true;
     if (!file.open(QIODevice::ReadOnly)) {
@@ -1087,7 +1195,7 @@ JsonWindowScan scanRuntimeFile(const QString &path,
                                quint64 boundary)
 {
     JsonWindowScan result;
-    QFile file(path);
+    HistoryReader file(path);
     if (!file.exists()) return result;
     result.exists = true;
     if (!file.open(QIODevice::ReadOnly)) {
@@ -1149,6 +1257,7 @@ DiagnosticRecorder::ExportRequest DiagnosticRecorder::captureExportRequest(quint
     if (!m_state) return ExportRequest();
     ExportRequest request = m_state->captureRequest(boundarySequence, note);
     request.capturedLive = true;
+    request.storageLease=diagnostic_storage::exportLease(m_state->rootDirectory);
     request.bundleExtension=captureBundle(std::numeric_limits<qint64>::min(),QDateTime::currentMSecsSinceEpoch());
     request.flushBeforeExport = [state = m_state, boundary = request.boundarySequence] {
         return state->flushTo(boundary, 5000);
@@ -1167,7 +1276,7 @@ DiagnosticRecorder::TimeWindowRequest DiagnosticRecorder::captureTimeWindowReque
     result.exportCapturedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
     result.note = note;
     result.rootDirectory = m_state ? m_state->rootDirectory : QString();
-    result.bundleExtension=captureBundle(startLocal.toMSecsSinceEpoch(),qMin(endLocal.toMSecsSinceEpoch(),QDateTime::currentMSecsSinceEpoch()));
+
     if (!startLocal.isValid() || !endLocal.isValid()) {
         result.validationError = QStringLiteral("时间窗无效");
         return result;
@@ -1177,6 +1286,18 @@ DiagnosticRecorder::TimeWindowRequest DiagnosticRecorder::captureTimeWindowReque
         return result;
     }
 
+    if(QDir(result.rootDirectory).exists()) {
+        result.storageLease=diagnostic_storage::exportLease(result.rootDirectory);
+        if(!result.storageLease){result.validationError=QStringLiteral("日志目录正在清理，请重试导出");return result;}
+    }
+    result.bundleExtension=captureBundle(startLocal.toMSecsSinceEpoch(),
+        qMin(endLocal.toMSecsSinceEpoch(),QDateTime::currentMSecsSinceEpoch()));
+    auto captureLive=[&] {
+        auto source=m_state->captureRequest(captureBoundary(),note);
+        source.capturedLive=true;
+        source.flushBeforeExport=[state=m_state,boundary=source.boundarySequence]{return state->flushTo(boundary,5000);};
+        return source;
+    };
     const qint64 startMs = startLocal.toMSecsSinceEpoch();
     const qint64 endMs = endLocal.toMSecsSinceEpoch();
     const QVector<RunInfo> runs = enumerateRuns(result.rootDirectory);
@@ -1196,7 +1317,7 @@ DiagnosticRecorder::TimeWindowRequest DiagnosticRecorder::captureTimeWindowReque
         if (!liveDirectory.isEmpty()
             && QFileInfo(run.directory).absoluteFilePath()
                 == QFileInfo(liveDirectory).absoluteFilePath()) {
-            result.sources.append(captureExportRequest(captureBoundary(), note));
+            result.sources.append(captureLive());
             liveIncluded = true;
             continue;
         }
@@ -1216,7 +1337,7 @@ DiagnosticRecorder::TimeWindowRequest DiagnosticRecorder::captureTimeWindowReque
         const qint64 liveStart = isoMillisLocal(m_state->startIsoTime);
         if (liveStart == std::numeric_limits<qint64>::min()
             || (liveStart <= endMs && QDateTime::currentDateTime().toMSecsSinceEpoch() >= startMs))
-            result.sources.append(captureExportRequest(captureBoundary(), note));
+            result.sources.append(captureLive());
     }
     return result;
 }
@@ -1225,8 +1346,15 @@ std::future<DiagnosticRecorder::ExportResult> DiagnosticRecorder::exportRunAsync
 
 DiagnosticRecorder::ExportResult DiagnosticRecorder::exportRequest(const ExportRequest &request, const QString &targetZipPath)
 {
+    const auto root=QFileInfo(request.sourceDirectory).absolutePath();
+    const bool hasDiskSource=!request.sourceDirectory.isEmpty()&&QDir(root).exists();
+    const auto sourceLease=request.storageLease ? request.storageLease :
+        (hasDiskSource ? diagnostic_storage::exportLease(root) : nullptr);
+    if(hasDiskSource&&!sourceLease){ ExportResult failed;failed.targetPath=targetZipPath;
+        failed.error=QStringLiteral("日志目录正在清理，请重试导出");return failed; }
     ExportRequest effective = request;
     QStringList sourceWarnings;
+    appendRetentionReason(effective.sourceDirectory,&sourceWarnings);
     if (effective.flushBeforeExport && !effective.flushBeforeExport())
         sourceWarnings.append(QStringLiteral("导出前刷新未完成或发生写入错误，已合并点击时的内存记录"));
     // Historical callers normally provide only RunInfo. Merge the persisted
@@ -1266,7 +1394,7 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportRequest(const ExportR
     QHash<QString, QByteArray> contents; contents.insert(QStringLiteral("runtime.log"), events.runtime); contents.insert(QStringLiteral("events.jsonl"), events.events); contents.insert(QStringLiteral("network.json"), jsonBytes(snapshots.network) + '\n'); contents.insert(QStringLiteral("settings.json"), jsonBytes(snapshots.settings) + '\n'); contents.insert(QStringLiteral("summary.txt"), summary);
     const QJsonObject manifest = manifestObject(effective.runId, effective.startIsoTime, effective.endIsoTime, effective.boundarySequence, effective.sourceWasActive, effective.writeError, effective.writeErrorText, effective.drops, missing, truncationReasons, effective.note, names, contents); contents.insert(QStringLiteral("manifest.json"), jsonBytes(manifest) + '\n');
     const QFileInfo targetInfo(targetZipPath); if (!QDir().mkpath(targetInfo.absolutePath())) { result.error = QStringLiteral("create target directory failed: %1").arg(targetInfo.absolutePath()); result.missingFiles = missing; result.truncationReasons = truncationReasons; return result; }
-    const QString temporaryPath = targetZipPath + QStringLiteral(".part-") + QUuid::createUuid().toString(QUuid::WithoutBraces); QString error; ZipWriter writer(temporaryPath); bool ok = writer.open(&error); if (ok) for (const QString &name : names) if (!writer.addStored(name, contents.value(name), &error)) { ok = false; break; } if(ok&&effective.bundleExtension)ok=effective.bundleExtension([&](const QString& name,const QByteArray& bytes){return writer.addStored(name,bytes,&error);},&error); if (ok) ok = writer.close(&error);
+    const QString temporaryPath = targetZipPath + QStringLiteral(".part-") + QUuid::createUuid().toString(QUuid::WithoutBraces); QString error; ZipWriter writer(temporaryPath); bool ok = writer.open(&error); if (ok) for (const QString &name : names) if (!writer.add(name, contents.value(name), &error)) { ok = false; break; } if(ok&&effective.bundleExtension)ok=effective.bundleExtension([&](const QString& name,const QByteArray& bytes){return writer.add(name,bytes,&error);},&error); if (ok) ok = writer.close(&error);
     if (!ok) { writer.cancel(); QFile::remove(temporaryPath); result.error = error; result.missingFiles = missing; result.truncationReasons = truncationReasons; return result; }
     if (!QFile::rename(temporaryPath, targetZipPath)) { QFile::remove(temporaryPath); result.error = QStringLiteral("publish target ZIP failed"); return result; }
     result.success = true; result.missingFiles = missing; result.truncationReasons = truncationReasons; return result;
@@ -1345,6 +1473,7 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportTimeWindow(
     for (const ExportRequest &source : request.sources) {
         if (source.runId.isEmpty() || source.sourceDirectory.isEmpty()) continue;
         sourceIds.insert(source.runId);
+        appendRetentionReason(source.sourceDirectory,&truncationReasons,startMs);
         if (source.sourceWasActive || runIsActive(source.sourceDirectory))
             activeSources.append(source.runId);
         else if (!source.endIsoTime.isEmpty())
@@ -1511,8 +1640,8 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportTimeWindow(
     ZipWriter writer(temporaryPath);
     bool ok = writer.open(&error);
     for (auto it = contents.constBegin(); ok && it != contents.constEnd(); ++it)
-        ok = writer.addStored(it.key(), it.value(), &error);
-    if(ok&&request.bundleExtension)ok=request.bundleExtension([&](const QString& name,const QByteArray& bytes){return writer.addStored(name,bytes,&error);},&error);
+        ok = writer.add(it.key(), it.value(), &error);
+    if(ok&&request.bundleExtension)ok=request.bundleExtension([&](const QString& name,const QByteArray& bytes){return writer.add(name,bytes,&error);},&error);
     if (ok) ok = writer.close(&error);
     if (!ok) {
         writer.cancel();

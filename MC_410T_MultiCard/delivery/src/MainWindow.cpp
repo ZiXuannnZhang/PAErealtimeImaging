@@ -43,7 +43,7 @@
 #include <QApplication>
 #include <QScrollArea>
 #include <QSignalBlocker>
-#include <QSplitter>
+#include <QTextDocument>
 #include <mutex>
 #include <condition_variable>
 #include <deque>
@@ -290,7 +290,12 @@ MainWindow::MainWindow(QWidget *parent)
     ui->edtTriggersPerFile->setAccessibleName("每文件触发数");
     ui->edtFileSuffix->setAccessibleName("文件后缀");
     ui->chkAutoSave->setAccessibleName("自动保存");
-    ui->btnExportDiagnostic->setAccessibleName("导出诊断日志");
+    ui->btnExportDiagnostic->setAccessibleName("导出日志");
+    ui->chkDiagnosticMode->setAccessibleName("诊断模式");
+    connect(ui->chkDiagnosticMode, &QCheckBox::toggled, this, [this](bool enabled) {
+        logMessage(enabled ? QStringLiteral("下次监听将启用详细诊断")
+                           : QStringLiteral("下次监听将使用日常日志"));
+    });
 
     m_lblStats[0] = ui->lblStats1;
     m_lblStats[1] = ui->lblStats2;
@@ -903,36 +908,8 @@ void MainWindow::setupUI()
     connect(m_cmbImagingMode, static_cast<void(QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
             this, &MainWindow::onImagingModeChanged);
 
-    // 工作八：运行日志框可拖拽调整高度，其余分组框整体随动适应
-    if (ui->leftPanelLayout) {
-        QWidget *topContainer = new QWidget(ui->leftPanel);
-        topContainer->setObjectName("leftTopContainer");
-        QVBoxLayout *topLayout = new QVBoxLayout(topContainer);
-        topLayout->setContentsMargins(0, 0, 0, 0);
-        QList<QWidget*> topWidgets;
-        while (ui->leftPanelLayout->count() > 0) {
-            QLayoutItem *item = ui->leftPanelLayout->takeAt(0);
-            if (QWidget *w = item->widget()) {
-                if (w != ui->grpLog) topWidgets.append(w);
-            }
-            delete item;
-        }
-        for (QWidget *w : topWidgets) topLayout->addWidget(w);
-        // 其余分组框保持自然高度，多余空间由底部空白吸收，不随日志框伸缩
-        topLayout->addStretch(1);
-        QSplitter *logSplitter = new QSplitter(Qt::Vertical, ui->leftPanel);
-        logSplitter->setObjectName("logSplitter");
-        logSplitter->addWidget(topContainer);
-        logSplitter->addWidget(ui->grpLog);
-        logSplitter->setStretchFactor(0, 0);
-        logSplitter->setStretchFactor(1, 1);
-        logSplitter->setSizes({ 520, 200 });
-        ui->leftPanelLayout->addWidget(logSplitter);
-    }
-    // 日志区域最小高度：确保默认显示至少6行日志
-    if (ui->grpLog) {
-        ui->grpLog->setMinimumHeight(100);
-    }
+    ui->leftPanelLayout->addStretch(1);
+    ui->txtLog->document()->setMaximumBlockCount(500);
 
     // 工作七优化：左侧交互面板独立滚动，右侧信号显示区自适应窗口
     if (ui->centralwidget && ui->leftPanel) {
@@ -2392,8 +2369,8 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     }
     {
         QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
-        cfg.diagnosticLevel = qBound(0, settings.value("Diagnostics/Level", 1).toInt(), 2);
-        cfg.diagnosticTraceEnabled = settings.value("Diagnostics/RawIngressTrace", true).toBool();
+        cfg.diagnosticLevel = ui->chkDiagnosticMode->isChecked() ? 1 : 0;
+        cfg.diagnosticTraceEnabled = ui->chkDiagnosticMode->isChecked();
         cfg.socketTimestampMode = qBound(0, settings.value("Diagnostics/SocketTimestampMode", 0).toInt(), 3);
     }
     // Startup admission policy from the command line: --startup-policy=legacy

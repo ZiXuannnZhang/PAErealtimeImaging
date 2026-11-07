@@ -1,3 +1,5 @@
+#include "DiagnosticStorage.h"
+#include <QStorageInfo>
 #include "NetworkController.h"
 #include "StartupPolicy.h"
 #include <QCoreApplication>
@@ -105,21 +107,51 @@ bool NetworkController::createPaimageBackend(QString& error){
     for(auto& s:m_savers)savers.push_back(s.get());
     try{
         const QString id=QUuid::createUuid().toString(QUuid::WithoutBraces);
-        const QString tracePath=QDir(QCoreApplication::applicationDirPath()).filePath("paimage-traces/"+id);
-        if(!QDir().mkpath(tracePath))throw std::runtime_error("trace directory creation failed");
+        const QString traceRoot=QDir(QCoreApplication::applicationDirPath()).filePath("paimage-traces");
+        const QString tracePath=QDir(traceRoot).filePath(id);
+        const bool detailed=m_paimageDiagnosticDeadlineNs>paimage::SocketReceiver::now();
         m_paimageTracePath=tracePath;
-        if(m_config.diagnosticTraceEnabled)
-            m_paimageTrace=std::make_unique<paimage::TraceWriter>(std::filesystem::path(tracePath.toStdWString()));
-        if(m_config.diagnosticLevel>=1)
-            m_paimageTiming=std::make_unique<paimage::TimingWriter>(std::filesystem::path(tracePath.toStdWString()));
-        if(m_config.diagnosticLevel>=1)
-            m_paimageLoopLog=std::make_unique<paimage::LoopLog>(std::filesystem::path(tracePath.toStdWString()));
+        bool diagnosticDiskReady=false;
+        try {
+            if(!QDir().mkpath(traceRoot)) throw std::runtime_error("trace root creation failed");
+            if(detailed && !m_paimageDetailLease){
+                auto detail=std::make_unique<QLockFile>(QDir(traceRoot).filePath(".detail.lock"));
+                detail->setStaleLockTime(0);
+                if(detail->tryLock(0))m_paimageDetailLease=std::move(detail);
+            }
+            const bool hasDetailLease=bool(m_paimageDetailLease);
+            const auto retained=diagnostic_storage::pruneTraces(traceRoot,
+                detailed&&hasDetailLease?diagnostic_storage::DetailedReserve:0);
+            if(!QDir().mkpath(tracePath)) throw std::runtime_error("trace directory creation failed");
+            m_paimageTraceLease=std::make_unique<QLockFile>(QDir(tracePath).filePath(".active.lock"));
+            m_paimageTraceLease->setStaleLockTime(0);
+            if(!m_paimageTraceLease->tryLock(0)) throw std::runtime_error("trace lease unavailable");
+            diagnosticDiskReady=true;
+            if(detailed && (!hasDetailLease || !retained ||
+                            *retained>diagnostic_storage::TraceQuota-diagnostic_storage::DetailedReserve))
+                throw std::runtime_error("detailed quota unavailable (active/exporting diagnostics)");
+            const auto free=QStorageInfo(tracePath).bytesAvailable();
+            if(detailed && free>=0 && free<diagnostic_storage::DetailedReserve+256*diagnostic_storage::MiB)
+                throw std::runtime_error("insufficient space for detailed diagnostics");
+            if(detailed && m_config.diagnosticTraceEnabled)
+                m_paimageTrace=std::make_unique<paimage::TraceWriter>(std::filesystem::path(tracePath.toStdWString()));
+            if(detailed && m_config.diagnosticLevel>=1) {
+                m_paimageTiming=std::make_unique<paimage::TimingWriter>(std::filesystem::path(tracePath.toStdWString()));
+                m_paimageLoopLog=std::make_unique<paimage::LoopLog>(std::filesystem::path(tracePath.toStdWString()));
+            }
+        } catch(const std::exception &e) {
+            m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();
+            recordDiagnosticEvent("paimage.lifecycle","detailed_diagnostics_unavailable",
+                DiagnosticRecorder::Severity::Warning,{{"reason",QString::fromUtf8(e.what())}});
+            if(detailed)emit statusMessage(QStringLiteral("详细诊断未启用，继续记录日常日志：%1").arg(QString::fromUtf8(e.what())));
+        }
         QJsonArray targets;for(const auto& ip:m_targetIPs)targets.append(ip);
         QJsonObject identity{{"runId",id},{"backendId","paimage-receiver-diagnostics"},{"schemaVersion",3},
             {"wallAnchorMs",double(QDateTime::currentMSecsSinceEpoch())},{"monotonicAnchorNs",QString::number(paimage::SocketReceiver::now())},
-            {"cpuTopology",processorTopology()},{"affinityRequested",false},{"diagnosticTraceEnabled",m_config.diagnosticTraceEnabled},
-            {"diagnosticLevel",m_config.diagnosticLevel},{"timingEnabled",m_config.diagnosticLevel>=1},
-            {"diagnosticModes",QJsonObject{{"0","raw-ingress only"},{"1","raw-ingress plus lightweight timing"},{"2","legacy alias of detailed application diagnostics"}}},
+            {"cpuTopology",processorTopology()},{"affinityRequested",false},{"diagnosticTraceEnabled",bool(m_paimageTrace)},
+            {"diagnosticLevel",m_config.diagnosticLevel},{"timingEnabled",bool(m_paimageTiming)},{"loopLogEnabled",bool(m_paimageLoopLog)},
+            {"detailDeadlineNs",QString::number(m_paimageDiagnosticDeadlineNs)},
+            {"diagnosticModes",QJsonObject{{"0","daily summaries; raw trace is independently opt-in"},{"1","detailed timing and receive windows"},{"2","legacy alias of detailed application diagnostics"}}},
             {"listenId",m_diagnosticListenId},{"configId",m_currentConfigId},{"samples",m_config.samplesPerTrig()},
             {"bits",m_config.bitsPerChannel},{"cards",m_config.nCards},{"dataPort",8001},{"feedbackPort",8000},
              {"configuredLogicalTriggersPerRound",m_config.logicalTriggersPerRound},
@@ -140,9 +172,14 @@ bool NetworkController::createPaimageBackend(QString& error){
             {"interfaces",interfaceIdentity(m_config.localBindIP)},{"osVersion",QSysInfo::prettyProductName()},
             {"processId",double(QCoreApplication::applicationPid())},{"receiverThreadIdStatus","recorded in timing thread-life records"},
             {"driverProviderVersionStatus","unknown unless Windows adapter APIs expose it; system capture manifest retains tool output"}};
-        QFile metadata(QDir(tracePath).filePath("run-config.json"));
-        if(!metadata.open(QIODevice::WriteOnly)||metadata.write(QJsonDocument(identity).toJson())<0)throw std::runtime_error("trace identity write failed");
-        metadata.close();
+        if(diagnosticDiskReady) {
+            QFile metadata(QDir(tracePath).filePath("run-config.json"));
+            const auto bytes=QJsonDocument(identity).toJson();
+            if(!metadata.open(QIODevice::WriteOnly)||metadata.write(bytes)!=bytes.size()||!metadata.flush()){
+                m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();
+                recordDiagnosticEvent("paimage.lifecycle","diagnostic_metadata_write_failed",DiagnosticRecorder::Severity::Warning);
+            }
+        }
         m_paimage=std::make_unique<paimage::Backend>(settings,processors,savers,m_paimageTrace.get(),m_paimageTiming.get(),m_paimageLoopLog.get());
         // Normalized LogicalScan save stamps are resolved by physical round
         // identity.  This is installed before listen/start so round zero is
@@ -242,6 +279,10 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
         emit errorOccurred(QStringLiteral("PAimage采集配置无效：检查卡数、位宽及采样点数"));if(onFailed)onFailed();return false;}
     if(m_running||m_stopThread.joinable()){emit errorOccurred(QStringLiteral("请等待当前监听停止后再启动"));if(onFailed)onFailed();return false;}
     m_config=config;m_targetIPs.clear();
+    constexpr qint64 detailDurationNs = 15LL * 60 * 1000000000;
+    m_paimageDiagnosticDeadlineNs = (config.diagnosticTraceEnabled || config.diagnosticLevel>=1)
+        ? paimage::SocketReceiver::now()+detailDurationNs : 0;
+    m_paimageDiagnosticPaused=false;
     m_paimageLastBytes.assign(config.nCards,0);
     for(int c=0;c<config.nCards;++c)m_targetIPs.push_back(config.targetIPs.empty()?QString("192.168.0.%1").arg(c+2):
         (c<int(config.targetIPs.size())?QString::fromStdString(config.targetIPs[c]):QString()));
@@ -293,7 +334,7 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
         if(m_paimageTrace)m_paimageTrace->stop();
         if(m_paimageTiming)m_paimageTiming->stop();
         if(m_paimageLoopLog)m_paimageLoopLog->stop();
-        m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();m_paimageTracePath.clear();
+        m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();m_paimageTraceLease.reset();m_paimageDetailLease.reset();m_paimageTracePath.clear();
         m_processors.clear();m_savers.clear();m_displayBuffers.clear();
         emit errorOccurred("PAimage-derived 监听失败："+error);if(onFailed)onFailed();return false;
     }
@@ -375,8 +416,28 @@ void NetworkController::recordPaimageSnapshot(){
 }
 
 void NetworkController::pollPaimageLoopMonitor(){
-    if(!m_running||!m_paimage||!m_paimageLoopLog)return;
+    if(!m_running||!m_paimage)return;
     const auto nowNs=paimage::SocketReceiver::now();
+    if(m_paimageSaveGeneration&&!m_paimageSaveAppliedLogged&&
+       m_paimage->output().savingApplied(m_paimageSaveGeneration)){
+        m_paimageSaveAppliedLogged=true;
+        recordDiagnosticEvent("paimage.save","save_configuration_applied",DiagnosticRecorder::Severity::Info,
+            {{"generation",QString::number(m_paimageSaveGeneration)},
+             {"appliedMonotonicNs",QString::number(nowNs)},
+             {"directory",m_paimageSaveDir}});
+    }
+    if(m_paimageDiagnosticPaused)return;
+    if(m_paimageDiagnosticDeadlineNs>0 && nowNs>=m_paimageDiagnosticDeadlineNs){
+        if(m_paimageTrace)m_paimageTrace->pause();
+        if(m_paimageTiming)m_paimageTiming->pause();
+        if(m_paimageLoopLog)m_paimageLoopLog->pause();
+        m_paimageDiagnosticPaused=true;
+        recordDiagnosticEvent("paimage.lifecycle","detailed_diagnostics_window_ended",DiagnosticRecorder::Severity::Info,
+            {{"deadlineNs",QString::number(m_paimageDiagnosticDeadlineNs)},{"runId",m_paimageRunId}});
+        emit statusMessage(QStringLiteral("详细诊断已结束，继续记录日常日志"));
+        return;
+    }
+    if(!m_paimageLoopLog)return;
     const auto progress=m_paimageLoopLog->lastProgressNs();
     // 100 ms sampling cannot observe every 20 ms stall and this hint alone
     // never proves CPU preemption; WPR scheduling evidence must match.
@@ -400,14 +461,7 @@ void NetworkController::pollPaimageLoopMonitor(){
              {"runId",m_paimageRunId},{"detectMonotonicNs",QString::number(nowNs)},
              {"note","burst marker only; session handling, assembly cleanup and round attribution are unchanged"}});
     }
-    if(m_paimageSaveGeneration&&!m_paimageSaveAppliedLogged&&
-       m_paimage->output().savingApplied(m_paimageSaveGeneration)){
-        m_paimageSaveAppliedLogged=true;
-        recordDiagnosticEvent("paimage.save","save_configuration_applied",DiagnosticRecorder::Severity::Info,
-            {{"generation",QString::number(m_paimageSaveGeneration)},
-             {"appliedMonotonicNs",QString::number(nowNs)},
-             {"directory",m_paimageSaveDir}});
-    }
+
 }
 
 void NetworkController::stopPaimage(){
@@ -424,6 +478,8 @@ void NetworkController::stopPaimage(){
             // Backend 析构合流上游提交线程；随后 stop/clear frontend stage 并
             // 确定性 join，最后才能销毁 DisplayBuffer / Ring sink 依赖。
             m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();
+            m_paimageTraceLease.reset();m_paimageDetailLease.reset();
+            diagnostic_storage::pruneTraces(QDir(QCoreApplication::applicationDirPath()).filePath("paimage-traces"));
             m_processors.clear();
             stopFrontendStages();
             m_savers.clear();m_displayBuffers.clear();m_publisher.reset();
@@ -443,6 +499,7 @@ bool NetworkController::configurePaimage(int ns,int a,int b,const QString& trigg
         if(m_paimageTrace)m_paimageTrace->stop();m_paimageTrace.reset();
         if(m_paimageTiming)m_paimageTiming->stop();m_paimageTiming.reset();
         if(m_paimageLoopLog)m_paimageLoopLog->stop();m_paimageLoopLog.reset();
+        m_paimageTraceLease.reset();
         m_config.acqTimeNs=ns;
         QString error;if(!createPaimageBackend(error)){emit errorOccurred(error);stopPaimage();return false;}
         if(m_paimageSavingRequested)m_paimage->output().resumeSaving();

@@ -3,12 +3,12 @@
 #include "PaimageAcquisition/TimingWriter.h"
 #include "PaimageAcquisition/LoopLog.h"
 #include "DiagnosticRecorder.h"
+#include "DiagnosticStorage.h"
 #include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QCryptographicHash>
-#include <QDirIterator>
 #include <cstring>
 #include <limits>
 namespace paimage {
@@ -20,24 +20,40 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
     DiagnosticRecorder::setBundleCapture([root,toolsDirectory](qint64 start,qint64 end){
         // Capture just identities and sequence fences on the UI thread. File
         // reads, writer flush waits, filtering and hashing run in the exporter.
+        const bool rootExists=QDir(root).exists();
+        const auto lease=rootExists ? diagnostic_storage::exportLease(root) : nullptr;
+        if(rootExists&&!lease)
+            return DiagnosticRecorder::BundleExtension([](const auto&,QString* error){
+                if(error)*error=QStringLiteral("诊断目录正在清理，请重试导出");return false;
+            });
         auto cuts=TraceWriter::captureCuts();
         auto timingCuts=TimingWriter::captureCuts();
         auto loopCuts=LoopLog::captureCuts();
         auto dirs=QDir(root).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name);
-        return [root,toolsDirectory,start,end,cuts=std::move(cuts),timingCuts=std::move(timingCuts),loopCuts=std::move(loopCuts),dirs=std::move(dirs)]
+        return DiagnosticRecorder::BundleExtension([root,toolsDirectory,start,end,lease,cuts=std::move(cuts),timingCuts=std::move(timingCuts),loopCuts=std::move(loopCuts),dirs=std::move(dirs)]
             (const DiagnosticRecorder::BundleSink& sink,QString* error){
-            QJsonArray runs,files;bool bundleIncomplete=false;
+            QJsonArray runs,files,skippedRuns;bool bundleIncomplete=false;
             auto write=[&](const QString& name,const QByteArray& bytes){
                 if(!sink(name,bytes)){if(error&&error->isEmpty())*error="PAimage trace ZIP write failed";return false;}
                 files.append(QJsonObject{{"path",name},{"bytes",double(bytes.size())},
                     {"sha256",QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex())}});return true;
             };
             for(const auto& dir:dirs){
+                const auto runInfo=QFileInfo(QDir(root).filePath(dir));
+                if(runInfo.isSymLink()||runInfo.isJunction())continue;
                 const QString path=QDir(root).filePath(dir);auto metadata=object(QDir(path).filePath("run-config.json"));
                 if(metadata.isEmpty())continue;
                 const qint64 wall=metadata.value("wallAnchorMs").toVariant().toLongLong();
                 const qint64 mono=metadata.value("monotonicAnchorNs").toString().toLongLong();
                 bool anchorKnown=wall&&mono;
+                if(!anchorKnown && start!=std::numeric_limits<qint64>::min()){
+                    const auto binary=QDir(path).entryList({"trace-*.bin","timing-*.bin","looplog-*.bin"},QDir::Files);
+                    if(!binary.isEmpty()){
+                        skippedRuns.append(QJsonObject{{"runId",metadata.value("runId")},{"reason","missing_time_anchor"}});
+                        bundleIncomplete=true;
+                    }
+                    continue;
+                }
                 auto summary=object(QDir(path).filePath("trace-summary.json"));
                 quint64 boundary=quint64(summary.value("recordsIssued").toDouble());bool flushed=!summary.isEmpty(),boundaryKnown=flushed;
                 for(const auto& cut:cuts)if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){boundary=cut.sequence;boundaryKnown=true;flushed=cut.flush();break;}
@@ -60,57 +76,43 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     if(!chosen.isEmpty()){const QString out=QString("paimage/%1/trace-%2.bin").arg(dir).arg(part++);
                         if(!write(out,chosen))return false;runFiles.append(out);}
                 }
-                bool timingFlushed=true;quint64 timingBoundary=0;for(const auto& cut:timingCuts)if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){timingBoundary=cut.sequence;timingFlushed=cut.flush();break;}
                 auto timingSummary=object(QDir(path).filePath("timing-summary.json"));
-                if(timingSummary.isEmpty()&&timingBoundary)incomplete=true;
-                auto timingNames=QDir(path).entryList({"timing-*.bin"},QDir::Files,QDir::Name);int timingPart=0;quint64 timingSelected=0;
-                for(const auto& name:timingNames){QByteArray bytes=read(QDir(path).filePath(name)),chosen;if(bytes.size()%64)incomplete=true;for(qsizetype at=0;at+64<=bytes.size();at+=64){TimingRecord r;std::memcpy(&r,bytes.constData()+at,64);if(timingBoundary&&r.sequence>timingBoundary)continue;chosen.append(bytes.constData()+at,64);++timingSelected;}if(!chosen.isEmpty()){const QString out=QString("paimage/%1/timing-%2.bin").arg(dir).arg(timingPart++);if(!write(out,chosen))return false;runFiles.append(out);}}
-                const QString prefix="paimage/"+dir+"/";
-                QJsonArray systemFiles,systemTrials;
-                bool systemCaptureIncomplete=false;
-                const QString systemRoot=QDir(path).filePath(QStringLiteral("system-capture"));
-                if(QDir(systemRoot).exists()){
-                    QDirIterator iterator(systemRoot,QDir::Files,QDirIterator::Subdirectories);
-                    while(iterator.hasNext()){
-                        const QString filePath=iterator.next();
-                        const QString relative=QDir(systemRoot).relativeFilePath(filePath);
-                        if(QFileInfo(filePath).fileName()==QStringLiteral(".capture-session.lock")
-                           ||filePath.endsWith(QStringLiteral(".tmp")))continue;
-                        QString relativeUnix=relative;relativeUnix.replace('\\','/');
-                        const QString out=prefix+QStringLiteral("system-capture/")+relativeUnix;
-                        if(!write(out,read(filePath)))return false;
-                        systemFiles.append(out);
+                bool timingFlushed=true, timingLive=false;
+                quint64 timingBoundary=0;
+                for(const auto& cut:timingCuts)
+                    if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){
+                        timingLive=true;timingBoundary=cut.sequence;timingFlushed=cut.flush();break;
                     }
-                    QStringList trialDirectories;
-                    if(QFileInfo::exists(QDir(systemRoot).filePath(QStringLiteral("capture-state.json")))) trialDirectories.append(systemRoot);
-                    for(const auto &trial:QDir(systemRoot).entryList(QDir::Dirs|QDir::NoDotAndDotDot|QDir::NoSymLinks))
-                        trialDirectories.append(QDir(systemRoot).filePath(trial));
-                    for(const auto &trialDirectory:trialDirectories){
-                        const auto state=object(QDir(trialDirectory).filePath(QStringLiteral("capture-state.json")));
-                        const auto manifest=object(QDir(trialDirectory).filePath(QStringLiteral("system-capture-manifest.json")));
-                        const bool finished=!manifest.isEmpty()&&manifest.value("status").toString()==QStringLiteral("complete");
-                        systemCaptureIncomplete|=!finished;
-                        systemTrials.append(QJsonObject{{"trialId",state.value("trialId")},
-                            {"path",QDir(systemRoot).relativeFilePath(trialDirectory)},
-                            {"status",state.value("status")},{"inProgress",QStringList{"idle","preflight","starting","ready","collecting","stopping","validating"}.contains(state.value("status").toString())},
-                            {"analysisReady",manifest.value("analysisReady")},{"manifestMissing",manifest.isEmpty()}});
+                auto timingNames=QDir(path).entryList({"timing-*.bin"},QDir::Files,QDir::Name);
+                std::sort(timingNames.begin(),timingNames.end(),[](const QString& a,const QString& b){
+                    return a.mid(7).section('.',0,0).toInt()<b.mid(7).section('.',0,0).toInt();
+                });
+                int timingPart=0;quint64 timingSelected=0,timingFiltered=0;
+                bool timingBad=false;
+                for(const auto& name:timingNames){
+                    const QByteArray bytes=read(QDir(path).filePath(name));
+                    QByteArray chosen;
+                    if(bytes.size()%sizeof(TimingRecord))timingBad=true;
+                    for(qsizetype at=0;at+qsizetype(sizeof(TimingRecord))<=bytes.size();at+=sizeof(TimingRecord)){
+                        TimingRecord r;std::memcpy(&r,bytes.constData()+at,sizeof(r));
+                        if(timingLive&&r.sequence>timingBoundary)continue;
+                        const auto first=qMin(r.startNs,r.endNs),last=qMax(r.startNs,r.endNs);
+                        if(anchorKnown && (wall+(qint64(last)-mono)/1000000<start ||
+                                           wall+(qint64(first)-mono)/1000000>end)){
+                            ++timingFiltered;continue;
+                        }
+                        chosen.append(bytes.constData()+at,sizeof(r));++timingSelected;
                     }
-                    if(trialDirectories.isEmpty())systemCaptureIncomplete=true;
-                    incomplete=incomplete||systemCaptureIncomplete;
+                    if(!chosen.isEmpty()){
+                        const auto out=QString("paimage/%1/timing-%2.bin").arg(dir).arg(timingPart++);
+                        if(!write(out,chosen))return false;runFiles.append(out);
+                    }
                 }
-                if(!selected&&systemFiles.isEmpty())continue;
-                if(!boundary)boundary=maxSequence;
-                incomplete=incomplete||filtered>0||selected!=boundary;bundleIncomplete|=incomplete;
-                auto exported=summary;exported.insert("recordsIssued",double(boundary));exported.insert("recordsWritten",double(selected));
-                exported.insert("traceIncomplete",incomplete);exported.insert("exportClipped",filtered>0);
-                exported.insert("exportFilteredRecords",double(filtered));exported.insert("exportFlushCompleted",flushed);
-                if(!write(prefix+"run-config.json",QJsonDocument(metadata).toJson())||
-                   !write(prefix+"trace-summary.json",QJsonDocument(exported).toJson()))return false;
-                if(!timingSummary.isEmpty()){timingSummary.insert("exportFlushCompleted",timingFlushed);timingSummary.insert("recordsWritten",double(timingSelected));timingSummary.insert("timingIncomplete",timingSummary.value("timingIncomplete").toBool()||!timingFlushed||(timingBoundary&&timingSelected!=timingBoundary));if(!write(prefix+"timing-summary.json",QJsonDocument(timingSummary).toJson()))return false;}
+                const QString prefix="paimage/"+dir+"/";
                 bool loopFlushed=true,loopIncomplete=false,loopBudgetExhausted=false,loopWriteFailed=false;
-                quint64 loopBoundary=0,loopDropped=0,loopFreezeEpoch=0;
+                quint64 loopBoundary=0,loopDropped=0,loopFreezeEpoch=0; bool loopLive=false;
                 for(const auto& cut:loopCuts)if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){
-                    loopBoundary=cut.sequence;loopDropped=cut.dropped;loopFreezeEpoch=cut.freezeEpoch;
+                    loopLive=true;loopBoundary=cut.sequence;loopDropped=cut.dropped;loopFreezeEpoch=cut.freezeEpoch;
                     loopIncomplete=cut.incomplete;loopBudgetExhausted=cut.budgetExhausted;loopWriteFailed=cut.writeFailed;
                     loopFlushed=cut.flush();break;}
                 auto loopSummary=object(QDir(path).filePath("looplog-summary.json"));
@@ -118,25 +120,58 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     {"recordsIssued",double(loopBoundary)},{"queueDropped",double(loopDropped)},
                     {"budgetExhausted",loopBudgetExhausted},{"writeFailed",loopWriteFailed},
                     {"burstMarkEpochs",double(loopFreezeEpoch)}};
-                auto loopNames=QDir(path).entryList({"looplog-*.bin"},QDir::Files,QDir::Name);int loopPart=0;quint64 loopSelected=0,loopFiltered=0;
+                auto loopNames=QDir(path).entryList({"looplog-*.bin"},QDir::Files,QDir::Name);
+                std::sort(loopNames.begin(),loopNames.end(),[](const QString& a,const QString& b){
+                    return a.section('-',-1).section('.',0,0).toInt()<b.section('-',-1).section('.',0,0).toInt();
+                });
+                int loopPart=0;quint64 loopSelected=0,loopFiltered=0;
                 for(const auto& name:loopNames){
                     QByteArray bytes=read(QDir(path).filePath(name)),chosen;if(bytes.size()%80)incomplete=true;
                     for(qsizetype at=0;at+80<=bytes.size();at+=80){LoopRecord r;std::memcpy(&r,bytes.constData()+at,80);
-                        if(loopBoundary&&r.sequence>loopBoundary)continue;
+                        if(loopLive&&r.sequence>loopBoundary)continue;
                         const qint64 time=anchorKnown?wall+(qint64(r.timeNs)-mono)/1000000:0;
                         if(anchorKnown&&(time<start||time>end)){++loopFiltered;continue;}
                         chosen.append(bytes.constData()+at,80);++loopSelected;}
                     if(!chosen.isEmpty()){const QString out=QString("paimage/%1/looplog-%2.bin").arg(dir).arg(loopPart++);
                         if(!write(out,chosen))return false;runFiles.append(out);}}
+                if(!selected&&!timingSelected&&!loopSelected)continue;
+                const bool traceExpected=metadata.value("diagnosticTraceEnabled").toBool(true);
+                if(!boundary)boundary=maxSequence;
+                const bool traceIncomplete=traceExpected&&(!flushed||!anchorKnown||
+                    summary.value("traceIncomplete").toBool()||filtered>0||selected!=boundary);
+                incomplete=traceIncomplete;
+                if(!write(prefix+"run-config.json",QJsonDocument(metadata).toJson()))return false;
+                if(traceExpected){
+                    auto exported=summary;
+                    exported.insert("recordsIssued",double(boundary));
+                    exported.insert("recordsWritten",double(selected));
+                    exported.insert("traceIncomplete",traceIncomplete);
+                    exported.insert("exportClipped",filtered>0);
+                    exported.insert("exportFilteredRecords",double(filtered));
+                    exported.insert("exportFlushCompleted",flushed);
+                    if(!write(prefix+"trace-summary.json",QJsonDocument(exported).toJson()))return false;
+                }
+                if(timingSelected){
+                    if(timingLive)timingSummary.insert("recordsIssued",double(timingBoundary));
+                    timingSummary.insert("exportFlushCompleted",timingFlushed);
+                    timingSummary.insert("recordsWritten",double(timingSelected));
+                    timingSummary.insert("exportFilteredRecords",double(timingFiltered));
+                    const bool timingIncomplete=timingSummary.value("timingIncomplete").toBool()||
+                        !timingFlushed||timingBad||!anchorKnown||
+                        (timingLive&&timingSelected+timingFiltered!=timingBoundary);
+                    timingSummary.insert("timingIncomplete",timingIncomplete);
+                    incomplete|=timingIncomplete;
+                    if(!write(prefix+"timing-summary.json",QJsonDocument(timingSummary).toJson()))return false;
+                }
                 if(!loopSummary.isEmpty()){loopSummary.insert("exportFlushCompleted",loopFlushed);
                     loopSummary.insert("recordsWritten",double(loopSelected));loopSummary.insert("exportFilteredRecords",double(loopFiltered));
                     loopSummary.insert("loopLogIncomplete",loopSummary.value("loopLogIncomplete").toBool(loopIncomplete)||loopIncomplete||!loopFlushed||(loopBoundary&&loopSelected+loopFiltered!=loopBoundary));
                     if(!write(prefix+"looplog-summary.json",QJsonDocument(loopSummary).toJson()))return false;}
                 incomplete=incomplete||loopIncomplete||!loopFlushed||(loopBoundary&&loopSelected+loopFiltered!=loopBoundary);
+                bundleIncomplete|=incomplete;
                 runs.append(QJsonObject{{"runId",metadata.value("runId")},{"recordBoundary",double(boundary)},
                     {"recordsIncluded",double(selected)},{"recordsOutsideWindow",double(filtered)},
-                    {"traceIncomplete",incomplete},{"anchorKnown",anchorKnown},{"files",runFiles},
-                    {"systemCaptureFiles",systemFiles},{"systemCaptureTrials",systemTrials},{"systemCaptureIncomplete",systemCaptureIncomplete},
+                    {"traceIncomplete",incomplete},{"traceEnabled",traceExpected},{"timingRecordsIncluded",double(timingSelected)},{"anchorKnown",anchorKnown},{"files",runFiles},
                     {"firstIncludedMs",anchorKnown?QJsonValue(double(firstMs)):QJsonValue()},
                     {"lastIncludedMs",anchorKnown?QJsonValue(double(lastMs)):QJsonValue()}});
             }
@@ -147,9 +182,9 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
             }
             QJsonObject manifest{{"schemaVersion",2},{"backendId","paimage-derived"},
                 {"requestedStartMs",double(start)},{"fixedEndMs",double(end)},{"traceIncomplete",bundleIncomplete},
-                {"runs",runs},{"files",files},{"coverageNote","Window clipping is explicit; missing pre-window object anchors remain unknown. Callback returns do not prove disk durability or completed reconstruction."}};
+                {"runs",runs},{"skippedRuns",skippedRuns},{"files",files},{"coverageNote","Window clipping is explicit; missing pre-window object anchors remain unknown. Callback returns do not prove disk durability or completed reconstruction."}};
             return sink("paimage/manifest.json",QJsonDocument(manifest).toJson());
-        };
+        });
     });
 }
 }

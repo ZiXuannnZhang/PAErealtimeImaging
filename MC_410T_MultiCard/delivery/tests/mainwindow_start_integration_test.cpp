@@ -1,3 +1,6 @@
+#include <QAction>
+#include <QTextDocument>
+#include <QTextEdit>
 #include "MainWindow.h"
 #include "ImagingController.h"
 #include "ImagingBypass.h"
@@ -77,6 +80,16 @@ public:
         }
         {
             MainWindow window;
+            auto *logView=widget<QTextEdit>(window,"txtLog");
+            auto *exportLog=widget<QPushButton>(window,"btnExportDiagnostic");
+            auto *diagnosticMode=widget<QCheckBox>(window,"chkDiagnosticMode");
+            check(logView->minimumHeight()==112&&logView->maximumHeight()==112
+                &&logView->document()->maximumBlockCount()==500,"log view must stay readable and bounded");
+            check(exportLog->text()==QStringLiteral("导出日志")&&exportLog->maximumWidth()<=104
+                &&diagnosticMode->text()==QStringLiteral("诊断模式")&&!diagnosticMode->isChecked(),
+                "daily diagnostics controls changed");
+            check(!window.findChild<QAction*>("prepareSystemCaptureAction"),"retired capture action is still present");
+
             auto& controller = *window.m_imagingController;
             window.m_cmbImagingMode->setCurrentIndex(1);
             window.m_motorScanMonitor->tick();

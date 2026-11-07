@@ -41,6 +41,7 @@ public:
         int maxSnapshotEntries = 4096;
         int maxRetainedRuns = 30;
         qint64 maxRetainedBytes = 500LL * 1024LL * 1024LL;
+        qint64 maxHistorySegmentBytes = 16LL * 1024LL * 1024LL;
     };
 
     struct Event {
@@ -110,6 +111,7 @@ public:
     // include state recorded after the button click.
     struct ExportRequest {
         BundleExtension bundleExtension;
+        std::shared_ptr<void> storageLease;
         QString runId;
         QString sourceDirectory;
         QString startIsoTime;
@@ -132,6 +134,7 @@ public:
 
     struct TimeWindowRequest {
         BundleExtension bundleExtension;
+        std::shared_ptr<void> storageLease;
         QString requestedStartTime;
         QString requestedEndTime;
         QString exportCapturedAt;

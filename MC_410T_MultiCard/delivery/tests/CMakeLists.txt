@@ -12,6 +12,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/DiagnosticZlib.cmake)
+link_libraries(PAimageDiagnosticZlib)
 
 add_executable(ring_fractional_delay_test ring_fractional_delay_test.cpp ../src/RingFractionalDelay.cpp)
 target_include_directories(ring_fractional_delay_test PRIVATE ../include)

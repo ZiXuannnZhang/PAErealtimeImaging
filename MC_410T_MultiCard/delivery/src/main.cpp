@@ -173,8 +173,100 @@ static bool parseStartupArguments(int argc, char* argv[], StartupPolicy* policy,
 #include <fcntl.h>
 #include <io.h>
 
-// ── 全局日志句柄，所有 LOG() 调用写入此文件 ──────────────────────────
-void* g_hLogFile = INVALID_HANDLE_VALUE;
+namespace {
+SRWLOCK appLogLock = SRWLOCK_INIT;
+HANDLE appLog = INVALID_HANDLE_VALUE;
+std::wstring appLogPath;
+constexpr LONGLONG appLogSegmentBytes = 8LL * 1024 * 1024;
+constexpr int appLogArchives = 3;
+constexpr unsigned char appLogBom[]{0xef, 0xbb, 0xbf};
+
+void openAppLog()
+{
+    appLog = CreateFileW(appLogPath.c_str(), GENERIC_READ | GENERIC_WRITE,
+                         FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (appLog == INVALID_HANDLE_VALUE) return;
+    LARGE_INTEGER end{};
+    if (SetFilePointerEx(appLog, {}, &end, FILE_END) && end.QuadPart == 0) {
+        DWORD wrote = 0;
+        WriteFile(appLog, appLogBom, sizeof(appLogBom), &wrote, nullptr);
+    }
+}
+
+bool rotateAppLog(LONGLONG bytes)
+{
+    const std::wstring first = appLogPath + L".1";
+    const std::wstring legacyTail = appLogPath + L".rotate";
+    // Upgrade from an unlimited log: archive its recent tail, not the
+    // original potentially multi-GB file. Don't truncate on a failed copy.
+    if (bytes > appLogSegmentBytes) {
+        HANDLE tail = CreateFileW(legacyTail.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                  FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (tail == INVALID_HANDLE_VALUE) return false;
+        LARGE_INTEGER offset{};
+        offset.QuadPart = bytes - appLogSegmentBytes + sizeof(appLogBom);
+        DWORD wrote = 0;
+        bool ok = SetFilePointerEx(appLog, offset, nullptr, FILE_BEGIN) &&
+            WriteFile(tail, appLogBom, sizeof(appLogBom), &wrote, nullptr) && wrote == sizeof(appLogBom);
+        char chunk[64 * 1024];
+        bool lineStart = false;
+        while (ok) {
+            DWORD got = 0;
+            if (!ReadFile(appLog, chunk, sizeof(chunk), &got, nullptr)) { ok = false; break; }
+            if (!got) break;
+            const char *begin = chunk;
+            if (!lineStart) {
+                const auto *newline = static_cast<const char *>(std::memchr(chunk, '\n', got));
+                if (!newline) continue;
+                begin = newline + 1;
+                lineStart = true;
+            }
+            const auto length = static_cast<DWORD>(chunk + got - begin);
+            ok = WriteFile(tail, begin, length, &wrote, nullptr) && wrote == length;
+        }
+        CloseHandle(tail);
+        SetFilePointerEx(appLog, {}, nullptr, FILE_END);
+        if (!ok) { DeleteFileW(legacyTail.c_str()); return false; }
+    }
+    CloseHandle(appLog);
+    appLog = INVALID_HANDLE_VALUE;
+    for (int i = appLogArchives; i > 1; --i) {
+        const auto src = appLogPath + L"." + std::to_wstring(i-1);
+        const auto dst = appLogPath + L"." + std::to_wstring(i);
+        if (!MoveFileExW(src.c_str(), dst.c_str(), MOVEFILE_REPLACE_EXISTING) &&
+            GetLastError() != ERROR_FILE_NOT_FOUND) {
+            DeleteFileW(legacyTail.c_str());openAppLog();return false;
+        }
+    }
+    const bool archived = MoveFileExW((bytes > appLogSegmentBytes ? legacyTail : appLogPath).c_str(),
+                                      first.c_str(), MOVEFILE_REPLACE_EXISTING);
+    const bool removed = archived && (bytes <= appLogSegmentBytes || DeleteFileW(appLogPath.c_str()));
+    if (!archived) DeleteFileW(legacyTail.c_str());
+    openAppLog();
+    return removed && appLog != INVALID_HANDLE_VALUE;
+}
+
+void writeAppLog(const char *data, size_t size, bool emergency = false)
+{
+    if (!size || size > 4096) return;
+    if (emergency) {
+        if (!TryAcquireSRWLockExclusive(&appLogLock)) return;
+    } else {
+        AcquireSRWLockExclusive(&appLogLock);
+    }
+    if (appLog != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER bytes{};
+        if (GetFileSizeEx(appLog, &bytes) &&
+            (bytes.QuadPart + static_cast<LONGLONG>(size) <= appLogSegmentBytes - (emergency ? 0 : 4096) ||
+             (!emergency && rotateAppLog(bytes.QuadPart)))) {
+            DWORD wrote = 0;
+            WriteFile(appLog, data, static_cast<DWORD>(size), &wrote, nullptr);
+            if (emergency) FlushFileBuffers(appLog);
+        }
+    }
+    ReleaseSRWLockExclusive(&appLogLock);
+}
+} // namespace
 
 // ── 崩溃转储（首异常向量处理器）：任何线程的严重异常都先写一份 minidump ──
 typedef BOOL(WINAPI *MiniDumpWriteDumpFn)(HANDLE, DWORD, HANDLE, DWORD,
@@ -217,22 +309,14 @@ static void writeCrashDump(EXCEPTION_POINTERS *ep)
             int n = _snprintf_s(buf, sizeof(buf), _TRUNCATE,
                 "[CRASH] MiniDumpWriteDump ok=%d err=%lu path=%s\r\n",
                 ok ? 1 : 0, GetLastError(), dumpPath);
-            DWORD w = 0;
-            if (g_hLogFile != INVALID_HANDLE_VALUE && n > 0) {
-                WriteFile((HANDLE)g_hLogFile, buf, (DWORD)n, &w, nullptr);
-                FlushFileBuffers((HANDLE)g_hLogFile);
-            }
+            if (n > 0) writeAppLog(buf, n, true);
         } else {
             const char *msg = "[CRASH] GetProcAddress(MiniDumpWriteDump) failed\r\n";
-            DWORD w = 0;
-            if (g_hLogFile != INVALID_HANDLE_VALUE)
-                WriteFile((HANDLE)g_hLogFile, msg, (DWORD)strlen(msg), &w, nullptr);
+            writeAppLog(msg, strlen(msg), true);
         }
     } else {
         const char *msg = "[CRASH] LoadLibrary(dbghelp.dll) failed\r\n";
-        DWORD w = 0;
-        if (g_hLogFile != INVALID_HANDLE_VALUE)
-            WriteFile((HANDLE)g_hLogFile, msg, (DWORD)strlen(msg), &w, nullptr);
+        writeAppLog(msg, strlen(msg), true);
     }
     CloseHandle(hFile);
 }
@@ -323,11 +407,7 @@ static LONG CALLBACK crashVectoredHandler(PEXCEPTION_POINTERS ep)
     int n = _snprintf_s(buf, sizeof(buf), _TRUNCATE,
         "[CRASH] VectoredHandler code=0x%08lX addr=%p thread=%lu\r\n",
         code, ep->ExceptionRecord->ExceptionAddress, GetCurrentThreadId());
-    DWORD w = 0;
-    if (g_hLogFile != INVALID_HANDLE_VALUE && n > 0) {
-        WriteFile((HANDLE)g_hLogFile, buf, (DWORD)n, &w, nullptr);
-        FlushFileBuffers((HANDLE)g_hLogFile);
-    }
+    if (n > 0) writeAppLog(buf, n, true);
     OutputDebugStringA(buf);
 
     writeCrashBacktrace(ep);
@@ -362,11 +442,7 @@ static void qtMessageHandler(QtMsgType type, const QMessageLogContext &ctx,
     int n = _snprintf_s(buf, sizeof(buf), _TRUNCATE,
         "[QT:%s] %s (%s:%u)\r\n", level, local.constData(), file, ctx.line);
     if (n <= 0) return;
-    if (g_hLogFile != INVALID_HANDLE_VALUE) {
-        DWORD w = 0;
-        WriteFile((HANDLE)g_hLogFile, buf, (DWORD)n, &w, nullptr);
-        FlushFileBuffers((HANDLE)g_hLogFile);
-    }
+    writeAppLog(buf, n, type == QtFatalMsg);
     OutputDebugStringA(buf);
 }
 
@@ -384,7 +460,6 @@ static void LOG(const char* fmt, ...) {
     // OutputDebugStringA：VS Code 调试输出 / DebugView 可见（无需控制台）
     OutputDebugStringA(buf);
 
-    if (g_hLogFile == INVALID_HANDLE_VALUE) return;
     char out[4096];
     int m = 0;
     for (int i = 0; i < n && m < (int)sizeof(out) - 2; ++i) {
@@ -392,34 +467,17 @@ static void LOG(const char* fmt, ...) {
             out[m++] = '\r';
         out[m++] = buf[i];
     }
-    DWORD w = 0;
-    WriteFile((HANDLE)g_hLogFile, out, (DWORD)m, &w, nullptr);
-    FlushFileBuffers((HANDLE)g_hLogFile);
+    writeAppLog(out, m);
 }
 
 static void redirectStdioToFile() {
-    char exePath[MAX_PATH] = {};
-    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-    char* lastSlash = strrchr(exePath, '\\');
-    if (lastSlash) *(lastSlash + 1) = '\0';
-    char logPath[MAX_PATH] = {};
-    snprintf(logPath, MAX_PATH, "%sapp_log.txt", exePath);
-
-    HANDLE hFile = CreateFileA(logPath,
-        GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
-        nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (hFile == INVALID_HANDLE_VALUE) return;
-
-    // 新文件写 UTF-8 BOM
-    LARGE_INTEGER fileSize = {};
-    GetFileSizeEx(hFile, &fileSize);
-    if (fileSize.QuadPart == 0) {
-        DWORD w = 0;
-        const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
-        WriteFile(hFile, bom, sizeof(bom), &w, nullptr);
-    }
-    SetFilePointer(hFile, 0, nullptr, FILE_END);
-    g_hLogFile = (void*)hFile;
+    wchar_t exePath[MAX_PATH]{};
+    const DWORD length = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    if (!length || length >= MAX_PATH) return;
+    appLogPath.assign(exePath, length);
+    appLogPath.resize(appLogPath.find_last_of(L'\\') + 1);
+    appLogPath += L"app_log.txt";
+    openAppLog();
 
     SYSTEMTIME st; GetLocalTime(&st);
     LOG("\n=== SESSION %04d-%02d-%02d %02d:%02d:%02d ===\n",
@@ -430,9 +488,7 @@ static void redirectStdioToFile() {
     // 1. SIGABRT: 捕获 CRT abort()
     std::signal(SIGABRT, [](int) {
         const char* msg = "[FATAL] SIGABRT: abort() called\r\n";
-        DWORD w = 0;
-        if (g_hLogFile != INVALID_HANDLE_VALUE)
-            WriteFile((HANDLE)g_hLogFile, msg, (DWORD)strlen(msg), &w, nullptr);
+        writeAppLog(msg, strlen(msg), true);
         OutputDebugStringA(msg);
         std::signal(SIGABRT, SIG_DFL);
         std::raise(SIGABRT);
@@ -445,11 +501,8 @@ static void redirectStdioToFile() {
             "[FATAL] UnhandledExceptionFilter code=0x%08lX addr=%p\r\n",
             ep->ExceptionRecord->ExceptionCode,
             ep->ExceptionRecord->ExceptionAddress);
-        DWORD w = 0;
-        if (g_hLogFile != INVALID_HANDLE_VALUE && n > 0)
-            WriteFile((HANDLE)g_hLogFile, buf, (DWORD)n, &w, nullptr);
+        if (n > 0) writeAppLog(buf, n, true);
         OutputDebugStringA(buf);
-        FlushFileBuffers((HANDLE)g_hLogFile);
         return EXCEPTION_CONTINUE_SEARCH;  // 让系统继续处理（生成 WER 报告）
     });
 
@@ -469,7 +522,7 @@ int main(int argc, char* argv[]) {
     StartupPolicy startupPolicyValue = StartupPolicy::Bypass;
     QString startupTrialIdValue, startupArgumentsError;
     if (!parseStartupArguments(argc, argv, &startupPolicyValue, &startupTrialIdValue,
-                               &startupChannelValue, &startupArgumentsError)) {
+                               &startupArgumentsError)) {
         const QByteArray errorBytes = startupArgumentsError.toLocal8Bit();
         std::fprintf(stderr, "error: %s\n", errorBytes.constData());
         return 2;

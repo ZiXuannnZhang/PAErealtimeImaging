@@ -31,6 +31,7 @@ std::vector<TimingWriter::Cut> TimingWriter::captureCuts(){
 }
 void TimingWriter::stop(){stopping_=true;if(worker_.joinable())worker_.join();}
 void TimingWriter::observe(TimingRecord r,bool keep)noexcept{
+    if(paused_.load(std::memory_order_relaxed)) return;
     const auto duration=r.endNs>=r.startNs?r.endNs-r.startNs:0;const auto kind=std::min<std::size_t>(r.kind,aggregates_.size()-1);auto& a=aggregates_[kind];
     a.count.fetch_add(1,std::memory_order_relaxed);a.totalNs.fetch_add(duration,std::memory_order_relaxed);auto maximum=a.maxNs.load(std::memory_order_relaxed);
     while(duration>maximum&&!a.maxNs.compare_exchange_weak(maximum,duration,std::memory_order_relaxed)){}

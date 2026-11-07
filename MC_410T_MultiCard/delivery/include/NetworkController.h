@@ -1,4 +1,5 @@
 #pragma once
+#include <QLockFile>
 #include <QObject>
 #include <QTimer>
 #include <QByteArray>
@@ -247,6 +248,9 @@ private:
     quint64 m_paimageGeneration=0;
     QString m_paimageSaveDir,m_paimageSaveSuffix;
     QString m_paimageTracePath;
+    std::unique_ptr<QLockFile> m_paimageTraceLease, m_paimageDetailLease;
+    qint64 m_paimageDiagnosticDeadlineNs = 0;
+    bool m_paimageDiagnosticPaused = false;
     int m_paimageSaveCount=1000;
     bool m_paimageSavingRequested=false;
     quint64 m_paimageSaveGeneration=0;

@@ -31,6 +31,7 @@ std::vector<TraceWriter::Cut> TraceWriter::captureCuts(){
 }
 void TraceWriter::stop(){stopping_.store(true);if(worker_.joinable())worker_.join();}
 std::uint64_t TraceWriter::push(TraceRecord r)noexcept{
+    if(paused_.load(std::memory_order_relaxed)) return 0;
     r.sequence=sequence_.fetch_add(1)+1;
     auto pos=write_.load(std::memory_order_relaxed);
     for(int attempt=0;attempt<8;++attempt){
