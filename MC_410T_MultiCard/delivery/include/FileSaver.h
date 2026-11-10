@@ -4,6 +4,7 @@
 #include <atomic>
 #include <functional>
 #include "DataTypes.h"
+#include "RoundIdentity.h"
 #include "third_party/concurrentqueue.h"
 
 // Low-frequency observability for file rollovers. Distinguishes capacity
@@ -72,6 +73,7 @@ public:
     // with this FileSaver's QThread left unstarted. Reuses the same file format,
     // routing, batching and float16 conversion as the historical run() path.
     bool consumeTriggerGroup(const TriggerGroupPtr& group);
+    void sealRound(paimage::RoundIdentity identity);
     void serviceCloseRequest();
     void suspendForSourceRestart();
     void resumeAfterSourceRestart();
@@ -148,6 +150,7 @@ private:
     int      m_currentFileTriggers  = 0;
     int      m_fileSequence         = 0;
     uint32_t m_currentSourceIPv4    = 0;
+    int      m_currentSamples       = 0;
 
     // 自动保存会话代路由：当前处理的会话代 + 目录解析器
     uint64_t m_currentGen = 0;
@@ -163,6 +166,9 @@ private:
     // of a new generation is written; triggersPerFile remains the capacity cap.
     bool     m_haveCurrentPhysicalRound = false;
     uint64_t m_currentPhysicalRoundGeneration = 0;
+    paimage::RoundIdentity m_currentIdentity;
+    paimage::RoundIdentity m_sealedThrough;
+    bool m_isLateWriter=false;
     FileRolloverInfo m_lastRollover;
     uint64_t m_rolloverCount = 0;
     uint64_t m_roundRolloverCount = 0;

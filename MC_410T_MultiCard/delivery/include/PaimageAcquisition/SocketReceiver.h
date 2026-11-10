@@ -44,6 +44,7 @@ public:
     std::uint64_t socketTimestampControlTruncated()const{return timestampControlTruncated_.load();}
     std::function<void(int,int,Time)> feedbackSink;
     SourceCore::Observer observationSink;
+    void setAssemblySink(SourceCore::AssemblySink sink){core_.setAssemblySink(std::move(sink));}
     std::function<void(int,const TraceRecord&)> ingressSink;
 #ifdef PAIMAGE_SOCKET_TEST_SEAM
     // Test-only fault injection point; never defined in delivery builds.

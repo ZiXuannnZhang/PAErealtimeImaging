@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <utility>
+#include "RoundIdentity.h"
 namespace paimage {
 // Lifetimes: processors/savers and trace outlive this adapter. Their QThreads
 // remain unstarted; only the recovered two output workers invoke delivery.
@@ -41,6 +42,7 @@ public:
     void requestStop(){workers_.requestStop();}
     void beginSession(std::uint64_t s){
         std::lock_guard<std::mutex> lock(normalizationMutex_);
+        cancelTailState(true);
         if(measurementSessionBinder_)
             measurementSessionBinder_(s);
         if(normalizer_)normalizer_->beginSession(s);
@@ -53,6 +55,7 @@ public:
     // frame is dispatched after the measurement stopped.
     void endSession(){
         std::lock_guard<std::mutex> lock(normalizationMutex_);
+        cancelTailState(true);
         if(frontendSessionSink_)frontendSessionSink_(0);
     }
     void setFrontendSessionSink(FrontendSessionSink sink){
@@ -74,10 +77,16 @@ public:
         measurementSessionBinder_=std::move(binder);
     }
     void card(Frame f);
+    // Called by the receiver with its core lock held, before packet assembly.
+    void assemblyStarted(int card,std::uint64_t session,std::uint64_t ingress,Time first);
     void sync(std::uint16_t,const std::vector<Frame>&,bool startup);
     bool pollPhysicalRoundTimeout(std::int64_t now){
         std::lock_guard<std::mutex> lock(normalizationMutex_);
-        return normalizer_ && normalizer_->timeoutBoundaryIfIdle(now);
+        if(!normalizer_)return false;
+        preBoundarySnapshot_=normalizer_->snapshot();
+        const bool result=normalizer_->timeoutBoundaryIfIdle(now);
+        finishTailSeals(now);
+        return result;
     }
     void setConfiguredLogicalTriggersPerRound(std::uint64_t count){
         if(normalizer_)normalizer_->setConfiguredLogicalTriggersPerRound(count);
@@ -103,6 +112,10 @@ public:
     unsigned cardDepth(int card){return workers_.cardDepth(card);}
     OutputWorkers::Snapshot stats() const noexcept{return workers_.snapshot();}
 private:
+    void beginTailSeals(const PhysicalRoundEvent&);
+    void finishTailSeals(Time);
+    void sealCard(int,RoundIdentity);
+    void cancelTailState(bool seal);
     void consumeCard(Frame);void consumeSync(const SyncFrame&);
     void observe(Frame,std::uint8_t stage,std::uint8_t reason,std::uint32_t value=0);
     std::vector<DataProcessor*> processors_;std::vector<FileSaver*> savers_;
@@ -112,6 +125,16 @@ private:
     // merely the normalizer counters. Observers must never wait on the UI.
     std::mutex normalizationMutex_;
     std::uint64_t timeoutSession_ = 0, timeoutGeneration_ = 0;
+    struct ActiveAssembly {
+        std::uint64_t session=0, ingress=0;
+        Time first=0;
+        RoundIdentity round;
+    };
+    std::vector<ActiveAssembly> activeAssemblies_;
+    struct Tail {ActiveAssembly active;RoundIdentity round;std::uint64_t generation=0;Time deadline=0;bool waiting=false;};
+    std::vector<Tail> tails_;
+    std::vector<RoundIdentity> cardSaveRounds_;
+    PhysicalRoundNormalizer::Snapshot preBoundarySnapshot_;
     SaveSessionResolver saveSessionResolver_;
     MeasurementSessionBinder measurementSessionBinder_;
     FrontendSessionSink frontendSessionSink_;

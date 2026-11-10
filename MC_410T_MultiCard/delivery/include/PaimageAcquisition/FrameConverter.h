@@ -12,6 +12,8 @@ class FrameConverter {
 public:
     FrameConverter(int bits,std::uint64_t wallMs,Time monotonic):bits_(bits),wallMs_(wallMs),monotonic_(monotonic){}
     TriggerGroupPtr convert(Frame);
+    TriggerGroupPtr convertForSave(Frame);
+    void tagSaveOverride(Frame,std::uint64_t session,std::uint64_t round,std::uint64_t generation,bool late);
     void tagSaveSession(Frame,std::uint64_t);
     void tagNormalization(Frame,const PhysicalRoundClassification&);
     std::uint64_t conversions()const{return conversions_.load();}
@@ -22,6 +24,8 @@ private:
         TriggerGroupPtr group;
         std::uint64_t saveSession=0;
         std::optional<PhysicalRoundClassification> normalization;
+        struct SaveOverride {std::uint64_t session,round,generation;bool late;};
+        std::optional<SaveOverride> saveOverride;
     };
     int bits_;std::uint64_t wallMs_;Time monotonic_;
     std::mutex mutex_;std::unordered_map<const CardFrame*,std::shared_ptr<Entry>> entries_;

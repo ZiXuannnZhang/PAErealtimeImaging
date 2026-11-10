@@ -126,6 +126,8 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
     m_fileSequence      = 0;
     m_currentFileTriggers = 0;
     m_currentSourceIPv4 = 0;
+    m_currentSamples=0;
+    m_currentIdentity={};m_sealedThrough={};
     m_writeFaulted = false;   // 新会话重新武装写盘故障告警
     resetPhysicalRoundState();
     // 不保证从 000 开始，只保证不覆盖：复用一个已有数据的目录时让号到空闲序号。
@@ -377,6 +379,13 @@ void FileSaver::run() {
 }
 
 
+void FileSaver::sealRound(paimage::RoundIdentity identity){
+    if(!identity.valid() || (m_sealedThrough.valid() && identity<=m_sealedThrough))return;
+    m_sealedThrough=identity;
+    if(m_currentIdentity.valid() && m_currentIdentity<=identity && !closeFiles())
+        handleWriteFault(QStringLiteral("轮次封存"));
+}
+
 bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     if (!group) return false;
     if (!m_saving.load()) {
@@ -385,6 +394,23 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         return false;
     }
 
+    const paimage::RoundIdentity identity{group->measurementSession,group->roundGeneration};
+    if(!m_isLateWriter && group->normalizationApplied && identity.valid() &&
+       (group->saveForceLate || (group->saveTailCandidate && (m_currentIdentity!=identity || m_currentGen!=group->sessionGen || !m_fileChannelA || !m_fileChannelB || m_currentSamples!=group->sampleCount || m_currentSourceIPv4!=group->sourceIPv4)) || (m_sealedThrough.valid() && identity<=m_sealedThrough) ||
+        (m_currentIdentity.valid() && identity<m_currentIdentity))){
+        const QString root=group->sessionGen ? (m_dirResolver ? m_dirResolver(group->sessionGen) : QString()) : m_saveDirectory;
+        if(root.isEmpty()){emit errorOccurred(QStringLiteral("迟到帧保存目录不可用"));return false;}
+        FileSaver late(m_cardId);late.m_isLateWriter=true;
+        const QString dir=QDir(root).filePath(QStringLiteral("_late/session-%1-round-%2").arg(identity.measurementSession).arg(identity.roundGeneration));
+        late.startSaving(dir,1,m_fileSuffix);
+        auto copy=std::make_shared<TriggerGroup>(*group);copy->sessionGen=0;
+        const bool accepted=late.consumeTriggerGroup(copy);
+        const bool flushed=late.closeFiles();
+        if(!accepted || !flushed){emit errorOccurred(QStringLiteral("迟到帧保存失败"));return false;}
+        m_savedCount.fetch_add(1,std::memory_order_relaxed);
+        emit statusMessage(QStringLiteral("Card%1: 隔离迟到帧 session=%2 round=%3 trigger=%4").arg(m_cardId+1).arg(identity.measurementSession).arg(identity.roundGeneration).arg(group->triggerSeq));
+        return true;
+    }
     // 自动保存会话代切换：边界处刷盘并关闭上一会话文件，
     // 按新会话代查询目录（gen=0 保持当前目录，即手动模式）
     const uint64_t gen = group->sessionGen;
@@ -432,6 +458,9 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     // LogicalScan 参与轮次判定，保持旧路径/旧数据行为不变。
     if (group->normalizationApplied &&
         group->physicalDecision == paimage::PhysicalTriggerDecision::LogicalScan) {
+        if(m_currentIdentity.valid() && m_currentIdentity<identity &&
+           (!m_sealedThrough.valid() || m_sealedThrough<m_currentIdentity))m_sealedThrough=m_currentIdentity;
+        m_currentIdentity=identity;
         if (!m_haveCurrentPhysicalRound) {
             m_haveCurrentPhysicalRound = true;
             m_currentPhysicalRoundGeneration = group->roundGeneration;
@@ -466,6 +495,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         group->sourceIPv4 != m_currentSourceIPv4) {
         openNewFiles(group->sourceIPv4);
     }
+    m_currentSamples=group->sampleCount;
 
     // 文件序号翻滚（容量上限 triggersPerFile）
     if (m_currentFileTriggers >= m_triggersPerFile) {
@@ -535,6 +565,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     // 扣减，只有当本触发也已入账时扣减才与文件里的实际记录数完全对齐。
     ++m_currentFileTriggers;
     m_savedCount.fetch_add(1, std::memory_order_relaxed);
+    if(group->saveTailCandidate)emit statusMessage(QStringLiteral("Card%1: 旧轮尾帧已接收 session=%2 round=%3 trigger=%4").arg(m_cardId+1).arg(identity.measurementSession).arg(identity.roundGeneration).arg(group->triggerSeq));
 
     // 达到合并阈値时一次性写盘（WRITE_BUFFER_TRIGGERS 个触发合并为一条大 I/O）
     if (m_accumTriggers >= WRITE_BUFFER_TRIGGERS && !flushWriteBuffers()) {

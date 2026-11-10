@@ -34,6 +34,8 @@ struct TriggerGroup {
     uint32_t sourceIPv4   = 0;        // 数据源 IP（uint32 大端序，比较用）
     uint64_t sessionGen   = 0;        // 自动保存会话代（0=手动/无会话代；DataProcessor 入队前打标）
     uint64_t measurementSession = 0;  // 采集会话令牌；成像旁路用来拒绝旧会话帧
+    bool saveForceLate = false;       // save-only quarantine decision
+    bool saveTailCandidate = false;   // require the old file still open
 
     // PAimage physical-round normalization metadata.  The source frame is
     // immutable, so FrameConverter copies this decision onto the host group

@@ -119,7 +119,8 @@ Decision SourceCore::ingest(int c,const std::uint8_t* p,std::size_t n,Time now,s
                 a.gapAnchor=trigger;
             }
         }else{a.gapAnchor=trigger;a.gapAnchorValid=true;}
-        a.active=true;a.trigger=trigger;a.base=packet;a.first=now;a.firstIngressId=ingressId;a.sourceIPv4=sourceIPv4;}
+        a.active=true;a.trigger=trigger;a.base=packet;a.first=now;a.firstIngressId=ingressId;a.sourceIPv4=sourceIPv4;
+        if(assemblySink_)assemblySink_(c,diagnosticSession_,ingressId,now);}
     ++a.actual;a.last=now;
     const auto slot=std::uint16_t(packet-a.base);
     Decision result=Decision::Accepted;

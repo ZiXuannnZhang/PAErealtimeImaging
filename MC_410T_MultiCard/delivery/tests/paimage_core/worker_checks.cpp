@@ -49,5 +49,12 @@ int main(){
         outputs.start();outputs.setSavingEnabled(true);for(int i=0;i<20;++i)outputs.pushCard(frame(0,i));outputs.stop();
         auto s=outputs.snapshot();require(consumed==20&&s.saveEnqueued==20&&s.saveDequeued==20&&s.saveCurrentDepth==0);
     }
+    {std::mutex mutex;std::condition_variable cv;bool release=false;std::atomic<int> entered{0},done{0};std::vector<int> order;
+        OutputWorkers outputs(1,2,[&](Frame f){if(f->trigger==1){++entered;std::unique_lock<std::mutex> lock(mutex);cv.wait(lock,[&]{return release;});}order.push_back(f->trigger);++done;},[](const SyncFrame&){});
+        outputs.start();outputs.setSavingEnabled(true);outputs.pushCard(frame(0,1));require(until([&]{return entered.load()==1;}));
+        outputs.pushCard(frame(0,2));outputs.enqueueSaveBarrier([&]{order.push_back(10);++done;});outputs.pushCard(frame(0,3));
+        {std::lock_guard<std::mutex> lock(mutex);release=true;}cv.notify_all();require(until([&]{return done.load()==4;}));outputs.stop();
+        require(order==std::vector<int>({1,2,10,3}));
+    }
     std::cout<<"PASS worker boundaries: per-card saturation, measurement restart preservation, startup priority, whole-block eviction\n";
 }

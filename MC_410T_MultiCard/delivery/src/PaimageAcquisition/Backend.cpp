@@ -27,6 +27,7 @@ Backend::Backend(Settings settings,std::vector<DataProcessor*> p,std::vector<Fil
     });
     },SocketReceiver::now){
     if(settings_.targets.size()!=std::size_t(settings_.acquisition.cards))throw std::invalid_argument("target/card mapping");
+    receiver_.setAssemblySink([this](int card,std::uint64_t session,std::uint64_t ingress,Time first){output_.assemblyStarted(card,session,ingress,first);});
     receiver_.feedbackSink=[this](int card,int type,std::int64_t receivedNs){if(feedbackSink)feedbackSink(card,type,receivedNs);};
 }
 Backend::~Backend(){stop();}

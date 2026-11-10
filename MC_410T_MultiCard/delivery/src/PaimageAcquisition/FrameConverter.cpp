@@ -2,6 +2,23 @@
 #include <optional>
 #include <stdexcept>
 namespace paimage {
+void FrameConverter::tagSaveOverride(Frame frame,std::uint64_t session,std::uint64_t round,std::uint64_t generation,bool late){
+    std::lock_guard<std::mutex> lock(mutex_);auto& entry=entries_[frame.get()];
+    if(!entry||entry->source.lock()!=frame){entry=std::make_shared<Entry>();entry->source=frame;}
+    entry->saveOverride=Entry::SaveOverride{session,round,generation,late};
+}
+TriggerGroupPtr FrameConverter::convertForSave(Frame frame){
+    auto source=convert(frame);std::optional<Entry::SaveOverride> override;
+    {std::lock_guard<std::mutex> lock(mutex_);auto it=entries_.find(frame.get());
+        if(it!=entries_.end()&&it->second->source.lock()==frame)override=it->second->saveOverride;}
+    if(!override)return source;
+    auto result=std::make_shared<TriggerGroup>(*source);
+    result->measurementSession=override->session;result->roundGeneration=override->round;
+    result->sessionGen=override->generation;result->normalizationApplied=true;
+    result->physicalDecision=PhysicalTriggerDecision::LogicalScan;result->saveForceLate=override->late;
+    result->saveTailCandidate=!override->late;
+    return result;
+}
 void FrameConverter::tagSaveSession(Frame frame,std::uint64_t generation){
     if(!generation)return;
     std::lock_guard<std::mutex> lock(mutex_);

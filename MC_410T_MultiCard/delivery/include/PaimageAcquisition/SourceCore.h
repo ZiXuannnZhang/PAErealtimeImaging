@@ -58,6 +58,8 @@ public:
     using Observer=std::function<void(const Observation&)>;
     using CardSink=std::function<void(Frame)>;
     using SyncSink=std::function<void(std::uint16_t,const std::vector<Frame>&,bool startupRelease)>;
+    using AssemblySink=std::function<void(int,std::uint64_t,std::uint64_t,Time)>;
+    void setAssemblySink(AssemblySink sink){assemblySink_=std::move(sink);}
     SourceCore(Config,CardSink,SyncSink,Observer={});
     void prepareStart(std::uint64_t diagnosticSession=0,Time now=0);
     void completeStart(bool success, Time now);
@@ -109,6 +111,7 @@ private:
     std::vector<Frame> startupCards_;
     std::deque<std::pair<std::uint16_t,std::vector<Frame>>> startupSync_;
     CardSink cardSink_; SyncSink syncSink_; Observer observer_;
+    AssemblySink assemblySink_;
 };
 using Command=std::array<std::uint8_t,58>;
 Command configCommand(std::int32_t durationNs,std::int32_t delayA,std::int32_t delayB);

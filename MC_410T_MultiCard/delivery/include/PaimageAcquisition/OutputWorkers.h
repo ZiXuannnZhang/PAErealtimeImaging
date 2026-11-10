@@ -27,6 +27,9 @@ public:
     void beginSession(std::uint64_t);
     void setSavingEnabled(bool);
     std::uint64_t configureSaving(bool,std::function<void()>);
+    // Execute after all frames admitted before this call finish their save
+    // callbacks.  Control actions are not subject to the per-card data limit.
+    void enqueueSaveBarrier(std::function<void()>);
     bool savingConfigurationApplied(std::uint64_t g) const {return saveApplied_.load()>=g;}
     // Install before start; all hooks execute on the sole saving worker.
     void setSavingHooks(std::function<void()> idle,std::function<void()> exit) {
@@ -52,6 +55,9 @@ private:
     std::uint64_t saveGeneration_=0;
     std::atomic<std::uint64_t> saveApplied_{0};
     std::function<void()> saveApply_,saveIdle_,saveExit_;
+    struct SaveBarrier { std::uint64_t after; std::function<void()> apply; };
+    std::deque<SaveBarrier> saveBarriers_;
+    std::uint64_t acceptedOrdinal_=0, completedOrdinal_=0;
     std::thread cardWorker_,syncWorker_;
     std::atomic<std::uint64_t> saveEnqueued_{0},saveDequeued_{0},saveQueueFull_{0};
     std::atomic<std::uint64_t> saveDepth_{0},savePeakDepth_{0},maxSaveWorkerNs_{0};

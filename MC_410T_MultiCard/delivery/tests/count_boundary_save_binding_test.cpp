@@ -606,6 +606,86 @@ int main(int argc, char** argv)
               "C10 reconfigure starts an isolated directory registry");
     }
 
+    // T1: only the exact pre-cutoff in-flight object may join the open tail.
+    {
+        QTemporaryDir root;FileSaver s0(0),s1(1);AcqConfig config;config.acqTimeNs=64;
+        DataProcessor p0(0,nullptr,nullptr,config),p1(1,nullptr,nullptr,config);
+        HostOutput output(32,50,{&p0,&p1},{&s0,&s1},nullptr,nullptr,8000,{},1.0,0,true);
+        output.beginSession(6001);output.start();const auto gen=output.startSaving(root.path(),100,"tail");
+        check(until([&]{return output.savingApplied(gen);}),"T1 configured");
+        output.card(makeFrame(6001,0,10,1000000000LL,1));
+        output.card(makeFrame(6001,1,10,1000000000LL,1));
+        check(until([&]{return s0.savedCount()==1 && s1.savedCount()==1;}),"T1 initial files open");
+        output.assemblyStarted(0,6001,11,1900000000LL);
+        check(output.pollPhysicalRoundTimeout(2000000000LL),"T1 boundary");
+        auto wrong=std::const_pointer_cast<CardFrame>(makeFrame(6001,0,10,2010000000LL,3));wrong->firstIngressId=22;
+        output.card(wrong);
+        auto tail=std::const_pointer_cast<CardFrame>(makeFrame(6001,0,11,1900000000LL,2));tail->firstIngressId=11;tail->closed=2050000000LL;
+        output.card(tail);
+        check(until([&]{return s0.savedCount()>=3;}),"T1 exact tail written");
+        const auto stopped=output.stopSaving();check(until([&]{return output.savingApplied(stopped);}),"T1 stopped");output.stop();
+        check(hasSize(dataFile(root.path(),0,"tail"),64),"T1 old file contains both frames");
+        check(hasSize(dataFile(root.path(),1,"tail"),32),"T1 other card sealed independently");
+        check(hasSize(dataFile(QDir(root.path()).filePath("_late/session-6001-round-0"),0,"tail"),32),"T1 non-token isolated");
+        check(!QFile::exists(QDir(root.path()).filePath("Card1_ChA_tail_001.dat")),"T1 no split official file");
+    }
+    // T2: boundary triggered by a new frame still preserves an earlier
+    // assembly for one card while the triggering frame reaches the new dir.
+    {
+        QTemporaryDir root;AutoSaveRoundCoordinator coordinator;coordinator.configure(root.path(),0);const auto initial=coordinator.beginSession(0);
+        FileSaver s0(0),s1(1);s0.setSessionDirResolver([&](auto g){return coordinator.directoryFor(g);});s1.setSessionDirResolver([&](auto g){return coordinator.directoryFor(g);});
+        AcqConfig config;config.acqTimeNs=64;DataProcessor p0(0,nullptr,nullptr,config),p1(1,nullptr,nullptr,config);
+        AutoSaveRoundCoordinator::CommitResult next;
+        HostOutput output(32,50,{&p0,&p1},{&s0,&s1},nullptr,nullptr,8000,[&](const PhysicalRoundEvent& e){if(e.kind==PhysicalRoundEvent::Kind::TimeoutBoundary)next=coordinator.commitBoundary(e.measurementSession,e.roundGeneration,AutoSaveBoundaryKind::Timeout,"tail-test");},1.0,0,true);
+        output.setMeasurementSessionBinder([&](auto session){return coordinator.bindMeasurementSession(session).newSessionGen;});
+        output.setSaveSessionResolver([&](auto session,auto round){return coordinator.resolveRound(session,round).sessionGen;});
+        output.beginSession(6002);output.start();const auto configured=output.startSaving(initial.directory,100,"auto-tail");
+        check(until([&]{return output.savingApplied(configured);}),"T2 configured");
+        output.card(makeFrame(6002,0,10,1000000000LL,1));output.card(makeFrame(6002,1,10,1000000000LL,1));
+        check(until([&]{return s0.savedCount()==1&&s1.savedCount()==1;}),"T2 old files open");
+        output.assemblyStarted(0,6002,100,1900000000LL);
+        output.assemblyStarted(1,6002,200,2010000000LL);
+        auto nextFrame=std::const_pointer_cast<CardFrame>(makeFrame(6002,1,20,2010000000LL,2));nextFrame->firstIngressId=200;
+        output.card(nextFrame);
+        auto tail=std::const_pointer_cast<CardFrame>(makeFrame(6002,0,11,1900000000LL,3));tail->firstIngressId=100;tail->closed=2050000000LL;
+        output.card(tail);
+        check(until([&]{return s0.savedCount()>=2&&s1.savedCount()>=2;}),"T2 frames saved");
+        const auto stopped=output.stopSaving();check(until([&]{return output.savingApplied(stopped);}),"T2 stop");output.stop();
+        check(next.committed,"T2 boundary committed");
+        check(hasSize(dataFile(initial.directory,0,"auto-tail"),64),"T2 eligible tail joined old file");
+        check(hasSize(dataFile(next.directory,1,"auto-tail"),32),"T2 post-cutoff frame in new directory");
+    }
+    // T3: deadline closes the old file even if the exact assembly never
+    // finishes in time; its eventual completed frame remains quarantined.
+    {
+        QTemporaryDir root;FileSaver saver(0);AcqConfig config;config.acqTimeNs=64;DataProcessor processor(0,nullptr,nullptr,config);
+        HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,8000,{},1.0,0,true);
+        output.beginSession(6003);output.start();const auto gen=output.startSaving(root.path(),100,"expired");
+        check(until([&]{return output.savingApplied(gen);}),"T3 configured");
+        output.card(makeFrame(6003,0,10,1000000000LL,1));check(until([&]{return saver.savedCount()==1;}),"T3 file opened");
+        output.assemblyStarted(0,6003,30,1900000000LL);
+        check(output.pollPhysicalRoundTimeout(2000000000LL),"T3 boundary");
+        output.pollPhysicalRoundTimeout(2100000001LL);
+        auto late=std::const_pointer_cast<CardFrame>(makeFrame(6003,0,11,1900000000LL,2));late->firstIngressId=30;late->closed=2200000000LL;output.card(late);
+        check(until([&]{return saver.savedCount()>=2;}),"T3 late isolated");
+        const auto stopped=output.stopSaving();check(until([&]{return output.savingApplied(stopped);}),"T3 stopped");output.stop();
+        check(hasSize(dataFile(root.path(),0,"expired"),32),"T3 old file not reopened");
+        check(hasSize(dataFile(QDir(root.path()).filePath("_late/session-6003-round-0"),0,"expired"),32),"T3 late exists separately");
+    }
+    // T4: a cached trigger after the idle deadline but before polling does
+    // not reopen or append to the official old-round file.
+    {
+        QTemporaryDir root;FileSaver saver(0);AcqConfig config;config.acqTimeNs=64;DataProcessor processor(0,nullptr,nullptr,config);
+        HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,8000,{},1.0,0,true);
+        output.beginSession(6004);output.start();const auto gen=output.startSaving(root.path(),100,"cache");
+        check(until([&]{return output.savingApplied(gen);}),"T4 configured");
+        output.card(makeFrame(6004,0,10,1000000000LL,1));check(until([&]{return saver.savedCount()==1;}),"T4 file opened");
+        output.card(makeFrame(6004,0,10,2010000000LL,2));
+        check(until([&]{return saver.savedCount()>=2;}),"T4 cache hit isolated");
+        const auto stopped=output.stopSaving();check(until([&]{return output.savingApplied(stopped);}),"T4 stopped");output.stop();
+        check(hasSize(dataFile(root.path(),0,"cache"),32),"T4 old file unchanged");
+        check(hasSize(dataFile(QDir(root.path()).filePath("_late/session-6004-round-0"),0,"cache"),32),"T4 late exists");
+    }
     if (g_failures == 0) {
         std::cout << "count_boundary_save_binding_test: C1-C10 ALL PASS\n";
         return 0;

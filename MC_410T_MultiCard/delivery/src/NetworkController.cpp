@@ -636,7 +636,7 @@ NetworkController::AutoSaveCommit NetworkController::commitAutoSaveBoundary(
 {
     auto result = m_autoSaveCoordinator.commitBoundary(
         measurementSession, roundGeneration, boundaryKind, phase);
-    if (result.committed)
+    if (result.committed && !(m_paimage && boundaryKind==paimage::AutoSaveBoundaryKind::Timeout))
         requestCloseSavers();
     return result;
 }
