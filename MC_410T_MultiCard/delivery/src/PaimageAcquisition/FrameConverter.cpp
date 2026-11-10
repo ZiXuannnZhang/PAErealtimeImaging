@@ -8,9 +8,8 @@ void FrameConverter::tagSaveOverride(Frame frame,std::uint64_t session,std::uint
     entry->saveOverride=Entry::SaveOverride{session,round,generation,late};
 }
 TriggerGroupPtr FrameConverter::convertForSave(Frame frame){
-    auto source=convert(frame);std::optional<Entry::SaveOverride> override;
-    {std::lock_guard<std::mutex> lock(mutex_);auto it=entries_.find(frame.get());
-        if(it!=entries_.end()&&it->second->source.lock()==frame)override=it->second->saveOverride;}
+    std::optional<Entry::SaveOverride> override;
+    auto source=convert(frame,&override);
     if(!override)return source;
     auto result=std::make_shared<TriggerGroup>(*source);
     result->measurementSession=override->session;result->roundGeneration=override->round;
@@ -52,6 +51,9 @@ void FrameConverter::tagNormalization(Frame frame,const PhysicalRoundClassificat
     }
 }
 TriggerGroupPtr FrameConverter::convert(Frame frame){
+    return convert(frame,nullptr);
+}
+TriggerGroupPtr FrameConverter::convert(Frame frame,std::optional<Entry::SaveOverride>* saveOverride){
     if(!frame)throw std::invalid_argument("null source frame");
     std::shared_ptr<Entry> entry;
     {std::lock_guard<std::mutex> lock(mutex_);
@@ -64,13 +66,23 @@ TriggerGroupPtr FrameConverter::convert(Frame frame){
         }
     }
     std::call_once(entry->once,[&]{
+        // card() publishes all three tags before either worker can receive this
+        // frame. sync() may repeat classification after publication. Take the
+        // conversion metadata together, and never hold mutex_ while decoding
+        // or while waiting for another call_once participant.
+        std::uint64_t saveSession;
+        std::optional<PhysicalRoundClassification> normalization;
+        {std::lock_guard<std::mutex> lock(mutex_);
+            saveSession=entry->saveSession;normalization=entry->normalization;
+            entry->frozenSaveOverride=entry->saveOverride;}
+        if(afterSnapshot_)afterSnapshot_();
         auto group=std::make_shared<TriggerGroup>();group->cardId=frame->card;group->triggerSeq=frame->trigger;
-        group->sessionGen=entry->saveSession;
+        group->sessionGen=saveSession;
         group->measurementSession=frame->measurementSession;
         group->isComplete=frame->complete;group->sourceIPv4=frame->sourceIPv4;
         group->sourceTimedOut=frame->reason==Decision::Timeout;
-        if(entry->normalization){
-            const auto& n=*entry->normalization;
+        if(normalization){
+            const auto& n=*normalization;
             group->normalizationApplied=true;
             group->physicalDecision=n.decision;
             group->roundGeneration=n.roundGeneration;
@@ -83,6 +95,7 @@ TriggerGroupPtr FrameConverter::convert(Frame frame){
         decodeRaw(*frame,bits_,group->freqA,group->freqB);group->sampleCount=int(group->freqA.size());
         entry->group=std::move(group);++conversions_;
     });
+    if(saveOverride)*saveOverride=entry->frozenSaveOverride;
     return entry->group;
 }
 }

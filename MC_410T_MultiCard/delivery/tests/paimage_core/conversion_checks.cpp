@@ -3,8 +3,44 @@
 #include <thread>
 #include <stdexcept>
 #include <iostream>
+#include <condition_variable>
 using namespace paimage;
 int main(){
+    // Force each worker to win call_once, then repeat classification while
+    // its snapshot is frozen and the other worker is waiting. The save-only
+    // override must never mutate the imaging object.
+    for(bool saveFirst : {true,false}){
+        std::mutex mutex;std::condition_variable cv;bool entered=false,release=false;
+        FrameConverter converter(32,1000,1000000,[&]{
+            std::unique_lock<std::mutex> lock(mutex);entered=true;cv.notify_all();
+            cv.wait(lock,[&]{return release;});
+        });
+        auto f=std::make_shared<CardFrame>();f->card=1;f->trigger=42;
+        f->first=2000000;f->complete=true;f->bytes.resize(8);f->measurementSession=5;
+        PhysicalRoundClassification first;first.decision=PhysicalTriggerDecision::LogicalScan;
+        first.measurementSession=5;first.roundGeneration=3;first.triggerSeq=42;
+        first.logicalTriggerIndex=10;first.newDistinct=true;first.roundComplete=true;
+        first.isFinalLogicalTrigger=true;
+        converter.tagNormalization(f,first);converter.tagSaveSession(f,17);
+        converter.tagSaveOverride(f,5,2,11,true);
+        TriggerGroupPtr save,image;
+        std::thread winner([&]{if(saveFirst)save=converter.convertForSave(f);else image=converter.convert(f);});
+        {std::unique_lock<std::mutex> lock(mutex);cv.wait(lock,[&]{return entered;});}
+        auto cached=first;cached.newDistinct=false;cached.roundComplete=false;
+        converter.tagNormalization(f,cached);
+        // Deliberately exercise an update after the snapshot as well: both
+        // views must retain the same published conversion metadata.
+        converter.tagSaveSession(f,99);converter.tagSaveOverride(f,5,9,88,false);
+        std::thread other([&]{if(saveFirst)image=converter.convert(f);else save=converter.convertForSave(f);});
+        {std::lock_guard<std::mutex> lock(mutex);release=true;}cv.notify_all();
+        winner.join();other.join();
+        if(converter.conversions()!=1||!image||!save||image==save||
+           image->physicalRoundIdentity()!=RoundIdentity{5,3}||image->sessionGen!=17||
+           image->logicalTriggerIndex!=10||!image->roundComplete||!image->isFinalLogicalTrigger||
+           image->saveForceLate||save->physicalRoundIdentity()!=RoundIdentity{5,2}||
+           save->sessionGen!=11||!save->saveForceLate||!save->roundComplete||!save->isFinalLogicalTrigger)
+            throw std::runtime_error("snapshot ordering and save-only override");
+    }
     for(int samples:{5000,12500}){
         FrameConverter converter(32,1000,1000000);
         auto f=std::make_shared<CardFrame>();f->card=2;f->trigger=65535;

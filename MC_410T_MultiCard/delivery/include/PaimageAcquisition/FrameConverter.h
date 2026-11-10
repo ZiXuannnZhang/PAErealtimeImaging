@@ -5,12 +5,15 @@
 #include <mutex>
 #include <unordered_map>
 #include <optional>
+#include <functional>
 namespace paimage {
 // Host-only adapter. Saving and sync workers share one integer->float conversion
 // for a source object, without putting conversion back on the receive thread.
 class FrameConverter {
 public:
-    FrameConverter(int bits,std::uint64_t wallMs,Time monotonic):bits_(bits),wallMs_(wallMs),monotonic_(monotonic){}
+    FrameConverter(int bits,std::uint64_t wallMs,Time monotonic,
+                   std::function<void()> afterSnapshot = {})
+        :bits_(bits),wallMs_(wallMs),monotonic_(monotonic),afterSnapshot_(std::move(afterSnapshot)){}
     TriggerGroupPtr convert(Frame);
     TriggerGroupPtr convertForSave(Frame);
     void tagSaveOverride(Frame,std::uint64_t session,std::uint64_t round,std::uint64_t generation,bool late);
@@ -26,8 +29,14 @@ private:
         std::optional<PhysicalRoundClassification> normalization;
         struct SaveOverride {std::uint64_t session,round,generation;bool late;};
         std::optional<SaveOverride> saveOverride;
+        // Written by call_once, read only after call_once has returned.
+        std::optional<SaveOverride> frozenSaveOverride;
     };
+    TriggerGroupPtr convert(Frame,std::optional<Entry::SaveOverride>*);
     int bits_;std::uint64_t wallMs_;Time monotonic_;
+    // Optional synchronization seam for conversion contract tests; invoked
+    // without mutex_ and before decoding.
+    std::function<void()> afterSnapshot_;
     std::mutex mutex_;std::unordered_map<const CardFrame*,std::shared_ptr<Entry>> entries_;
     unsigned inserted_=0;std::atomic<std::uint64_t> conversions_{0};
 };

@@ -145,6 +145,9 @@ void HostOutput::card(Frame f){
     }
     if(tail.waiting && classification.roundGeneration>tail.round.roundGeneration){tail.waiting=false;sealCard(card,tail.round);}
     if(classification.decision==PhysicalTriggerDecision::LogicalScan)cardSaveRounds_[card]={session,classification.roundGeneration};
+    // Publication contract: classification, save generation and any save
+    // override are all tagged before this enqueue. SourceCore delivers each
+    // card before publishing the corresponding sync group (also on startup).
     workers_.pushCard(f);
     {auto& active=activeAssemblies_[card];if(active.session==session&&active.ingress==link&&active.first==f->first)active={};}
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=session;r.correlation=link;r.threadId=GetCurrentThreadId();r.card=card;r.kind=std::uint16_t(TimingKind::CardEnqueue);timing_->observe(r,end-begin>=500000);}
