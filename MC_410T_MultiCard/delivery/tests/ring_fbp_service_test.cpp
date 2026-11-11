@@ -19,14 +19,15 @@ static void checkDasSectors(){
         const int M=int(physical.size()),lines=M*perCh;
         const int sign=positive?1:-1;
         const double width=360./M;
-        QSharedMemory shm("MC_410T_RingShm");
-        need(shm.create(int(ringImagingShmTotalSizeV2(depth*lines,frame,lines,frame))),"isolated DAS SHM");
-        shm.lock();
-        std::memset(shm.data(),0,shm.size());
+        ring_input::NativeMapping shm; ring_input::Mutex inputMutex;
+        need(shm.create(size_t(ringImagingShmTotalSizeV3(depth*lines,frame,lines,frame)))==ring_input::Result::Ok,"isolated DAS SHM");
+
+        std::memset(shm.data(),0,shm.capacity());
         auto* h=static_cast<RingImagingShmHeader*>(shm.data());
         h->magic=0x52494e47;h->version=2;h->block_size=depth*lines;h->alines=lines;
         h->frame_size=frame;h->nx=nx;h->ny=nx;h->display_nx=nx;h->display_ny=nx;
         h->display_frame_size=frame;h->snapshot_step=1;
+        need(ring_input::initialize(inputMutex,shm.data(),shm.capacity(),1,20)==ring_input::Result::Ok,"v3 initialize");
         h->block_seq=1;h->block_ready=1;
         auto* raw=reinterpret_cast<float*>(h+1);
         auto* angles=reinterpret_cast<float*>(reinterpret_cast<char*>(h+1)+ringAnglesOffset(depth*lines));
@@ -36,7 +37,7 @@ static void checkDasSectors(){
             angles[pos]=float(first+sign*(rank+(j/2+w)*.5)*width);channels[pos]=c;
             std::fill_n(raw+pos*depth,depth,float(c+1+10*w));
         }
-        shm.unlock();
+
         QJsonArray enabled,radii;
         for(int c=0;c<8;++c){
             enabled.append(std::find(physical.begin(),physical.end(),c)!=physical.end()?1:0);
@@ -52,7 +53,17 @@ static void checkDasSectors(){
         svc.processRingConfigure(ring);
         need(svc.m_ringCuda[0]&&svc.m_ringCuda[1],"DAS configure failed");
         svc.m_running=true;
-        svc.processRingPulse(1,1,0,true,{1,0},true,positive);
+        auto publish = [&](uint64_t id, uint32_t seq, uint64_t generation, bool final, int direction) {
+            auto* base=static_cast<uint8_t*>(shm.data())+sizeof(RingImagingShmHeader);
+            std::vector<float> rawCopy(reinterpret_cast<float*>(base),reinterpret_cast<float*>(base)+h->block_size);
+            auto* anglePtr=reinterpret_cast<float*>(base+ringAnglesOffset(int(h->block_size)));
+            std::vector<float> angleCopy(anglePtr,anglePtr+h->alines);
+            auto* channelPtr=base+ringChannelsOffset(int(h->block_size),int(h->alines));
+            std::vector<uint8_t> channelCopy(channelPtr,channelPtr+h->alines);
+            ring_input::Identity identity{1,id,1,generation,0,seq,direction,final,seq};
+            need(ring_input::publish(inputMutex,shm.data(),shm.capacity(),identity,rawCopy.data(),angleCopy.data(),channelCopy.data(),20)==ring_input::Result::Ok,"v3 publish");
+        };
+        publish(1,0,0,true,positive); svc.processRingPulse(1,1);
         need(h->frame_seq==1,"DAS did not publish a frame");
         std::vector<int> seen(M);
         for(int x=0;x<nx;++x)for(int y=0;y<nx;++y){
@@ -92,9 +103,10 @@ static void run(bool twoOnly=false){
         else for(int c=0;c<M;++c)physical.push_back(c);
         const bool median=!twoOnly||splice, gap=twoOnly&&splice, invert=twoOnly&&ccw;
         const bool mask=twoOnly&&layered, clip=twoOnly&&ccw, cutEnabled=!twoOnly||splice;
-        QSharedMemory shm("MC_410T_RingShm");need(shm.create(int(ringImagingShmTotalSizeV2(depth*lines,frame,lines,frame))),"isolated SHM");
-        shm.lock();memset(shm.data(),0,shm.size());auto*h=static_cast<RingImagingShmHeader*>(shm.data());
-        h->magic=0x52494e47;h->version=2;h->block_size=depth*lines;h->alines=lines;h->frame_size=frame;h->nx=nx;h->ny=nx;h->display_nx=nx;h->display_ny=nx;h->display_frame_size=frame;h->snapshot_step=1;shm.unlock();
+        ring_input::NativeMapping shm; ring_input::Mutex inputMutex;need(shm.create(size_t(ringImagingShmTotalSizeV3(depth*lines,frame,lines,frame)))==ring_input::Result::Ok,"isolated SHM");
+        memset(shm.data(),0,shm.capacity());auto*h=static_cast<RingImagingShmHeader*>(shm.data());
+        h->magic=0x52494e47;h->version=2;h->block_size=depth*lines;h->alines=lines;h->frame_size=frame;h->nx=nx;h->ny=nx;h->display_nx=nx;h->display_ny=nx;h->display_frame_size=frame;h->snapshot_step=1;
+        need(ring_input::initialize(inputMutex,shm.data(),shm.capacity(),1,20)==ring_input::Result::Ok,"v3 initialize");
         QJsonArray enabled,delays,radii;for(int c=0;c<8;++c){
             enabled.append(std::find(physical.begin(),physical.end(),c)!=physical.end()?1:0);
             delays.append(QJsonArray{5+c,7+c});radii.append(.004+c*.00001);
@@ -116,6 +128,16 @@ static void run(bool twoOnly=false){
             need(settings.delayOffset[3][1]==delaysFbp[3].toArray()[1].toDouble(),"fractional offset lost on import");
             ring["exactFbp"]=ring_fbp_settings::toJson(settings);}
         ImagingSvc svc;svc.processRingConfigure(ring);need(svc.m_fbp[0]&&svc.m_fbp[1],"FBP configure failed");svc.m_running=true;
+        auto publish = [&](uint64_t id, uint32_t seq, uint64_t generation, bool final, int direction) {
+            auto* base=static_cast<uint8_t*>(shm.data())+sizeof(RingImagingShmHeader);
+            std::vector<float> rawCopy(reinterpret_cast<float*>(base),reinterpret_cast<float*>(base)+h->block_size);
+            auto* anglePtr=reinterpret_cast<float*>(base+ringAnglesOffset(int(h->block_size)));
+            std::vector<float> angleCopy(anglePtr,anglePtr+h->alines);
+            auto* channelPtr=base+ringChannelsOffset(int(h->block_size),int(h->alines));
+            std::vector<uint8_t> channelCopy(channelPtr,channelPtr+h->alines);
+            ring_input::Identity identity{1,id,1,generation,0,seq,direction,final,seq};
+            need(ring_input::publish(inputMutex,shm.data(),shm.capacity(),identity,rawCopy.data(),angleCopy.data(),channelCopy.data(),20)==ring_input::Result::Ok,"v3 publish");
+        };
         const auto *prepared0=svc.m_fbp[0], *prepared1=svc.m_fbp[1];
         const auto *preparedPreprocessing=svc.m_fbpDevice.get();
         need(svc.m_ringTimevarGpu.active()==timevar,"GPU STFT selection mismatch");
@@ -124,7 +146,7 @@ static void run(bool twoOnly=false){
         need(referenceFilter.configure(svc.m_ringTimevarConfig,10e6,depth,&filterError),"reference filter configure");
         std::vector<ring_fbp_stream::Line> full[8][2];
         for(int block=0;block<3;++block){
-            shm.lock();h->block_seq=block+1;h->block_ready=1;auto* raw=reinterpret_cast<float*>(h+1);
+            h->block_seq=block+1;h->block_ready=1;auto* raw=reinterpret_cast<float*>(h+1);
             auto* ang=reinterpret_cast<float*>(reinterpret_cast<char*>(h+1)+ringAnglesOffset(depth*lines));
             auto* ch=reinterpret_cast<uint8_t*>(h+1)+ringChannelsOffset(depth*lines,lines);
             for(int j=0;j<perCh;++j)for(int rank=0;rank<M;++rank){int c=physical[rank],pos=j*M+rank,w=j%2,k=block*3+j/2;
@@ -142,8 +164,8 @@ static void run(bool twoOnly=false){
                 }
                 full[c][w].push_back(l);
             }
-            std::vector<float> saved(raw,raw+depth*lines);shm.unlock();
-            svc.processRingPulse(block+1,block+1,0,true,{1,0},block==2,ccw);
+            std::vector<float> saved(raw,raw+depth*lines);
+            publish(block+1,block,0,block==2,ccw); svc.processRingPulse(1,block+1);
             need(!memcmp(saved.data(),h+1,saved.size()*4),"raw input changed");
             need(svc.m_running,"FBP service stopped");
         }

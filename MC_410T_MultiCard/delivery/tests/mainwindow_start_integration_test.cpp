@@ -120,7 +120,7 @@ public:
             auto stop = [&] {
                 checkbox->setChecked(false);
                 waitFor([&] { return !controller.isRunning() && !window.m_imagingEnabled
-                    && controlsAvailable() && !controller.m_ringSharedMemory; }, "normal stop failed");
+                    && controlsAvailable() && !controller.m_ringMapping.data(); }, "normal stop failed");
                 check(!checkbox->isChecked(), "stop left checkbox checked");
             };
             start();
@@ -136,7 +136,7 @@ public:
                                            sizeof(RingReconCudaConfig));
                 const QByteArray oldDelays(reinterpret_cast<const char*>(controller.m_ringSysDelayCh),
                                            sizeof(controller.m_ringSysDelayCh));
-                auto* const shm = controller.m_ringSharedMemory;
+                auto* const shm = controller.m_ringMapping.data();
                 auto* const process = controller.m_svcProcess;
                 const auto pid = process ? process->processId() : 0;
                 const auto running = controller.m_running.load();
@@ -167,7 +167,7 @@ public:
                       "rejection entered assembler/feed startup");
                 check(controller.m_testSvcStarts == starts && controller.m_testSvcStops == stops,
                       "rejection entered service start/stop");
-                check(controller.m_ringSharedMemory == shm && controller.m_svcProcess == process
+                check(controller.m_ringMapping.data() == shm && controller.m_svcProcess == process
                     && (!process || process->processId() == pid) && controller.m_running.load() == running,
                       "rejection changed process/shared-memory lifecycle");
                 check(controller.isRunning() == resident, "resident service state changed");
@@ -225,7 +225,7 @@ public:
             reject(true);
             std::cout << "PASS resident real ImagingSvc PID/SHM/running/ready state unchanged\n";
             controller.stopSvc();
-            waitFor([&] { return !controller.isRunning() && !controller.m_ringSharedMemory; },
+            waitFor([&] { return !controller.isRunning() && !controller.m_ringMapping.data(); },
                     "resident cleanup failed");
             depth->setText("20000");
             start();
@@ -243,7 +243,7 @@ public:
             widget<QComboBox>(dialog,"ringReconAlgorithm")->setCurrentIndex(1);
             widget<QLineEdit>(dialog,"fbpDensities")->setText("0");
             reject(true,true);
-            controller.stopSvc();waitFor([&]{return !controller.isRunning()&&!controller.m_ringSharedMemory;},"FBP resident cleanup");
+            controller.stopSvc();waitFor([&]{return !controller.isRunning()&&!controller.m_ringMapping.data();},"FBP resident cleanup");
             widget<QLineEdit>(dialog,"fbpDensities")->setText("1000,1100,1100,1100,1100,1100,1100,1100");
             std::uint64_t motorTestSession = 0;
             for(bool tv:{false,true})for(bool fbp:{false,true}) {
@@ -275,7 +275,7 @@ public:
                 const int startsBeforeMotor = controller.m_testSvcStarts;
                 const int stopsBeforeMotor = controller.m_testSvcStops;
                 const auto pid = controller.m_svcProcess->processId();
-                const auto* shm = controller.m_ringSharedMemory;
+                const auto* shm = controller.m_ringMapping.data();
                 const auto feedStarts = window.m_testFeedStarts;
                 const auto assemblerConfigs = window.m_testAssemblerConfigs;
                 const auto totalAlines = controller.ringConfig().alinesPerFrame;
@@ -319,7 +319,7 @@ public:
                 waitFor([&]{return window.m_lblImagingStatus->text().contains("输出");},
                         "new-direction snapshot did not restore normal status");
                 check(controller.isRunning() && window.m_imagingServiceReady.load()
-                    && controller.m_svcProcess->processId() == pid && controller.m_ringSharedMemory == shm
+                    && controller.m_svcProcess->processId() == pid && controller.m_ringMapping.data() == shm
                     && controller.m_testSvcStarts == startsBeforeMotor && controller.m_testSvcStops == stopsBeforeMotor
                     && window.m_testFeedStarts == feedStarts && window.m_testAssemblerConfigs == assemblerConfigs,
                       "direction switch restarted or reconfigured the resident imaging chain");
@@ -329,7 +329,7 @@ public:
                 check(controller.ringConfig().alinesPerFrame == totalAlines
                     && controller.ringConfig().sectorCcw == 1
                     && controller.m_testSvcStarts == startsBeforeMotor && controller.m_testSvcStops == stopsBeforeMotor
-                    && controller.m_ringSharedMemory == shm && window.m_pendingRingDirectionRevision == 0,
+                    && controller.m_ringMapping.data() == shm && window.m_pendingRingDirectionRevision == 0,
                       "unused motor fields changed imaging configuration");
                 // A service stopping inside another active round must not reopen the motor gate.
                 normalizer.classify(session, 102);

@@ -154,7 +154,8 @@ public:
     ProducerEvent observeProducerSubmit(uint8_t previousReady,
                                          uint32_t previousSeq,
                                          uint32_t newSeq,
-                                         uint64_t submitWallUs)
+                                         uint64_t submitWallUs,
+                                         uint64_t actualId = 0)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         ++m_state.submitted;
@@ -166,7 +167,7 @@ public:
             intervalUs = submitWallUs - m_lastSubmitWallUs;
         m_haveLastSubmit = true;
         m_lastSubmitWallUs = submitWallUs;
-        m_state.lastSubmitIndex = m_state.submitted;
+        m_state.lastSubmitIndex = actualId ? actualId : m_state.submitted;
         m_state.lastSubmitIntervalUs = intervalUs;
         m_state.lastSubmittedSeq = newSeq;
         m_state.hasLastSubmittedSeq = true;

@@ -39,7 +39,6 @@ ImagingSvc::ImagingSvc(QObject *parent)
     , m_pulseCount(0)
     , m_initialized(false)
     , m_running(false)
-    , m_ringSharedMemory(nullptr)
 {
 }
 
@@ -54,11 +53,7 @@ ImagingSvc::~ImagingSvc()
             m_ringCuda[w] = nullptr;
         }
     }
-    if (m_ringSharedMemory) {
-        m_ringSharedMemory->detach();
-        delete m_ringSharedMemory;
-        m_ringSharedMemory = nullptr;
-    }
+
 
     if (m_pollTimer) {
         m_pollTimer->stop();
@@ -132,24 +127,31 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
     if (cmd == "configure") {
         processConfigure(msg["params"].toObject());
     } else if (cmd == "ring_block_ready") {
-        const ring_shm_obs::ReadyMetadata ready = ring_shm_obs::parseReadyMessage(msg);
-        if (!ready.hasRoundIdentity) {
-            QJsonObject extra;
-            extra[QStringLiteral("error")] = ready.identityError;
-            extra[QStringLiteral("has_identity_fields")] = ready.identityFieldsPresent;
-            sendRingObservation("round_identity_rejected", m_ringObs.snapshot(), extra);
-            return;
-        }
-        m_ringObs.observeNotification(ready.seq, ready.submitIndex);
-        // The input flag is the data-plane source round end (stable terminal
-        // trigger property), NOT the reconstruction completion published back
-        // to the UI. Missing field fails closed.
-        processRingPulse(ready.seq, ready.submitIndex, ready.submitWallUs,
-                         ready.hasSeq, ready.roundIdentity,
-                         msg.value(QStringLiteral("source_round_complete")).toBool(false),
-                         msg.value(QStringLiteral("sector_ccw")).toInt(m_ringConfig.sectorCcw));
+        const auto parseId = [](const QJsonValue &v, uint64_t &out) {
+            if (!v.isString()) return false;
+            const QString text = v.toString();
+            if (text.isEmpty()) return false;
+            for (const QChar c : text) if (c < QLatin1Char('0') || c > QLatin1Char('9')) return false;
+            bool ok = false; out = text.toULongLong(&ok, 10); return ok && out != 0;
+        };
+        uint64_t epoch = 0, publication = 0;
+        if (parseId(msg.value("input_epoch"), epoch) && parseId(msg.value("publication_id"), publication))
+            processRingPulse(epoch, publication);
     } else if (cmd == "ring_reset") {
-        // 停机超时判定新一圈：清空重建累积（与圈末重置同一函数）
+        const QJsonValue value = msg.value("input_epoch");
+        const QString text = value.toString();
+        bool digits = value.isString() && !text.isEmpty();
+        for (const QChar c : text) digits = digits && c >= QLatin1Char('0') && c <= QLatin1Char('9');
+        bool ok = false; const uint64_t epoch = text.toULongLong(&ok, 10);
+        if (!digits || !ok || !epoch || epoch == m_ringEpoch) return;
+        const auto locked = ring_input::acquire(m_ringInputMutex, 20, m_ringSharedMemory.data(), m_ringSharedMemory.capacity());
+        if (locked != ring_input::Result::Ok) return;
+        ring_input::View view;
+        const bool matches = ring_input::layout(m_ringSharedMemory.data(), m_ringSharedMemory.capacity(), true, view)
+            && view.meta->epoch == epoch;
+        m_ringInputMutex.unlock();
+        if (!matches) return;
+        m_ringEpoch = epoch;
         sendRingObservation("epoch_reset", m_ringObs.snapshot());
         m_ringObs.resetEpoch();
         m_ringRound.close();
@@ -157,7 +159,11 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
     } else if (cmd == "start") {
         m_ringObs.beginSession();
         m_ringRound.resetSession();
+        m_ringExpectedSeq = 0; m_ringSequenceIncomplete = false;
         resetRingRecon();
+        if (m_ringMode && (!m_ringConfigReady || !m_ringEpoch || !m_ringSharedMemory.data())) {
+            sendError("环形共享内存未就绪", 2010); return;
+        }
         m_running = true;
         m_pulseCount = 0;
         m_ringBlockIndex = 0;
@@ -181,6 +187,11 @@ void ImagingSvc::processConfigure(const QJsonObject &params)
 {
     // 环形扫描并行分支：与线性 pa_recon 完全独立
     if (params["imagingMode"].toString() == "ring") {
+        m_ringMode = true; m_ringConfigReady = false; m_running = false;
+        if (params.value("ringInputProtocolVersion").toInt() != 3) {
+            m_running = false; m_ringEpoch = 0; m_ringSharedMemory.close();
+            sendError("环形输入协议版本不匹配（需要 v3）", 2010); return;
+        }
         processRingConfigure(params["ring"].toObject());
         return;
     }
@@ -389,6 +400,7 @@ void ImagingSvc::processConfigure(const QJsonObject &params)
 // =====================================================================
 void ImagingSvc::processRingConfigure(const QJsonObject &ring)
 {
+    m_ringConfigReady = false;
     int nextSysDelayCh[8][2];
     RingReconCudaConfig cfg;
     ring_recon_cuda_set_defaults(&cfg);
@@ -608,33 +620,30 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
         m_ringPrevRadius[c] = 0.0f;
     }
 
-    if (m_ringSharedMemory) {
-        m_ringSharedMemory->detach();
-        delete m_ringSharedMemory;
-        m_ringSharedMemory = nullptr;
+    m_running = false; m_ringEpoch = 0;
+    m_ringSharedMemory.close();
+    if (m_ringSharedMemory.attach() != ring_input::Result::Ok) {
+        sendError("环形共享内存附接失败", 2007); return;
     }
-    m_ringSharedMemory = new QSharedMemory("MC_410T_RingShm", this);
-    if (!m_ringSharedMemory->attach()) {
-        sendError("环形共享内存附接失败", 2007);
-        return;
-    }
-    // v2 强校验：显示参数与 SHM 头一致，避免尺寸漂移导致越界读写
-    m_ringSharedMemory->lock();
-    auto *hdr = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    const bool shmOk = hdr
-        && hdr->magic == 0x52494E47u
-        && hdr->version == 2u
-        && hdr->frame_size == static_cast<uint32_t>(m_ringFrameSize)
-        && hdr->nx == static_cast<uint16_t>(nx)
-        && hdr->display_nx == static_cast<uint16_t>(m_ringDisplayNx)
-        && hdr->display_frame_size == static_cast<uint32_t>(m_ringDisplayFrameSize)
-        && hdr->snapshot_step == static_cast<uint32_t>(m_ringDisplayStep);
-    m_ringSharedMemory->unlock();
-    if (!shmOk) {
-        sendError("环形共享内存版本/显示参数不匹配（需要 v2 布局）", 2010);
-        return;
-    }
+    const auto locked = ring_input::acquire(m_ringInputMutex, 20, m_ringSharedMemory.data(), m_ringSharedMemory.capacity());
+    if (locked != ring_input::Result::Ok) { sendError("环形输入锁失败", 2010); return; }
+    ring_input::View view;
+    const bool layoutOk = ring_input::layout(m_ringSharedMemory.data(), m_ringSharedMemory.capacity(), true, view);
+    const auto *hdr = layoutOk ? view.header : nullptr;
+    const bool shmOk = hdr && hdr->block_size == uint32_t(m_ringBlockSize)
+        && hdr->alines == uint32_t(m_ringAlineCount)
+        && hdr->frame_size == uint32_t(m_ringFrameSize)
+        && hdr->nx == uint16_t(nx) && hdr->ny == uint16_t(nx)
+        && hdr->display_nx == uint16_t(m_ringDisplayNx) && hdr->display_ny == uint16_t(m_ringDisplayNx)
+        && hdr->display_frame_size == uint32_t(m_ringDisplayFrameSize)
+        && hdr->snapshot_step == uint32_t(m_ringDisplayStep)
+        && view.meta->logical_size == ringImagingShmTotalSizeV3(m_ringBlockSize, m_ringFrameSize, m_ringAlineCount, m_ringDisplayFrameSize)
+        && view.meta->epoch != 0;
+    if (shmOk) m_ringEpoch = view.meta->epoch;
+    m_ringInputMutex.unlock();
+    if (!shmOk) { m_ringSharedMemory.close(); sendError("环形共享内存版本或配置不匹配（需要 v3）", 2010); return; }
 
+    m_ringConfigReady = true;
     qDebug() << "ImagingSvc ring mode: channels=" << cnt
              << "perChannelBlock=" << cfg.alinesPerChannelPerBlock
              << "blockSize=" << m_ringBlockSize
@@ -646,69 +655,37 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     }
 }
 
-void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
-                                  uint64_t submitWallUs, bool notifySeqValid,
-                                  const paimage::RoundIdentity &round, bool sourceRoundComplete,
-                                  int sectorCcw)
+void ImagingSvc::processRingPulse(uint64_t epoch, uint64_t publicationId)
 {
     const uint64_t processStartUs = ring_shm_obs::steadyNowUs();
-    if (!round.valid()) {
-        QJsonObject extra;
-        extra[QStringLiteral("error")] = QStringLiteral("invalid physical round identity");
-        sendRingObservation("round_identity_rejected", m_ringObs.snapshot(), extra);
-        return;
-    }
-    if (!m_running || (m_fbpSettings.enabled?(!m_fbp[0]||!m_fbp[1]):(!m_ringCuda[0]||!m_ringCuda[1])) || !m_ringSharedMemory) return;
-
-    const uint64_t copyStartUs = ring_shm_obs::steadyNowUs();
-    if (!m_ringSharedMemory->lock()) return;
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    if (!h) { m_ringSharedMemory->unlock(); return; }
-    // The input slot is latest-wins too. Never apply old metadata to new raw data.
-    if (!notifySeqValid || h->block_seq != notifySeq || !h->block_ready) {
-        const auto actual = h->block_seq;
-        m_ringSharedMemory->unlock();
-        QJsonObject extra;
-        extra[QStringLiteral("notify_seq")] = static_cast<qint64>(notifySeq);
-        extra[QStringLiteral("shm_seq")] = static_cast<qint64>(actual);
-        sendRingObservation("block_copy_rejected", m_ringObs.snapshot(), extra);
-        return;
-    }
-    const int blockSize = m_ringBlockSize;
-    const int alines    = m_ringAlineCount;
-    const uint8_t readyBeforeCopy = h->block_ready;
-    const uint32_t shmSeq = h->block_seq;
-    QVector<float> raw(blockSize);
-    QVector<float> ang(alines);
+    if (!m_running || !m_ringSharedMemory.data()
+        || (m_fbpSettings.enabled ? (!m_fbp[0] || !m_fbp[1]) : (!m_ringCuda[0] || !m_ringCuda[1]))) return;
+    const int blockSize = m_ringBlockSize, alines = m_ringAlineCount;
+    QVector<float> raw(blockSize), ang(alines);
     QVector<quint8> ch(alines);
-    std::memcpy(raw.data(), reinterpret_cast<float *>(h + 1),
-                static_cast<size_t>(blockSize) * sizeof(float));
-    std::memcpy(ang.data(),
-                reinterpret_cast<uint8_t *>(h + 1) + ringAnglesOffset(blockSize),
-                static_cast<size_t>(alines) * sizeof(float));
-    std::memcpy(ch.data(),
-                reinterpret_cast<uint8_t *>(h + 1) + ringChannelsOffset(blockSize, alines),
-                static_cast<size_t>(alines));
-    h->block_ready = 0;
-    m_ringSharedMemory->unlock();
-
-    const uint64_t copyLockUs = ring_shm_obs::steadyNowUs() - copyStartUs;
-    const auto observation = m_ringObs.observeConsumed(
-        notifySeq, notifySeqValid, shmSeq, readyBeforeCopy, submitWallUs,
-        ring_shm_obs::wallNowUs(), copyLockUs);
-    if (observation.hasAnomaly()) {
-        QJsonObject extra;
-        extra[QStringLiteral("notify_seq")] = static_cast<qint64>(notifySeq);
-        extra[QStringLiteral("shm_seq")] = static_cast<qint64>(shmSeq);
-        extra[QStringLiteral("ready_before_copy")] = static_cast<int>(readyBeforeCopy);
-        extra[QStringLiteral("submit_index")] = static_cast<qint64>(submitIndex);
-        extra[QStringLiteral("notify_shm_mismatch")] = observation.notifyShmMismatch;
-        extra[QStringLiteral("ready_zero_before_copy")] = observation.readyZeroBeforeCopy;
-        extra[QStringLiteral("duplicate_shm_seq")] = observation.duplicateShmSeq;
-        extra[QStringLiteral("shm_seq_gap")] = observation.shmSeqGap;
-        sendRingObservation("anomaly", m_ringObs.snapshot(), extra);
+    ring_input::Identity identity{};
+    const uint64_t copyStartUs = ring_shm_obs::steadyNowUs();
+    const auto copied = ring_input::copyAndAcknowledge(m_ringInputMutex, m_ringSharedMemory.data(),
+        m_ringSharedMemory.capacity(), epoch, publicationId, raw.data(), ang.data(), ch.data(), identity, 20);
+    if (copied != ring_input::Result::Ok) {
+        sendRingObservation("block_copy_rejected", m_ringObs.snapshot()); return;
     }
-
+    if (epoch != m_ringEpoch) {
+        // A reset notification can time out acquiring the lock. The exact
+        // successful copy above proves this is the currently shared epoch.
+        m_ringEpoch = epoch;
+        sendRingObservation("epoch_reset", m_ringObs.snapshot());
+        m_ringObs.resetEpoch(); m_ringRound.close(); resetRingRecon();
+    }
+    const uint32_t notifySeq = identity.blockSeq;
+    const uint64_t submitIndex = identity.publicationId;
+    const uint64_t submitWallUs = identity.submitWallUs;
+    const paimage::RoundIdentity round{identity.measurementSession, identity.roundGeneration};
+    const bool sourceRoundComplete = identity.sourceRoundComplete;
+    int sectorCcw = identity.direction;
+    m_ringObs.observeNotification(notifySeq, submitIndex);
+    const auto observation = m_ringObs.observeConsumed(notifySeq, true, notifySeq, 1, submitWallUs,
+        ring_shm_obs::wallNowUs(), ring_shm_obs::steadyNowUs() - copyStartUs);
     const auto oldRound = m_ringRound.active();
     if (sectorCcw == -1) sectorCcw = m_ringConfig.sectorCcw; // standalone fixture callers
     if ((sectorCcw != 0 && sectorCcw != 1)
@@ -735,10 +712,21 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
         // Direction changes the signed step and sector assignments only.
         // Travel-time tables, exact kernel and preprocessing plans are reused.
         m_ringConfig.sectorCcw = sectorCcw;
+        m_ringExpectedSeq = 0; m_ringSequenceIncomplete = false;
         resetRingRecon();
         roundDiagnostic[QStringLiteral("sector_ccw")] = sectorCcw;
         sendRingObservation("round_barrier_reset", m_ringObs.snapshot(), roundDiagnostic);
     }
+
+    // Keep partial snapshots while latching any missing prefix or middle block.
+    // Replays and backwards sequences never enter the accumulator.
+    const uint32_t roundBlockIndex = identity.roundBlockIndex;
+    if (uint64_t(roundBlockIndex) < m_ringExpectedSeq) {
+        sendRingObservation("round_sequence_rejected", m_ringObs.snapshot(), roundDiagnostic);
+        return;
+    }
+    if (uint64_t(roundBlockIndex) != m_ringExpectedSeq) m_ringSequenceIncomplete = true;
+    m_ringExpectedSeq = uint64_t(roundBlockIndex) + 1;
 
     if(m_fbpSettings.enabled){
         if(!processFbpBlock(raw,ang,ch,sourceRoundComplete))return;
@@ -891,19 +879,25 @@ void ImagingSvc::processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
     // 触发（决定生命周期关闭）；reconstructionComplete 还要求服务端实际消费
     // 块数精确等于配置块数（决定 final PNG / presentation 等业务动作）。
     // 中间块丢失但 source-final 仍到达时，快照 round_complete 必须为 false。
-    const auto completion = paimage::evaluateRingReconCompletion(
+    auto completion = paimage::evaluateRingReconCompletion(
         sourceRoundComplete, m_ringBlockIndex, m_ringBlocksPerFrame);
+    if (sourceRoundComplete && m_ringSequenceIncomplete) {
+        completion.reconstructionComplete = false; completion.blockCountMismatch = true;
+    }
 
-    m_ringSharedMemory->lock();
-    h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    float *fb = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) +
-                                          ringFramesOffset(blockSize, alines));
-    std::memcpy(fb, m_ringDisplay0.data(),
-                static_cast<size_t>(m_ringFrameSize) * sizeof(float));
-    std::memcpy(fb + m_ringFrameSize, m_ringDisplay1.data(),
-                static_cast<size_t>(m_ringFrameSize) * sizeof(float));
+    const auto outputLock = m_ringOutputMutex.lock(20);
+    if (outputLock != ring_input::Result::Ok && outputLock != ring_input::Result::Abandoned) {
+        if (sourceRoundComplete) { m_ringRound.close(); resetRingRecon(); }
+        sendError("环形输出锁失败", 2011); return;
+    }
+    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory.data());
+    h->frame_ready = 0;
+    float *fb = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) + ringFramesOffset(blockSize, alines));
+    std::memcpy(fb, m_ringDisplay0.data(), static_cast<size_t>(m_ringFrameSize) * sizeof(float));
+    std::memcpy(fb + m_ringFrameSize, m_ringDisplay1.data(), static_cast<size_t>(m_ringFrameSize) * sizeof(float));
     const uint32_t snapshotSeq = ++h->frame_seq;
-    m_ringSharedMemory->unlock();
+    h->frame_ready = 1;
+    m_ringOutputMutex.unlock();
 
     sendRingSnapshotToHost(snapshotSeq, submitIndex, round, completion.reconstructionComplete,
                            ring_shm_obs::steadyNowUs() - processStartUs);

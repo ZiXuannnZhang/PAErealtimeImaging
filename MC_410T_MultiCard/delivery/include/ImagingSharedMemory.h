@@ -97,3 +97,45 @@ inline size_t ringImagingShmTotalSizeV2(int blockSize, int frameSize, int alines
          + ringDisplayFramesOffset(blockSize, alines, frameSize)
          + 2ULL * static_cast<size_t>(displayFrameSize) * sizeof(float);
 }
+
+// v3 keeps all v2 payload and output offsets unchanged. The appended input
+// control block is accessed only under the shared Windows input mutex.
+constexpr uint32_t kRingImagingShmVersion3 = 3;
+constexpr uint32_t kRingInputProtocolMagic = 0x52494E33u; // RIN3
+constexpr uint32_t kRingInputProtocolVersion = 2;
+
+enum class RingInputSlotState : uint32_t { Empty = 0, Ready = 1, Poisoned = 2 };
+
+struct RingInputMetadata {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t size;
+    uint32_t state;
+    uint64_t logical_size;          // declared mapping size, excluding OS page rounding
+    uint64_t epoch;                 // nonzero; new unique value on each reset
+    uint64_t publication_id;        // monotonically increasing within epoch
+    uint64_t acknowledged_id;      // last independently copied publication
+    uint64_t measurement_session;
+    uint64_t round_generation;
+    uint64_t submit_wall_us;
+    uint32_t block_seq;
+    int32_t direction;              // caller's sectorCcw value (-1, 0, 1)
+    uint8_t source_round_complete;
+    uint8_t reserved[3];
+    uint32_t round_block_index;    // zero-based within the physical round
+};
+static_assert(sizeof(RingInputMetadata) == 88, "RingInputMetadata layout changed");
+static_assert(offsetof(RingInputMetadata, epoch) == 24, "RingInputMetadata layout changed");
+
+inline size_t ringInputMetadataOffsetV3(int blockSize, int frameSize, int alines,
+                                        int displayFrameSize)
+{
+    const size_t end = ringImagingShmTotalSizeV2(blockSize, frameSize, alines, displayFrameSize);
+    return (end + 7u) & ~size_t(7u);
+}
+inline size_t ringImagingShmTotalSizeV3(int blockSize, int frameSize, int alines,
+                                        int displayFrameSize)
+{
+    return ringInputMetadataOffsetV3(blockSize, frameSize, alines, displayFrameSize)
+         + sizeof(RingInputMetadata);
+}

@@ -20,6 +20,8 @@
 #include <cmath>
 #include <chrono>
 #include <cstring>
+#include <random>
+#include <limits>
 
 // ZMQ IPC 端点（与 ImagingSvc 子进程约定一致）
 static const char *ZMQ_IPC_ENDPOINT = "tcp://127.0.0.1:5555";
@@ -47,7 +49,6 @@ ImagingController::ImagingController(QObject *parent)
     , m_frameWidth(0)
     , m_frameHeight(0)
     , m_running(false)
-    , m_ringSharedMemory(nullptr)
     , m_pulseAccumCount(0)
     , m_pulseAccumSeq(0)
 {
@@ -55,10 +56,14 @@ ImagingController::ImagingController(QObject *parent)
 
 ImagingController::~ImagingController()
 {
+    blockSignals(true);
+    if (m_svcProcess) disconnect(m_svcProcess, nullptr, this, nullptr);
     stopSvc();
-    // stopSvc 可能因 m_running 已为 false 提前返回，这里兜底汇合残留工作线程，
-    // 保证析构前没有任何环形帧线程还在访问本对象。
-    m_running.store(false, std::memory_order_relaxed);
+    if (m_svcProcess && m_svcProcess->state() != QProcess::NotRunning) {
+        m_svcProcess->kill();
+        m_svcProcess->waitForFinished(500);
+    }
+    finishStopSvc();
     stopRingWorker();
 }
 
@@ -71,6 +76,9 @@ bool ImagingController::startSvc()
     ++m_testSvcStarts;
 #endif
     if (m_running) return true;
+    if (m_stopping || m_svcResourcesActive) return false;
+    ++m_svcLifecycleToken;
+    m_svcResourcesActive = true;
 
     // 允许新一轮成像重新启动常驻工作线程
     {
@@ -88,9 +96,9 @@ bool ImagingController::startSvc()
         const int nx = static_cast<int>(std::ceil(m_ringConfig.fov / m_ringConfig.gridSize));
         const int alines = m_ringConfig.enabledChannelCount * m_ringConfig.alinesPerChannelPerBlock;
         const int blockSize = m_ringConfig.sampDepth * alines;
-        m_ringAlineCount = alines;
         const int frameSize = nx * nx;
-        m_ringBlockSize = blockSize;
+        { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+          m_ringAlineCount = alines; m_ringBlockSize = blockSize; }
         m_ringFrameSize = frameSize;
         // v2 显示快照参数（方案A：显示图像=全分辨率重建矩阵，每像素=gridSize）
         m_ringDisplayStep = 1;
@@ -103,8 +111,9 @@ bool ImagingController::startSvc()
         emit svcStatus(QString("环形共享内存 %1 MB, blockSize=%2 frameSize=%3")
                            .arg(ringTotal / 1048576.0, 0, 'f', 1)
                            .arg(blockSize).arg(frameSize), 0);
-        if (!setupRingSharedMemory(blockSize, frameSize, alines, nx))
-            return false;
+        if (!setupRingSharedMemory(blockSize, frameSize, alines, nx)) {
+            finishStopSvc(); return false;
+        }
         m_ringObs.beginSession();
     } else {
         emit svcStatus(QString("[诊断] startSvc: pulseSize=%1 frameSize=%2 nx=%3 ny=%4 depth=%5")
@@ -138,7 +147,7 @@ bool ImagingController::startSvc()
             } catch (const zmq::error_t &e) {
                 if (e.num() != EADDRINUSE || bindRetries == 0) {
                     emit svcError(QString("ZMQ bind failed: %1").arg(e.what()));
-                    return false;
+                    finishStopSvc(); return false;
                 }
                 m_zmqSocket->close();
                 delete m_zmqSocket;
@@ -149,11 +158,11 @@ bool ImagingController::startSvc()
         }
         if (!bound) {
             emit svcError("ZMQ bind failed: Address in use（重试后仍失败）");
-            return false;
+            finishStopSvc(); return false;
         }
     } catch (const zmq::error_t &e) {
         emit svcError(QString("ZMQ bind failed: %1").arg(e.what()));
-        return false;
+        finishStopSvc(); return false;
     }
 
     // ZMQ 轮询定时器（5ms 间隔，非阻塞收信令）
@@ -164,7 +173,7 @@ bool ImagingController::startSvc()
     // 启动 ImagingSvc 子进程
     // 上一次生命周期遗留的 QProcess 对象在 stopSvc 后已结束，先回收再新建，
     // 支持运行中修改环形参数后的自动重启
-    delete m_svcProcess;
+    if (m_svcProcess) m_svcProcess->deleteLater();
     m_svcProcess = new QProcess(this);
     m_suppressSvcCrashError = false;   // 新生命周期开始，恢复崩溃上报
 
@@ -175,7 +184,7 @@ bool ImagingController::startSvc()
     }
     if (!QFile::exists(svcPath)) {
         emit svcError("找不到 ImagingSvc.exe");
-        return false;
+        finishStopSvc(); return false;
     }
 
     emit svcStatus(QString("启动 ImagingSvc: %1").arg(svcPath), 0);
@@ -197,7 +206,9 @@ bool ImagingController::startSvc()
     const bool prepareFbp=m_ringMode&&m_fbpSettings.enabled;
     if(prepareFbp){m_fbpPreparing=true;m_running=true;++m_fbpPrepareToken;}
     const auto token=m_fbpPrepareToken;
-    QTimer::singleShot(1000, this, [this,prepareFbp,token]() {
+    const auto lifecycle = m_svcLifecycleToken;
+    QTimer::singleShot(1000, this, [this,prepareFbp,token,lifecycle]() {
+        if (lifecycle != m_svcLifecycleToken || m_stopping || !m_svcResourcesActive) return;
         if(prepareFbp&&(!m_fbpPreparing||token!=m_fbpPrepareToken))return;
         sendConfigureAndStart();
     });
@@ -211,7 +222,11 @@ void ImagingController::stopSvc()
 #ifdef MAINWINDOW_START_TEST_SEAM
     ++m_testSvcStops;
 #endif
-    if (!m_running) return;
+    if (!m_svcResourcesActive || m_stopping) return;
+    m_stopping = true;
+    ++m_svcLifecycleToken;
+    m_running.store(false);
+    clearRingInput();
 
     // 主动停止（含运行中修改参数后的自动重启）：终止/强杀子进程会触发
     // QProcess::Crashed，属于预期行为，抑制对应的“成像错误”误报
@@ -229,12 +244,16 @@ void ImagingController::stopSvc()
     if (m_svcProcess && m_svcProcess->state() != QProcess::NotRunning) {
         m_svcProcess->terminate();
         // 单次超时：1.5s 后如果进程仍运行则强制 kill
-        QTimer::singleShot(1500, this, [this]() {
+        const auto lifecycle = m_svcLifecycleToken;
+        QProcess *const process = m_svcProcess;
+        QTimer::singleShot(1500, this, [this, lifecycle, process]() {
+            if (lifecycle != m_svcLifecycleToken || !m_stopping || process != m_svcProcess) return;
             if (m_svcProcess && m_svcProcess->state() != QProcess::NotRunning) {
                 m_svcProcess->kill();
                 m_svcProcess->waitForFinished(500);
             }
-            finishStopSvc();
+            if (lifecycle == m_svcLifecycleToken && m_stopping && process == m_svcProcess)
+                finishStopSvc();
         });
     } else {
         finishStopSvc();
@@ -243,10 +262,18 @@ void ImagingController::stopSvc()
 
 void ImagingController::finishStopSvc()
 {
+    if (!m_svcResourcesActive) return;
+    ++m_svcLifecycleToken;
+    m_svcResourcesActive = false;
+    m_stopping = false;
+    m_fbpPreparing = false; ++m_fbpPrepareToken;
+    if (m_pollTimer) { m_pollTimer->stop(); delete m_pollTimer; m_pollTimer = nullptr; }
     // 先置停止标志，再无条件汇合环形帧工作线程（不再用超时放行），
     // 最后释放共享内存/ZMQ，杜绝工作线程访问已释放资源。
     m_running.store(false, std::memory_order_relaxed);
     stopRingWorker();
+    m_ringInFlight = RingBlock{};
+    m_ringHasInFlight = false; m_ringPublished = false; m_ringResetPending = false;
 
     if (m_ringMode && m_zmqSocket) {
         const QJsonDocument doc(makeRingObservation("final", m_ringObs.snapshot()));
@@ -262,11 +289,8 @@ void ImagingController::finishStopSvc()
         delete m_sharedMemory;
         m_sharedMemory = nullptr;
     }
-    if (m_ringSharedMemory) {
-        m_ringSharedMemory->detach();
-        delete m_ringSharedMemory;
-        m_ringSharedMemory = nullptr;
-    }
+    clearRingInput();
+    m_ringMapping.close();
 
     emit svcStopped();
 }
@@ -369,173 +393,249 @@ void ImagingController::applyMotorRingDirection(int sectorCcw)
     else if (directionChanged) emit ringDirectionChanged(sectorCcw);
 }
 
+namespace {
+std::uint64_t newRingEpoch()
+{
+    static std::atomic<std::uint64_t> counter{0};
+    static const std::uint64_t seed = [] {
+        std::random_device rd;
+        return (std::uint64_t(rd()) << 32) ^ rd() ^ ring_shm_obs::wallNowUs();
+    }();
+    std::uint64_t value = seed + ++counter;
+    if (!value) value = seed + ++counter;
+    return value;
+}
+}
+
 bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
                                   const QVector<float> &anglesDeg,
                                   const QVector<quint8> &channels,
                                   const paimage::RoundIdentity &round,
-                                  int blockSeq,
-                                  std::uint64_t *outSubmitIndex, bool sourceRoundComplete, int sectorCcw)
+                                  int blockSeq, std::uint64_t *outSubmitIndex,
+                                  bool sourceRoundComplete, int sectorCcw)
 {
     if (outSubmitIndex) *outSubmitIndex = 0;
-    if (!round.valid()) {
-        emit svcError(QStringLiteral("环形块缺少有效物理轮次身份，拒绝提交"));
+    if (!round.valid() || blockSeq < 0 || (sectorCcw < -1 || sectorCcw > 1)) {
+        std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+        ++m_ringRejectedCount;
         return false;
     }
-    if (!m_running.load(std::memory_order_relaxed) || m_fbpPreparing || !m_ringSharedMemory) {
-        emit svcError(QStringLiteral("环形服务未就绪，拒绝提交块"));
-        return false;
+    RingBlock block{rawBlock, anglesDeg, channels, round, 0, ring_shm_obs::wallNowUs(),
+                    blockSeq, sectorCcw, sourceRoundComplete};
+    bool accepted = false;
+    {
+        std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+        // Establish the source baseline before queue capacity can reject a block.
+        if (m_running.load() && !m_fbpPreparing && m_ringRequestedEpoch && !m_ringInputFailed) {
+            if (m_ringBaselineRound.valid() && round < m_ringBaselineRound) {
+                ++m_ringRejectedCount; return false;
+            }
+            if (round != m_ringBaselineRound) {
+                m_ringBaselineRound = round; m_ringBaselineSeq = blockSeq;
+            }
+            if (blockSeq < m_ringBaselineSeq) { ++m_ringRejectedCount; return false; }
+            block.roundBlockIndex = uint32_t(blockSeq - m_ringBaselineSeq);
+        }
+        const size_t bytes = size_t(m_ringBlockSize) * sizeof(float)
+                           + size_t(m_ringAlineCount) * (sizeof(float) + 1);
+        constexpr size_t kMaxPendingBytes = 1024ull * 1024 * 1024;
+        if (rawBlock.size() == m_ringBlockSize && anglesDeg.size() == m_ringAlineCount
+            && channels.size() == m_ringAlineCount
+            && m_running.load() && !m_fbpPreparing && m_ringRequestedEpoch && !m_ringInputFailed
+            && m_ringPendingCount < 8 && bytes <= kMaxPendingBytes
+            && m_ringRetiredBytes <= kMaxPendingBytes - bytes
+            && m_ringRetiredInFlightBytes <= kMaxPendingBytes - bytes - m_ringRetiredBytes
+            && m_ringPendingBytes <= kMaxPendingBytes - bytes - m_ringRetiredBytes - m_ringRetiredInFlightBytes
+            && m_ringSubmitIndex != std::numeric_limits<std::uint64_t>::max()) {
+            block.index = ++m_ringSubmitIndex;
+            if (outSubmitIndex) *outSubmitIndex = block.index;
+            m_ringPendingBytes += bytes; ++m_ringPendingCount;
+            m_ringQueue.push_back(std::move(block));
+            accepted = true; ++m_ringAcceptedCount;
+        } else { ++m_ringRejectedCount; }
     }
-    if (rawBlock.size() != m_ringBlockSize ||
-        anglesDeg.size() != m_ringAlineCount ||
-        channels.size() != m_ringAlineCount) {
-        emit svcError(QString("环形块大小错误：期望 %1，实际 %2")
-                          .arg(m_ringBlockSize).arg(rawBlock.size()));
-        return false;
-    }
-
-    const uint64_t submitWallUs = ring_shm_obs::wallNowUs();
-    uint8_t previousReady = 0;
-    uint32_t previousSeq = 0;
-    m_ringSharedMemory->lock();
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    previousReady = h->block_ready;
-    previousSeq = h->block_seq;
-    auto *blockBuf = reinterpret_cast<float *>(h + 1);
-    std::memcpy(blockBuf, rawBlock.constData(),
-                static_cast<size_t>(m_ringBlockSize) * sizeof(float));
-    auto *angleBuf = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) + ringAnglesOffset(m_ringBlockSize));
-    auto *chanBuf = reinterpret_cast<uint8_t *>(reinterpret_cast<uint8_t *>(h + 1) + ringChannelsOffset(m_ringBlockSize, m_ringAlineCount));
-    std::memcpy(angleBuf, anglesDeg.constData(), static_cast<size_t>(m_ringAlineCount) * sizeof(float));
-    std::memcpy(chanBuf, channels.constData(), static_cast<size_t>(m_ringAlineCount));
-    h->alines = static_cast<uint32_t>(m_ringAlineCount);
-    h->block_seq   = static_cast<uint32_t>(blockSeq);
-    h->block_ready = 1;
-    m_ringSharedMemory->unlock();
-
-    const auto event = m_ringObs.observeProducerSubmit(
-        previousReady, previousSeq, static_cast<uint32_t>(blockSeq), submitWallUs);
-    QJsonObject ready;
-    ready[QStringLiteral("cmd")] = QStringLiteral("ring_block_ready");
-    ready[QStringLiteral("seq")] = blockSeq;
-    ready[QStringLiteral("submit_index")] = static_cast<qint64>(event.submitIndex);
-    ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(event.submitWallUs);
-    ring_round_identity::add(ready, round);
-    // Host->svc input carries the source round-end fact only. The service
-    // derives ring_snapshot_ready.round_complete (reconstructionComplete)
-    // from its own exact consumed block count.
-    ready[QStringLiteral("source_round_complete")] = sourceRoundComplete;
-    if (sectorCcw == 0 || sectorCcw == 1)
-        ready[QStringLiteral("sector_ccw")] = sectorCcw;
-    if (outSubmitIndex) *outSubmitIndex = event.submitIndex;
-    const bool sent = sendCommand(ready);
-
-    if (event.slotBusy || event.periodicDue) {
-        QJsonObject diag = makeRingObservation(event.slotBusy ? "producer_overwrite" : "periodic",
-                                               m_ringObs.snapshot());
-        diag[QStringLiteral("previous_ready")] = static_cast<int>(previousReady);
-        diag[QStringLiteral("previous_seq")] = static_cast<qint64>(previousSeq);
-        diag[QStringLiteral("new_seq")] = static_cast<qint64>(event.newSeq);
-        diag[QStringLiteral("submit_interval_us")] = static_cast<qint64>(event.submitIntervalUs);
-        const QJsonDocument doc(diag);
-        emit svcStatus(QStringLiteral("[RingSHMObs] ")
-                           + QString::fromUtf8(doc.toJson(QJsonDocument::Compact)), 0);
-    }
-    return sent;
+    return accepted;
 }
 
 bool ImagingController::sendRingReset()
 {
-    const bool sent = sendCommand({{"cmd", "ring_reset"}});
-    if (sent)
-        m_ringObs.resetEpoch();
-    return sent;
+    std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+    if (!m_running.load() || !m_ringRequestedEpoch || m_ringInputFailed) return false;
+    const size_t blockBytes = size_t(m_ringBlockSize) * sizeof(float)
+                            + size_t(m_ringAlineCount) * (sizeof(float) + 1);
+    m_ringRetiredInFlightBytes += (m_ringPendingCount - m_ringQueue.size()) * blockBytes;
+    if (!m_ringQueue.empty()) {
+        m_ringRetiredBytes += m_ringQueue.size() * blockBytes;
+        m_ringRetiredQueues.push_back(std::move(m_ringQueue));
+    }
+    m_ringPendingBytes = 0; m_ringPendingCount = 0;
+    m_ringRequestedEpoch = newRingEpoch();
+    m_ringBaselineRound = {}; m_ringBaselineSeq = 0;
+    m_ringInputFailed = false;
+    return true;
+}
+
+void ImagingController::clearRingInput()
+{
+    std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+    m_ringQueue.clear(); m_ringRetiredQueues.clear(); m_ringRetiredBytes = 0; m_ringRetiredInFlightBytes = 0; m_ringPendingBytes = 0; m_ringPendingCount = 0;
+    m_ringRequestedEpoch = 0;
+    m_ringBaselineRound = {}; m_ringBaselineSeq = 0;
+    m_ringInputFailed = true;
 }
 
 bool ImagingController::setupRingSharedMemory(int blockSize, int frameSize, int alines, int nx)
 {
-    if (m_ringSharedMemory) {
-        m_ringSharedMemory->detach();
-        delete m_ringSharedMemory;
-        m_ringSharedMemory = nullptr;
-    }
-
-    const size_t totalSize = ringImagingShmTotalSizeV2(blockSize, frameSize, alines,
-                                                       m_ringDisplayFrameSize);
-    m_ringSharedMemory = new QSharedMemory("MC_410T_RingShm", this);
-    if (!m_ringSharedMemory->create(static_cast<int>(totalSize))) {
-        if (m_ringSharedMemory->error() == QSharedMemory::AlreadyExists) {
-            if (!m_ringSharedMemory->attach()) {
-                emit svcError(QString("环形共享内存附接失败: %1")
-                                  .arg(m_ringSharedMemory->errorString()));
-                delete m_ringSharedMemory;
-                m_ringSharedMemory = nullptr;
-                return false;
-            }
-            // v2 强校验：陈旧/尺寸不匹配的残留 SHM 一律拒绝，避免越界读写
-            if (!ringShmMatches(blockSize, frameSize, alines, nx, totalSize)) {
-                emit svcError("环形共享内存校验失败：存在旧版本或尺寸不匹配的残留共享内存，"
-                              "请先关闭残留 ImagingSvc 进程后重试");
-                m_ringSharedMemory->detach();
-                delete m_ringSharedMemory;
-                m_ringSharedMemory = nullptr;
-                return false;
-            }
-            return true;
-        }
-        emit svcError(QString("环形共享内存创建失败: %1")
-                          .arg(m_ringSharedMemory->errorString()));
-        delete m_ringSharedMemory;
-        m_ringSharedMemory = nullptr;
+    clearRingInput();
+    m_ringMapping.close();
+    const size_t total = ringImagingShmTotalSizeV3(blockSize, frameSize, alines, m_ringDisplayFrameSize);
+    const auto created = m_ringMapping.create(total);
+    if (created != ring_input::Result::Ok) {
+        emit svcError(QStringLiteral("环形 v3 映射创建失败（可能存在旧进程），result=%1").arg(int(created)));
         return false;
     }
-
-    m_ringSharedMemory->lock();
-    std::memset(m_ringSharedMemory->data(), 0, totalSize);
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    h->magic       = 0x52494E47;  // "RING"
-    h->version     = 2;
-    h->block_size  = static_cast<uint32_t>(blockSize);
-    h->alines      = static_cast<uint32_t>(alines);
-    h->frame_size  = static_cast<uint32_t>(frameSize);
-    h->nx          = static_cast<uint16_t>(nx);
-    h->ny          = static_cast<uint16_t>(nx);
-    h->display_nx  = static_cast<uint16_t>(m_ringDisplayNx);
-    h->display_ny  = static_cast<uint16_t>(m_ringDisplayNx);
-    h->display_frame_size = static_cast<uint32_t>(m_ringDisplayFrameSize);
-    h->snapshot_step      = static_cast<uint32_t>(m_ringDisplayStep);
-    h->flags              = 0;
-    m_ringSharedMemory->unlock();
+    std::memset(m_ringMapping.data(), 0, total);
+    auto *h = static_cast<RingImagingShmHeader *>(m_ringMapping.data());
+    h->magic = 0x52494E47u; h->version = 2;
+    h->block_size = uint32_t(blockSize); h->alines = uint32_t(alines);
+    h->frame_size = uint32_t(frameSize); h->nx = uint16_t(nx); h->ny = uint16_t(nx);
+    h->display_nx = uint16_t(m_ringDisplayNx); h->display_ny = uint16_t(m_ringDisplayNx);
+    h->display_frame_size = uint32_t(m_ringDisplayFrameSize);
+    h->snapshot_step = uint32_t(m_ringDisplayStep);
+    const auto epoch = newRingEpoch();
+    const auto result = ring_input::initialize(m_ringInputMutex, m_ringMapping.data(), m_ringMapping.capacity(), epoch, 5);
+    if (result != ring_input::Result::Ok) {
+        emit svcError(QStringLiteral("环形 v3 映射初始化失败 result=%1").arg(int(result)));
+        m_ringMapping.close(); return false;
+    }
+    { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+      m_ringRequestedEpoch = epoch; m_ringInputFailed = false; }
+    m_ringActiveEpoch = epoch; m_ringHasInFlight = false; m_ringPublished = false;
+    m_ringResetPending = true; m_ringResetTarget = epoch;
+    m_ringDeadline = std::chrono::steady_clock::time_point::max();
     return true;
 }
 
-bool ImagingController::ringShmMatches(int blockSize, int frameSize, int alines, int nx,
-                                       size_t expectedTotal) const
+void ImagingController::pumpRingInput()
 {
-    if (!m_ringSharedMemory) return false;
-    if (static_cast<size_t>(m_ringSharedMemory->size()) != expectedTotal) return false;
-
-    m_ringSharedMemory->lock();
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory->data());
-    const bool ok = h != nullptr
-        && h->magic == 0x52494E47u
-        && h->version == 2u
-        && h->block_size == static_cast<uint32_t>(blockSize)
-        && h->alines == static_cast<uint32_t>(alines)
-        && h->frame_size == static_cast<uint32_t>(frameSize)
-        && h->nx == static_cast<uint16_t>(nx)
-        && h->ny == static_cast<uint16_t>(nx)
-        && h->display_nx == static_cast<uint16_t>(m_ringDisplayNx)
-        && h->display_ny == static_cast<uint16_t>(m_ringDisplayNx)
-        && h->display_frame_size == static_cast<uint32_t>(m_ringDisplayFrameSize)
-        && h->snapshot_step == static_cast<uint32_t>(m_ringDisplayStep);
-    m_ringSharedMemory->unlock();
-    return ok;
+    if (!m_ringMode || !m_ringMapping.data() || !m_running.load() || m_fbpPreparing) return;
+    std::uint64_t requested, acceptedCount, rejectedCount; bool failed;
+    std::vector<std::deque<RingBlock>> retired;
+    size_t retiredBytes = 0;
+    { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+      retired.swap(m_ringRetiredQueues); retiredBytes = m_ringRetiredBytes;
+      requested = m_ringRequestedEpoch; failed = m_ringInputFailed;
+      acceptedCount = m_ringAcceptedCount; rejectedCount = m_ringRejectedCount; }
+    if (acceptedCount != m_ringReportedAccepted || rejectedCount != m_ringReportedRejected) {
+        emit svcStatus(QStringLiteral("[RingInput] enqueued_total=%1 dropped_total=%2")
+                           .arg(acceptedCount).arg(rejectedCount), 0);
+        m_ringReportedAccepted = acceptedCount; m_ringReportedRejected = rejectedCount;
+    }
+    retired.clear();
+    { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+      m_ringRetiredBytes -= retiredBytes; }
+    if (!requested) return;
+    auto fail = [this, requested, failed](const QString &reason) {
+        if (failed) { emit svcError(QStringLiteral("环形输入撤回失败：") + reason); stopSvc(); return; }
+        { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+          if (m_ringRequestedEpoch != requested) return;
+          m_ringInputFailed = true; m_ringQueue.clear();
+          m_ringPendingBytes = 0; m_ringPendingCount = 0;
+          // Invalidate a possibly still-ready slot on the next pump.
+          m_ringRequestedEpoch = newRingEpoch(); }
+        emit ringInputFailed();
+        m_ringInFlight = RingBlock{}; m_ringHasInFlight = false; m_ringPublished = false;
+        emit svcError(QStringLiteral("环形输入中止：") + reason);
+    };
+    const auto now = std::chrono::steady_clock::now();
+    if (requested != m_ringActiveEpoch) {
+        if (m_ringResetTarget != requested) {
+            m_ringResetTarget = requested;
+            m_ringDeadline = now + std::chrono::seconds(2);
+        }
+        if (now >= m_ringDeadline) { fail(QStringLiteral("共享槽重置超时")); return; }
+        const auto r = ring_input::reset(m_ringInputMutex, m_ringMapping.data(), m_ringMapping.capacity(), requested, 5);
+        if (r == ring_input::Result::Timeout) return;
+        if (r != ring_input::Result::Ok) { fail(QStringLiteral("共享槽重置失败 %1").arg(int(r))); return; }
+        m_ringActiveEpoch = requested; m_ringInFlight = RingBlock{}; m_ringHasInFlight = false; m_ringPublished = false;
+        { std::lock_guard<std::mutex> lock(m_ringQueueMutex); m_ringRetiredInFlightBytes = 0; }
+        m_ringResetPending = true; m_ringNextNotify = now;
+        m_ringDeadline = now + std::chrono::seconds(2);
+        m_ringObs.resetEpoch();
+    }
+    if (failed) { stopSvc(); return; }
+    if (m_ringResetPending) {
+        if (m_ringDeadline == std::chrono::steady_clock::time_point::max())
+            m_ringDeadline = now + std::chrono::seconds(2);
+        if (now >= m_ringDeadline) { fail(QStringLiteral("重置信令超时")); return; }
+        if (now < m_ringNextNotify) return;
+        m_ringNextNotify = now + std::chrono::milliseconds(100);
+        const bool sent = sendCommand({{"cmd", "ring_reset"}, {"input_epoch", QString::number(m_ringActiveEpoch)}});
+        emit svcStatus(QStringLiteral("[RingInput] reset_notification_%1 epoch=%2")
+            .arg(sent ? QStringLiteral("sent") : QStringLiteral("failed")).arg(m_ringActiveEpoch), 0);
+        if (!sent) return;
+        m_ringResetPending = false;
+    }
+    if (!m_ringHasInFlight) {
+        std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+        if (m_ringInputFailed || m_ringRequestedEpoch != m_ringActiveEpoch || m_ringQueue.empty()) return;
+        m_ringInFlight = std::move(m_ringQueue.front()); m_ringQueue.pop_front();
+        m_ringHasInFlight = true; m_ringPublished = false;
+        m_ringNextNotify = now;
+        m_ringDeadline = now + std::chrono::seconds(2);
+    }
+    if (now >= m_ringDeadline) { fail(QStringLiteral("块发布或消费确认超时")); return; }
+    if (!m_ringPublished) {
+        const auto &b = m_ringInFlight;
+        ring_input::Identity id{m_ringActiveEpoch, b.index, b.round.measurementSession,
+            b.round.roundGeneration, b.wallUs, uint32_t(b.seq), b.direction, b.complete, b.roundBlockIndex};
+        const auto r = ring_input::publish(m_ringInputMutex, m_ringMapping.data(), m_ringMapping.capacity(), id,
+                                         b.raw.constData(), b.angles.constData(), b.channels.constData(), 5);
+        if (r == ring_input::Result::Busy || r == ring_input::Result::Timeout) return;
+        if (r != ring_input::Result::Ok) { fail(QStringLiteral("发布失败 %1").arg(int(r))); return; }
+        m_ringPublished = true;
+        const auto event = m_ringObs.observeProducerSubmit(0, 0, uint32_t(b.seq), b.wallUs, b.index);
+        if (event.periodicDue) {
+            const QJsonDocument doc(makeRingObservation("periodic", m_ringObs.snapshot()));
+            emit svcStatus(QStringLiteral("[RingSHMObs] ")
+                               + QString::fromUtf8(doc.toJson(QJsonDocument::Compact)), 0);
+        }
+    }
+    bool copied = false;
+    const auto ack = ring_input::acknowledged(m_ringInputMutex, m_ringMapping.data(), m_ringMapping.capacity(),
+                                              m_ringActiveEpoch, m_ringInFlight.index, copied, 5);
+    if (ack == ring_input::Result::Timeout) return;
+    if (ack != ring_input::Result::Ok) { fail(QStringLiteral("消费确认失败 %1").arg(int(ack))); return; }
+    if (copied) {
+        { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+          if (m_ringRequestedEpoch == m_ringActiveEpoch && m_ringPendingCount) {
+              --m_ringPendingCount;
+              m_ringPendingBytes -= size_t(m_ringBlockSize) * sizeof(float)
+                  + size_t(m_ringAlineCount) * (sizeof(float) + 1);
+          } }
+        emit svcStatus(QStringLiteral("[RingInput] acknowledged id=%1").arg(m_ringInFlight.index), 0);
+        m_ringInFlight = RingBlock{}; m_ringHasInFlight = false; m_ringPublished = false; return;
+    }
+    if (now < m_ringNextNotify) return;
+    m_ringNextNotify = now + std::chrono::milliseconds(100);
+    QJsonObject ready{{"cmd", "ring_block_ready"}, {"input_epoch", QString::number(m_ringActiveEpoch)},
+                      {"publication_id", QString::number(m_ringInFlight.index)}, {"seq", m_ringInFlight.seq},
+                      {"submit_index", static_cast<qint64>(m_ringInFlight.index)}};
+#ifdef RING_INPUT_TEST_SEAM
+    int remaining = m_testFailRingNotifications.load();
+    while (remaining > 0 && !m_testFailRingNotifications.compare_exchange_weak(remaining, remaining - 1)) {}
+    const bool sent = remaining > 0 ? false : sendCommand(ready);
+#else
+    const bool sent = sendCommand(ready);
+#endif
+    emit svcStatus(QStringLiteral("[RingInput] notification_%1 id=%2")
+        .arg(sent ? QStringLiteral("sent") : QStringLiteral("failed")).arg(m_ringInFlight.index), 0);
 }
 
 void ImagingController::processRingMessage(const QJsonObject &msg)
 {
     const QString cmd = msg["cmd"].toString();
-    if (cmd != "ring_snapshot_ready" || !m_ringSharedMemory) return;
+    if (cmd != "ring_snapshot_ready" || !m_ringMapping.data()) return;
 
     const auto identity = ring_round_identity::parse(msg);
     if (!identity.valid) {
@@ -559,7 +659,7 @@ void ImagingController::startRingFrameWorker(int seq,
                                              bool hasSubmitIndex,
                                              const paimage::RoundIdentity &round, bool roundComplete)
 {
-    if (!m_running.load(std::memory_order_relaxed) || !m_ringSharedMemory) return;
+    if (!m_running.load(std::memory_order_relaxed) || !m_ringMapping.data()) return;
 
     {
         std::lock_guard<std::mutex> lk(m_ringReqMutex);
@@ -583,7 +683,8 @@ void ImagingController::ensureRingWorkerStarted()
         std::lock_guard<std::mutex> rl(m_ringReqMutex);
         if (m_ringWorkerStop) return;
     }
-    m_ringWorker = std::thread([this]() { ringWorkerLoop(); });
+    const quint64 lifecycle = m_svcLifecycleToken; // owner thread only
+    m_ringWorker = std::thread([this, lifecycle]() { ringWorkerLoop(lifecycle); });
 }
 
 void ImagingController::stopRingWorker()
@@ -602,7 +703,7 @@ void ImagingController::stopRingWorker()
         m_ringWorker.join();
 }
 
-void ImagingController::ringWorkerLoop()
+void ImagingController::ringWorkerLoop(quint64 lifecycle)
 {
 #ifdef _WIN32
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
@@ -628,17 +729,17 @@ void ImagingController::ringWorkerLoop()
             m_ringReqPending = false;
         }
         if (seq >= 0)
-            processRingFrame(seq, submitIndex, hasSubmitIndex, round, roundComplete);
+            processRingFrame(seq, submitIndex, hasSubmitIndex, round, roundComplete, lifecycle);
     }
 }
 
 void ImagingController::processRingFrame(int seq,
                                          std::uint64_t submitIndex,
                                          bool hasSubmitIndex,
-                                         const paimage::RoundIdentity &round, bool roundComplete)
+                                         const paimage::RoundIdentity &round, bool roundComplete,
+                                         quint64 lifecycle)
 {
-    QSharedMemory *shm = m_ringSharedMemory;
-    if (!m_running.load(std::memory_order_relaxed) || !shm) return;
+    if (!m_running.load(std::memory_order_relaxed) || !m_ringMapping.data()) return;
 
     // 方案A：固定双缓冲（各 nx²*2 float）。worker 只写“已被 UI 消费”的缓冲，
     // UI 读期间缓冲被占用，worker 直接丢弃本快照（latest-wins），杜绝覆盖竞态。
@@ -655,8 +756,22 @@ void ImagingController::processRingFrame(int seq,
         m_dispBuf[target].assign(frameSize * 2, 0.0f);
 
     std::uint32_t observedSeq = 0;
-    const auto copied = ring_snapshot::copy(*shm, static_cast<std::uint32_t>(seq),
-        blockSize, alines, frameSize, m_dispBuf[target].data(), observedSeq);
+    auto copied = ring_snapshot::CopyResult::LockFailed;
+    const auto locked = m_ringOutputMutex.lock(5);
+    if (locked == ring_input::Result::Ok) {
+        struct OutputView { ring_input::NativeMapping &map; bool lock() { return true; }
+            void unlock() {} void *data() {
+                auto *h = static_cast<RingImagingShmHeader *>(map.data());
+                return h && h->frame_ready ? h : nullptr;
+            } } view{m_ringMapping};
+        copied = ring_snapshot::copy(view, static_cast<std::uint32_t>(seq),
+            blockSize, alines, frameSize, m_dispBuf[target].data(), observedSeq);
+        m_ringOutputMutex.unlock();
+    } else if (locked == ring_input::Result::Abandoned) {
+        auto *header = static_cast<RingImagingShmHeader *>(m_ringMapping.data());
+        if (header) header->frame_ready = 0;
+        m_ringOutputMutex.unlock();
+    }
     if (copied != ring_snapshot::CopyResult::Copied) {
         m_dispConsumed[target].store(true, std::memory_order_release);
         emit svcStatus(QStringLiteral("[RingSnapshot] copy rejected result=%1 notify_seq=%2 shm_seq=%3")
@@ -673,8 +788,8 @@ void ImagingController::processRingFrame(int seq,
         return;
     }
     QMetaObject::invokeMethod(this, [this, seq, submitIndex, hasSubmitIndex,
-                                     round, roundComplete, target]() {
-        if (!m_running.load(std::memory_order_relaxed)) {
+                                     round, roundComplete, target, lifecycle]() {
+        if (lifecycle != m_svcLifecycleToken || !m_running.load(std::memory_order_relaxed)) {
             releaseSnapshotBuffer(target);
             return;
         }
@@ -802,7 +917,8 @@ int ImagingController::ringBlocksPerFrame() const
 
 std::uint64_t ImagingController::ringLastSubmitIndex() const
 {
-    return m_ringObs.snapshot().lastSubmitIndex;
+    std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+    return m_ringSubmitIndex;
 }
 
 // =====================================================================
@@ -817,16 +933,23 @@ void ImagingController::onSvcStarted()
 void ImagingController::onSvcFinished(int exitCode, QProcess::ExitStatus status)
 {
     m_running = false;
+    clearRingInput();
+    if (m_ringMode) emit ringInputFailed();
     if (status == QProcess::CrashExit && !m_suppressSvcCrashError) {
         emit svcError(QString("ImagingSvc crashed (exit code %1)").arg(exitCode));
     }
+    finishStopSvc();
 }
 
 void ImagingController::onSvcErrorOccurred(QProcess::ProcessError error)
 {
     m_running = false;
+    clearRingInput();
+    if (m_ringMode) emit ringInputFailed();
     if (!m_suppressSvcCrashError)
         emit svcError(QString("ImagingSvc process error: %1").arg(error));
+    if (error == QProcess::FailedToStart) finishStopSvc();
+    else stopSvc();
 }
 
 // =====================================================================
@@ -834,6 +957,7 @@ void ImagingController::onSvcErrorOccurred(QProcess::ProcessError error)
 // =====================================================================
 void ImagingController::pollControlMessages()
 {
+    pumpRingInput();
     try {
         for (;;) {
             zmq::message_t msg;
@@ -1009,6 +1133,7 @@ void ImagingController::sendConfigureAndStart()
 
                 QJsonObject params;
         params["imagingMode"] = "ring";
+        params["ringInputProtocolVersion"] = 3;
         params["ring"] = ring;
         const bool sent=sendCommand({{"cmd", "configure"}, {"params", params}});
         if (!sent) { emit svcError(QStringLiteral("环形成像配置发送失败")); stopSvc(); return; }

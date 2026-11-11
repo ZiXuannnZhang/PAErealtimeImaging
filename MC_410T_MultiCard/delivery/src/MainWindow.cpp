@@ -547,6 +547,9 @@ MainWindow::MainWindow(QWidget *parent)
             m_imagingController->releaseSnapshotBuffer(bufferIndex);
         }
     });
+    connect(m_imagingController, &ImagingController::ringInputFailed, this, [this] {
+        m_ringSnapshotAdmissionBlocked.store(true, std::memory_order_release);
+    });
     connect(m_imagingController, &ImagingController::svcError,
             this, &MainWindow::onImagingError);
     connect(m_imagingController, &ImagingController::svcStatus,
@@ -597,9 +600,8 @@ MainWindow::MainWindow(QWidget *parent)
                     && m_imagingController->submitRingBlock(
                         rawQ, angQ, chQ, round, blockSeq, &submitIndex, sourceRoundComplete,
                         m_ringAssembler->activeSectorCcw());
-                // submit_index is the producer identity domain. Record it
-                // even when dontwait send returned false: the missing
-                // notification is a gap, never an attempt-count alias.
+                // A nonzero submit_index identifies a block admitted to the
+                // bounded local queue, even before its IPC notification.
                 if (submitIndex != 0)
                     m_roundUi.recordSubmitIndex(submitIndex);
                 if (m_imagingBypass) m_imagingBypass->observeBlockResult(submitted);
@@ -2201,6 +2203,8 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                         if (!m_ringAssembler || !m_ringAssemblerConfigured) return;
                         m_ringResetCommandSent.store(false, std::memory_order_release);
                         m_ringAssembler->resetAfterPhysicalTimeout();
+                        // True means the local reset barrier was installed;
+                        // the owner sends it before any new-epoch block.
                         const bool sent = m_ringResetCommandSent.exchange(false, std::memory_order_acq_rel);
                         const auto cutoff = sent && m_imagingController
                             ? m_imagingController->ringLastSubmitIndex() : 0;

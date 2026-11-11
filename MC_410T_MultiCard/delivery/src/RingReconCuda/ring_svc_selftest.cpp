@@ -5,6 +5,7 @@
 // 环形重建，逐块保存 wl1/wl2 帧供对照。多通道模拟要求 360° 数据集。
 #include "ImagingSharedMemory.h"
 #include "RingShmObservability.h"
+#include "RingNativeMapping.h"
 #include "RingBlockAssembler.h"
 
 #include <QCoreApplication>
@@ -222,18 +223,14 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    QSharedMemory shm("MC_410T_RingShm");
-    if (!shm.create(static_cast<int>(
-            ringImagingShmTotalSizeV2(blockSize, frameSize, alines, frameSize)))) {
-        if (shm.error() == QSharedMemory::AlreadyExists) shm.attach();
-        else { std::fprintf(stderr, "ring shm create failed\n"); return 2; }
-    }
-    shm.lock();
-    std::memset(shm.data(), 0,
-                ringImagingShmTotalSizeV2(blockSize, frameSize, alines, frameSize));
+    ring_input::NativeMapping shm;
+    ring_input::Mutex inputMutex, outputMutex(ring_input::kOutputMutexName);
+    const size_t shmBytes = ringImagingShmTotalSizeV3(blockSize, frameSize, alines, frameSize);
+    if (shm.create(shmBytes) != ring_input::Result::Ok) { std::fprintf(stderr, "ring shm create failed\n"); return 2; }
+    std::memset(shm.data(), 0, shmBytes);
     auto* hdr = static_cast<RingImagingShmHeader*>(shm.data());
     hdr->magic = 0x52494E47;
-    hdr->version = 2;   // 方案A：显示区=全分辨率区，display 字段与 v2 强校验一致
+    hdr->version = 3;   // 方案A：显示区=全分辨率区，display 字段与 v2 强校验一致
     hdr->block_size = static_cast<uint32_t>(blockSize);
     hdr->frame_size = static_cast<uint32_t>(frameSize);
     hdr->alines = static_cast<uint32_t>(alines);
@@ -244,7 +241,8 @@ int main(int argc, char** argv) {
     hdr->display_frame_size = static_cast<uint32_t>(frameSize);
     hdr->snapshot_step = 1;
     hdr->flags = 0;
-    shm.unlock();
+    uint64_t epoch = 1, publication = 0;
+    if (ring_input::initialize(inputMutex, shm.data(), shm.capacity(), epoch, 20) != ring_input::Result::Ok) return 2;
 
     QProcess svc;
     if (!noLaunch) {
@@ -257,6 +255,14 @@ int main(int argc, char** argv) {
         // 否则连接建立前的 configure 会被丢弃导致 svc 不响应。
         QThread::msleep(1500);
     }
+
+    auto exitWithCleanup = [&](int code) {
+        if (!noLaunch && svc.state() != QProcess::NotRunning) {
+            svc.terminate();
+            if (!svc.waitForFinished(1500)) { svc.kill(); svc.waitForFinished(1500); }
+        }
+        std::exit(code);
+    };
 
     QJsonObject ring;
     ring["sampDepth"] = sampDepth;
@@ -383,6 +389,7 @@ int main(int argc, char** argv) {
     ring["timevarLowpass"] = timevar;
     QJsonObject params;
     params["imagingMode"] = "ring";
+    params["ringInputProtocolVersion"] = 3;
     params["ring"] = ring;
     // PAIR 未连接时 dontwait send 会 EWOULDBLOCK：以“可写”为 svc ZMQ 就绪信号，
     // 冷启动（如 Defender 首扫新构建 exe）时反复尝试，避免 configure 被静默丢弃。
@@ -439,10 +446,20 @@ int main(int argc, char** argv) {
     QJsonObject mismatchObservation;
     int mismatchCount = 0;
     RingBlockAssembler assembler;
+    paimage::RoundIdentity baselineRound;
+    int baselineSeq = 0;
     assembler.setBlockCallback([&](std::vector<float> &&raw, std::vector<float> &&angles,
                                    std::vector<uint8_t> &&chIds, int blockSeq,
                                    const paimage::RoundIdentity &round, bool sourceRoundComplete) {
         const auto t0 = std::chrono::steady_clock::now();
+        if (baselineRound.valid() && round < baselineRound) {
+            std::fprintf(stderr, "stale round in assembler callback\n"); exitWithCleanup(2);
+        }
+        if (round != baselineRound) { baselineRound = round; baselineSeq = blockSeq; }
+        if (blockSeq < baselineSeq) {
+            std::fprintf(stderr, "backwards block sequence in assembler callback\n"); exitWithCleanup(2);
+        }
+        const auto roundBlockIndex = static_cast<uint32_t>(blockSeq - baselineSeq);
         if (blockSeq == dropBlock) {
             // 确定性丢块：不写 SHM、不发通知、不等快照。模拟生产链路的
             // SHM latest-wins / notification gap——svc 永远收不到该块，
@@ -457,33 +474,17 @@ int main(int argc, char** argv) {
             haveRoundGen = true;
             roundFirstSubmitUs = submitWallUs;
         }
-        uint8_t previousReady = 0;
-        uint32_t previousSeq = 0;
-        shm.lock();
-        auto* h = static_cast<RingImagingShmHeader*>(shm.data());
-        previousReady = h->block_ready;
-        previousSeq = h->block_seq;
-        std::memcpy(reinterpret_cast<float*>(h + 1), raw.data(),
-                    static_cast<size_t>(blockSize) * sizeof(float));
-        std::memcpy(reinterpret_cast<uint8_t*>(h + 1) + ringAnglesOffset(blockSize),
-                    angles.data(), static_cast<size_t>(alines) * sizeof(float));
-        std::memcpy(reinterpret_cast<uint8_t*>(h + 1) + ringChannelsOffset(blockSize, alines),
-                    chIds.data(), static_cast<size_t>(alines));
-        h->block_seq = static_cast<uint32_t>(blockSeq);
-        h->block_ready = 1;
-        shm.unlock();
-        const auto producerEvent = producerObs.observeProducerSubmit(
-            previousReady, previousSeq, static_cast<uint32_t>(blockSeq), submitWallUs);
-        QJsonObject ready;
-        ready[QStringLiteral("cmd")] = QStringLiteral("ring_block_ready");
-        ready[QStringLiteral("seq")] = blockSeq;
-        ready[QStringLiteral("submit_index")] = static_cast<qint64>(producerEvent.submitIndex);
-        ready[QStringLiteral("submit_wall_us")] = static_cast<qint64>(producerEvent.submitWallUs);
-        ring_round_identity::add(ready, round);
-        // 输入只承载 source round end；svc 回传的 round_complete 才是
-        // reconstructionComplete（source end + 精确块数）。
-        ready[QStringLiteral("source_round_complete")] = sourceRoundComplete;
-        sendJson(sock, ready);
+        ++publication;
+        const ring_input::Identity identity{epoch, publication, round.measurementSession, round.roundGeneration,
+                                            submitWallUs, static_cast<uint32_t>(blockSeq), sectorCcw, sourceRoundComplete, roundBlockIndex};
+        if (ring_input::publish(inputMutex, shm.data(), shm.capacity(), identity,
+                                raw.data(), angles.data(), chIds.data(), 20) != ring_input::Result::Ok) {
+            std::fprintf(stderr, "input publish failed\n"); exitWithCleanup(2);
+        }
+        const auto producerEvent = producerObs.observeProducerSubmit(0, 0, static_cast<uint32_t>(blockSeq), submitWallUs);
+        QJsonObject ready{{"cmd", "ring_block_ready"}, {"input_epoch", QString::number(epoch)},
+                          {"publication_id", QString::number(publication)}};
+        if (!sendJson(sock, ready)) { std::fprintf(stderr, "input notification failed\n"); exitWithCleanup(2); }
 
         // 丢块轮的 final 块：svc 实际消费块数 < 期望块数，round_complete 必须
         // 为 false；其余块保持 sourceRoundComplete 回显。
@@ -532,7 +533,7 @@ int main(int argc, char** argv) {
         }
         if (!got || !identityMatch) {
             std::fprintf(stderr, "timeout at block %d\n", blockSeq);
-            std::exit(2);
+            exitWithCleanup(2);
         }
         const double snapshotMs = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-t0).count();
         std::printf("[block-timing] submit=%llu roundtrip_ms=%.9f service_ms=%.9f\n",
@@ -547,13 +548,13 @@ int main(int argc, char** argv) {
         }
 
         std::vector<float> wl1(frameSize), wl2(frameSize);
-        shm.lock();
-        h = static_cast<RingImagingShmHeader*>(shm.data());
+        if (outputMutex.lock(20) != ring_input::Result::Ok) { std::fprintf(stderr,"output lock failed\n"); exitWithCleanup(2); }
+        auto* h = static_cast<RingImagingShmHeader*>(shm.data());
         auto* fb = reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(h + 1) +
                                            ringFramesOffset(blockSize, alines));
         std::memcpy(wl1.data(), fb, static_cast<size_t>(frameSize) * sizeof(float));
         std::memcpy(wl2.data(), fb + frameSize, static_cast<size_t>(frameSize) * sizeof(float));
-        shm.unlock();
+        outputMutex.unlock();
 
         if (blockSeq > 0) {
             const size_t n = static_cast<size_t>(frameSize);
@@ -576,7 +577,7 @@ int main(int argc, char** argv) {
             std::printf("[barrier-test] fresh-round max_pixel_difference=%.9g\n", maxDiff);
             if (!std::isfinite(maxDiff) || maxDiff > 1e-6) {
                 std::fprintf(stderr, "cross-round reconstruction contamination\n");
-                std::exit(4);
+                exitWithCleanup(4);
             }
         }
         if (dropBlock >= 0 && blockSeq == nBlocks) {
@@ -592,7 +593,7 @@ int main(int argc, char** argv) {
                         maxDiff);
             if (!std::isfinite(maxDiff) || maxDiff > 1e-6) {
                 std::fprintf(stderr, "incomplete round contaminated the next round\n");
-                std::exit(5);
+                exitWithCleanup(5);
             }
         }
 
@@ -603,14 +604,14 @@ int main(int argc, char** argv) {
                       blockSeq + 1);
         if (!noSave && !saveRaw(outDir + "/" + nm, wl1)) {
             std::fprintf(stderr, "write %s failed\n", nm);
-            std::exit(2);
+            exitWithCleanup(2);
         }
         std::snprintf(nm, sizeof(nm), "svc_wl2_r%03llu_%03d.raw",
                       static_cast<unsigned long long>(round.roundGeneration),
                       blockSeq + 1);
         if (!noSave && !saveRaw(outDir + "/" + nm, wl2)) {
             std::fprintf(stderr, "write %s failed\n", nm);
-            std::exit(2);
+            exitWithCleanup(2);
         }
 
         const auto t1 = std::chrono::steady_clock::now();
@@ -622,7 +623,9 @@ int main(int argc, char** argv) {
                         sectorWidth, step, K, 1, timeoutResetSec, sectorCcw);
     assembler.setTimeoutCallback([&]() {
         // 模拟接收端：触发级超时判定新一圈，通知 svc 清空重建累积
-        sendJson(sock, {{"cmd", "ring_reset"}});
+        ++epoch; publication = 0; baselineRound = {}; baselineSeq = 0;
+        if (ring_input::reset(inputMutex, shm.data(), shm.capacity(), epoch, 20) != ring_input::Result::Ok ||
+            !sendJson(sock, {{"cmd", "ring_reset"}, {"input_epoch", QString::number(epoch)}})) exitWithCleanup(2);
         std::fprintf(stderr, "[selftest] timeout reset fired\n");
     });
 

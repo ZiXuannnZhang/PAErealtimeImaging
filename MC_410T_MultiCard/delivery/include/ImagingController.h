@@ -13,6 +13,9 @@
 #include <QJsonObject>
 #include <QTimer>
 #include <vector>
+#include <deque>
+#include <chrono>
+#include "RingNativeMapping.h"
 #include "ImagingParams.h"
 #include "RingTimevarLowpassConfig.h"
 #include "RingFbpSettings.h"
@@ -73,6 +76,9 @@ public:
                          bool sourceRoundComplete = false, int sectorCcw = -1);
     // 超时判定新一圈：通知子进程清空重建累积（RingBlockAssembler 超时回调调用）
     bool sendRingReset();
+#ifdef RING_INPUT_TEST_SEAM
+    void testFailNextRingNotifications(int count) { m_testFailRingNotifications.store(count); }
+#endif
 
     // 数据输入（从 MainWindow 调用，线程安全）
     // freqA/freqB 分别对应一张卡的两个物理通道的频率数据
@@ -109,6 +115,7 @@ signals:
                            bool roundComplete, int bufferIndex);  // 每块显示快照（UI 线程槽）
     void svcStatus(const QString &status, float fps);
     void svcError(const QString &error);
+    void ringInputFailed(); // queued onto the owner thread before delivery
     void svcReady();                   // 子进程就绪（配置已下发）
     void svcStopped();                 // 异步停止完成通知
     void ringConfigChangedWhileRunning();  // 运行中环形参数变更（需重启子进程生效）
@@ -126,8 +133,8 @@ private:
     QImage frameDataToImage(const QVector<float> &data, int nx, int ny) const;
     void setupSharedMemory(int pulseSize, int frameSize);
     bool setupRingSharedMemory(int blockSize, int frameSize, int alines, int nx);
-    bool ringShmMatches(int blockSize, int frameSize, int alines, int nx,
-                        size_t expectedTotal) const;  // v2 强校验
+    void pumpRingInput();
+    void clearRingInput();
     void processMessage(const QJsonObject &msg);
     void processRingMessage(const QJsonObject &msg);
     void startRingFrameWorker(int seq,
@@ -136,11 +143,12 @@ private:
                               const paimage::RoundIdentity &round, bool roundComplete);   // 请求环形帧转换（最新一帧覆盖）
     void ensureRingWorkerStarted();
     void stopRingWorker();
-    void ringWorkerLoop();
+    void ringWorkerLoop(quint64 lifecycle);
     void processRingFrame(int seq,
                           std::uint64_t submitIndex,
                           bool hasSubmitIndex,
-                          const paimage::RoundIdentity &round, bool roundComplete);       // 常驻工作线程内的单帧读取/转换/投递
+                          const paimage::RoundIdentity &round, bool roundComplete,
+                          quint64 lifecycle);       // 常驻工作线程内的单帧读取/转换/投递
     void finishStopSvc();              // 异步停止的收尾清理
 
     QProcess      *m_svcProcess;
@@ -167,11 +175,45 @@ private:
     RingFbpSettings m_fbpSettings;
     std::atomic<bool> m_fbpPreparing{false};
     quint64 m_fbpPrepareToken=0;
+    quint64 m_svcLifecycleToken = 0;
+    bool m_stopping = false;
+    bool m_svcResourcesActive = false;
     int                 m_ringSysDelayCh[8][2] = {
         {358, 371}, {358, 371}, {358, 371}, {358, 371},
         {358, 371}, {358, 371}, {358, 371}, {358, 371}};   // 每通道双波长延时截断（独立于 CUDA 结构体，避免 ABI 变更）
     bool                m_ringMode = false;
-    QSharedMemory      *m_ringSharedMemory = nullptr;
+    ring_input::NativeMapping m_ringMapping;
+    ring_input::Mutex m_ringInputMutex;
+#ifdef RING_INPUT_TEST_SEAM
+    std::atomic<int> m_testFailRingNotifications{0};
+#endif
+    ring_input::Mutex m_ringOutputMutex{ring_input::kOutputMutexName};
+    struct RingBlock {
+        QVector<float> raw, angles;
+        QVector<quint8> channels;
+        paimage::RoundIdentity round;
+        std::uint64_t index = 0, wallUs = 0;
+        int seq = 0, direction = -1;
+        bool complete = false;
+        uint32_t roundBlockIndex = 0;
+    };
+    mutable std::mutex m_ringQueueMutex;
+    std::deque<RingBlock> m_ringQueue;
+    paimage::RoundIdentity m_ringBaselineRound; // protected by m_ringQueueMutex
+    int m_ringBaselineSeq = 0;
+    std::vector<std::deque<RingBlock>> m_ringRetiredQueues;
+    std::uint64_t m_ringAcceptedCount = 0, m_ringRejectedCount = 0;
+    std::uint64_t m_ringReportedAccepted = 0, m_ringReportedRejected = 0;
+    size_t m_ringRetiredBytes = 0, m_ringRetiredInFlightBytes = 0;
+    std::uint64_t m_ringSubmitIndex = 0;
+    std::uint64_t m_ringRequestedEpoch = 0;
+    bool m_ringInputFailed = false;
+    size_t m_ringPendingBytes = 0, m_ringPendingCount = 0;
+    // The following transport state belongs exclusively to the timer thread.
+    std::uint64_t m_ringActiveEpoch = 0, m_ringResetTarget = 0;
+    RingBlock m_ringInFlight;
+    bool m_ringHasInFlight = false, m_ringPublished = false, m_ringResetPending = false;
+    std::chrono::steady_clock::time_point m_ringDeadline, m_ringNextNotify;
     int                 m_ringBlockSize = 0;
     int                 m_ringAlineCount = 0;
     int                 m_ringFrameSize = 0;

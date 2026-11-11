@@ -10,6 +10,7 @@
 #include <vector>
 #include "ImagingParams.h"
 #include "RingShmObservability.h"
+#include "RingNativeMapping.h"
 #include "RoundIdentity.h"
 #include "RingTimevarLowpassConfig.h"
 #include "RingReconRoundState.h"
@@ -56,10 +57,7 @@ private:
     void processConfigure(const QJsonObject &params);
     void processRingConfigure(const QJsonObject &ring);
     void processPulse();
-    void processRingPulse(uint32_t notifySeq, uint64_t submitIndex,
-                          uint64_t submitWallUs, bool notifySeqValid,
-                          const paimage::RoundIdentity &round, bool sourceRoundComplete,
-                          int sectorCcw = -1);
+    void processRingPulse(uint64_t epoch, uint64_t publicationId);
     void resetRingRecon();        // 圈末/超时共用：清空 CUDA 累积与跨圈边界状态
     bool processFbpBlock(const QVector<float>&, const QVector<float>&, const QVector<quint8>&, bool final);
     void processFbpDevice(const QVector<float>&, const QVector<float>&, const QVector<quint8>&,
@@ -110,8 +108,14 @@ private:
         {358, 371}, {358, 371}, {358, 371}, {358, 371},
         {358, 371}, {358, 371}, {358, 371}, {358, 371}};   // 每通道双波长延时截断（实时预处理使用）
     bool                m_ringMode = false;
+    bool                m_ringConfigReady = false;
     void               *m_ringCuda[2] = {nullptr, nullptr};
-    QSharedMemory      *m_ringSharedMemory = nullptr;
+    ring_input::NativeMapping m_ringSharedMemory;
+    ring_input::Mutex m_ringInputMutex;
+    ring_input::Mutex m_ringOutputMutex{ring_input::kOutputMutexName};
+    uint64_t m_ringEpoch = 0;
+    uint64_t m_ringExpectedSeq = 0;
+    bool m_ringSequenceIncomplete = false;
     int                 m_ringBlockSize = 0;
     int                 m_ringFrameSize = 0;
     int                 m_ringBlockIndex = 0;

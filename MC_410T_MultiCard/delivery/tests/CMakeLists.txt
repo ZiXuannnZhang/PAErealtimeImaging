@@ -15,6 +15,15 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/DiagnosticZlib.cmake)
 link_libraries(PAimageDiagnosticZlib)
 
+if(WIN32)
+    add_executable(ring_input_transport_test ring_input_transport_test.cpp)
+    target_include_directories(ring_input_transport_test PRIVATE ../include)
+    target_compile_definitions(ring_input_transport_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(ring_input_transport_test PRIVATE Qt6::Core)
+    add_test(NAME ring_input_transport_test COMMAND ring_input_transport_test)
+    set_tests_properties(ring_input_transport_test PROPERTIES RUN_SERIAL TRUE)
+endif()
+
 add_executable(ring_fractional_delay_test ring_fractional_delay_test.cpp ../src/RingFractionalDelay.cpp)
 target_include_directories(ring_fractional_delay_test PRIVATE ../include)
 add_test(NAME ring_fractional_delay_test COMMAND ring_fractional_delay_test)
@@ -34,7 +43,7 @@ set_tests_properties(ring_fbp_service_test ring_fbp_fusion_two_channel_test PROP
 add_executable(ring_fbp_controller_test ring_fbp_controller_test.cpp ../src/ImagingController.cpp ../include/ImagingController.h
     ../src/RingTimevarLowpass.cpp ../src/RingTimevarLowpassSettings.cpp ../src/RingRecon/ring_recon.cpp)
 target_include_directories(ring_fbp_controller_test PRIVATE ../include ../src/RingRecon ../third_party/zeromq/include)
-target_compile_definitions(ring_fbp_controller_test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+target_compile_definitions(ring_fbp_controller_test PRIVATE RING_INPUT_TEST_SEAM WIN32_LEAN_AND_MEAN NOMINMAX)
 target_link_libraries(ring_fbp_controller_test PRIVATE Qt6::Gui "${RING_TEST_CUDA_LIB}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/lib/libzmq.dll.a")
 set_target_properties(ring_fbp_controller_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/controller-isolated")
@@ -49,7 +58,9 @@ add_custom_command(TARGET ring_fbp_controller_test POST_BUILD COMMAND ${CMAKE_CO
     "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
     "$<TARGET_FILE_DIR:ring_fbp_controller_test>")
 add_test(NAME ring_fbp_controller_test COMMAND ring_fbp_controller_test)
-set_tests_properties(ring_fbp_controller_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 45)
+add_test(NAME ring_fbp_controller_burst_test COMMAND ring_fbp_controller_test --burst)
+add_test(NAME ring_fbp_controller_faults_test COMMAND ring_fbp_controller_test --faults)
+set_tests_properties(ring_fbp_controller_test ring_fbp_controller_burst_test ring_fbp_controller_faults_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)
 add_custom_command(TARGET ring_fbp_service_test POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
     "${RING_TEST_CUDA_BIN}/ring_recon_cuda.dll" "${RING_TEST_CUDA_BIN}/cudart64_12.dll"
     "${RING_TEST_CUDA_BIN}/cublas64_12.dll" "${RING_TEST_CUDA_BIN}/cublasLt64_12.dll"
