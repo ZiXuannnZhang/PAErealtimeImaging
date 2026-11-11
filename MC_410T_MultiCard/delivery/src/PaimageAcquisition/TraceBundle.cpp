@@ -48,16 +48,23 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 bool anchorKnown=wall&&mono;
                 if(!anchorKnown && start!=std::numeric_limits<qint64>::min()){
                     const auto binary=QDir(path).entryList({"trace-*.bin","timing-*.bin","looplog-*.bin"},QDir::Files);
-                    if(!binary.isEmpty()){
+                    const auto traceInfo=object(QDir(path).filePath("trace-summary.json"));
+                    const auto timingInfo=object(QDir(path).filePath("timing-summary.json"));
+                    const auto loopInfo=object(QDir(path).filePath("looplog-summary.json"));
+                    const auto hasEvidence=[](const QJsonObject& info,const char* key){
+                        return info.value(key).toBool()||info.value("recordsIssued").toDouble()>0;
+                    };
+                    if(!binary.isEmpty()||hasEvidence(traceInfo,"traceIncomplete")||
+                       hasEvidence(timingInfo,"timingIncomplete")||hasEvidence(loopInfo,"loopLogIncomplete")){
                         skippedRuns.append(QJsonObject{{"runId",metadata.value("runId")},{"reason","missing_time_anchor"}});
                         bundleIncomplete=true;
                     }
                     continue;
                 }
                 auto summary=object(QDir(path).filePath("trace-summary.json"));
-                quint64 boundary=quint64(summary.value("recordsIssued").toDouble());bool flushed=!summary.isEmpty(),boundaryKnown=flushed;
+                quint64 boundary=quint64(summary.value("recordsIssued").toDouble());bool flushed=!summary.isEmpty(),boundaryKnown=summary.contains("recordsIssued");
                 for(const auto& cut:cuts)if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){boundary=cut.sequence;boundaryKnown=true;flushed=cut.flush();break;}
-                bool incomplete=!flushed||!anchorKnown||summary.value("traceIncomplete").toBool(false);
+                bool traceBad=false;
                 quint64 selected=0,filtered=0,maxSequence=0;int part=0;
                 qint64 firstMs=std::numeric_limits<qint64>::max(),lastMs=std::numeric_limits<qint64>::min();
                 QJsonArray runFiles;
@@ -65,7 +72,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 std::sort(names.begin(),names.end(),[](const QString& a,const QString& b){return a.mid(6).section('.',0,0).toInt()<b.mid(6).section('.',0,0).toInt();});
                 for(const auto& name:names){
                     QByteArray bytes=read(QDir(path).filePath(name)),chosen;chosen.reserve(bytes.size());
-                    if(bytes.size()%64)incomplete=true;
+                    if(bytes.size()%64)traceBad=true;
                     for(qsizetype at=0;at+64<=bytes.size();at+=64){TraceRecord r;std::memcpy(&r,bytes.constData()+at,64);
                         if(boundaryKnown&&r.sequence>boundary)continue;maxSequence=std::max(maxSequence,quint64(r.sequence));
                         const qint64 time=anchorKnown?wall+(qint64(r.monotonicNs)-mono)/1000000:0;
@@ -83,6 +90,8 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){
                         timingLive=true;timingBoundary=cut.sequence;timingFlushed=cut.flush();break;
                     }
+                if(!timingLive)timingBoundary=quint64(timingSummary.value("recordsIssued").toDouble());
+                const bool timingBoundaryKnown=timingLive||timingSummary.contains("recordsIssued");
                 auto timingNames=QDir(path).entryList({"timing-*.bin"},QDir::Files,QDir::Name);
                 std::sort(timingNames.begin(),timingNames.end(),[](const QString& a,const QString& b){
                     return a.mid(7).section('.',0,0).toInt()<b.mid(7).section('.',0,0).toInt();
@@ -95,7 +104,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     if(bytes.size()%sizeof(TimingRecord))timingBad=true;
                     for(qsizetype at=0;at+qsizetype(sizeof(TimingRecord))<=bytes.size();at+=sizeof(TimingRecord)){
                         TimingRecord r;std::memcpy(&r,bytes.constData()+at,sizeof(r));
-                        if(timingLive&&r.sequence>timingBoundary)continue;
+                        if(timingBoundaryKnown&&r.sequence>timingBoundary)continue;
                         const auto first=qMin(r.startNs,r.endNs),last=qMax(r.startNs,r.endNs);
                         if(anchorKnown && (wall+(qint64(last)-mono)/1000000<start ||
                                            wall+(qint64(first)-mono)/1000000>end)){
@@ -120,28 +129,48 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     {"recordsIssued",double(loopBoundary)},{"queueDropped",double(loopDropped)},
                     {"budgetExhausted",loopBudgetExhausted},{"writeFailed",loopWriteFailed},
                     {"burstMarkEpochs",double(loopFreezeEpoch)}};
+                if(!loopLive)loopBoundary=quint64(loopSummary.value("recordsIssued").toDouble());
+                const bool loopBoundaryKnown=loopLive||loopSummary.contains("recordsIssued");
                 auto loopNames=QDir(path).entryList({"looplog-*.bin"},QDir::Files,QDir::Name);
                 std::sort(loopNames.begin(),loopNames.end(),[](const QString& a,const QString& b){
                     return a.section('-',-1).section('.',0,0).toInt()<b.section('-',-1).section('.',0,0).toInt();
                 });
-                int loopPart=0;quint64 loopSelected=0,loopFiltered=0;
+                int loopPart=0;quint64 loopSelected=0,loopFiltered=0; bool loopBad=false;
                 for(const auto& name:loopNames){
-                    QByteArray bytes=read(QDir(path).filePath(name)),chosen;if(bytes.size()%80)incomplete=true;
+                    QByteArray bytes=read(QDir(path).filePath(name)),chosen;if(bytes.size()%80)loopBad=true;
                     for(qsizetype at=0;at+80<=bytes.size();at+=80){LoopRecord r;std::memcpy(&r,bytes.constData()+at,80);
-                        if(loopLive&&r.sequence>loopBoundary)continue;
+                        if(loopBoundaryKnown&&r.sequence>loopBoundary)continue;
                         const qint64 time=anchorKnown?wall+(qint64(r.timeNs)-mono)/1000000:0;
                         if(anchorKnown&&(time<start||time>end)){++loopFiltered;continue;}
                         chosen.append(bytes.constData()+at,80);++loopSelected;}
                     if(!chosen.isEmpty()){const QString out=QString("paimage/%1/looplog-%2.bin").arg(dir).arg(loopPart++);
                         if(!write(out,chosen))return false;runFiles.append(out);}}
-                if(!selected&&!timingSelected&&!loopSelected)continue;
                 const bool traceExpected=metadata.value("diagnosticTraceEnabled").toBool(true);
-                if(!boundary)boundary=maxSequence;
-                const bool traceIncomplete=traceExpected&&(!flushed||!anchorKnown||
-                    summary.value("traceIncomplete").toBool()||filtered>0||selected!=boundary);
-                incomplete=traceIncomplete;
+                if(!boundaryKnown)boundary=maxSequence;
+                const bool traceCountCovered=!boundaryKnown||selected+filtered==boundary;
+                const bool traceFailure=traceBad||(traceExpected&&(!flushed||!anchorKnown||
+                    summary.value("traceIncomplete").toBool()||!traceCountCovered));
+                const bool traceIncomplete=traceFailure||(traceExpected&&filtered>0);
+                const bool timingCountCovered=!timingBoundaryKnown||timingSelected+timingFiltered==timingBoundary;
+                const bool timingPresent=timingLive||!timingSummary.isEmpty()||!timingNames.isEmpty();
+                const bool timingIncomplete=timingPresent&&(timingSummary.value("timingIncomplete").toBool()||
+                    !timingFlushed||timingBad||!anchorKnown||!timingCountCovered);
+                const bool loopCountCovered=!loopBoundaryKnown||loopSelected+loopFiltered==loopBoundary;
+                const bool loopPresent=loopLive||!loopSummary.isEmpty()||!loopNames.isEmpty();
+                const bool loopStreamIncomplete=loopPresent&&(loopSummary.value("loopLogIncomplete").toBool()||
+                    loopIncomplete||loopBad||!loopFlushed||!loopCountCovered);
+                const bool incomplete=traceIncomplete||timingIncomplete||loopStreamIncomplete;
+                if(!selected&&!timingSelected&&!loopSelected){
+                    if(traceFailure||timingIncomplete||loopStreamIncomplete){
+                        skippedRuns.append(QJsonObject{{"runId",metadata.value("runId")},{"reason","no_complete_records"},
+                            {"traceFormatError",traceBad},{"timingFormatError",timingBad},{"loopLogFormatError",loopBad},
+                            {"traceIncomplete",traceFailure},{"timingIncomplete",timingIncomplete},{"loopLogIncomplete",loopStreamIncomplete}});
+                        bundleIncomplete=true;
+                    }
+                    continue;
+                }
                 if(!write(prefix+"run-config.json",QJsonDocument(metadata).toJson()))return false;
-                if(traceExpected){
+                if(traceExpected||traceBad){
                     auto exported=summary;
                     exported.insert("recordsIssued",double(boundary));
                     exported.insert("recordsWritten",double(selected));
@@ -149,25 +178,26 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     exported.insert("exportClipped",filtered>0);
                     exported.insert("exportFilteredRecords",double(filtered));
                     exported.insert("exportFlushCompleted",flushed);
+                    exported.insert("exportFormatError",traceBad);
+                    exported.insert("exportCountCovered",boundaryKnown?QJsonValue(traceCountCovered):QJsonValue());
                     if(!write(prefix+"trace-summary.json",QJsonDocument(exported).toJson()))return false;
                 }
-                if(timingSelected){
+                if(timingPresent){
                     if(timingLive)timingSummary.insert("recordsIssued",double(timingBoundary));
                     timingSummary.insert("exportFlushCompleted",timingFlushed);
                     timingSummary.insert("recordsWritten",double(timingSelected));
                     timingSummary.insert("exportFilteredRecords",double(timingFiltered));
-                    const bool timingIncomplete=timingSummary.value("timingIncomplete").toBool()||
-                        !timingFlushed||timingBad||!anchorKnown||
-                        (timingLive&&timingSelected+timingFiltered!=timingBoundary);
+                    timingSummary.insert("exportFormatError",timingBad);
+                    timingSummary.insert("exportCountCovered",timingBoundaryKnown?QJsonValue(timingCountCovered):QJsonValue());
                     timingSummary.insert("timingIncomplete",timingIncomplete);
-                    incomplete|=timingIncomplete;
                     if(!write(prefix+"timing-summary.json",QJsonDocument(timingSummary).toJson()))return false;
                 }
-                if(!loopSummary.isEmpty()){loopSummary.insert("exportFlushCompleted",loopFlushed);
+                if(loopPresent){loopSummary.insert("exportFlushCompleted",loopFlushed);
                     loopSummary.insert("recordsWritten",double(loopSelected));loopSummary.insert("exportFilteredRecords",double(loopFiltered));
-                    loopSummary.insert("loopLogIncomplete",loopSummary.value("loopLogIncomplete").toBool(loopIncomplete)||loopIncomplete||!loopFlushed||(loopBoundary&&loopSelected+loopFiltered!=loopBoundary));
+                    loopSummary.insert("exportFormatError",loopBad);
+                    loopSummary.insert("exportCountCovered",loopBoundaryKnown?QJsonValue(loopCountCovered):QJsonValue());
+                    loopSummary.insert("loopLogIncomplete",loopStreamIncomplete);
                     if(!write(prefix+"looplog-summary.json",QJsonDocument(loopSummary).toJson()))return false;}
-                incomplete=incomplete||loopIncomplete||!loopFlushed||(loopBoundary&&loopSelected+loopFiltered!=loopBoundary);
                 bundleIncomplete|=incomplete;
                 runs.append(QJsonObject{{"runId",metadata.value("runId")},{"recordBoundary",double(boundary)},
                     {"recordsIncluded",double(selected)},{"recordsOutsideWindow",double(filtered)},
