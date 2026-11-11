@@ -1,6 +1,7 @@
 #include "FileSaver.h"
 #include <QDir>
 #include <QDateTime>
+#include <QDebug>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
@@ -101,7 +102,7 @@ FileSaver::~FileSaver() {
             wait();   // 确保线程真正结束后再析构 QThread，避免 qFatal
         }
     }
-    closeFiles();
+    if (!closeFiles()) qWarning().noquote() << "FileSaver destructor:" << m_faultDetail;
 }
 
 // 
@@ -129,6 +130,7 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
     m_currentSamples=0;
     m_currentIdentity={};m_sealedThrough={};
     m_writeFaulted = false;   // 新会话重新武装写盘故障告警
+    m_faultDetail.clear();
     resetPhysicalRoundState();
     // 不保证从 000 开始，只保证不覆盖：复用一个已有数据的目录时让号到空闲序号。
     resolveFreeSequence();
@@ -139,8 +141,7 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
 void FileSaver::stopSaving() {
     m_saving.store(false, std::memory_order_release);
     // 停止时立即刷盘 + 关闭文件，确保未达触发数部分也能完整写入
-    const bool flushed = flushWriteBuffers();
-    closeFiles();
+    const bool flushed = closeFiles();
     m_writeAccumA.clear();
     m_writeAccumB.clear();
     m_accumTriggers = 0;
@@ -266,33 +267,33 @@ void FileSaver::openNewFiles(uint32_t sourceIPv4) {
         delete m_fileChannelB; m_fileChannelB = nullptr;
     }
     m_currentFileTriggers = 0;
+    m_confirmedA = m_confirmedB = 0;
 }
 
 bool FileSaver::closeFiles() {
-    const bool flushed = flushWriteBuffers();   // 关闭前将尚未写盘的积累数据刷入文件
-    if (m_fileChannelA) {
-        m_fileChannelA->close();
-        delete m_fileChannelA;
-        m_fileChannelA = nullptr;
-    }
-    if (m_fileChannelB) {
-        m_fileChannelB->close();
-        delete m_fileChannelB;
-        m_fileChannelB = nullptr;
-    }
-    return flushed;
+    bool ok = flushWriteBuffers();
+    auto closeOne = [&](QFile*& file) {
+        if (!file) return;
+        file->close();
+        if (file->error() != QFileDevice::NoError) {
+            m_faultDetail += QStringLiteral("; 关闭 %1: %2（文件完整性未知）")
+                                 .arg(file->fileName(), file->errorString());
+            ok = false;
+        }
+        delete file;
+        file = nullptr;
+    };
+    closeOne(m_fileChannelA);
+    closeOne(m_fileChannelB);
+    return ok;
 }
 
-//
-// 写盘缓冲
-//
 void FileSaver::handleWriteFault(const QString& where) {
-    // 一次性告警：磁盘满/介质拔出通常是持续性的，不要每段刷一条。
+    m_saving.store(false, std::memory_order_release);
     if (m_writeFaulted) return;
     m_writeFaulted = true;
-    m_saving.store(false, std::memory_order_release);
-    emit errorOccurred(QString("Card%1: %2 写盘失败，已停止保存；未落盘的一段已按记录边界回退丢弃")
-                           .arg(m_cardId + 1).arg(where));
+    emit errorOccurred(QString("Card%1: %2 写盘失败，已停止保存%3")
+                           .arg(m_cardId + 1).arg(where, m_faultDetail));
 }
 
 bool FileSaver::flushWriteBuffers()
@@ -300,58 +301,84 @@ bool FileSaver::flushWriteBuffers()
     if (m_accumTriggers == 0) return true;
     const qint64 bytesA = static_cast<qint64>(m_writeAccumA.size()) * sizeof(uint16_t);
     const qint64 bytesB = static_cast<qint64>(m_writeAccumB.size()) * sizeof(uint16_t);
-    const bool openA = m_fileChannelA && m_fileChannelA->isOpen();
-    const bool openB = m_fileChannelB && m_fileChannelB->isOpen();
-    // 本次刷盘前的记录边界。.dat 是定长记录、无文件头，一旦留下半条记录，
-    // 该文件后续所有记录的边界都会错位且无法离线修复，所以失败必须整段回退。
-    const qint64 sizeA = openA ? m_fileChannelA->size() : 0;
-    const qint64 sizeB = openB ? m_fileChannelB->size() : 0;
-
-    qint64 wroteA = 0;
-    qint64 wroteB = 0;
-    if (openA && bytesA > 0)
-        wroteA = m_fileChannelA->write(reinterpret_cast<const char*>(m_writeAccumA.data()), bytesA);
-    if (openB && bytesB > 0)
-        wroteB = m_fileChannelB->write(reinterpret_cast<const char*>(m_writeAccumB.data()), bytesB);
-
+    auto writeOne = [&](QFile* f, const std::vector<uint16_t>& data, qint64 bytes, int side) {
+        if (!f || !f->isOpen()) return qint64(-1);
 #ifdef FILESAVER_TEST_SEAM
-    if (m_writeFaultForTest == 1) {
-        wroteA = bytesA > 0 ? -1 : 0;
-        wroteB = bytesB > 0 ? -1 : 0;
-    } else if (m_writeFaultForTest == 2) {
-        wroteA = bytesA > 0 ? -1 : 0;
-    } else if (m_writeFaultForTest == 3) {
-        wroteB = bytesB > 0 ? -1 : 0;
-    }
+        if (m_writeFaultForTest == 1 || m_writeFaultForTest == side + 1)
+            return f->write(reinterpret_cast<const char*>(data.data()), (bytes > 1 ? bytes / 2 - (bytes / 2 % 2 == 0 ? 1 : 0) : 0));
+#else
+        (void)side;
 #endif
-
-    // 成功判据：每通道「不需要写 或 全部字节都写进去了」。短写按失败处理。
-    const bool okA = !openA || bytesA == 0 || wroteA == bytesA;
-    const bool okB = !openB || bytesB == 0 || wroteB == bytesB;
-    if (okA && okB) {
-        m_writeAccumA.clear();
-        m_writeAccumB.clear();
-        m_accumTriggers = 0;
-        return true;
+        return f->write(reinterpret_cast<const char*>(data.data()), bytes);
+    };
+    const qint64 wroteA = writeOne(m_fileChannelA, m_writeAccumA, bytesA, 1);
+    const qint64 wroteB = writeOne(m_fileChannelB, m_writeAccumB, bytesB, 2);
+    auto flushOne = [&](QFile* f, int side) {
+        if (!f || !f->isOpen()) return false;
+#ifdef FILESAVER_TEST_SEAM
+        if (m_flushFaultForTest == side) return false;
+#else
+        (void)side;
+#endif
+        return f->flush();
+    };
+    // Flush both even when a write failed, then close both before rollback. No
+    // buffered bytes may be written back after truncation on the fresh handles.
+    const bool flushA = flushOne(m_fileChannelA, 1);
+    const bool flushB = flushOne(m_fileChannelB, 2);
+    const bool ok = wroteA == bytesA && wroteB == bytesB && flushA && flushB;
+    if (ok) {
+        m_confirmedA += bytesA; m_confirmedB += bytesB;
+        m_savedCount.fetch_add(static_cast<uint64_t>(m_accumTriggers), std::memory_order_relaxed);
+    } else {
+        auto description = [](QFile* f) { return f ? f->fileName() : QStringLiteral("<未打开>"); };
+        const QString pathA = description(m_fileChannelA), pathB = description(m_fileChannelB);
+        m_faultDetail = QStringLiteral("；写入/flush A %1 (%2/%3, flush=%4, %5)，B %6 (%7/%8, flush=%9, %10)")
+            .arg(pathA).arg(wroteA).arg(bytesA).arg(flushA).arg(m_fileChannelA ? m_fileChannelA->errorString() : QStringLiteral("未打开"))
+            .arg(pathB).arg(wroteB).arg(bytesB).arg(flushB).arg(m_fileChannelB ? m_fileChannelB->errorString() : QStringLiteral("未打开"));
+        auto discardHandle = [&](QFile*& f) {
+            if (!f) return;
+            f->close();
+            if (f->error() != QFileDevice::NoError)
+                m_faultDetail += QStringLiteral("；关闭 %1: %2").arg(f->fileName(), f->errorString());
+            delete f; f = nullptr;
+        };
+        discardHandle(m_fileChannelA); discardHandle(m_fileChannelB);
+        auto rollback = [&](const QString& path, qint64 boundary, int side) {
+            QFile f(path);
+            bool success = f.open(QIODevice::ReadWrite | QIODevice::ExistingOnly);
+            if (success && f.size() < boundary) {
+                m_faultDetail += QStringLiteral("；回退 %1: 文件短于已确认边界（文件完整性未知）").arg(path);
+                f.close();
+                return false;
+            }
+#ifdef FILESAVER_TEST_SEAM
+            if (m_rollbackFaultForTest == side) {
+                m_faultDetail += QStringLiteral("；回退 %1: 注入 resize 失败（文件完整性未知）").arg(path);
+                if (success) f.close();
+                return false;
+            }
+#else
+            (void)side;
+#endif
+            if (success) success = f.resize(boundary);
+            if (!success) m_faultDetail += QStringLiteral("；回退 %1: %2（文件完整性未知）").arg(path, f.errorString());
+            if (f.isOpen()) {
+                f.close();
+                if (f.error() != QFileDevice::NoError) {
+                    m_faultDetail += QStringLiteral("；回退后关闭 %1: %2（文件完整性未知）").arg(path, f.errorString());
+                    success = false;
+                }
+            }
+            return success;
+        };
+        const bool rolledA = rollback(pathA, m_confirmedA, 1);
+        const bool rolledB = rollback(pathB, m_confirmedB, 2);
+        if (rolledA && rolledB) m_faultDetail += QStringLiteral("；两侧已回退至此前确认的边界");
+        m_currentFileTriggers -= m_accumTriggers;
     }
-
-    // 成对回退：一侧失败也把另一侧撤回，A/B 两侧的记录数恒相等。
-    if (openA) m_fileChannelA->resize(sizeA);
-    if (openB) m_fileChannelB->resize(sizeB);
-    // 本段已不可恢复（不重试，避免把半条记录再写一遍）。
-    m_writeAccumA.clear();
-    m_writeAccumB.clear();
-    // 计数同步回退：本段 m_accumTriggers 个触发并未落盘，诊断计数必须与文件
-    // 里的实际记录数保持一致，否则现场看到的"已保存触发数"会多于磁盘上的记录。
-    const int dropped = m_accumTriggers;
-    m_currentFileTriggers -= dropped;
-    if (m_currentFileTriggers < 0) m_currentFileTriggers = 0;
-    const std::uint64_t saved = m_savedCount.load(std::memory_order_relaxed);
-    m_savedCount.store(saved > static_cast<std::uint64_t>(dropped)
-                           ? saved - static_cast<std::uint64_t>(dropped) : 0,
-                       std::memory_order_relaxed);
-    m_accumTriggers = 0;
-    return false;
+    m_writeAccumA.clear(); m_writeAccumB.clear(); m_accumTriggers = 0;
+    return ok;
 }
 
 //
@@ -404,9 +431,22 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         const QString dir=QDir(root).filePath(QStringLiteral("_late/session-%1-round-%2").arg(identity.measurementSession).arg(identity.roundGeneration));
         late.startSaving(dir,1,m_fileSuffix);
         auto copy=std::make_shared<TriggerGroup>(*group);copy->sessionGen=0;
+        QObject::connect(&late, &FileSaver::errorOccurred, this, [this](const QString& error) {
+            m_faultDetail = QStringLiteral("；迟到文件：") + error;
+        }, Qt::DirectConnection);
+#ifdef FILESAVER_TEST_SEAM
+        late.m_writeFaultForTest=m_lateWriteFaultForTest; late.m_flushFaultForTest=m_flushFaultForTest; late.m_rollbackFaultForTest=m_rollbackFaultForTest;
+#endif
         const bool accepted=late.consumeTriggerGroup(copy);
         const bool flushed=late.closeFiles();
-        if(!accepted || !flushed){emit errorOccurred(QStringLiteral("迟到帧保存失败"));return false;}
+        m_acceptedCount.fetch_add(late.acceptedCount(), std::memory_order_relaxed);
+        if(!accepted || !flushed){
+            const QString lateDetail = m_faultDetail.isEmpty() ? late.m_faultDetail : m_faultDetail;
+            const bool mainClosed = closeFiles();
+            const QString mainDetail = mainClosed ? QString() : m_faultDetail;
+            m_faultDetail = lateDetail + (mainClosed ? QString() : QStringLiteral("；主文件关闭失败：") + mainDetail);
+            handleWriteFault(QStringLiteral("迟到帧保存")); return false;
+        }
         m_savedCount.fetch_add(1,std::memory_order_relaxed);
         emit statusMessage(QStringLiteral("Card%1: 隔离迟到帧 session=%2 round=%3 trigger=%4").arg(m_cardId+1).arg(identity.measurementSession).arg(identity.roundGeneration).arg(group->triggerSeq));
         return true;
@@ -515,7 +555,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         ++m_fileSequence;
         info.newFileSequence = m_fileSequence;
         info.manualMode = (m_currentGen == 0);
-        closeFiles();
+        if (!closeFiles()) { handleWriteFault(QStringLiteral("容量轮转关闭文件")); return false; }
         openNewFiles(m_currentSourceIPv4);
         recordRollover(info);
     }
@@ -526,7 +566,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         emit errorOccurred(QString("Card%1: 保存文件未成功打开，已自动停止保存")
                            .arg(m_cardId + 1));
         m_saving.store(false, std::memory_order_release);
-        closeFiles();
+        if (!closeFiles()) handleWriteFault(QStringLiteral("打开失败后关闭文件"));
         return false;
     }
 
@@ -548,7 +588,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         emit errorOccurred(QString("Card%1: 保存线程内存不足，已自动停止保存")
                            .arg(m_cardId + 1));
         m_saving.store(false, std::memory_order_release);
-        closeFiles();
+        if (!closeFiles()) handleWriteFault(QStringLiteral("转换失败后关闭文件"));
         return false;
     } catch (...) {
         m_writeAccumA.resize(offset);
@@ -556,7 +596,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         emit errorOccurred(QString("Card%1: 保存线程发生异常，已自动停止保存")
                            .arg(m_cardId + 1));
         m_saving.store(false, std::memory_order_release);
-        closeFiles();
+        if (!closeFiles()) handleWriteFault(QStringLiteral("转换失败后关闭文件"));
         return false;
     }
 
@@ -564,7 +604,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     // 记账在周期性 flush 之前完成：flushWriteBuffers 的失败回退按 m_accumTriggers
     // 扣减，只有当本触发也已入账时扣减才与文件里的实际记录数完全对齐。
     ++m_currentFileTriggers;
-    m_savedCount.fetch_add(1, std::memory_order_relaxed);
+    m_acceptedCount.fetch_add(1, std::memory_order_relaxed);
     if(group->saveTailCandidate)emit statusMessage(QStringLiteral("Card%1: 旧轮尾帧已接收 session=%2 round=%3 trigger=%4").arg(m_cardId+1).arg(identity.measurementSession).arg(identity.roundGeneration).arg(group->triggerSeq));
 
     // 达到合并阈値时一次性写盘（WRITE_BUFFER_TRIGGERS 个触发合并为一条大 I/O）
@@ -595,5 +635,5 @@ void FileSaver::resumeAfterSourceRestart() {
     // stopSaving() (via suspendForSourceRestart) already reset the physical
     // round file state; keep the invariant explicit for the resume half.
     resetPhysicalRoundState();
-    m_saving.store(true,std::memory_order_release);
+    if (!m_writeFaulted) m_saving.store(true,std::memory_order_release);
 }

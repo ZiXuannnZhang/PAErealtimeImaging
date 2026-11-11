@@ -241,7 +241,7 @@ struct RoundFixture {
         // has written it all — stopping first would drop in-flight frames.
         require(until([&] {
             return output.cardDepth(0) == 0 &&
-                   saver.savedCount() == static_cast<std::uint64_t>(expectedSaves);
+                   saver.acceptedCount() == static_cast<std::uint64_t>(expectedSaves);
         }), "all fed frames saved");
         const auto stopped = output.stopSaving();
         require(until([&] { return output.savingApplied(stopped); }), "saving stopped");
@@ -450,7 +450,7 @@ int main(int argc, char** argv)
             for (int i = 1; i <= 5; ++i)
                 saver.saveTriggerGroup(makeGroup(200 + i, 1, 200 + i));
             require(until([&] {
-                return saver.savedCount() == 10 && saver.queueDepth() == 0;
+                return saver.acceptedCount() == 10 && saver.queueDepth() == 0;
             }), "T4t queue drained");
             saver.requestStop();
             saver.wait();
@@ -852,6 +852,85 @@ int main(int argc, char** argv)
         check(false, (QString("W exception: ") + e.what()).toUtf8().constData());
     }
 
+    // Actual prefix short writes, flush failures and failed rollback across close paths.
+    for (int entry = 0; entry < 6; ++entry) {
+        for (int side = 1; side <= 2; ++side) {
+            QTemporaryDir dir(QDir::currentPath() + "/r3-fault-XXXXXX");
+            FileSaver saver(0); int errors = 0; QString detail;
+            QObject::connect(&saver, &FileSaver::errorOccurred, &app,
+                [&](const QString& e) { ++errors; detail = e; }, Qt::DirectConnection);
+            saver.setSessionDirResolver([&](uint64_t) { return dir.path(); });
+            saver.startSaving(dir.path(), entry == 2 ? 1 : 100, "r3");
+            auto first = makeGroup(1, 1, 10, entry == 1 ? 1 : 0);
+            first->measurementSession = 1;
+            saver.consumeTriggerGroup(first);
+            check(saver.acceptedCount() == 1 && saver.savedCount() == 0,
+                  "R3 buffered item accepted but not confirmed");
+            saver.setFlushFaultForTest(side);
+            if (entry == 0) saver.stopSaving();
+            if (entry == 1) saver.consumeTriggerGroup(makeGroup(2, 1, 11, 2));
+            if (entry == 2) saver.consumeTriggerGroup(makeGroup(2, 1, 11));
+            if (entry == 3) { saver.requestClose(); saver.serviceCloseRequest(); }
+            if (entry == 4) { saver.consumeTriggerGroup(makeGroup(2, 2, 11)); }
+            if (entry == 5) { saver.sealRound({1,1}); }
+            check(!saver.isSaving() && saver.savedCount() == 0 && errors == 1,
+                  "R3 close entry propagates flush error once and stops");
+            check(fileSizeOf(dir.path()+"/Card1_ChA_r3_000.dat") == 0 &&
+                  fileSizeOf(dir.path()+"/Card1_ChB_r3_000.dat") == 0,
+                  "R3 both buffered channels rolled back");
+            saver.stopSaving();
+            check(errors == 1, "R3 repeated stop does not repeat error");
+        }
+    }
+    for (int side = 1; side <= 2; ++side) {
+        QTemporaryDir dir(QDir::currentPath() + "/r3-rollback-XXXXXX");
+        FileSaver saver(0); int errors = 0; QString detail;
+        QObject::connect(&saver, &FileSaver::errorOccurred, &app,
+            [&](const QString& e) { ++errors; detail = e; }, Qt::DirectConnection);
+        saver.startSaving(dir.path(), 100, "rb");
+        for (int i=0;i<16;++i) saver.consumeTriggerGroup(makeGroup(i,1,100+i));
+        saver.setWriteFaultForTest(side+1); saver.setRollbackFaultForTest(side);
+        for (int i=0;i<16;++i) saver.consumeTriggerGroup(makeGroup(i,1,200+i));
+        check(!saver.isSaving() && errors == 1 && saver.savedCount() == 16 &&
+              detail.contains("完整性未知") && detail.contains(QStringLiteral("回退 ") + dir.path() + (side == 1 ? "/Card1_ChA_rb_000.dat" : "/Card1_ChB_rb_000.dat")),
+              "R3 failed rollback identifies affected file and unknown integrity");
+        const QString other = dir.path() + (side == 1 ? "/Card1_ChB_rb_000.dat" : "/Card1_ChA_rb_000.dat");
+        check(verifyFile(other, side == 1 ? negHalvesOfRange(100,16) : halvesOfRange(100,16)), "R3 other side independently rolled back to exact contents");
+        const QString failed = dir.path() + (side == 1 ? "/Card1_ChA_rb_000.dat" : "/Card1_ChB_rb_000.dat");
+        check(fileSizeOf(failed) > 16 * kSamples * 2, "R3 failed side retains torn tail");
+    }
+    for (int side=1; side<=2; ++side) {
+        QTemporaryDir dir(QDir::currentPath()+"/r3-large-XXXXXX");
+        FileSaver saver(0); int errors=0;
+        QObject::connect(&saver, &FileSaver::errorOccurred, &app, [&](const QString&) { ++errors; }, Qt::DirectConnection);
+        saver.startSaving(dir.path(),100,"large");
+        auto g=makeGroup(1,1,1); g->sampleCount=10000; g->freqA.assign(10000,1); g->freqB.assign(10000,-1);
+        saver.consumeTriggerGroup(g); saver.setFlushFaultForTest(side); saver.stopSaving();
+        check(errors==1 && saver.savedCount()==0 && !saver.isSaving() &&
+              fileSizeOf(dir.path()+"/Card1_ChA_large_000.dat")==0 &&
+              fileSizeOf(dir.path()+"/Card1_ChB_large_000.dat")==0,
+              "R3 large direct write and flush failure rolled back both sides");
+    }
+    {
+        QTemporaryDir dir(QDir::currentPath()+"/r3-late-XXXXXX");
+        FileSaver saver(0); int errors=0; QString detail;
+        QObject::connect(&saver, &FileSaver::errorOccurred, &app, [&](const QString& e) { ++errors; detail=e; }, Qt::DirectConnection);
+        saver.startSaving(dir.path(),100,"late");
+        auto first=makeGroup(1,1,10); first->measurementSession=1;
+        saver.consumeTriggerGroup(first);
+        saver.setLateWriteFaultForTest(2);
+        auto late=makeGroup(2,1,11); late->measurementSession=1; late->saveForceLate=true;
+        saver.consumeTriggerGroup(late);
+        check(!saver.isSaving() && errors==1 && detail.contains("_late") && saver.acceptedCount()==2,
+              "R3 late failure stops parent and carries file detail");
+        const QString lateDir=dir.path()+"/_late/session-1-round-1/";
+        check(fileSizeOf(lateDir+"Card1_ChA_late_000.dat")==0 &&
+              fileSizeOf(lateDir+"Card1_ChB_late_000.dat")==0,
+              "R3 late files both rolled back");
+        check(saver.savedCount()==1 && verifyFile(dir.path()+"/Card1_ChA_late_000.dat", halvesOf({10})) &&
+              verifyFile(dir.path()+"/Card1_ChB_late_000.dat", halvesOf({-10})),
+              "R3 parent pending data confirmed and preserved after late failure");
+    }
     if (g_failures == 0) {
         std::cout << "filesaver_round_boundary_test: ALL PASS\n";
         return 0;

@@ -86,7 +86,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             p[0]=seq;p[2]=9;for(int i=0;i<n;i+=8){int a=card+1,b=-a;std::memcpy(p.data()+4+i,&b,4);std::memcpy(p.data()+8+i,&a,4);}
             source.ingest(card,p.data(),p.size(),1000000+seq,card*100+seq+1,0x0100007f);
         }
-        require(until([&]{return rings==4 && savers[0]->savedCount()==1&&savers[1]->savedCount()==1&&savers[2]->savedCount()==1&&savers[3]->savedCount()==1
+        require(until([&]{return rings==4 && savers[0]->acceptedCount()==1&&savers[1]->acceptedCount()==1&&savers[2]->acceptedCount()==1&&savers[3]->acceptedCount()==1
             &&frontends[0]->snapshot().displayUpdates==1&&frontends[1]->snapshot().displayUpdates==1
             &&frontends[2]->snapshot().displayUpdates==1&&frontends[3]->snapshot().displayUpdates==1;}));
         auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));output.stop();require(values);
@@ -117,7 +117,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         auto make=[](int trigger){auto frame=std::make_shared<CardFrame>();frame->card=0;frame->trigger=trigger;frame->complete=true;frame->bytes.resize(40000);return frame;};
         output.card(make(1));require(until([&]{return entered.load();}));
         output.card(make(2));generation=2;output.card(make(3));release=true;
-        require(until([&]{return saver.savedCount()==3;}));
+        require(until([&]{return saver.acceptedCount()==3;}));
         auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));output.stop();
         for(int g:{1,2})for(auto ch:{QString("A"),QString("B")}){
             QFile file(root.path()+QString("/gen%1/Card1_Ch%2_generation_000.dat").arg(g).arg(ch));
@@ -166,7 +166,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             auto frame=make(trigger);output.card(frame);output.sync(trigger,{frame},false);
         }
         require(until([&]{std::lock_guard<std::mutex> lock(ringMutex);
-            return saver.savedCount()==3&&ringTriggers.size()==3;}));
+            return saver.acceptedCount()==3&&ringTriggers.size()==3;}));
         const auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));
         output.stop();stopFrontends(frontends);
         {
@@ -248,7 +248,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         require(until([&]{return ringCount.load()==2;}),
                 "timeout T1 partial round dispatched before the boundary");
         deliver(200,20000);deliver(201,20500);deliver(202,20800);deliver(203,20900);
-        require(until([&]{return saver.savedCount()==5&&ringCount.load()==5;}),
+        require(until([&]{return saver.acceptedCount()==5&&ringCount.load()==5;}),
                 "timeout T1/T7 save and Ring delivery");
         const auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));
         output.stop();stopFrontends(frontends);
@@ -395,7 +395,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         const int logical=disable?6:4;
         for(int i=0;i<startup+logical;++i)send(100+i,1000000000LL+i);
         require(until([&]{std::lock_guard<std::mutex> lock(mutex);
-            return s0.savedCount()==logical&&s1.savedCount()==logical&&indices.size()==8;}),
+            return s0.acceptedCount()==logical&&s1.acceptedCount()==logical&&indices.size()==8;}),
             "C2 raw >=N saved, only four logical indices per card reach Ring");
         {std::lock_guard<std::mutex> lock(mutex);
             // One FrontendPreprocessor worker per card preserves that card's
@@ -427,7 +427,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             output.sync(100+startup,{frame(0,100+startup,3100000000LL),frame(1,100+startup,3100000000LL)},false);
             for(int i=0;i<startup+1;++i)send(200+i,3200000000LL+i);
             require(until([&]{std::lock_guard<std::mutex> lock(mutex);
-                return indices.size()==10&&s0.savedCount()==7&&s1.savedCount()==7;}),"C8 new cap opens after startup");
+                return indices.size()==10&&s0.acceptedCount()==7&&s1.acceptedCount()==7;}),"C8 new cap opens after startup");
             std::lock_guard<std::mutex> lock(mutex);
             require(indices[8]==0&&indices[9]==0&&generations[8]==1&&generations[9]==1&&finals==0,
                     "C7/C8 old late sync suppressed; new index zero, no synthetic final");
@@ -502,7 +502,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             output.card(f);
             output.sync(100 + i, {f}, false);
         }
-        require(until([&] { return saver.savedCount() == 12; }),
+        require(until([&] { return saver.acceptedCount() == 12; }),
                 "G1 raw save is untouched by the frontend gate");
         require(until([&] { return frontends.load() == 12; }),
                 "G1 every trigger keeps reaching the frontend signal path beyond the count boundary");
@@ -520,7 +520,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
                 "G2 the frontend signal path continues across the live threshold update");
         require(until([&] { return imagingArrivals.load() == 9; }),
                 "G2 imaging arrivals follow the live threshold update");
-        require(until([&] { return saver.savedCount() == 16; }),
+        require(until([&] { return saver.acceptedCount() == 16; }),
                 "G2 raw save stays complete across the update");
         output.stop();
     }
@@ -585,7 +585,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         // synchronously before any enqueue, so the zero counts are stable.
         send(100,1000000000LL);
         require(frontends[0]->snapshot().displayUpdates==0&&ringArrivals.load()==0&&
-                publisherFrames.load()==0&&saver.savedCount()==0,
+                publisherFrames.load()==0&&saver.acceptedCount()==0,
                 "FO1 startup control trigger reaches neither frontend nor publisher");
         // FO2 the N designed logical triggers: display, both imaging
         // publishers and save each receive exactly N.
@@ -593,7 +593,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             send(trigger,1000000000LL+trigger);
         require(until([&]{return frontends[0]->snapshot().displayUpdates==4&&
                                   ringArrivals.load()==4&&publisherFrames.load()==4&&
-                                  saver.savedCount()==4;}),
+                                  saver.acceptedCount()==4;}),
                 "FO2 N designed triggers reach display, imaging publishers and save");
         // FO3 beyond the count boundary (N+1..N+k): the frontend keeps
         // refreshing (time/frequency windows) while both imaging publishers
@@ -601,7 +601,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         for(std::uint16_t trigger=105;trigger<=106;++trigger)
             send(trigger,1000000000LL+trigger);
         require(until([&]{return frontends[0]->snapshot().displayUpdates==6&&
-                                  saver.savedCount()==6;}),
+                                  saver.acceptedCount()==6;}),
                 "FO3 display keeps refreshing and save continues beyond the boundary");
         require(ringArrivals.load()==4,
                 "FO3 imaging frozen at N: frontend Ring leg skipped");
@@ -626,7 +626,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         send(201,4000000000LL+2);
         require(until([&]{return frontends[0]->snapshot().displayUpdates==7&&
                                   ringArrivals.load()==5&&publisherFrames.load()==5&&
-                                  saver.savedCount()==7;}),
+                                  saver.acceptedCount()==7;}),
                 "FO5 new round passes again after the timeout boundary");
         const auto stopped=output.stopSaving();require(until([&]{return output.savingApplied(stopped);}));
         output.stop();stopFrontends(frontends);
@@ -674,7 +674,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         // the generation advances.
         require(until([&]{return frontends2[0]->snapshot().displayUpdates==5&&
                                   ringArrivals2.load()==5&&publisherFrames2.load()==5&&
-                                  saver2.savedCount()==5;}),
+                                  saver2.acceptedCount()==5;}),
                 "FO6 unchecked mode: identical pass-through for the same input");
         require(ringFinals2.load()==1,
                 "FO6 unchecked mode: exactly one CountBoundary final at N");

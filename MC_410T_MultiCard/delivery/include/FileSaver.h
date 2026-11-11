@@ -90,7 +90,8 @@ public:
     //  状态查询
     bool     isSaving()      const { return m_saving.load(); }
     int      queueDepth()    const;
-    uint64_t savedCount()    const { return m_savedCount.load(); }
+    uint64_t savedCount()    const { return m_savedCount.load(); } // confirmed on both channels
+    uint64_t acceptedCount() const { return m_acceptedCount.load(); } // consumed into the buffer
 
     // Physical-round rollover observability (low frequency, rollover only).
     const FileRolloverInfo& lastFileRollover() const { return m_lastRollover; }
@@ -143,6 +144,9 @@ private:
     std::atomic<bool>     m_running{false};
     std::atomic<bool>     m_saving{false};
     std::atomic<uint64_t> m_savedCount{0};
+    std::atomic<uint64_t> m_acceptedCount{0};
+    qint64 m_confirmedA = 0, m_confirmedB = 0;
+    QString m_faultDetail;
 
     QString  m_saveDirectory;
     QString  m_fileSuffix;
@@ -202,7 +206,13 @@ public:
     // 同套路）。mode: 0=正常 1=两通道都失败 2=仅 A 失败 3=仅 B 失败。
     // 通过把 write() 返回值改写为 -1 模拟失败；回退逻辑负责撤掉已落的字节。
     void setWriteFaultForTest(int mode) { m_writeFaultForTest = mode; }
+    void setLateWriteFaultForTest(int mode) { m_lateWriteFaultForTest = mode; }
+    void setFlushFaultForTest(int side) { m_flushFaultForTest = side; }
+    void setRollbackFaultForTest(int side) { m_rollbackFaultForTest = side; }
 private:
     int m_writeFaultForTest = 0;
+    int m_lateWriteFaultForTest = 0;
+    int m_flushFaultForTest = 0;
+    int m_rollbackFaultForTest = 0;
 #endif
 };

@@ -174,7 +174,7 @@ int main(int argc, char** argv)
         saver.saveTriggerGroup(makeGroup(coordinator.currentGeneration(), 1, 302));
         drain(saver);
         saver.stopSaving();
-        check(saver.savedCount() == 1,
+        check(saver.acceptedCount() == 1,
               "A5 failed generation is not saved into old directory");
         check(!exists(failed.directory),
               "A5 failed directory is not registered/created");

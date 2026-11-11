@@ -189,8 +189,8 @@ int main(int argc, char** argv)
         send(1, 102, 1);
         send(1, 103, 1);
 
-        check(until([&] { return savers[0]->savedCount() == 3 &&
-                                  savers[1]->savedCount() == 3; }),
+        check(until([&] { return savers[0]->acceptedCount() == 3 &&
+                                  savers[1]->acceptedCount() == 3; }),
               "C1 old round saved before next presentation callback");
         check(countCommits.size() == 1 && countCommits.front().committed,
               "C1 CountBoundary committed synchronously");
@@ -210,8 +210,8 @@ int main(int argc, char** argv)
         send(0, 202, 2);
         send(1, 201, 2);
         send(1, 202, 2);
-        check(until([&] { return savers[0]->savedCount() == 5 &&
-                                  savers[1]->savedCount() == 5; }),
+        check(until([&] { return savers[0]->acceptedCount() == 5 &&
+                                  savers[1]->acceptedCount() == 5; }),
               "C1 next round does not wait for old final frame");
         const auto stopped = output.stopSaving();
         check(until([&] { return output.savingApplied(stopped); }),
@@ -291,7 +291,7 @@ int main(int argc, char** argv)
         output.card(makeFrame(601, 0, 11, 1100, 3));
         output.card(makeFrame(601, 0, 20, 1200, 0));
         output.card(makeFrame(601, 0, 21, 1300, 4));
-        check(until([&] { return saver.savedCount() == 2; }),
+        check(until([&] { return saver.acceptedCount() == 2; }),
               "C3 both N=1 logical scans saved");
         check(commits.size() == 2 &&
                   coordinator.resolveRound(601, 0).sessionGen == initial.newSessionGen &&
@@ -372,8 +372,8 @@ int main(int argc, char** argv)
                                       time++, static_cast<float>(value)));
             }
         }
-        check(until([&] { return savers[0]->savedCount() == 6 &&
-                                  savers[1]->savedCount() == 6; }),
+        check(until([&] { return savers[0]->acceptedCount() == 6 &&
+                                  savers[1]->acceptedCount() == 6; }),
               "C4 three rounds saved before presentation callbacks");
         check(commits.size() == 3 && commits[0].committed &&
                   commits[1].committed && commits[2].committed &&
@@ -511,7 +511,7 @@ int main(int argc, char** argv)
         output.card(makeFrame(901, 0, 200, 20000, 0)); // new round control
         output.card(makeFrame(901, 0, 201, 20500, 2));
         output.card(makeFrame(901, 0, 202, 20800, 2));
-        check(until([&] { return saver.savedCount() == 4; }),
+        check(until([&] { return saver.acceptedCount() == 4; }),
               "C8 timeout next round saved immediately");
         check(timeoutCommits.size() == 1 &&
                   coordinator.resolveRound(901, 0).sessionGen == initial.newSessionGen &&
@@ -558,7 +558,7 @@ int main(int argc, char** argv)
               "C9 manual save configuration");
         output.card(makeFrame(1001, 0, 10, 1000, 5));
         output.card(makeFrame(1001, 0, 11, 1100, 5));
-        check(until([&] { return saver.savedCount() == 1; }),
+        check(until([&] { return saver.acceptedCount() == 1; }),
               "C9 manual logical scan saved");
         const auto stopped = output.stopSaving();
         check(until([&] { return output.savingApplied(stopped); }), "C9 stop saving");
@@ -615,14 +615,14 @@ int main(int argc, char** argv)
         check(until([&]{return output.savingApplied(gen);}),"T1 configured");
         output.card(makeFrame(6001,0,10,1000000000LL,1));
         output.card(makeFrame(6001,1,10,1000000000LL,1));
-        check(until([&]{return s0.savedCount()==1 && s1.savedCount()==1;}),"T1 initial files open");
+        check(until([&]{return s0.acceptedCount()==1 && s1.acceptedCount()==1;}),"T1 initial files open");
         output.assemblyStarted(0,6001,11,1900000000LL);
         check(output.pollPhysicalRoundTimeout(2000000000LL),"T1 boundary");
         auto wrong=std::const_pointer_cast<CardFrame>(makeFrame(6001,0,10,2010000000LL,3));wrong->firstIngressId=22;
         output.card(wrong);
         auto tail=std::const_pointer_cast<CardFrame>(makeFrame(6001,0,11,1900000000LL,2));tail->firstIngressId=11;tail->closed=2050000000LL;
         output.card(tail);
-        check(until([&]{return s0.savedCount()>=3;}),"T1 exact tail written");
+        check(until([&]{return s0.acceptedCount()>=3;}),"T1 exact tail written");
         const auto stopped=output.stopSaving();check(until([&]{return output.savingApplied(stopped);}),"T1 stopped");output.stop();
         check(hasSize(dataFile(root.path(),0,"tail"),64),"T1 old file contains both frames");
         check(hasSize(dataFile(root.path(),1,"tail"),32),"T1 other card sealed independently");
@@ -642,14 +642,14 @@ int main(int argc, char** argv)
         output.beginSession(6002);output.start();const auto configured=output.startSaving(initial.directory,100,"auto-tail");
         check(until([&]{return output.savingApplied(configured);}),"T2 configured");
         output.card(makeFrame(6002,0,10,1000000000LL,1));output.card(makeFrame(6002,1,10,1000000000LL,1));
-        check(until([&]{return s0.savedCount()==1&&s1.savedCount()==1;}),"T2 old files open");
+        check(until([&]{return s0.acceptedCount()==1&&s1.acceptedCount()==1;}),"T2 old files open");
         output.assemblyStarted(0,6002,100,1900000000LL);
         output.assemblyStarted(1,6002,200,2010000000LL);
         auto nextFrame=std::const_pointer_cast<CardFrame>(makeFrame(6002,1,20,2010000000LL,2));nextFrame->firstIngressId=200;
         output.card(nextFrame);
         auto tail=std::const_pointer_cast<CardFrame>(makeFrame(6002,0,11,1900000000LL,3));tail->firstIngressId=100;tail->closed=2050000000LL;
         output.card(tail);
-        check(until([&]{return s0.savedCount()>=2&&s1.savedCount()>=2;}),"T2 frames saved");
+        check(until([&]{return s0.acceptedCount()>=2&&s1.acceptedCount()>=2;}),"T2 frames saved");
         const auto stopped=output.stopSaving();check(until([&]{return output.savingApplied(stopped);}),"T2 stop");output.stop();
         check(next.committed,"T2 boundary committed");
         check(hasSize(dataFile(initial.directory,0,"auto-tail"),64),"T2 eligible tail joined old file");
@@ -662,12 +662,12 @@ int main(int argc, char** argv)
         HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,8000,{},1.0,0,true);
         output.beginSession(6003);output.start();const auto gen=output.startSaving(root.path(),100,"expired");
         check(until([&]{return output.savingApplied(gen);}),"T3 configured");
-        output.card(makeFrame(6003,0,10,1000000000LL,1));check(until([&]{return saver.savedCount()==1;}),"T3 file opened");
+        output.card(makeFrame(6003,0,10,1000000000LL,1));check(until([&]{return saver.acceptedCount()==1;}),"T3 file opened");
         output.assemblyStarted(0,6003,30,1900000000LL);
         check(output.pollPhysicalRoundTimeout(2000000000LL),"T3 boundary");
         output.pollPhysicalRoundTimeout(2100000001LL);
         auto late=std::const_pointer_cast<CardFrame>(makeFrame(6003,0,11,1900000000LL,2));late->firstIngressId=30;late->closed=2200000000LL;output.card(late);
-        check(until([&]{return saver.savedCount()>=2;}),"T3 late isolated");
+        check(until([&]{return saver.acceptedCount()>=2;}),"T3 late isolated");
         const auto stopped=output.stopSaving();check(until([&]{return output.savingApplied(stopped);}),"T3 stopped");output.stop();
         check(hasSize(dataFile(root.path(),0,"expired"),32),"T3 old file not reopened");
         check(hasSize(dataFile(QDir(root.path()).filePath("_late/session-6003-round-0"),0,"expired"),32),"T3 late exists separately");
@@ -679,9 +679,9 @@ int main(int argc, char** argv)
         HostOutput output(32,50,{&processor},{&saver},nullptr,nullptr,8000,{},1.0,0,true);
         output.beginSession(6004);output.start();const auto gen=output.startSaving(root.path(),100,"cache");
         check(until([&]{return output.savingApplied(gen);}),"T4 configured");
-        output.card(makeFrame(6004,0,10,1000000000LL,1));check(until([&]{return saver.savedCount()==1;}),"T4 file opened");
+        output.card(makeFrame(6004,0,10,1000000000LL,1));check(until([&]{return saver.acceptedCount()==1;}),"T4 file opened");
         output.card(makeFrame(6004,0,10,2010000000LL,2));
-        check(until([&]{return saver.savedCount()>=2;}),"T4 cache hit isolated");
+        check(until([&]{return saver.acceptedCount()>=2;}),"T4 cache hit isolated");
         const auto stopped=output.stopSaving();check(until([&]{return output.savingApplied(stopped);}),"T4 stopped");output.stop();
         check(hasSize(dataFile(root.path(),0,"cache"),32),"T4 old file unchanged");
         check(hasSize(dataFile(QDir(root.path()).filePath("_late/session-6004-round-0"),0,"cache"),32),"T4 late exists");
