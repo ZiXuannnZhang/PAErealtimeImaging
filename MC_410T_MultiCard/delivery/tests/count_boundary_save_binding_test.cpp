@@ -665,7 +665,10 @@ int main(int argc, char** argv)
         output.card(makeFrame(6003,0,10,1000000000LL,1));check(until([&]{return saver.acceptedCount()==1;}),"T3 file opened");
         output.assemblyStarted(0,6003,30,1900000000LL);
         check(output.pollPhysicalRoundTimeout(2000000000LL),"T3 boundary");
-        output.pollPhysicalRoundTimeout(2100000001LL);
+        // The global queue can still be busy while this card has drained.
+        // Its own watermark must seal the tail without a new round boundary.
+        const std::vector<Time> cardWatermarks{2100000001LL};
+        check(!output.pollPhysicalRoundTimeout(0,&cardWatermarks),"T3 card watermark seals without a new boundary");
         auto late=std::const_pointer_cast<CardFrame>(makeFrame(6003,0,11,1900000000LL,2));late->firstIngressId=30;late->closed=2200000000LL;output.card(late);
         check(until([&]{return saver.acceptedCount()>=2;}),"T3 late isolated");
         const auto stopped=output.stopSaving();check(until([&]{return output.savingApplied(stopped);}),"T3 stopped");output.stop();

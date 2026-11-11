@@ -80,12 +80,12 @@ public:
     // Called by the receiver with its core lock held, before packet assembly.
     void assemblyStarted(int card,std::uint64_t session,std::uint64_t ingress,Time first);
     void sync(std::uint16_t,const std::vector<Frame>&,bool startup);
-    bool pollPhysicalRoundTimeout(std::int64_t now){
+    bool pollPhysicalRoundTimeout(std::int64_t now,const std::vector<Time>* cardWatermarks=nullptr){
         std::lock_guard<std::mutex> lock(normalizationMutex_);
         if(!normalizer_)return false;
         preBoundarySnapshot_=normalizer_->snapshot();
-        const bool result=normalizer_->timeoutBoundaryIfIdle(now);
-        finishTailSeals(now);
+        const bool result=now>0 && normalizer_->timeoutBoundaryIfIdle(now);
+        finishTailSeals(now,cardWatermarks);
         return result;
     }
     void setConfiguredLogicalTriggersPerRound(std::uint64_t count){
@@ -113,7 +113,7 @@ public:
     OutputWorkers::Snapshot stats() const noexcept{return workers_.snapshot();}
 private:
     void beginTailSeals(const PhysicalRoundEvent&);
-    void finishTailSeals(Time);
+    void finishTailSeals(Time,const std::vector<Time>*);
     void sealCard(int,RoundIdentity);
     void cancelTailState(bool seal);
     void consumeCard(Frame);void consumeSync(const SyncFrame&);

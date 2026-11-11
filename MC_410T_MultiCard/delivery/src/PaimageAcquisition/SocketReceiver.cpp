@@ -89,8 +89,9 @@ bool SocketReceiver::start(std::string& error){
     timestampEnabled_=timestampRequested&&timestampReady&&recvMsgFunction_!=0;
     if(timestampRequested&&!timestampEnabled_&&timestampStatus_.empty())
         timestampStatus_="requested but not enabled on every socket";
-    running_=true;worker_=std::thread(&SocketReceiver::run,this);return true;
+    resetIdleWatermarks();running_=true;worker_=std::thread(&SocketReceiver::run,this);return true;
 }
+void SocketReceiver::resetIdleWatermarks(){idleWatermark_=0;for(auto& watermark:cardIdleWatermarks_)watermark=0;}
 void SocketReceiver::closeSockets(){for(auto s:sockets_)closesocket(SOCKET(s));sockets_.clear();if(feedbackSocket_!=INVALID_SOCKET){closesocket(SOCKET(feedbackSocket_));feedbackSocket_=INVALID_SOCKET;}if(wsa_){WSACleanup();wsa_=false;}}
 void SocketReceiver::stop(){
     running_=false;
@@ -98,6 +99,7 @@ void SocketReceiver::stop(){
     {
         std::lock_guard<std::mutex> lock(coreMutex_);
         if(startFenceActive_||!startHold_.empty())resetStartFence(Decision::StartFenceShutdownDiscard);
+        resetIdleWatermarks();
     }
     closeSockets();
 }
@@ -202,6 +204,7 @@ bool SocketReceiver::admitOrHold(int card,const std::uint8_t* data,int length,Ti
     return false;
 }
 void SocketReceiver::prepareStart(std::uint64_t session){auto begin=now();std::unique_lock<std::mutex> lock(coreMutex_);auto acquired=now();
+    resetIdleWatermarks();
     if(startFenceActive_||!startHold_.empty())resetStartFence(Decision::StartFenceResetDiscard);
     startFenceActive_=true;startFenceFailed_=false;startFenceCallbacksSeen_=false;
     startCardStates_.assign(std::size_t(config_.cards),StartCardState::AwaitingStart);startHoldBytes_=0;
@@ -241,6 +244,7 @@ bool SocketReceiver::completeStart(bool ok){auto begin=now();std::unique_lock<st
     return fenceOk;
 }
 void SocketReceiver::prepareStop(){auto begin=now();std::unique_lock<std::mutex> lock(coreMutex_);auto acquired=now();
+    resetIdleWatermarks();
     if(startFenceActive_||!startHold_.empty())resetStartFence(Decision::StartFenceStopDiscard);
     correlation_=0;core_.prepareStop();auto end=now();
     timing(TimingKind::ControlMutexWait,begin,acquired,-1,0,3);timing(TimingKind::ControlMutexHold,acquired,end,-1,0,3);
@@ -252,18 +256,32 @@ void SocketReceiver::completeStop(bool ok){auto begin=now();std::unique_lock<std
     if(loopLog_){LoopRecord r;r.timeNs=begin;r.spanNs=end-begin;r.session=session_.load();r.threadId=GetCurrentThreadId();
         r.kind=std::uint16_t(LoopKind::ControlMark);r.value0=4;r.value1=ok?1u:0u;r.payloadB=session_.load();
         r.flags=std::uint16_t((core_.enabled()?1u:0u)|(core_.confirmed()?2u:0u));loopLog_->push(r);}}
+bool SocketReceiver::pendingSockets(std::vector<bool>& cards,bool& feedback) const {
+    cards.assign(sockets_.size(),false); feedback=false;
+    fd_set read;FD_ZERO(&read);
+    if(feedbackSocket_!=INVALID_SOCKET)FD_SET(SOCKET(feedbackSocket_),&read);
+    for(auto socket:sockets_)FD_SET(SOCKET(socket),&read);
+    timeval timeout{0,0};const int status=select(0,&read,nullptr,nullptr,&timeout);
+    // On an error do not assert that the queues are empty.
+    if(status==SOCKET_ERROR){std::fill(cards.begin(),cards.end(),true);feedback=true;return false;}
+    if(status>0){feedback=feedbackSocket_!=INVALID_SOCKET&&FD_ISSET(SOCKET(feedbackSocket_),&read);
+        for(std::size_t i=0;i<sockets_.size();++i)cards[i]=FD_ISSET(SOCKET(sockets_[i]),&read)!=0;}
+    return true;
+}
 void SocketReceiver::run(){
     priorityResult_=SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_HIGHEST)?0:int(GetLastError());
     actualPriority_=GetThreadPriority(GetCurrentThread());
     std::vector<std::uint8_t> buffer(65536);
-    const auto threadStart=now();timing(TimingKind::ThreadLife,threadStart,threadStart,-1,0,1,0,0,0,true);Time previousLoop=threadStart;std::uint64_t selectId=0,drainId=0,loopId=0;
+    const auto threadStart=now();timing(TimingKind::ThreadLife,threadStart,threadStart,-1,0,1,0,0,0,true);Time previousLoop=threadStart;std::uint64_t selectId=0,drainId=0,loopId=0;std::size_t firstPort=0;
+    constexpr std::uint32_t drainBudget=256;
+    std::vector<bool> pending;
     if(loopLog_){LoopRecord thread;thread.timeNs=threadStart;thread.threadId=GetCurrentThreadId();
         thread.kind=std::uint16_t(LoopKind::ThreadStart);
         thread.value0=std::uint32_t(priorityResult_.load());thread.value1=std::uint32_t(actualPriority_.load());
         loopLog_->push(thread);loopLog_->noteThreadStart(threadStart);}
-    while(running_){const auto loopStart=now();timing(TimingKind::LoopGap,previousLoop,loopStart);
+    while(running_){++loopId;const auto loopStart=now();timing(TimingKind::LoopGap,previousLoop,loopStart);
 #ifdef PAIMAGE_SOCKET_TEST_SEAM
-        if(testLoopHook)testLoopHook(loopId+1);
+        if(testLoopHook)testLoopHook(loopId);
 #endif
         std::uint32_t loopRecvSuccess=0,loopDrainAttempts=0;std::uint64_t readyMask=0;
         fd_set read;FD_ZERO(&read);if(feedbackSocket_!=INVALID_SOCKET)FD_SET(SOCKET(feedbackSocket_),&read);for(auto s:sockets_)FD_SET(SOCKET(s),&read);
@@ -294,7 +312,13 @@ void SocketReceiver::run(){
             if(!FD_ISSET(socket,&read))return;
             const auto drainStart=now();const auto drainIdentifier=++drainId;std::uint32_t attempts=0,success=0,bytes=0,exitReason=1;std::uint64_t lastIngress=0;
             readyMask|=std::uint64_t(1)<<(feedback?0:1+card);
-            for(;;){++attempts;sockaddr_in source{};int sourceSize=sizeof(source);const auto recvStart=now();int n=receivePacket(socket,buffer.data(),int(buffer.size()),source,sourceSize);const auto recvEnd=now();
+            for(;;){if(!running_){exitReason=4;break;}
+                if(success>=drainBudget){exitReason=3;
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+                    if(testBudgetHook)testBudgetHook(feedback?-1:card);
+#endif
+                    break;}
+                ++attempts;sockaddr_in source{};int sourceSize=sizeof(source);const auto recvStart=now();int n=receivePacket(socket,buffer.data(),int(buffer.size()),source,sourceSize);const auto recvEnd=now();
                 if(n==SOCKET_ERROR){const int error=WSAGetLastError();exitReason=error==WSAEWOULDBLOCK?1:2;
                     // The failed call has no ingress record: its timing
                     // correlation is the drain identifier with flags bit 1
@@ -336,11 +360,18 @@ void SocketReceiver::run(){
                 d.flags=std::uint16_t(exitReason);d.session=session_.load();loopLog_->push(d);}
         };
         if(status>0){if(feedbackSocket_!=INVALID_SOCKET)drain(SOCKET(feedbackSocket_),-1,feedback_.port,true);
-            for(std::size_t i=0;i<sockets_.size();++i)drain(SOCKET(sockets_[i]),int(i),endpoints_[i].port,false);}
+            for(std::size_t offset=0;offset<sockets_.size()&&running_;++offset){const auto i=(firstPort+offset)%sockets_.size();drain(SOCKET(sockets_[i]),int(i),endpoints_[i].port,false);}
+            if(!sockets_.empty())firstPort=(firstPort+1)%sockets_.size();}
+        if(!running_)break;
         Time pollSpan=0;
-        {const auto waitStart=now();std::unique_lock<std::mutex> lock(coreMutex_);const auto acquired=now();correlation_=0;core_.poll(acquired);const auto end=now();timing(TimingKind::CoreMutexWait,waitStart,acquired,-1,0,2);timing(TimingKind::CorePoll,acquired,end);pollSpan=end-waitStart;}
+        {const auto waitStart=now();std::unique_lock<std::mutex> lock(coreMutex_);const auto acquired=now();correlation_=0;bool feedbackPending=false;pendingSockets(pending,feedbackPending);core_.poll(acquired,&pending,feedbackPending);
+            if(!feedbackPending && !startFenceActive_ && startHold_.empty()){
+                for(std::size_t i=0;i<pending.size();++i)if(!pending[i])cardIdleWatermarks_[i].store(acquired);
+                if(!std::any_of(pending.begin(),pending.end(),[](bool x){return x;}))idleWatermark_.store(acquired);
+            }
+            const auto end=now();timing(TimingKind::CoreMutexWait,waitStart,acquired,-1,0,2);timing(TimingKind::CorePoll,acquired,end);pollSpan=end-waitStart;}
         if(loopLog_){LoopRecord loop;loop.timeNs=loopStart;loop.spanNs=loopStart-previousLoop;loop.threadId=GetCurrentThreadId();
-            loop.kind=std::uint16_t(LoopKind::Loop);loop.value0=std::uint32_t(++loopId);
+            loop.kind=std::uint16_t(LoopKind::Loop);loop.value0=std::uint32_t(loopId);
             loop.value1=std::uint32_t(std::int32_t(status));loop.value2=loopDrainAttempts;loop.value3=loopRecvSuccess;
             loop.payloadA=selectEnd-selectStart;loop.payloadB=pollSpan;loop.payloadC=readyMask;
             loop.flags=std::uint16_t(status==0?1u:(status<0?2u:0u));loop.session=session_.load();loopLog_->push(loop);}

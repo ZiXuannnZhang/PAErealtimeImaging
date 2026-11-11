@@ -4,6 +4,7 @@
 #include "TimingWriter.h"
 #include "LoopLog.h"
 #include <atomic>
+#include <array>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -21,6 +22,8 @@ public:
     void stop();
     void requestStop(){running_=false;}
     void observeShutdown();
+    Time ingressIdleWatermark()const{return idleWatermark_.load();}
+    std::vector<Time> cardIdleWatermarks()const {std::vector<Time> result;result.reserve(endpoints_.size());for(std::size_t i=0;i<endpoints_.size();++i)result.push_back(cardIdleWatermarks_[i].load());return result;}
     void prepareStart(std::uint64_t session);
     bool completeStart(bool success);
     // ControlSocket calls these around each real START sendto().
@@ -49,6 +52,7 @@ public:
 #ifdef PAIMAGE_SOCKET_TEST_SEAM
     // Test-only fault injection point; never defined in delivery builds.
     std::function<void(std::uint64_t)> testLoopHook;
+    std::function<void(int)> testBudgetHook;
 #endif
     Counters counters()const{std::lock_guard<std::mutex> lock(coreMutex_);return core_.counters();}
     static Time now();
@@ -65,6 +69,8 @@ private:
     static constexpr std::size_t kMaxStartHoldDatagrams=8192;
     static constexpr std::size_t kMaxStartHoldBytes=64u*1024u*1024u;
     void run();void closeSockets();
+    bool pendingSockets(std::vector<bool>& cards, bool& feedback) const;
+    void resetIdleWatermarks();
     bool admitOrHold(int card,const std::uint8_t*,int,Time,std::uint64_t,std::uint32_t,
                      std::uint16_t,std::uint16_t,std::uint16_t,std::uint16_t);
     bool holdStartDatagram(int card,const std::uint8_t*,int,Time,std::uint64_t,std::uint32_t,
@@ -85,6 +91,7 @@ private:
     std::atomic<bool> running_{false};std::atomic<std::uint64_t> session_{0},ingress_{0},hardErrors_{0};
     std::atomic<int> priorityResult_{-1},actualPriority_{-1};std::thread worker_;
     std::atomic<int> lastSocketError_{0};
+    std::atomic<Time> idleWatermark_{0};std::array<std::atomic<Time>,32> cardIdleWatermarks_{};
     bool timestampEnabled_=false;std::uintptr_t recvMsgFunction_=0;std::string timestampStatus_="disabled by configuration";
     std::atomic<std::uint64_t> timestampedPackets_{0},timestampControlTruncated_{0};
     std::uint64_t correlation_=0;bool wsa_=false;

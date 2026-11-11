@@ -28,7 +28,9 @@ public:
     void poll(){
         const auto now = SocketReceiver::now();
         control_.poll(now);
-        output_.pollPhysicalRoundTimeout(now);
+        const auto cardWatermarks=receiver_.cardIdleWatermarks();
+        output_.pollPhysicalRoundTimeout(receiver_.ingressIdleWatermark(),&cardWatermarks);
+
     }
     bool configured()const{return control_.configured();}
     bool configuring()const{return control_.configuring();}

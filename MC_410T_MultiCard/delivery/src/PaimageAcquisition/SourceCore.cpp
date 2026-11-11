@@ -133,10 +133,11 @@ Decision SourceCore::ingest(int c,const std::uint8_t* p,std::size_t n,Time now,s
     if(a.unique>=unsigned(expected_)){close(c,Decision::Complete,now);clearAssembly(a);}
     return result;
 }
-void SourceCore::poll(Time now){
+void SourceCore::poll(Time now, const std::vector<bool>* pendingCards, bool feedbackPending){
     if(!enabled_)return;
-    if(!confirmed_&&lastStartup_&&now-lastStartup_>=Time(config_.startupIdleMs)*ms)clearStartup(now,true);
+    if(!confirmed_&&lastStartup_&&!feedbackPending&&(!pendingCards||(pendingCards->size()>=std::size_t(config_.cards)&&std::none_of(pendingCards->begin(),pendingCards->end(),[](bool pending){return pending;})))&&now-lastStartup_>=Time(config_.startupIdleMs)*ms)clearStartup(now,true);
     for(int c=0;c<config_.cards;++c){auto& a=cards_[c];
+        if(feedbackPending||(pendingCards&&(std::size_t(c)>=pendingCards->size()||(*pendingCards)[c])))continue;
         if(a.active&&a.actual&&a.last&&now-a.last>=100*ms){close(c,Decision::Timeout,now);clearAssembly(a);if(!enabled_)break;}}
 }
 void SourceCore::deliverCard(Frame f,Time now){event(Decision::CardOutput,f->card,f->trigger,0,f->unique,now,f->firstIngressId);if(cardSink_)cardSink_(std::move(f));}

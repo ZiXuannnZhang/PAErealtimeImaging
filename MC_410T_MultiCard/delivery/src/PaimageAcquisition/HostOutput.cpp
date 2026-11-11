@@ -81,8 +81,8 @@ void HostOutput::beginTailSeals(const PhysicalRoundEvent& event){
         if(!t.waiting)sealCard(int(c),old);
     }
 }
-void HostOutput::finishTailSeals(Time now){
-    for(std::size_t c=0;c<tails_.size();++c)if(tails_[c].waiting && now>tails_[c].deadline){
+void HostOutput::finishTailSeals(Time now,const std::vector<Time>* cardWatermarks){
+    for(std::size_t c=0;c<tails_.size();++c)if(tails_[c].waiting && (cardWatermarks ? (c<cardWatermarks->size()?(*cardWatermarks)[c]:0) : now)>tails_[c].deadline){
         tails_[c].waiting=false;sealCard(int(c),tails_[c].round);
     }
 }

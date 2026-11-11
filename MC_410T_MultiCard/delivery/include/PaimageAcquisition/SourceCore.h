@@ -70,7 +70,7 @@ public:
     // second raw-ingress record or applying assembly logic.
     void observeAdmission(Decision,int,std::uint16_t,std::uint16_t,std::uint32_t,Time,
                           std::uint64_t firstIngressId=0);
-    void poll(Time);
+    void poll(Time, const std::vector<bool>* pendingCards = nullptr, bool feedbackPending = false);
     void observeShutdown(Time); // observation only, no state transition
     bool enabled() const { return enabled_; }
     bool confirmed() const { return confirmed_; }

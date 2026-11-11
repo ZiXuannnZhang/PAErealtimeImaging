@@ -53,4 +53,7 @@ Kinds and field meanings retain the existing contract:
 
 Successful `recvfrom` calls correlate with the raw ingress trace by ingress
 ID. Failed calls have no ingress record and use the drain ID in timing output.
+Drain flags: 1 = would block (queue observed empty), 2 = socket error,
+3 = packet budget yielded (not an error or drop), 4 = stop requested.
+The same values apply to Drain timing records; RecvFailure only uses 1 or 2.
 Feedback/ACK packets are control evidence, not sampling data.
