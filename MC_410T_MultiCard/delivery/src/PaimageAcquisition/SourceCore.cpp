@@ -125,6 +125,7 @@ Decision SourceCore::ingest(int c,const std::uint8_t* p,std::size_t n,Time now,s
     const auto slot=std::uint16_t(packet-a.base);
     Decision result=Decision::Accepted;
     if(slot>=expected_)result=Decision::OffsetOutside;
+    else if(n-4<std::min(payload,bytes_-std::size_t(slot)*payload))result=Decision::Short;
     else if(a.seen[slot/32]&(1u<<(slot%32)))result=Decision::Duplicate;
     else {a.seen[slot/32]|=1u<<(slot%32);const auto length=std::min(n-4,payload);
         std::memcpy(a.bytes.data()+slot*payload,p+4,length);a.lengths[slot]=std::uint16_t(length);++a.unique;}
@@ -136,7 +137,7 @@ void SourceCore::poll(Time now){
     if(!enabled_)return;
     if(!confirmed_&&lastStartup_&&now-lastStartup_>=Time(config_.startupIdleMs)*ms)clearStartup(now,true);
     for(int c=0;c<config_.cards;++c){auto& a=cards_[c];
-        if(a.active&&a.unique&&a.last&&now-a.last>=100*ms){close(c,Decision::Timeout,now);clearAssembly(a);if(!enabled_)break;}}
+        if(a.active&&a.actual&&a.last&&now-a.last>=100*ms){close(c,Decision::Timeout,now);clearAssembly(a);if(!enabled_)break;}}
 }
 void SourceCore::deliverCard(Frame f,Time now){event(Decision::CardOutput,f->card,f->trigger,0,f->unique,now,f->firstIngressId);if(cardSink_)cardSink_(std::move(f));}
 void SourceCore::deliverSync(std::uint16_t seq,std::vector<Frame> frames,Time now){

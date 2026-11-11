@@ -43,13 +43,13 @@ def _round_summaries(groups,rounds,expected,cards,trace_complete):
                     ambiguous.append(trigger);continue
                 g=matches[0] if matches else None
                 if g is None:missing.append(trigger)
-                elif g['unique']==expected and not g['shortNonTailPayloads'] and not g['shortTailPayloads']:complete+=1
+                elif g['validUnique']==expected:complete+=1
                 else:partial+=1
             extra_matches=by_card.get((card,extra),[])
             extra_group=extra_matches[0] if len(extra_matches)==1 else None
             per_card.append(dict(card=card,physicalExpected=effective+1,extraExpected=1,effectiveExpected=effective,
                 extraTrigger=extra,extraObserved=bool(extra_matches),extraAssociationAmbiguous=len(extra_matches)>1,
-                extraComplete=(extra_group is not None and extra_group['unique']==expected and not extra_group['shortNonTailPayloads'] and not extra_group['shortTailPayloads']),
+                extraComplete=(extra_group is not None and extra_group['validUnique']==expected),
                 effectiveComplete=complete,effectivePartial=partial,effectiveCompletelyUnseen=len(missing),
                 effectiveObserved=complete+partial,effectiveAmbiguous=len(ambiguous),ambiguousEffectiveTriggers=ambiguous,missingEffectiveTriggers=missing,
                 conservationVerified=bool(trace_complete and not ambiguous and len(extra_matches)<=1 and basis in ('user-confirmed','protocol-confirmed') and complete+partial+len(missing)==effective)))
@@ -378,7 +378,7 @@ def analyze(root,expected,base_port,samples=None,bits=32,cards=4,rounds=None,sys
                     key=identity+(occurrences[identity],)
                     if exact_object:key=exact
                     if key not in groups:
-                        groups[key]=dict(session=session,card=card,trigger=trig,rawPackets=0,seen=0,
+                        groups[key]=dict(session=session,card=card,trigger=trig,rawPackets=0,seen=0,validSeen=0,
                             basePacket=None,sourceIp=None,first=None,last=None,duplicates=0,outsideAnchor=0,sourceClosed=None,
                             occurrence=occurrences[identity],sourceUnique=None,startupFiltered=False,startupBuffered=False,
                             sourceOutput=0,adapterOutput=0,shortNonTailPayloads=0,shortTailPayloads=0,sourceRejects={},outputQueueEvents={},hostDelivery={},terminationEvents={},deliverySessions=[])
@@ -389,6 +389,9 @@ def analyze(root,expected,base_port,samples=None,bits=32,cards=4,rounds=None,sys
                             g['basePacket']=pkt;g['sourceIp']=socket.inet_ntoa(int(ip).to_bytes(4,'little'));g['first']=tick
                             first_links[(card,link)]=key
                         g['last']=tick;g['rawPackets']+=1;offset=(pkt-g['basePacket'])&65535
+                        if offset<expected:
+                            needed=1440 if offset<expected-1 else (samples*(8 if bits==32 else 4)-offset*1440 if samples is not None else 1)
+                            if length>=needed+4:g['validSeen']|=1<<offset
                         if offset>=expected:g['outsideAnchor']+=1
                         elif g['seen']&(1<<offset):g['duplicates']+=1
                         else:
@@ -427,14 +430,15 @@ def analyze(root,expected,base_port,samples=None,bits=32,cards=4,rounds=None,sys
     anomalies=[];first={};partial=0;source_filtered=0;raw_complete=0;slot_complete=0;host_totals={}
     for g in groups.values():
         for name,count in g['hostDelivery'].items():host_totals[name]=host_totals.get(name,0)+count
-        seen=g.pop('seen');g['unique']=seen.bit_count();g['expected']=expected
+        seen=g.pop('seen');valid_seen=g.pop('validSeen');g['unique']=seen.bit_count();g['validUnique']=valid_seen.bit_count();g['expected']=expected
+        g['missingValidSlots']=[i for i in range(expected) if not valid_seen&(1<<i)]
         g['missingRelativeSlots']=[i for i in range(expected) if not seen&(1<<i)]
         g['physicalSlotZero']='unknown (source uses first arrival as anchor)'
         g['associationAmbiguous']=1 in schemas and (g['session'],g['card'],g['trigger']) in ambiguous_keys
         g['tailPayloadVerified']=samples is not None
         if g['rawPackets']:
             if g['unique']==expected:slot_complete+=1
-            if g['unique']==expected and not g['shortNonTailPayloads'] and not g['shortTailPayloads']:
+            if g['validUnique']==expected:
                 if samples is not None:raw_complete+=1
             else:partial+=1
             k=str(g['session'])+':'+str(g['card'])
@@ -446,7 +450,7 @@ def analyze(root,expected,base_port,samples=None,bits=32,cards=4,rounds=None,sys
         if host_count and g['sourceClosed']==6 and not g['hostDelivery'].get('displayReturn:1'):
             g['synchronizedHostDelivery']='not observed; inspect source sync/termination events and queue results'
             delivery_gap=True
-        if g['missingRelativeSlots'] or g['outsideAnchor'] or g['duplicates'] or g['shortNonTailPayloads'] or g['shortTailPayloads'] or g['startupFiltered'] or g['associationAmbiguous'] or g['sourceRejects'] or g['terminationEvents'] or delivery_gap:anomalies.append(g)
+        if g['missingRelativeSlots'] or g['missingValidSlots'] or g['outsideAnchor'] or g['duplicates'] or g['shortNonTailPayloads'] or g['shortTailPayloads'] or g['startupFiltered'] or g['associationAmbiguous'] or g['sourceRejects'] or g['terminationEvents'] or delivery_gap:anomalies.append(g)
     timing=_timing(root)
     looplog=_looplog(root)
     round_summaries=_round_summaries(groups,rounds,expected,cards,not incomplete)

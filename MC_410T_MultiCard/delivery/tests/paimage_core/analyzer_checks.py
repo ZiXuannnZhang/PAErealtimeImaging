@@ -24,6 +24,16 @@ def main():
         assert good['rawCompleteCardTriggers']==1 and not good['traceIncomplete']
         tail=fixture(root/'tail',[(1,0,1444),(1,1,4)])
         assert tail['rawCompleteCardTriggers']==0 and tail['anomalies'][0]['shortTailPayloads']==1
+        unknown=m.analyze(root/'tail',2,18001,None,32,4)
+        assert unknown['anomalies'][0]['validUnique']==1 and unknown['anomalies'][0]['missingValidSlots']==[1]
+        assert not unknown['anomalies'][0]['tailPayloadVerified']
+        repaired=fixture(root/'repaired',[(1,0,4),(1,0,1444),(1,1,4),(1,1,12)])
+        assert repaired['rawCompleteCardTriggers']==1
+        g=repaired['anomalies'][0]
+        assert g['unique']==2 and g['validUnique']==2 and not g['missingValidSlots']
+        assert g['shortNonTailPayloads']==1 and g['shortTailPayloads']==1 and g['duplicates']==2
+        round_result=m.analyze(root/'repaired',2,18001,181,32,4,[{'extraTrigger':0,'effectiveCount':1,'basis':'user-confirmed'}])
+        assert round_result['rounds'][0]['perCard'][0]['effectiveComplete']==1
         reused=fixture(root/'reused',[(1,0,1444),(2,0,1444),(1,1,12)])
         assert reused['rawCompleteCardTriggers']==0 and reused['rawOccurrenceCount']==3
         assert reused['repeatedTriggerIdentities']==1 and not reused['associationComplete']

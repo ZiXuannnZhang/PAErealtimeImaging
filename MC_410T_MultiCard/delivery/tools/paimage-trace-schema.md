@@ -8,7 +8,7 @@ reason, rawHeader[4], schemaVersion. No payload is stored.
 
 Stage 1 is successful recvfrom before classification. It is application ingress,
 not NIC ingress. Correlation is the raw ingress ID. Stage 2 is source decision:
-0 accepted, 1 short, 2 disabled, 3 recent trigger, 4 duplicate, 5 offset outside,
+0 accepted, 1 short (header shorter than 4 bytes, or insufficient payload for the mapped slot; distinguish using the raw ingress length and configured sample count), 2 disabled, 3 recent trigger, 4 duplicate, 5 offset outside,
 6 complete, 7 trigger switch, 8 timeout, 9 startup idle clear, 10 startup overflow,
 11 startup confirmed, 12 sync expired, 13 Stop active truncation observation,
 14 startup buffered, 15 card output, 16 sync output, 17 invalid card,

@@ -18,6 +18,25 @@ struct Harness {
         for(int c=0;c<cfg.cards;++c)if(onlyCard<0||c==onlyCard)for(int i=0;i<n;++i)if(i!=missing){auto p=packet(i,t,std::min(1440,size-i*1440));core.ingest(c,p.data(),p.size(),at+i);}}
 };
 int main(){try{
+    // Short packets retain the first-arrival anchor but do not occupy a slot.
+    for(int bits:{16,32})for(int cards:{1,4}){
+        Harness h({cards,400,bits,0});const int total=400*(bits==32?8:4), slots=(total+1439)/1440;
+        for(int c=0;c<cards;++c){
+            auto header=packet(65535,7,0);check(h.core.ingest(c,header.data(),header.size(),ms,42,123)==Decision::Short,"header is short");
+            auto shortFirst=packet(65535,7,1439);check(h.core.ingest(c,shortFirst.data(),shortFirst.size(),ms+1)==Decision::Short,"short non-tail");
+            auto first=packet(65535,7);check(h.core.ingest(c,first.data(),first.size(),ms+2)==Decision::Accepted,"valid retransmit");
+            check(h.core.ingest(c,first.data(),first.size(),ms+3)==Decision::Duplicate,"valid duplicate");
+            for(int i=1;i<slots;++i){const int seq=(65535+i)&65535, need=std::min(1440,total-i*1440);
+                if(i==slots-1){auto shortTail=packet(seq,7,need-1);check(h.core.ingest(c,shortTail.data(),shortTail.size(),ms+4)==Decision::Short,"short tail");}
+                auto full=packet(seq,7,(c%2)?1440:need);check(h.core.ingest(c,full.data(),full.size(),ms+5+i)==Decision::Accepted,"short or padded legal tail");}
+        }
+        check(h.output.size()==unsigned(cards)&&h.sync.size()==1,"valid retransmissions synchronize");
+        for(auto f:h.output)check(f->complete&&f->basePacket==65535&&f->firstIngressId==42&&f->sourceIPv4==123&&f->unique==unsigned(slots),"anchor and source metadata");
+    }
+    {Harness h({4,400,32,0});for(int c=0;c<4;++c){auto p=packet(0,8,c?1440:0);h.core.ingest(c,p.data(),p.size(),ms);for(int i=1;i<3;++i){p=packet(i,8,i==2?320:1440);h.core.ingest(c,p.data(),p.size(),ms+i);}}
+        h.core.poll(102*ms);check(h.output.size()==4&&h.sync.empty()&&h.core.counters().completeCards==3,"malformed card cannot synchronize");
+        check(!h.output.back()->complete&&h.output.back()->unique==2,"malformed slot remains missing");}
+    {Harness h({1,400,32,0});auto p=packet(0,9,0);h.core.ingest(0,p.data(),p.size(),ms);h.core.poll(102*ms);check(h.output.size()==1&&!h.output[0]->complete&&h.output[0]->unique==0&&h.sync.empty(),"header-only timeout partial");}
     for(int samples:{5000,12500}){Harness h({4,samples,32,0});h.trigger(65535,ms);h.trigger(0,26*ms);check(h.output.size()==8&&h.sync.size()==2,"four-card complete and wrap");
         for(const auto& f:h.output){check(f->complete&&f->expected==unsigned(samples==5000?28:70),"packet count");std::vector<float>a,b;decodeRaw(*f,32,a,b);check(a.size()==unsigned(samples)&&a.back()==float(20000+samples-1)&&b.back()==float(-10000-samples+1),"B/A raw numerical contract");}
         auto p=packet(0,0);check(h.core.ingest(0,p.data(),p.size(),27*ms)==Decision::RecentTrigger,"recent completed dedup");}

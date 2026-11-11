@@ -48,13 +48,12 @@ struct FakeCard {
         sockaddr_in to{};to.sin_family=AF_INET;to.sin_port=htons(8000);inet_pton(AF_INET,"127.0.0.1",&to.sin_addr);
         require(sendto(control,reinterpret_cast<const char*>(ack.data()),int(ack.size()),0,reinterpret_cast<sockaddr*>(&to),sizeof(to))==int(ack.size()),"config ACK send");
     }
-    // Header-only datagrams: 4-byte packetSeq/triggerSeq header is all the
-    // production ingress needs for assembly and gap accounting.
-    void packet(std::uint16_t trigger,std::uint16_t seq){
-        const unsigned char p[4]={static_cast<unsigned char>(seq&255),static_cast<unsigned char>(seq>>8),
-                                  static_cast<unsigned char>(trigger&255),static_cast<unsigned char>(trigger>>8)};
+    // Full-size padded packets are accepted, including the final slot.
+    void packet(std::uint16_t trigger,std::uint16_t seq,int payload=1440){
+        std::vector<unsigned char> p(4+payload);p[0]=static_cast<unsigned char>(seq&255);p[1]=static_cast<unsigned char>(seq>>8);
+        p[2]=static_cast<unsigned char>(trigger&255);p[3]=static_cast<unsigned char>(trigger>>8);
         sockaddr_in to{};to.sin_family=AF_INET;to.sin_port=htons(8001);inet_pton(AF_INET,"127.0.0.1",&to.sin_addr);
-        require(sendto(sender,reinterpret_cast<const char*>(p),4,0,reinterpret_cast<sockaddr*>(&to),sizeof(to))==4,"data send");
+        require(sendto(sender,reinterpret_cast<const char*>(p.data()),int(p.size()),0,reinterpret_cast<sockaddr*>(&to),sizeof(to))==int(p.size()),"data send");
     }
     void trigger(std::uint16_t t,int packets){for(int s=0;s<packets;++s)packet(t,static_cast<std::uint16_t>(s));}
 };
@@ -63,9 +62,11 @@ struct Scenario {
     FakeCard card;
     NetworkController controller;
     std::atomic<int> started{0};
+    std::atomic<int> rings{0};
     std::atomic<bool> stopped{false};
     void begin(int acqTimeNs){
         require(card.open(),"fake card sockets");
+        controller.setRingFeedSink([this](const TriggerGroupConstPtr&){++rings;return ImagingSubmitResult::Accepted;});
         AcqConfig config;config.nCards=1;config.acqTimeNs=acqTimeNs;config.localBindIP="127.0.0.1";
         config.targetIPs={"127.0.0.2"};config.diagnosticTraceEnabled=false;config.diagnosticLevel=0;
         QObject::connect(&controller,&NetworkController::measurementStarted,[&]{++started;});
@@ -264,6 +265,9 @@ int main(int argc,char** argv){
     WSADATA winsock{};
     if(WSAStartup(MAKEWORD(2,2),&winsock)!=0)return 2;
     try{
+        { Scenario s;s.begin(512);s.card.packet(99,0,0);s.settle();
+          require(s.stats().triggersComplete==0&&s.stats().triggersPartial==1,"header-only is partial in production");
+          require(s.rings==0,"header-only never reaches sync imaging");s.end(); }
         fullGapOnly();
         partialPlusGap();
         adjacentNoGap();
