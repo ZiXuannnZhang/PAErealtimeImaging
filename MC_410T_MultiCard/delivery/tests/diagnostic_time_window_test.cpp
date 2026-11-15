@@ -350,6 +350,71 @@ bool testMixedWindowReleasesRetentionPin()
                  "mixed window did not export both runs exactly once");
 }
 
+bool testManualActiveSnapshotDoesNotBlockRotation()
+{
+    QTemporaryDir temp;
+    DiagnosticRecorder::Options options;
+    options.rootDirectory = temp.path();
+    options.maxHistorySegmentBytes = 6144;
+    options.maxFallbackEntries = 256;
+    options.noiseBurst = 1000;
+    DiagnosticRecorder recorder(options);
+    const QString padding(512, QLatin1Char('x'));
+    auto batch = [&](const QString &prefix, int count) {
+        for (int i = 0; i < count; ++i)
+            recorder.recordEvent("manual-snapshot", prefix + QString::number(i) + ":" + padding,
+                                 DiagnosticRecorder::Severity::Warning);
+        return recorder.flush(5000);
+    };
+    if (!check(batch("before-", 12), "initial rotation failed")) return false;
+    const QDir run(recorder.runDirectory());
+    QByteArray retained;
+    for (const QString &name : {QStringLiteral("events.jsonl.previous"), QStringLiteral("events.jsonl")}) {
+        QFile file(run.filePath(name));
+        if (!check(file.open(QIODevice::ReadOnly), "initial segment missing")) return false;
+        retained += file.readAll();
+    }
+    const auto runs = DiagnosticRecorder::enumerateRuns(temp.path());
+    if (!check(runs.size() == 1, "active run missing")) return false;
+    DiagnosticRecorder::TimeWindowRequest request;
+    request.requestedStartTime = QDateTime::currentDateTime().addSecs(-60).toString(Qt::ISODateWithMs);
+    request.requestedEndTime = QDateTime::currentDateTime().addSecs(60).toString(Qt::ISODateWithMs);
+    request.exportCapturedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    request.rootDirectory = temp.path();
+    request.sources.append(sourceFromRun(runs.first(), recorder.captureBoundary(), true,
+                                         [&] { return recorder.flush(5000); }));
+    std::promise<void> enteredPromise, releasePromise;
+    auto entered = enteredPromise.get_future();
+    auto release = releasePromise.get_future().share();
+    DiagnosticRecorder::setSnapshotReadHookForTest([&] { enteredPromise.set_value(); release.wait(); });
+    const QString target = temp.filePath("manual-window.zip");
+    auto worker = std::async(std::launch::async, [&] { return DiagnosticRecorder::exportTimeWindow(request, target); });
+    const bool paused = entered.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    const bool flushed = paused && batch("after-", 36);
+    const auto status = recorder.status();
+    QByteArray tail;
+    for (const QString &name : {QStringLiteral("events.jsonl.previous"), QStringLiteral("events.jsonl")}) {
+        QFile file(run.filePath(name));
+        if (file.open(QIODevice::ReadOnly)) tail += file.readAll();
+    }
+    releasePromise.set_value();
+    const auto result = worker.get();
+    DiagnosticRecorder::setSnapshotReadHookForTest({});
+    QString error;
+    const QByteArray exported = readZip(target, &error).value("events.jsonl");
+    bool ok = check(paused && flushed, QStringLiteral("manual snapshot blocked writer rotation: paused=%1 writeError=%2 exportError=%3")
+                        .arg(paused).arg(status.writeErrorText, result.error))
+        && check(!status.writeError && status.drops.queueDropped == 0 && status.drops.criticalQueueDropped == 0,
+                 QStringLiteral("manual snapshot caused writer loss: %1").arg(status.writeErrorText))
+        && check(tail.contains("after-35:") && !tail.contains("after-0:"), "multiple rotations or formal tail missing")
+        && check(result.success && error.isEmpty() && !exported.contains("after-"), "manual export boundary failed");
+    for (int i = 0; i < 12; ++i) {
+        const QByteArray marker = (QString("before-%1:").arg(i)).toUtf8();
+        ok = check(exported.count(marker) == retained.count(marker), "pinned segment content changed") && ok;
+    }
+    return ok;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -358,6 +423,7 @@ int main(int argc, char **argv)
     bool ok = testTimeWindowAcrossRuns();
     ok = testActiveImmutableBoundary() && ok;
     ok = testMixedWindowReleasesRetentionPin() && ok;
+    ok = testManualActiveSnapshotDoesNotBlockRotation() && ok;
     QTextStream(stdout) << (ok ? QStringLiteral("PASS") : QStringLiteral("FAIL"))
                         << QStringLiteral(" diagnostic time-window multi-run/active-boundary/empty-window export")
                         << Qt::endl;

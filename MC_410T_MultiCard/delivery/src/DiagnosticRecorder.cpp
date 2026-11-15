@@ -31,6 +31,15 @@
 #include <mutex>
 #include <thread>
 #include <zlib.h>
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#include <fcntl.h>
+#include <io.h>
+#else
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 // Shared ownership keeps captured bytes and their admission reservation alive for retries.
 struct DiagnosticRecorder::HistorySnapshot {
@@ -57,6 +66,10 @@ constexpr qint64 kSnapshotPerRunLimit = 32LL * 1024 * 1024;
 using Clock = std::chrono::steady_clock;
 std::mutex g_instanceMutex;
 DiagnosticRecorder *g_instance = nullptr;
+#ifdef PAIMAGE_DIAGNOSTIC_TEST_SEAM
+std::mutex g_snapshotHookMutex;
+std::function<void()> g_snapshotReadHook;
+#endif
 std::mutex g_bundleMutex;
 DiagnosticRecorder::BundleCapture g_bundleCapture;
 DiagnosticRecorder::BundleExtension captureBundle(qint64 start,qint64 end){
@@ -376,10 +389,10 @@ QByteArray summaryBytes(const QString &runId,
     return (lines.join(QStringLiteral("\n")) + QStringLiteral("\n")).toUtf8();
 }
 
-// Active files are copied under the writer lock. A missing key means that
-// the segment did not exist at capture, never that it should be reopened.
+// Open fixed file identities under the rotation lease, then copy their fixed
+// prefixes after releasing it. Missing keys must never be reopened later.
 std::shared_ptr<const DiagnosticRecorder::HistorySnapshot> captureHistory(
-    const QString &directory, QString *error)
+    const QString &directory, QString *error, std::shared_ptr<QLockFile> rotationLease = {})
 {
     auto snapshot = std::make_shared<DiagnosticRecorder::HistorySnapshot>();
     const QFileInfo runInfo(directory), rootInfo(QFileInfo(directory).absolutePath());
@@ -400,29 +413,71 @@ std::shared_ptr<const DiagnosticRecorder::HistorySnapshot> captureHistory(
               << QDir(directory).filePath(name);
     }
     const int historyPathCount = paths.size();
-    paths << QDir(directory).filePath(QStringLiteral("history-retention.json"))
-          << QDir(directory).filePath(QStringLiteral("network.json"))
-          << QDir(directory).filePath(QStringLiteral("settings.json"))
-          << QDir(directory).filePath(QStringLiteral("manifest.json"));
+    const QString receiptPath = QDir(directory).filePath(QStringLiteral("history-retention.json"));
+    paths << receiptPath;
+    // Manual time-window exports use only the retention receipt; the other
+    // metadata files are not read by that path.
+    if (!rotationLease) {
+        paths << QDir(directory).filePath(QStringLiteral("network.json"))
+              << QDir(directory).filePath(QStringLiteral("settings.json"))
+              << QDir(directory).filePath(QStringLiteral("manifest.json"));
+    }
     qint64 bytes = 0, historyBytes = 0, metadataBytes = 0;
-    QHash<QString, qint64> sizes;
+    struct PinnedFile { QString path; qint64 size; std::unique_ptr<QFile> file; };
+    std::vector<PinnedFile> pinned;
     for (int i = 0; i < paths.size(); ++i) {
         const QString &path = paths.at(i);
-        QFileInfo info(path);
+        const QFileInfo info(path);
         if (info.isSymLink() || info.isJunction() || (info.exists() && !info.isFile())) {
             *error = QStringLiteral("不安全的日志文件：%1").arg(path); return {};
         }
-        if (info.exists()) {
-            qint64 &part = i < historyPathCount ? historyBytes : metadataBytes;
-            const qint64 limit = i < historyPathCount ? kSnapshotPerRunLimit : kSnapshotMetadataLimit;
-            if (info.size() < 0 || info.size() > limit - part) {
-                *error = i < historyPathCount ? QStringLiteral("活动日志快照超过 32 MiB 限额")
-                    : QStringLiteral("活动日志元数据超过 8 MiB 限额"); return {};
-            }
-            part += info.size();
-            bytes += info.size();
-            sizes.insert(path, info.size());
+        if (!info.exists()) continue;
+        auto file = std::make_unique<QFile>();
+        qint64 size = -1;
+#ifdef Q_OS_WIN
+        HANDLE handle = CreateFileW(reinterpret_cast<LPCWSTR>(path.utf16()), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+        if (handle == INVALID_HANDLE_VALUE) {
+            *error = QStringLiteral("无法安全读取日志快照：%1").arg(path); return {};
         }
+        BY_HANDLE_FILE_INFORMATION attributes;
+        LARGE_INTEGER length;
+        if (!GetFileInformationByHandle(handle, &attributes)
+            || (attributes.dwFileAttributes & (FILE_ATTRIBUTE_REPARSE_POINT | FILE_ATTRIBUTE_DIRECTORY))
+            || GetFileType(handle) != FILE_TYPE_DISK || !GetFileSizeEx(handle, &length)) {
+            CloseHandle(handle);
+            *error = QStringLiteral("无法安全读取日志快照：%1").arg(path); return {};
+        }
+        size = length.QuadPart;
+        const int fd = _open_osfhandle(reinterpret_cast<intptr_t>(handle), _O_RDONLY | _O_BINARY);
+        if (fd == -1) { CloseHandle(handle); *error = QStringLiteral("无法打开日志快照：%1").arg(path); return {}; }
+        if (!file->open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+            _close(fd); *error = QStringLiteral("无法打开日志快照：%1").arg(path); return {};
+        }
+#else
+        const int fd = ::open(QFile::encodeName(path).constData(), O_RDONLY | O_NOFOLLOW);
+        struct stat attributes;
+        if (fd < 0) {
+            *error = QStringLiteral("无法安全读取日志快照：%1").arg(path); return {};
+        }
+        if (::fstat(fd, &attributes) != 0 || !S_ISREG(attributes.st_mode)) {
+            ::close(fd); *error = QStringLiteral("无法安全读取日志快照：%1").arg(path); return {};
+        }
+        size = attributes.st_size;
+        if (!file->open(fd, QIODevice::ReadOnly, QFileDevice::AutoCloseHandle)) {
+            ::close(fd); *error = QStringLiteral("无法打开日志快照：%1").arg(path); return {};
+        }
+#endif
+        qint64 &part = i < historyPathCount ? historyBytes : metadataBytes;
+        const qint64 limit = i < historyPathCount ? kSnapshotPerRunLimit : kSnapshotMetadataLimit;
+        if (size < 0 || size > limit - part) {
+            *error = i < historyPathCount ? QStringLiteral("活动日志快照超过 32 MiB 限额")
+                : QStringLiteral("活动日志元数据超过 8 MiB 限额"); return {};
+        }
+        part += size;
+        bytes += size;
+        pinned.push_back({path, size, std::move(file)});
     }
     {
         std::lock_guard<std::mutex> lock(g_snapshotBudgetMutex);
@@ -432,19 +487,40 @@ std::shared_ptr<const DiagnosticRecorder::HistorySnapshot> captureHistory(
         g_snapshotBytes += bytes;
         snapshot->reserved = bytes;
     }
-    for (const QString &path : paths) {
-        QFileInfo info(path);
-        if (!sizes.contains(path)) continue;
-        QFile file(path);
-        if (info.isSymLink() || info.isJunction() || !info.isFile() || !file.open(QIODevice::ReadOnly)) {
-            *error = QStringLiteral("无法安全读取日志快照：%1").arg(path); return {};
+    if (rotationLease) {
+        // QSaveFile replaces this small receipt during rotation. Close its
+        // handle before unlocking so Windows can replace the destination.
+        for (auto it = pinned.begin(); it != pinned.end(); ++it) {
+            if (it->path != receiptPath) continue;
+            if (it->size > 64 * 1024) {
+                *error = QStringLiteral("活动日志轮转记录超过 64 KiB 限额"); return {};
+            }
+            const QByteArray data = it->file->read(it->size);
+            if (data.size() != it->size || it->file->error() != QFile::NoError) {
+                *error = QStringLiteral("读取日志快照失败：%1").arg(it->path); return {};
+            }
+            snapshot->files.insert(it->path, data);
+            pinned.erase(it);
+            break;
         }
-        const qint64 size = sizes.value(path);
-        QByteArray data = file.read(size);
-        if (data.size() != size || file.error() != QFile::NoError) {
-            *error = QStringLiteral("读取日志快照失败：%1").arg(path); return {};
+    }
+#ifdef PAIMAGE_DIAGNOSTIC_TEST_SEAM
+    const bool hadRotationLease = bool(rotationLease);
+#endif
+    rotationLease.reset();
+#ifdef PAIMAGE_DIAGNOSTIC_TEST_SEAM
+    if (hadRotationLease) {
+        std::function<void()> hook;
+        { std::lock_guard<std::mutex> lock(g_snapshotHookMutex); hook = g_snapshotReadHook; }
+        if (hook) hook();
+    }
+#endif
+    for (auto &entry : pinned) {
+        QByteArray data = entry.file->read(entry.size);
+        if (data.size() != entry.size || entry.file->error() != QFile::NoError) {
+            *error = QStringLiteral("读取日志快照失败：%1").arg(entry.path); return {};
         }
-        snapshot->files.insert(path, data);
+        snapshot->files.insert(entry.path, data);
     }
     return snapshot;
 }
@@ -853,7 +929,8 @@ void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &
     QVector<Run> runs;
     static const QRegularExpression known(QStringLiteral(
         "^(\\.active\\.lock|\\.history\\.lock|\\.active|manifest\\.json|summary\\.txt|network\\.json|settings\\.json|"
-        "history-retention\\.json|(?:runtime\\.log|events\\.jsonl|(?:network|settings|card)_history\\.jsonl)(?:\\.previous)?)$"));
+        "history-retention\\.json|(?:runtime\\.log|events\\.jsonl|(?:network|settings|card)_history\\.jsonl)"
+        "(?:\\.previous(?:\\.retired-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?)?)$"));
     const QFileInfoList entries = root.entryInfoList({QStringLiteral("run-*")}, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);
     for (const QFileInfo &info : entries) {
         QByteArray manifestBytes;
@@ -1082,7 +1159,20 @@ struct DiagnosticRecorder::State
             const auto previous=file->fileName()+QStringLiteral(".previous");
             if (QFileInfo::exists(previous)) {
                 evicted = true;
+                #ifdef Q_OS_WIN
+                // A shared reader can keep the old inode alive after deletion.
+                // Rename first so its delete-pending name cannot block reuse.
+                const QString retired = previous + QStringLiteral(".retired-") + QUuid::createUuid().toString(QUuid::WithoutBraces);
+                if (!MoveFileExW(reinterpret_cast<LPCWSTR>(previous.utf16()), reinterpret_cast<LPCWSTR>(retired.utf16()), 0)) {
+                    if(error)*error=QStringLiteral("旧诊断分段无法移除"); return false;
+                }
+                if (!DeleteFileW(reinterpret_cast<LPCWSTR>(retired.utf16()))) {
+                    MoveFileExW(reinterpret_cast<LPCWSTR>(retired.utf16()), reinterpret_cast<LPCWSTR>(previous.utf16()), 0);
+                    if(error)*error=QStringLiteral("旧诊断分段无法移除"); return false;
+                }
+#else
                 if (!QFile::remove(previous)) { if(error)*error=QStringLiteral("旧诊断分段无法移除"); return false; }
+#endif
             }
             if (!QFile::rename(file->fileName(),previous) || !file->open(QIODevice::ReadWrite|QIODevice::Append|QIODevice::Unbuffered)) {
                 if(error)*error=QStringLiteral("诊断分段轮转失败：%1").arg(file->fileName());
@@ -1418,6 +1508,9 @@ quint64 DiagnosticRecorder::recordNetworkSnapshot(const QJsonObject &snapshot) {
 quint64 DiagnosticRecorder::recordSettingsSnapshot(const QJsonObject &snapshot) { return m_state ? m_state->recordSettingsSnapshot(snapshot) : 0; }
 quint64 DiagnosticRecorder::setCardSnapshot(int card, const QString &ip, const QString &state, const QJsonObject &fields) { return m_state ? m_state->setCardSnapshot(card, ip, state, fields) : 0; }
 void DiagnosticRecorder::requestFlush() { if (m_state) m_state->requestFlush(); }
+#ifdef PAIMAGE_DIAGNOSTIC_TEST_SEAM
+void DiagnosticRecorder::setSnapshotReadHookForTest(std::function<void()> hook) { std::lock_guard<std::mutex> lock(g_snapshotHookMutex); g_snapshotReadHook = std::move(hook); }
+#endif
 void DiagnosticRecorder::setBundleCapture(BundleCapture capture){std::lock_guard<std::mutex> lock(g_bundleMutex);g_bundleCapture=std::move(capture);}
 bool DiagnosticRecorder::flush(int timeoutMs) { if (!m_state) return false; const quint64 boundary = m_state->captureRequest(0, QString()).boundarySequence; return m_state->flushTo(boundary, timeoutMs); }
 quint64 DiagnosticRecorder::captureBoundary() const { if (!m_state) return 0; std::lock_guard<std::mutex> lock(m_state->mutex); return m_state->nextSequence - 1; }
@@ -1741,9 +1834,9 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportTimeWindow(
                 truncationReasons.append(QStringLiteral("运行 %1 导出前刷新未完成或发生写入错误").arg(source.runId));
             source.flushBeforeExport = {};
             {
-                const auto lease=diagnostic_storage::historyLease(source.sourceDirectory, 0);
+                auto lease=diagnostic_storage::historyLease(source.sourceDirectory, 0);
                 if (!lease) { result.error=QStringLiteral("活动运行正在轮转，请重试导出：%1").arg(source.sourceDirectory); return result; }
-                source.historySnapshot=captureHistory(source.sourceDirectory, &source.captureError);
+                source.historySnapshot=captureHistory(source.sourceDirectory, &source.captureError, std::move(lease));
             }
             if (!source.historySnapshot) { result.error=source.captureError; return result; }
             truncationReasons.append(QStringLiteral("运行 %1 使用调用方提供的序号边界及活动文件固定前缀；跨进程文件间一致性无法验证").arg(source.runId));

@@ -246,6 +246,7 @@ add_executable(diagnostic_time_window_test
     diagnostic_time_window_test.cpp
     ../src/DiagnosticRecorder.cpp)
 target_include_directories(diagnostic_time_window_test PRIVATE ../include)
+target_compile_definitions(diagnostic_time_window_test PRIVATE PAIMAGE_DIAGNOSTIC_TEST_SEAM)
 target_link_libraries(diagnostic_time_window_test PRIVATE Qt6::Core)
 add_test(NAME diagnostic_time_window_test COMMAND diagnostic_time_window_test)
 

@@ -21,6 +21,9 @@ public:
     using BundleExtension=std::function<bool(const BundleSink&,QString*)>;
     using BundleCapture=std::function<BundleExtension(qint64,qint64)>;
     static void setBundleCapture(BundleCapture);
+#ifdef PAIMAGE_DIAGNOSTIC_TEST_SEAM
+    static void setSnapshotReadHookForTest(std::function<void()> hook);
+#endif
     enum class Severity {
         Trace = 0,
         Debug,
