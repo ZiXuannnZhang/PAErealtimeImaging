@@ -2,6 +2,8 @@
 #include <QCoreApplication>
 #include <QTimer>
 #include <QProcess>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <cmath>
 #include <iostream>
 #include <algorithm>
@@ -27,6 +29,8 @@ static int burstTest(QCoreApplication &app)
     RingFbpSettings fbp; fbp.enabled=true; fbp.angularSamples=129;
     bool failed=false, done=false, nextSubmitted=false, resetSubmitted=false;
     bool recoveryComplete=false, resetComplete=false;
+    bool terminalEvidence=false, wholeRoundEvidence=false;
+    QString evidenceEpoch;
     std::vector<quint64> indices, acknowledgements;
     auto fail=[&](const QString &message) {
         if (failed) return;
@@ -35,7 +39,7 @@ static int burstTest(QCoreApplication &app)
     };
     auto submit=[&](int seq, paimage::RoundIdentity round, bool complete, quint64 *index) {
         QVector<float> raw(24*512), angles(24); QVector<quint8> channels(24);
-        const int roundSeq = round.roundGeneration == 2 ? seq - 10 : seq;
+        const int roundSeq = round.roundGeneration == 3 ? seq - 10 : seq;
         for (int j=0; j<6; ++j) for (int ch=0; ch<4; ++ch) {
             int p=j*4+ch; channels[p]=ch; angles[p]=float(ch*90+(roundSeq*3+j/2)*10);
             for (int t=0; t<512; ++t)
@@ -48,7 +52,7 @@ static int burstTest(QCoreApplication &app)
     };
     auto submitRound=[&](quint64 generation) {
         for (int i=0; i<3; ++i) {
-            const int seq = generation == 2 ? 10 + i : i;
+            const int seq = generation == 3 ? 10 + i : i;
             quint64 id=0;
             if (!submit(seq,{10,generation},i==2,&id) || id<=indices.back()) return false;
             indices.push_back(id);
@@ -58,7 +62,7 @@ static int burstTest(QCoreApplication &app)
     auto maybeReset=[&] {
         if (acknowledgements.size()!=11 || !recoveryComplete || resetSubmitted) return;
         resetSubmitted=true;
-        if (!controller.sendRingReset() || !submitRound(3)) fail("reset and reused block sequence failed");
+        if (!controller.sendRingReset() || !submitRound(4)) fail("reset and reused block sequence failed");
     };
     QObject::connect(&controller,&ImagingController::svcError,&app,fail);
     QObject::connect(&controller,&ImagingController::svcReady,&app,[&] {
@@ -83,12 +87,32 @@ static int burstTest(QCoreApplication &app)
         }
         quint64 rejected=999;
         if (submit(8,{10,1},true,&rejected) || rejected!=0) admissionOk=false;
-        // The queue is still held full for this subsequent same-round block.
-        if (submit(9,{10,1},true,nullptr)) admissionOk=false;
+        // An entire subsequent physical round is rejected while capacity is held.
+        for (int seq=0; seq<3; ++seq)
+            if (submit(seq,{10,2},seq==2,nullptr)) admissionOk=false;
         SetEvent(release); blocker.join(); CloseHandle(held); CloseHandle(release);
         if (!admissionOk) fail("queue admission/full contract failed");
     });
     QObject::connect(&controller,&ImagingController::svcStatus,&app,[&](const QString &s,float) {
+        const QString obsPrefix=QStringLiteral("[RingSHMObs] ");
+        if (s.startsWith(obsPrefix)) {
+            const auto obj=QJsonDocument::fromJson(s.mid(obsPrefix.size()).toUtf8()).object();
+            if (obj.value("kind").toString()=="capacity_rejected") {
+                const QString epoch=obj.value("input_epoch").toString();
+                if (epoch.isEmpty() || (!evidenceEpoch.isEmpty() && epoch!=evidenceEpoch)
+                    || obj.value("measurement_session").toString()!="10"
+                    || !obj.value("reconstruction_complete").isBool()
+                    || obj.value("reconstruction_complete").toBool()
+                    || !obj.value("source_terminal").toBool()) { fail("invalid capacity evidence"); return; }
+                evidenceEpoch=epoch;
+                const QString round=obj.value("round_generation").toString();
+                const int first=obj.value("first_block_index").toInt(-1);
+                const int last=obj.value("last_block_index").toInt(-1);
+                if (round=="1" && first==8 && last==8 && !terminalEvidence) terminalEvidence=true;
+                else if (round=="2" && first==0 && last==2 && !wholeRoundEvidence) wholeRoundEvidence=true;
+                else { fail("unexpected capacity evidence"); return; }
+            }
+        }
         const QString prefix=QStringLiteral("[RingInput] acknowledged id=");
         if (!s.startsWith(prefix) || failed) return;
         bool ok=false; quint64 id=s.mid(prefix.size()).toULongLong(&ok);
@@ -98,7 +122,7 @@ static int burstTest(QCoreApplication &app)
             id!=indices[acknowledgements.size()-1]) { fail("acknowledgements out of order"); return; }
         if (acknowledgements.size()==8 && !nextSubmitted) {
             nextSubmitted=true;
-            if (!submitRound(2)) { fail("next round was not admitted"); return; }
+            if (!submitRound(3)) { fail("next round was not admitted"); return; }
         }
         maybeReset();
         if (acknowledgements.size()==14 && resetComplete) { done=true; controller.stopSvc(); }
@@ -107,11 +131,11 @@ static int burstTest(QCoreApplication &app)
         [&](int,quint64,bool,quint64 session,quint64 round,bool complete,int buffer) {
             controller.releaseSnapshotBuffer(buffer);
             if (session==10 && round==1 && complete) { fail("incomplete round became complete"); return; }
-            if (session==10 && round==2 && complete) {
+            if (session==10 && round==3 && complete) {
                 recoveryComplete=true;
                 maybeReset();
             }
-            if (session==10 && round==3 && complete) {
+            if (session==10 && round==4 && complete) {
                 resetComplete=true;
                 if (acknowledgements.size()==14) { done=true; controller.stopSvc(); }
             }
@@ -120,7 +144,7 @@ static int burstTest(QCoreApplication &app)
     if (!controller.configureRing(c,tv,nullptr,fbp) || !controller.startSvc()) return 2;
     QTimer::singleShot(50000,&app,[&] { fail("burst integration timed out"); });
     app.exec();
-    if (!failed && done && acknowledgements.size()==14) {
+    if (!failed && done && acknowledgements.size()==14 && terminalEvidence && wholeRoundEvidence) {
         std::cout << "PASS real service burst, queue full, ordered acknowledgements, next-round recovery and reset\n";
         return 0;
     }

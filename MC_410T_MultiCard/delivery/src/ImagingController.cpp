@@ -452,7 +452,24 @@ bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
             m_ringPendingBytes += bytes; ++m_ringPendingCount;
             m_ringQueue.push_back(std::move(block));
             accepted = true; ++m_ringAcceptedCount;
-        } else { ++m_ringRejectedCount; }
+        } else {
+            ++m_ringRejectedCount;
+            const bool eligible = rawBlock.size() == m_ringBlockSize && anglesDeg.size() == m_ringAlineCount
+                && channels.size() == m_ringAlineCount && m_running.load() && !m_fbpPreparing
+                && m_ringRequestedEpoch && !m_ringInputFailed
+                && m_ringSubmitIndex != std::numeric_limits<std::uint64_t>::max();
+            if (eligible) {
+                auto *last = m_ringRejections.empty() ? nullptr : &m_ringRejections.back();
+                if (last && last->epoch == m_ringRequestedEpoch && last->round == round
+                    && last->afterIndex == m_ringSubmitIndex && last->direction == sectorCcw && !last->terminal
+                    && last->last != UINT32_MAX && block.roundBlockIndex == last->last + 1) {
+                    last->last = block.roundBlockIndex; last->terminal = sourceRoundComplete;
+                } else if (m_ringRejections.size() < 64) {
+                    m_ringRejections.push_back({round, m_ringRequestedEpoch, m_ringSubmitIndex,
+                        block.roundBlockIndex, block.roundBlockIndex, sectorCcw, sourceRoundComplete});
+                } else m_ringRejectionOverflow = true;
+            }
+        }
     }
     return accepted;
 }
@@ -460,7 +477,7 @@ bool ImagingController::submitRingBlock(const QVector<float> &rawBlock,
 bool ImagingController::sendRingReset()
 {
     std::lock_guard<std::mutex> lock(m_ringQueueMutex);
-    if (!m_running.load() || !m_ringRequestedEpoch || m_ringInputFailed) return false;
+    if (!m_running.load() || !m_ringRequestedEpoch || m_ringInputFailed || m_ringRejectionOverflow) return false;
     const size_t blockBytes = size_t(m_ringBlockSize) * sizeof(float)
                             + size_t(m_ringAlineCount) * (sizeof(float) + 1);
     m_ringRetiredInFlightBytes += (m_ringPendingCount - m_ringQueue.size()) * blockBytes;
@@ -469,6 +486,7 @@ bool ImagingController::sendRingReset()
         m_ringRetiredQueues.push_back(std::move(m_ringQueue));
     }
     m_ringPendingBytes = 0; m_ringPendingCount = 0;
+    // Retain old-epoch evidence until the owner reports it as superseded.
     m_ringRequestedEpoch = newRingEpoch();
     m_ringBaselineRound = {}; m_ringBaselineSeq = 0;
     m_ringInputFailed = false;
@@ -480,6 +498,7 @@ void ImagingController::clearRingInput()
     std::lock_guard<std::mutex> lock(m_ringQueueMutex);
     m_ringQueue.clear(); m_ringRetiredQueues.clear(); m_ringRetiredBytes = 0; m_ringRetiredInFlightBytes = 0; m_ringPendingBytes = 0; m_ringPendingCount = 0;
     m_ringRequestedEpoch = 0;
+    m_ringRejections.clear(); m_ringRejectionOverflow = false;
     m_ringBaselineRound = {}; m_ringBaselineSeq = 0;
     m_ringInputFailed = true;
 }
@@ -519,12 +538,12 @@ bool ImagingController::setupRingSharedMemory(int blockSize, int frameSize, int 
 void ImagingController::pumpRingInput()
 {
     if (!m_ringMode || !m_ringMapping.data() || !m_running.load() || m_fbpPreparing) return;
-    std::uint64_t requested, acceptedCount, rejectedCount; bool failed;
+    std::uint64_t requested, acceptedCount, rejectedCount; bool failed, rejectionOverflow;
     std::vector<std::deque<RingBlock>> retired;
     size_t retiredBytes = 0;
     { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
       retired.swap(m_ringRetiredQueues); retiredBytes = m_ringRetiredBytes;
-      requested = m_ringRequestedEpoch; failed = m_ringInputFailed;
+      requested = m_ringRequestedEpoch; failed = m_ringInputFailed; rejectionOverflow = m_ringRejectionOverflow;
       acceptedCount = m_ringAcceptedCount; rejectedCount = m_ringRejectedCount; }
     if (acceptedCount != m_ringReportedAccepted || rejectedCount != m_ringReportedRejected) {
         emit svcStatus(QStringLiteral("[RingInput] enqueued_total=%1 dropped_total=%2")
@@ -535,11 +554,30 @@ void ImagingController::pumpRingInput()
     { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
       m_ringRetiredBytes -= retiredBytes; }
     if (!requested) return;
+    // Reset cannot discard evidence that the service has not received. Report
+    // superseded records locally, without injecting them into the new epoch.
+    for (;;) {
+        RingRejection marker{};
+        {
+            std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+            if (m_ringRejections.empty() || m_ringRejections.front().epoch == m_ringRequestedEpoch) break;
+            marker = m_ringRejections.front(); m_ringRejections.pop_front();
+        }
+        QJsonObject evidence{{"cmd", "ring_shm_observation"}, {"kind", "capacity_rejected"},
+            {"component", "producer"}, {"superseded", true}, {"reconstruction_complete", false},
+            {"input_epoch", QString::number(marker.epoch)},
+            {"measurement_session", QString::number(marker.round.measurementSession)},
+            {"round_generation", QString::number(marker.round.roundGeneration)},
+            {"first_block_index", static_cast<qint64>(marker.first)},
+            {"last_block_index", static_cast<qint64>(marker.last)}, {"source_terminal", marker.terminal}};
+        emit svcStatus(QStringLiteral("[RingSHMObs] ")
+            + QString::fromUtf8(QJsonDocument(evidence).toJson(QJsonDocument::Compact)), 0);
+    }
     auto fail = [this, requested, failed](const QString &reason) {
         if (failed) { emit svcError(QStringLiteral("环形输入撤回失败：") + reason); stopSvc(); return; }
         { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
           if (m_ringRequestedEpoch != requested) return;
-          m_ringInputFailed = true; m_ringQueue.clear();
+          m_ringInputFailed = true; m_ringQueue.clear(); m_ringRejections.clear(); m_ringRejectionOverflow = false;
           m_ringPendingBytes = 0; m_ringPendingCount = 0;
           // Invalidate a possibly still-ready slot on the next pump.
           m_ringRequestedEpoch = newRingEpoch(); }
@@ -548,6 +586,7 @@ void ImagingController::pumpRingInput()
         emit svcError(QStringLiteral("环形输入中止：") + reason);
     };
     const auto now = std::chrono::steady_clock::now();
+    if (rejectionOverflow) { fail(QStringLiteral("容量拒收证据队列溢出")); return; }
     if (requested != m_ringActiveEpoch) {
         if (m_ringResetTarget != requested) {
             m_ringResetTarget = requested;
@@ -557,6 +596,7 @@ void ImagingController::pumpRingInput()
         const auto r = ring_input::reset(m_ringInputMutex, m_ringMapping.data(), m_ringMapping.capacity(), requested, 5);
         if (r == ring_input::Result::Timeout) return;
         if (r != ring_input::Result::Ok) { fail(QStringLiteral("共享槽重置失败 %1").arg(int(r))); return; }
+        m_ringRejectionDeadline = std::chrono::steady_clock::time_point::max();
         m_ringActiveEpoch = requested; m_ringInFlight = RingBlock{}; m_ringHasInFlight = false; m_ringPublished = false;
         { std::lock_guard<std::mutex> lock(m_ringQueueMutex); m_ringRetiredInFlightBytes = 0; }
         m_ringResetPending = true; m_ringNextNotify = now;
@@ -577,8 +617,43 @@ void ImagingController::pumpRingInput()
         m_ringResetPending = false;
     }
     if (!m_ringHasInFlight) {
+        RingRejection marker{}; bool haveMarker = false;
+        {
+            std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+            if (m_ringRequestedEpoch != m_ringActiveEpoch || m_ringInputFailed) return;
+            if (!m_ringRejections.empty() && (m_ringQueue.empty()
+                || m_ringRejections.front().afterIndex < m_ringQueue.front().index)) {
+                marker = m_ringRejections.front(); haveMarker = true;
+            }
+        }
+        if (haveMarker) {
+            if (m_ringRejectionDeadline == std::chrono::steady_clock::time_point::max()) {
+                m_ringRejectionDeadline = now + std::chrono::seconds(2); m_ringNextNotify = now;
+            }
+            if (now >= m_ringRejectionDeadline) { fail(QStringLiteral("容量拒收信令超时")); return; }
+            if (now < m_ringNextNotify) return;
+            m_ringNextNotify = now + std::chrono::milliseconds(100);
+            QJsonObject msg{{"cmd", "ring_capacity_rejected"}, {"input_epoch", QString::number(marker.epoch)},
+                {"measurement_session", QString::number(marker.round.measurementSession)},
+                {"round_generation", QString::number(marker.round.roundGeneration)},
+                {"first_block_index", static_cast<qint64>(marker.first)},
+                {"last_block_index", static_cast<qint64>(marker.last)}, {"source_terminal", marker.terminal},
+                {"sector_ccw", marker.direction}};
+            if (!sendCommand(msg)) return;
+            { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
+              if (m_ringRequestedEpoch == marker.epoch && !m_ringRejections.empty()) {
+                  auto &front = m_ringRejections.front();
+                  if (front.last == marker.last) m_ringRejections.pop_front();
+                  else front.first = marker.last + 1;
+              } }
+            m_ringRejectionDeadline = std::chrono::steady_clock::time_point::max();
+            return;
+        }
         std::lock_guard<std::mutex> lock(m_ringQueueMutex);
         if (m_ringInputFailed || m_ringRequestedEpoch != m_ringActiveEpoch || m_ringQueue.empty()) return;
+        // A producer may have appended a rejection after the first check.
+        if (!m_ringRejections.empty()
+            && m_ringRejections.front().afterIndex < m_ringQueue.front().index) return;
         m_ringInFlight = std::move(m_ringQueue.front()); m_ringQueue.pop_front();
         m_ringHasInFlight = true; m_ringPublished = false;
         m_ringNextNotify = now;

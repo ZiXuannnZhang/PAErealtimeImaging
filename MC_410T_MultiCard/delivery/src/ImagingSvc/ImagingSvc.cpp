@@ -137,6 +137,37 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
         uint64_t epoch = 0, publication = 0;
         if (parseId(msg.value("input_epoch"), epoch) && parseId(msg.value("publication_id"), publication))
             processRingPulse(epoch, publication);
+    } else if (cmd == "ring_capacity_rejected") {
+        uint64_t epoch = 0;
+        const auto parsed = ring_round_identity::parse(msg);
+        const auto first = msg.value("first_block_index");
+        const auto last = msg.value("last_block_index");
+        const double firstValue = first.toDouble(-1), lastValue = last.toDouble(-1);
+        const auto terminal = msg.value("source_terminal");
+        const int direction = msg.value("sector_ccw").toInt(-2);
+        if (!m_running || !parsed.valid || !ring_round_identity::parseDecimalUint64(msg.value("input_epoch"), epoch)
+            || !epoch || epoch != m_ringEpoch || !first.isDouble() || !last.isDouble()
+            || firstValue < 0 || lastValue < firstValue || lastValue > UINT32_MAX
+            || firstValue != double(uint32_t(firstValue)) || lastValue != double(uint32_t(lastValue))
+            || !terminal.isBool() || direction < -1 || direction > 1) return;
+        const auto admission = m_ringRound.admit(parsed.identity);
+        using Admission = paimage::RingReconRoundState::Admission;
+        if (admission == Admission::First || admission == Admission::Transition) {
+            if (direction != -1) m_ringConfig.sectorCcw = direction;
+            m_ringExpectedSeq = 0; m_ringSequenceIncomplete = false;
+            resetRingRecon();
+        }
+        if (admission != Admission::Stale && admission != Admission::Invalid) {
+            m_ringSequenceIncomplete = true;
+            if (terminal.toBool()) {
+                m_ringRound.close();
+                resetRingRecon();
+            }
+        }
+        QJsonObject extra = msg;
+        extra.remove("cmd");
+        extra[QStringLiteral("reconstruction_complete")] = false;
+        sendRingObservation("capacity_rejected", m_ringObs.snapshot(), extra);
     } else if (cmd == "ring_reset") {
         const QJsonValue value = msg.value("input_epoch");
         const QString text = value.toString();

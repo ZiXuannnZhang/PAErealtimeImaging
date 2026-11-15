@@ -197,6 +197,16 @@ private:
         bool complete = false;
         uint32_t roundBlockIndex = 0;
     };
+    struct RingRejection {
+        paimage::RoundIdentity round;
+        std::uint64_t epoch, afterIndex;
+        uint32_t first, last;
+        int direction;
+        bool terminal;
+    };
+    std::deque<RingRejection> m_ringRejections;
+    bool m_ringRejectionOverflow = false;
+    std::chrono::steady_clock::time_point m_ringRejectionDeadline = std::chrono::steady_clock::time_point::max();
     mutable std::mutex m_ringQueueMutex;
     std::deque<RingBlock> m_ringQueue;
     paimage::RoundIdentity m_ringBaselineRound; // protected by m_ringQueueMutex
