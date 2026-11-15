@@ -65,6 +65,17 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         {"monotonicAnchorNs","1000000"},{"diagnosticTraceEnabled",false}}).toJson());
     write(missing+"/timing-summary.json",QJsonDocument(QJsonObject{{"recordsIssued",1}}).toJson());
     write(traces+"/loop-only/timing-summary.json",QJsonDocument(QJsonObject{{"recordsIssued",1}}).toJson());
+    fixture("enabled-missing", "trace", QByteArray(reinterpret_cast<const char*>(&tr),sizeof(tr)), true);
+    write(traces+"/enabled-missing/run-config.json",QJsonDocument(QJsonObject{{"runId","enabled-missing"},
+        {"wallAnchorMs",double(wall)},{"monotonicAnchorNs","1000000"},{"diagnosticTraceEnabled",true},
+        {"timingEnabled",true},{"loopLogEnabled",true}}).toJson());
+    const QString emptyEnabled=traces+"/empty-enabled";QDir().mkpath(emptyEnabled);
+    write(emptyEnabled+"/run-config.json",QJsonDocument(QJsonObject{{"runId","empty-enabled"},
+        {"wallAnchorMs",double(wall)},{"monotonicAnchorNs","1000000"},{"diagnosticTraceEnabled",false},
+        {"timingEnabled",true},{"loopLogEnabled",true}}).toJson());
+    const QString anchorMissing=traces+"/anchor-missing";QDir().mkpath(anchorMissing);
+    write(anchorMissing+"/run-config.json",QJsonDocument(QJsonObject{{"runId","anchor-missing"},
+        {"diagnosticTraceEnabled",false},{"timingEnabled",true},{"loopLogEnabled",false}}).toJson());
     const QString noAnchor=traces+"/no-anchor";QDir().mkpath(noAnchor);
     write(noAnchor+"/run-config.json",QJsonDocument(QJsonObject{{"runId","no-anchor"}}).toJson());
     write(noAnchor+"/looplog-summary.json",QJsonDocument(QJsonObject{{"recordsIssued",1}}).toJson());
@@ -88,10 +99,27 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     auto loopSummary=QJsonDocument::fromJson(entries.value("paimage/run1/looplog-summary.json")).object();
     require(loopSummary.value("recordsWritten").toInt()==2&&!loopSummary.value("loopLogIncomplete").toBool(true));
     auto manifest=QJsonDocument::fromJson(entries.value("paimage/manifest.json")).object();
-    require(manifest.value("traceIncomplete").toBool()&&manifest.value("runs").toArray().size()==8);
-    const auto skipped=manifest.value("skippedRuns").toArray();require(skipped.size()==3);
+    require(manifest.value("traceIncomplete").toBool()&&manifest.value("runs").toArray().size()==9);
+    const auto skipped=manifest.value("skippedRuns").toArray();require(skipped.size()==5);
     QHash<QString,QJsonObject> skippedById;
     for(const auto& item:skipped){const auto obj=item.toObject();skippedById.insert(obj.value("runId").toString(),obj);}
+    const auto missingTiming=QJsonDocument::fromJson(entries.value("paimage/enabled-missing/timing-summary.json")).object();
+    const auto missingLoop=QJsonDocument::fromJson(entries.value("paimage/enabled-missing/looplog-summary.json")).object();
+    require(missingTiming.value("exportMissing").toBool()&&missingTiming.value("timingIncomplete").toBool());
+    require(missingLoop.value("exportMissing").toBool()&&missingLoop.value("loopLogIncomplete").toBool());
+    bool foundMissingRun=false;
+    for(const auto& item:manifest.value("runs").toArray()){
+        const auto obj=item.toObject();
+        if(obj.value("runId").toString()=="enabled-missing"){
+            foundMissingRun=true;require(obj.value("traceIncomplete").toBool()&&obj.value("timingMissing").toBool()&&obj.value("loopLogMissing").toBool());
+        }
+    }
+    require(foundMissingRun);
+    require(skippedById.value("empty-enabled").value("timingMissing").toBool()&&
+        skippedById.value("empty-enabled").value("loopLogMissing").toBool());
+    require(skippedById.value("anchor-missing").value("reason").toString()=="missing_time_anchor"&&
+        skippedById.value("anchor-missing").value("timingMissing").toBool()&&
+        !skippedById.value("anchor-missing").value("loopLogMissing").toBool());
     require(skippedById.value("no-anchor").value("reason").toString()=="missing_time_anchor");
     require(skippedById.value("zero").value("loopLogFormatError").toBool()&&
         skippedById.value("zero").value("loopLogIncomplete").toBool());
@@ -119,14 +147,14 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     require(timed.correlation==20&&entries.contains("paimage/timing-only/run-config.json"));
     const auto timingSummary=QJsonDocument::fromJson(entries.value("paimage/timing-only/timing-summary.json")).object();
     require(timingSummary.value("recordsWritten").toInt()==1&&timingSummary.value("exportFilteredRecords").toInt()==1);
-    for(const auto& id:{"bad-trace","bad-timing","bad-loop","zero","loop-only","missing","clipped-trace","no-anchor"})
+    for(const auto& id:{"bad-trace","bad-timing","bad-loop","zero","loop-only","missing","clipped-trace","no-anchor","enabled-missing","empty-enabled","anchor-missing"})
         require(QDir(traces+"/"+id).removeRecursively());
     const QString cleanRoot=root.path()+"/clean-traces";QDir().mkpath(cleanRoot+"/run2");
     for(const auto& file:{"run-config.json","trace-0.bin","trace-summary.json"})
         require(QFile::copy(run2+"/"+file,cleanRoot+"/run2/"+file));
     const QString outsideRun=cleanRoot+"/outside";QDir().mkpath(outsideRun);
     write(outsideRun+"/run-config.json",QJsonDocument(QJsonObject{{"runId","outside"},{"wallAnchorMs",double(wall)},
-        {"monotonicAnchorNs","1000000"}}).toJson());
+        {"monotonicAnchorNs","1000000"},{"timingEnabled",false},{"loopLogEnabled","unknown"}}).toJson());
     outside.sequence=1;
     write(outsideRun+"/trace-0.bin",QByteArray(reinterpret_cast<const char*>(&outside),sizeof(outside)));
     write(outsideRun+"/trace-summary.json",QJsonDocument(QJsonObject{{"recordsIssued",1}}).toJson());

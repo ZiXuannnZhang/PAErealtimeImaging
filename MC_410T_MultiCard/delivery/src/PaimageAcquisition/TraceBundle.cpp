@@ -43,6 +43,22 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 if(runInfo.isSymLink()||runInfo.isJunction())continue;
                 const QString path=QDir(root).filePath(dir);auto metadata=object(QDir(path).filePath("run-config.json"));
                 if(metadata.isEmpty())continue;
+                const auto enabledState=[&](const char* key){
+                    const auto value=metadata.value(key);
+                    return value.isBool()?value:QJsonValue(QJsonValue::Null);
+                };
+                const auto timingEnabled=enabledState("timingEnabled"),loopEnabled=enabledState("loopLogEnabled");
+                const auto hasCut=[&](const auto& streamCuts){
+                    for(const auto& cut:streamCuts)
+                        if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path))return true;
+                    return false;
+                };
+                const bool timingEvidence=hasCut(timingCuts)||QFileInfo::exists(QDir(path).filePath("timing-summary.json"))||
+                    !QDir(path).entryList({"timing-*.bin"},QDir::Files).isEmpty();
+                const bool loopEvidence=hasCut(loopCuts)||QFileInfo::exists(QDir(path).filePath("looplog-summary.json"))||
+                    !QDir(path).entryList({"looplog-*.bin"},QDir::Files).isEmpty();
+                const bool timingMissing=timingEnabled.isBool()&&timingEnabled.toBool()&&!timingEvidence;
+                const bool loopMissing=loopEnabled.isBool()&&loopEnabled.toBool()&&!loopEvidence;
                 const qint64 wall=metadata.value("wallAnchorMs").toVariant().toLongLong();
                 const qint64 mono=metadata.value("monotonicAnchorNs").toString().toLongLong();
                 bool anchorKnown=wall&&mono;
@@ -55,8 +71,12 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                         return info.value(key).toBool()||info.value("recordsIssued").toDouble()>0;
                     };
                     if(!binary.isEmpty()||hasEvidence(traceInfo,"traceIncomplete")||
-                       hasEvidence(timingInfo,"timingIncomplete")||hasEvidence(loopInfo,"loopLogIncomplete")){
-                        skippedRuns.append(QJsonObject{{"runId",metadata.value("runId")},{"reason","missing_time_anchor"}});
+                       hasEvidence(timingInfo,"timingIncomplete")||hasEvidence(loopInfo,"loopLogIncomplete")||timingMissing||loopMissing){
+                        skippedRuns.append(QJsonObject{{"runId",metadata.value("runId")},{"reason","missing_time_anchor"},
+                            {"timingEnabled",timingEnabled},{"loopLogEnabled",loopEnabled},
+                            {"timingMissing",timingMissing},{"loopLogMissing",loopMissing},
+                            {"timingIncomplete",timingMissing||hasEvidence(timingInfo,"timingIncomplete")},
+                            {"loopLogIncomplete",loopMissing||hasEvidence(loopInfo,"loopLogIncomplete")}});
                         bundleIncomplete=true;
                     }
                     continue;
@@ -152,19 +172,20 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     summary.value("traceIncomplete").toBool()||!traceCountCovered));
                 const bool traceIncomplete=traceFailure||(traceExpected&&filtered>0);
                 const bool timingCountCovered=!timingBoundaryKnown||timingSelected+timingFiltered==timingBoundary;
-                const bool timingPresent=timingLive||!timingSummary.isEmpty()||!timingNames.isEmpty();
-                const bool timingIncomplete=timingPresent&&(timingSummary.value("timingIncomplete").toBool()||
-                    !timingFlushed||timingBad||!anchorKnown||!timingCountCovered);
+                const bool timingPresent=timingEvidence||timingMissing;
+                const bool timingIncomplete=timingMissing||(timingPresent&&(timingSummary.value("timingIncomplete").toBool()||
+                    !timingFlushed||timingBad||!anchorKnown||!timingCountCovered));
                 const bool loopCountCovered=!loopBoundaryKnown||loopSelected+loopFiltered==loopBoundary;
-                const bool loopPresent=loopLive||!loopSummary.isEmpty()||!loopNames.isEmpty();
-                const bool loopStreamIncomplete=loopPresent&&(loopSummary.value("loopLogIncomplete").toBool()||
-                    loopIncomplete||loopBad||!loopFlushed||!loopCountCovered);
+                const bool loopPresent=loopEvidence||loopMissing;
+                const bool loopStreamIncomplete=loopMissing||(loopPresent&&(loopSummary.value("loopLogIncomplete").toBool()||
+                    loopIncomplete||loopBad||!loopFlushed||!loopCountCovered));
                 const bool incomplete=traceIncomplete||timingIncomplete||loopStreamIncomplete;
                 if(!selected&&!timingSelected&&!loopSelected){
                     if(traceFailure||timingIncomplete||loopStreamIncomplete){
                         skippedRuns.append(QJsonObject{{"runId",metadata.value("runId")},{"reason","no_complete_records"},
                             {"traceFormatError",traceBad},{"timingFormatError",timingBad},{"loopLogFormatError",loopBad},
-                            {"traceIncomplete",traceFailure},{"timingIncomplete",timingIncomplete},{"loopLogIncomplete",loopStreamIncomplete}});
+                            {"traceIncomplete",traceFailure},{"timingIncomplete",timingIncomplete},{"loopLogIncomplete",loopStreamIncomplete},
+                            {"timingEnabled",timingEnabled},{"loopLogEnabled",loopEnabled},{"timingMissing",timingMissing},{"loopLogMissing",loopMissing}});
                         bundleIncomplete=true;
                     }
                     continue;
@@ -190,18 +211,20 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     timingSummary.insert("exportFormatError",timingBad);
                     timingSummary.insert("exportCountCovered",timingBoundaryKnown?QJsonValue(timingCountCovered):QJsonValue());
                     timingSummary.insert("timingIncomplete",timingIncomplete);
+                    timingSummary.insert("exportMissing",timingMissing);
                     if(!write(prefix+"timing-summary.json",QJsonDocument(timingSummary).toJson()))return false;
                 }
                 if(loopPresent){loopSummary.insert("exportFlushCompleted",loopFlushed);
                     loopSummary.insert("recordsWritten",double(loopSelected));loopSummary.insert("exportFilteredRecords",double(loopFiltered));
                     loopSummary.insert("exportFormatError",loopBad);
                     loopSummary.insert("exportCountCovered",loopBoundaryKnown?QJsonValue(loopCountCovered):QJsonValue());
-                    loopSummary.insert("loopLogIncomplete",loopStreamIncomplete);
+                    loopSummary.insert("loopLogIncomplete",loopStreamIncomplete);loopSummary.insert("exportMissing",loopMissing);
                     if(!write(prefix+"looplog-summary.json",QJsonDocument(loopSummary).toJson()))return false;}
                 bundleIncomplete|=incomplete;
                 runs.append(QJsonObject{{"runId",metadata.value("runId")},{"recordBoundary",double(boundary)},
                     {"recordsIncluded",double(selected)},{"recordsOutsideWindow",double(filtered)},
-                    {"traceIncomplete",incomplete},{"traceEnabled",traceExpected},{"timingRecordsIncluded",double(timingSelected)},{"anchorKnown",anchorKnown},{"files",runFiles},
+                    {"traceIncomplete",incomplete},{"traceEnabled",traceExpected},{"timingEnabled",timingEnabled},{"loopLogEnabled",loopEnabled},
+                    {"timingIncomplete",timingIncomplete},{"loopLogIncomplete",loopStreamIncomplete},{"timingMissing",timingMissing},{"loopLogMissing",loopMissing},{"timingRecordsIncluded",double(timingSelected)},{"anchorKnown",anchorKnown},{"files",runFiles},
                     {"firstIncludedMs",anchorKnown?QJsonValue(double(firstMs)):QJsonValue()},
                     {"lastIncludedMs",anchorKnown?QJsonValue(double(lastMs)):QJsonValue()}});
             }
