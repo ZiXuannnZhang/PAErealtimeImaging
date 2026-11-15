@@ -27,6 +27,19 @@ inline std::shared_ptr<QLockFile> lease(const QString &root)
     return lock->tryLock(0) ? lock : nullptr;
 }
 
+// Serialize a bounded snapshot of one run with rotation across processes.
+// The lease must not be held while waiting for a writer or producing an archive.
+inline std::shared_ptr<QLockFile> historyLease(const QString &runDirectory, int timeoutMs)
+{
+    const QFileInfo directory(runDirectory);
+    const QFileInfo file(QDir(runDirectory).filePath(QStringLiteral(".history.lock")));
+    if (!directory.isDir() || directory.isSymLink() || directory.isJunction()
+        || file.isSymLink() || file.isJunction() || (file.exists() && !file.isFile())) return nullptr;
+    auto lock = std::make_shared<QLockFile>(file.filePath());
+    lock->setStaleLockTime(0);
+    return lock->tryLock(timeoutMs) ? lock : nullptr;
+}
+
 inline std::shared_ptr<QLockFile> exportLease(const QString &root)
 {
     static std::mutex mutex;

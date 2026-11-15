@@ -10,6 +10,8 @@
 #include <QTemporaryDir>
 
 #include <array>
+#include <chrono>
+#include <future>
 #include <thread>
 #include <vector>
 
@@ -423,6 +425,104 @@ bool testLiveHistoryRotation()
         !events.contains("\"message\":\"0:xxx"),"latest evidence or eviction indication lost");
 }
 
+bool testExportDoesNotBlockRotation()
+{
+    QTemporaryDir temp;
+    if (!check(temp.isValid(), "temporary directory unavailable")) return false;
+    auto options = optionsFor(temp.path());
+    options.maxHistorySegmentBytes = 6144;
+    options.maxFallbackEntries = 256;
+    DiagnosticRecorder recorder(options);
+    const QString padding(512, QLatin1Char('x'));
+    auto writeBatch = [&](const QString &prefix, int count) {
+        for (int i = 0; i < count; ++i)
+            recorder.recordEvent("rotation-export", prefix + QString::number(i) + ":" + padding,
+                                 DiagnosticRecorder::Severity::Warning);
+        return recorder.flush(3000);
+    };
+    if (!check(writeBatch("early-", 4), "initial flush failed")) return false;
+    auto first = recorder.captureExportRequest();
+    // Hold a captured request without starting the exporter while its source rotates.
+    if (!check(writeBatch("middle-", 24), "pre-export rotation flush failed")) return false;
+    auto second = recorder.captureExportRequest();
+    { auto abandoned = recorder.captureExportRequest(); Q_UNUSED(abandoned); }
+
+    std::promise<void> releasePromise, enteredFirst, enteredSecond;
+    const auto release = releasePromise.get_future().share();
+    auto firstEntered = enteredFirst.get_future();
+    auto secondEntered = enteredSecond.get_future();
+    first.bundleExtension = [&](const DiagnosticRecorder::BundleSink &, QString *) {
+        enteredFirst.set_value(); release.wait(); return true;
+    };
+    second.bundleExtension = [&](const DiagnosticRecorder::BundleSink &, QString *) {
+        enteredSecond.set_value(); release.wait(); return true;
+    };
+    const QString firstPath = temp.filePath("first.zip");
+    const QString secondPath = temp.filePath("second.zip");
+    auto firstFuture = std::async(std::launch::async, [&] { return DiagnosticRecorder::exportRequest(first, firstPath); });
+    auto secondFuture = std::async(std::launch::async, [&] { return DiagnosticRecorder::exportRequest(second, secondPath); });
+    const bool bothEntered = firstEntered.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+        && secondEntered.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    bool flushed = false;
+    if (bothEntered) flushed = writeBatch("late-", 24);
+    const auto status = recorder.status();
+    const QDir run(recorder.runDirectory());
+    QFile current(run.filePath("events.jsonl")), previous(run.filePath("events.jsonl.previous"));
+    QByteArray retained;
+    if (current.open(QIODevice::ReadOnly)) retained += current.readAll();
+    if (previous.open(QIODevice::ReadOnly)) retained += previous.readAll();
+    current.close();
+    previous.close();
+    const bool receipt = run.exists("history-retention.json");
+    // Always release both workers before reporting a failure or destroying futures.
+    releasePromise.set_value();
+    const auto firstResult = firstFuture.get();
+    const auto secondResult = secondFuture.get();
+    bool ok = check(bothEntered, "concurrent export extensions did not start")
+        && check(flushed, "flush timed out during exports")
+        && check(status.drops.queueDropped == 0 && status.drops.criticalQueueDropped == 0 && !status.writeError,
+                 "export caused dropped or failed writes")
+        && check(receipt && retained.contains("late-23:") && !retained.contains("late-0:"),
+                 "multiple rotations or retained formal events missing")
+        && check(firstResult.success && secondResult.success, "concurrent exports failed");
+    QString error;
+    const auto firstFiles = readZip(firstPath, &error);
+    ok = check(error.isEmpty(), error) && ok;
+    const QByteArray firstEvents = firstFiles.value("events.jsonl");
+    for (int i = 0; i < 4; ++i)
+        ok = check(firstEvents.count((QString("early-%1:").arg(i)).toUtf8()) == 1,
+                   "first capture lost or duplicated an event") && ok;
+    ok = check(!firstEvents.contains("middle-") && !firstEvents.contains("late-"),
+               "post-boundary event crossed first capture") && ok;
+    error.clear();
+    const auto secondFiles = readZip(secondPath, &error);
+    ok = check(error.isEmpty() && secondFiles.value("events.jsonl").contains("middle-23:")
+                   && !secondFiles.value("events.jsonl").contains("late-"),
+               "second capture lost its boundary") && ok;
+
+    auto failure = recorder.captureExportRequest();
+    failure.bundleExtension = [](const DiagnosticRecorder::BundleSink &sink, QString *error) {
+        sink("partial.txt", "partial");
+        if (error) *error = "intentional extension failure";
+        return false;
+    };
+    const QString failedPath = temp.filePath("failed.zip");
+    const auto failed = DiagnosticRecorder::exportRequest(failure, failedPath);
+    ok = check(!failed.success && !QFileInfo::exists(failedPath)
+                   && QDir(temp.path()).entryList({"failed.zip.part-*"}, QDir::Files).isEmpty(),
+               "failed export left output behind") && ok;
+    failure = {};
+    first = {};
+    second = {};
+    ok = check(writeBatch("after-", 12), "logging did not recover after export requests were released") && ok;
+    const QString laterPath = temp.filePath("later.zip");
+    const auto laterResult = recorder.exportRun(laterPath);
+    error.clear();
+    const auto laterFiles = readZip(laterPath, &error);
+    return check(laterResult.success && error.isEmpty() && laterFiles.value("events.jsonl").contains("after-11:"),
+                 "later export missing new records") && ok;
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -438,5 +538,6 @@ int main(int argc, char **argv)
     ok = testUnavailableDirectoryAndExistingExport() && ok;
     ok = testAbnormalHistory() && ok;
     ok = testLiveHistoryRotation() && ok;
+    ok = testExportDoesNotBlockRotation() && ok;
     return ok ? 0 : 1;
 }

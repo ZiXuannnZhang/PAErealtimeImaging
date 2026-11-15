@@ -1,5 +1,6 @@
 #include "ZipTestPayload.h"
 #include "DiagnosticRecorder.h"
+#include "DiagnosticStorage.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -14,6 +15,8 @@
 #include <QTextStream>
 
 #include <array>
+#include <chrono>
+#include <future>
 
 namespace {
 
@@ -295,6 +298,58 @@ bool testActiveImmutableBoundary()
                  QStringLiteral("post-capture active event crossed immutable export boundary"));
 }
 
+bool testMixedWindowReleasesRetentionPin()
+{
+    QTemporaryDir temp;
+    if (!check(temp.isValid(), "temporary directory unavailable")) return false;
+    DiagnosticRecorder::Options options;
+    options.rootDirectory = temp.path();
+    const QDateTime start = QDateTime::currentDateTime().addSecs(-10);
+    {
+        DiagnosticRecorder historical(options);
+        historical.recordEvent("window-pin", "ended-run-event");
+        if (!check(historical.flush(3000), "historical flush failed")) return false;
+    }
+    DiagnosticRecorder active(options);
+    active.recordEvent("window-pin", "active-run-event");
+    if (!check(active.flush(3000), "active flush failed")) return false;
+    const QDateTime end = QDateTime::currentDateTime().addSecs(10);
+    {
+        auto abandoned = active.captureTimeWindowRequest(start, end);
+        if (!check(abandoned.validationError.isEmpty() && abandoned.sources.size() == 2,
+                   "abandoned mixed window was not captured")) return false;
+    }
+    {
+        const auto lease = diagnostic_storage::lease(temp.path());
+        if (!check(bool(lease), "abandoned window retained the root pin")) return false;
+    }
+    auto request = active.captureTimeWindowRequest(start, end);
+    if (!check(request.validationError.isEmpty() && request.sources.size() == 2,
+               "mixed window was not captured")) return false;
+    std::promise<void> enteredPromise, releasePromise;
+    auto entered = enteredPromise.get_future();
+    const auto release = releasePromise.get_future().share();
+    request.bundleExtension = [&](const DiagnosticRecorder::BundleSink &, QString *) {
+        enteredPromise.set_value(); release.wait(); return true;
+    };
+    const QString zipPath = temp.filePath("mixed-window.zip");
+    auto worker = std::async(std::launch::async, [&] {
+        return DiagnosticRecorder::exportTimeWindow(request, zipPath);
+    });
+    const bool blocked = entered.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    bool rootAvailable = false;
+    if (blocked) rootAvailable = bool(diagnostic_storage::lease(temp.path()));
+    releasePromise.set_value();
+    const auto result = worker.get();
+    QString error;
+    const auto files = readZip(zipPath, &error);
+    const auto events = files.value("events.jsonl");
+    return check(blocked && rootAvailable, "mixed export retained root pin during ZIP extension")
+        && check(result.success && error.isEmpty() && result.sourceRunCount == 2
+                     && events.count("ended-run-event") == 1 && events.count("active-run-event") == 1,
+                 "mixed window did not export both runs exactly once");
+}
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -302,6 +357,7 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     bool ok = testTimeWindowAcrossRuns();
     ok = testActiveImmutableBoundary() && ok;
+    ok = testMixedWindowReleasesRetentionPin() && ok;
     QTextStream(stdout) << (ok ? QStringLiteral("PASS") : QStringLiteral("FAIL"))
                         << QStringLiteral(" diagnostic time-window multi-run/active-boundary/empty-window export")
                         << Qt::endl;

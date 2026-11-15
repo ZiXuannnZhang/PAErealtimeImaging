@@ -109,9 +109,12 @@ public:
     // contains the sequence boundary and any events/snapshots not yet safely
     // represented by the on-disk files, so a later worker cannot accidentally
     // include state recorded after the button click.
+    struct HistorySnapshot;
     struct ExportRequest {
         BundleExtension bundleExtension;
         std::shared_ptr<void> storageLease;
+        std::shared_ptr<const HistorySnapshot> historySnapshot;
+        QString captureError;
         QString runId;
         QString sourceDirectory;
         QString startIsoTime;
@@ -128,13 +131,16 @@ public:
         QString writeErrorText;
         bool snapshotsTruncated = false;
         bool capturedLive = false;
+        bool pendingAtCapture = false;
         // Executed only by the exporter, never by the UI capture operation.
         std::function<bool()> flushBeforeExport;
     };
 
+    struct RetentionPin;
     struct TimeWindowRequest {
         BundleExtension bundleExtension;
         std::shared_ptr<void> storageLease;
+        std::shared_ptr<RetentionPin> retentionPin;
         QString requestedStartTime;
         QString requestedEndTime;
         QString exportCapturedAt;
