@@ -65,7 +65,7 @@ public:
     void completeStart(bool success, Time now);
     void prepareStop();
     void completeStop(bool success,Time now);
-    Decision ingest(int card,const std::uint8_t*,std::size_t,Time,std::uint64_t ingressId=0,std::uint32_t sourceIPv4=0);
+    Decision ingest(int card,const std::uint8_t*,std::size_t,Time,std::uint64_t ingressId=0,std::uint32_t sourceIPv4=0,bool clearStartupOnIngress=true);
     // Record an admission decision made before ingest without manufacturing a
     // second raw-ingress record or applying assembly logic.
     void observeAdmission(Decision,int,std::uint16_t,std::uint16_t,std::uint32_t,Time,

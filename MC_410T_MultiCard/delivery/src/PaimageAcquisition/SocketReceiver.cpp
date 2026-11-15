@@ -178,11 +178,11 @@ bool SocketReceiver::admitOrHold(int card,const std::uint8_t* data,int length,Ti
                                   std::uint64_t ingressId,std::uint32_t sourceIPv4,std::uint16_t sourcePort,
                                   std::uint16_t localPort,std::uint16_t trigger,std::uint16_t packet){
     if(card<0||card>=config_.cards){
-        core_.ingest(card,data,static_cast<std::size_t>(std::max(length,0)),received,ingressId,sourceIPv4);
+        core_.ingest(card,data,static_cast<std::size_t>(std::max(length,0)),received,ingressId,sourceIPv4,false);
         return false;
     }
     if(!startFenceActive_){
-        core_.ingest(card,data,static_cast<std::size_t>(std::max(length,0)),received,ingressId,sourceIPv4);
+        core_.ingest(card,data,static_cast<std::size_t>(std::max(length,0)),received,ingressId,sourceIPv4,false);
         return false;
     }
     if(startFenceFailed_||std::size_t(card)>=startCardStates_.size()||
@@ -231,7 +231,7 @@ bool SocketReceiver::completeStart(bool ok){auto begin=now();std::unique_lock<st
         while(!startHold_.empty()){
             HeldDatagram held=std::move(startHold_.front());startHold_.pop_front();startHoldBytes_-=held.bytes.size();
             observeFence(Decision::StartFenceReleased,held.card,held.trigger,held.packet,1,held.receivedNs,held.ingressId);
-            core_.ingest(held.card,held.bytes.data(),held.bytes.size(),held.receivedNs,held.ingressId,held.sourceIPv4);
+            core_.ingest(held.card,held.bytes.data(),held.bytes.size(),held.receivedNs,held.ingressId,held.sourceIPv4,false);
         }
         startHoldBytes_=0;
     }
@@ -275,6 +275,10 @@ void SocketReceiver::run(){
     const auto threadStart=now();timing(TimingKind::ThreadLife,threadStart,threadStart,-1,0,1,0,0,0,true);Time previousLoop=threadStart;std::uint64_t selectId=0,drainId=0,loopId=0;std::size_t firstPort=0;
     constexpr std::uint32_t drainBudget=256;
     std::vector<bool> pending;
+    // FIONREAD on Winsock datagram sockets reports the total queued bytes.
+    // Keep the FIFO prefix until all of it has been received, across budgets.
+    std::uint64_t feedbackPrefixBytes=0;bool feedbackUncertain=false;
+    Time feedbackPrefixTime=0,feedbackCovered=feedbackSocket_==INVALID_SOCKET?threadStart:0;
     if(loopLog_){LoopRecord thread;thread.timeNs=threadStart;thread.threadId=GetCurrentThreadId();
         thread.kind=std::uint16_t(LoopKind::ThreadStart);
         thread.value0=std::uint32_t(priorityResult_.load());thread.value1=std::uint32_t(actualPriority_.load());
@@ -308,6 +312,12 @@ void SocketReceiver::run(){
             }
             return static_cast<int>(received);
         };
+        if(feedbackSocket_!=INVALID_SOCKET && !feedbackPrefixBytes && !feedbackUncertain){
+            const Time captured=now();u_long queued=0;
+            const int query=ioctlsocket(SOCKET(feedbackSocket_),FIONREAD,&queued);
+            if(query==SOCKET_ERROR)feedbackUncertain=true;
+            else if(queued){feedbackPrefixBytes=queued;feedbackPrefixTime=captured;}
+        }
         auto drain=[&](SOCKET socket,int card,std::uint16_t port,bool feedback){
             if(!FD_ISSET(socket,&read))return;
             const auto drainStart=now();const auto drainIdentifier=++drainId;std::uint32_t attempts=0,success=0,bytes=0,exitReason=1;std::uint64_t lastIngress=0;
@@ -327,8 +337,16 @@ void SocketReceiver::run(){
                     if(loopLog_){LoopRecord rf;rf.timeNs=recvStart;rf.spanNs=recvEnd-recvStart;rf.threadId=GetCurrentThreadId();
                         rf.kind=std::uint16_t(LoopKind::RecvFailure);rf.value0=port;rf.value1=std::uint32_t(error);
                         rf.flags=std::uint16_t(exitReason);rf.payloadA=drainIdentifier;rf.session=session_.load();loopLog_->push(rf);}
-                    if(error!=WSAEWOULDBLOCK){lastSocketError_=error;++hardErrors_;}break;}
+                    if(error!=WSAEWOULDBLOCK){lastSocketError_=error;++hardErrors_;
+                        if(feedback){feedbackPrefixBytes=0;feedbackPrefixTime=0;feedbackUncertain=true;}}
+                    else if(feedback && feedbackPrefixBytes){feedbackPrefixBytes=0;feedbackPrefixTime=0;feedbackUncertain=true;}
+                    break;}
                 ++success;bytes+=std::uint32_t(n);
+                if(feedback && feedbackPrefixBytes){
+                    if(std::uint64_t(n)==feedbackPrefixBytes){feedbackPrefixBytes=0;feedbackCovered=feedbackPrefixTime;feedbackPrefixTime=0;}
+                    else if(std::uint64_t(n)>feedbackPrefixBytes){feedbackPrefixBytes=0;feedbackPrefixTime=0;feedbackUncertain=true;}
+                    else feedbackPrefixBytes-=std::uint64_t(n);
+                }
                 const auto ingressId=ingress_.fetch_add(1)+1;
                 timing(TimingKind::Recvfrom,recvStart,recvEnd,card,port,std::uint32_t(n),0,ingressId,0);
                 auto time=now();
@@ -364,10 +382,15 @@ void SocketReceiver::run(){
             if(!sockets_.empty())firstPort=(firstPort+1)%sockets_.size();}
         if(!running_)break;
         Time pollSpan=0;
-        {const auto waitStart=now();std::unique_lock<std::mutex> lock(coreMutex_);const auto acquired=now();correlation_=0;bool feedbackPending=false;pendingSockets(pending,feedbackPending);core_.poll(acquired,&pending,feedbackPending);
-            if(!feedbackPending && !startFenceActive_ && startHold_.empty()){
-                for(std::size_t i=0;i<pending.size();++i)if(!pending[i])cardIdleWatermarks_[i].store(acquired);
-                if(!std::any_of(pending.begin(),pending.end(),[](bool x){return x;}))idleWatermark_.store(acquired);
+        {const auto waitStart=now();std::unique_lock<std::mutex> lock(coreMutex_);const auto acquired=now();correlation_=0;bool feedbackPending=false;
+            const Time recheckTime=now();const bool recheckOk=pendingSockets(pending,feedbackPending);
+            if(recheckOk&&!feedbackPending){feedbackCovered=recheckTime;feedbackPrefixBytes=0;feedbackPrefixTime=0;feedbackUncertain=false;}
+            const Time covered=feedbackSocket_==INVALID_SOCKET?recheckTime:std::min(recheckTime,feedbackCovered);
+            const bool fenced=startFenceActive_||!startHold_.empty();
+            if(!fenced)core_.poll(covered,&pending,false);
+            if(!fenced){
+                for(std::size_t i=0;i<pending.size();++i)if(!pending[i])cardIdleWatermarks_[i].store(covered);
+                if(!std::any_of(pending.begin(),pending.end(),[](bool x){return x;}))idleWatermark_.store(covered);
             }
             const auto end=now();timing(TimingKind::CoreMutexWait,waitStart,acquired,-1,0,2);timing(TimingKind::CorePoll,acquired,end);pollSpan=end-waitStart;}
         if(loopLog_){LoopRecord loop;loop.timeNs=loopStart;loop.spanNs=loopStart-previousLoop;loop.threadId=GetCurrentThreadId();

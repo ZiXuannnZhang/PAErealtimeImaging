@@ -46,6 +46,13 @@ int main(){try{
     {Harness h({1,5000,32,0});auto p=packet(1,1);h.core.ingest(0,p.data(),p.size(),ms);check(h.core.ingest(0,p.data(),p.size(),2*ms)==Decision::Duplicate,"duplicate");p=packet(0,1);check(h.core.ingest(0,p.data(),p.size(),3*ms)==Decision::OffsetOutside,"first-arrival anchor preserved");h.core.poll(103*ms);check(h.output.size()==1&&h.output[0]->unique==1,"out-of-range timeout");}
     {Harness h({4,5000,32,1000});for(int t=0;t<20;++t)h.trigger(t,ms+t*25*ms);check(h.output.empty()&&!h.core.confirmed(),"startup 475ms remains buffered");h.trigger(20,501*ms);check(h.core.confirmed()&&h.output.size()==84&&h.sync.size()==21,"startup confirmation releases all buffered output");}
     {Harness h({4,5000,32,1000});h.trigger(1,ms);h.core.poll(1002*ms);check(h.output.empty()&&h.core.counters().startupFilteredCards==4&&h.core.counters().startupFilteredSync==1,"idle filter units");h.trigger(1,1003*ms);check(h.core.startupCardCount()==0,"idle clear preserves recent dedup window");}
+    {Harness h({1,1,32,1000});auto p=packet(0,1,8);
+        h.core.ingest(0,p.data(),p.size(),ms,0,0,false);
+        std::vector<bool> pending{true};h.core.poll(1500*ms,&pending,false);
+        p=packet(0,2,8);h.core.ingest(0,p.data(),p.size(),1501*ms,0,0,false);
+        check(h.core.startupCardCount()==2&&h.core.counters().startupFilteredCards==0,"pending network preserves startup cache during ingress");
+        pending[0]=false;h.core.poll(2502*ms,&pending,false);
+        check(h.core.startupCardCount()==0&&h.core.counters().startupFilteredCards==2,"verified idle clears startup cache");}
     {Harness h({4,5000,32,1000});h.trigger(1,ms,7);h.core.poll(102*ms);check(h.output.empty()&&h.core.counters().startupIncomplete==4,"startup partial is not complete");h.core.prepareStop();h.core.completeStop(true,103*ms);check(h.core.counters().stopBufferedCards==4,"stop buffered partial count");}
     {Harness h({1,5000,32,0});for(int i=0;i<100;++i){h.core.prepareStart();auto p=packet(0,i);check(h.core.ingest(0,p.data(),p.size(),ms)==Decision::Disabled,"start gap disabled");h.core.completeStart(false,0);check(!h.core.enabled(),"failed start stays disabled");h.core.completeStart(true,0);h.trigger(i,ms);h.core.prepareStop();h.core.completeStop(true,2*ms);}check(h.output.size()==100,"100 starts single delivery");}
     {Harness h({1,5000,32,0});auto p=packet(0,1);h.core.ingest(0,p.data(),p.size(),ms);h.core.prepareStop();h.core.completeStop(false,2*ms);check(h.core.enabled(),"failed stop restores admission");h.core.prepareStop();h.core.completeStop(true,3*ms);check(h.output.empty()&&h.core.counters().stopActiveCards==1,"stop truncation not silently flushed");}

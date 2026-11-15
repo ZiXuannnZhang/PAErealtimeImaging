@@ -89,13 +89,13 @@ void SourceCore::clearStartup(Time now,bool count,Decision reason) {
     startupCards_.clear();startupSync_.clear();startupBytes_=0;lastStartup_=firstSync_=0;
     pending_.clear();for(auto& a:cards_)clearAssembly(a);
 }
-Decision SourceCore::ingest(int c,const std::uint8_t* p,std::size_t n,Time now,std::uint64_t ingressId,std::uint32_t sourceIPv4) {
+Decision SourceCore::ingest(int c,const std::uint8_t* p,std::size_t n,Time now,std::uint64_t ingressId,std::uint32_t sourceIPv4,bool clearStartupOnIngress) {
     if(c<0||c>=config_.cards){event(Decision::InvalidCard,c,0,0,1,now);return Decision::InvalidCard;}
     if(n<4){event(Decision::Short,c,0,0,1,now);return Decision::Short;}
     const auto packet=le16(p),trigger=le16(p+2);
     auto reject=[&](Decision d){event(d,c,trigger,packet,1,now);return d;};
     if(!enabled_)return reject(Decision::Disabled);
-    if(!confirmed_&&lastStartup_&&now-lastStartup_>=Time(config_.startupIdleMs)*ms)clearStartup(now,true);
+    if(clearStartupOnIngress&&!confirmed_&&lastStartup_&&now-lastStartup_>=Time(config_.startupIdleMs)*ms)clearStartup(now,true);
     auto& a=cards_[c];
     if(std::find(a.recent.begin(),a.recent.end(),trigger)!=a.recent.end())return reject(Decision::RecentTrigger);
     if(!confirmed_)lastStartup_=now;
