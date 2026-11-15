@@ -917,18 +917,25 @@ bool runIsActive(const QString &directory)
     return false;
 }
 
-void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &options, qint64 reserve=0)
+bool readRetentionManifest(const QString &directory, QByteArray *bytes)
+{
+    const QString path = QDir(directory).filePath(QStringLiteral("manifest.json"));
+    const QFileInfo info(path);
+    return info.size() <= 8LL * 1024 * 1024 && readAllBytes(path, bytes);
+}
+
+void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &options, qint64 reserve=0, bool locked=false)
 {
     QDir root(rootDirectory);
     if (!root.exists()) return;
     if (QFileInfo(rootDirectory).isSymLink() || QFileInfo(rootDirectory).isJunction()) return;
-    const auto retentionLock = diagnostic_storage::lease(rootDirectory);
-    if (!retentionLock) return;
+    const auto retentionLock = locked ? std::shared_ptr<QLockFile>() : diagnostic_storage::lease(rootDirectory);
+    if (!locked && !retentionLock) return;
     const QString rootCanonical = root.canonicalPath();
     struct Run { QString path; qint64 bytes = 0; QDateTime modified; bool active = false; };
     QVector<Run> runs;
     static const QRegularExpression known(QStringLiteral(
-        "^(\\.active\\.lock|\\.history\\.lock|\\.active|manifest\\.json|summary\\.txt|network\\.json|settings\\.json|"
+        "^(\\.active\\.lock|\\.history\\.lock|\\.active|\\.reservation|manifest\\.json|summary\\.txt|network\\.json|settings\\.json|"
         "history-retention\\.json|(?:runtime\\.log|events\\.jsonl|(?:network|settings|card)_history\\.jsonl)"
         "(?:\\.previous(?:\\.retired-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?)?)$"));
     const QFileInfoList entries = root.entryInfoList({QStringLiteral("run-*")}, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);
@@ -936,7 +943,7 @@ void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &
         QByteArray manifestBytes;
         const QString canonical = info.canonicalFilePath();
         if (info.isSymLink() || info.isJunction() || canonical.isEmpty() || QFileInfo(canonical).absolutePath() != rootCanonical
-            || !readAllBytes(QDir(info.absoluteFilePath()).filePath(QStringLiteral("manifest.json")), &manifestBytes)) continue;
+            || !readRetentionManifest(info.absoluteFilePath(), &manifestBytes)) continue;
         const QJsonObject manifest = parseObject(manifestBytes);
         const QString id = manifest.value(QStringLiteral("runId")).toString();
         if (manifest.value(QStringLiteral("formatVersion")).toInt(0) != 1 || id.isEmpty()
@@ -1034,6 +1041,11 @@ struct DiagnosticRecorder::State
 
     void startRun()
     {
+        if (!safeDirectory(rootDirectory)) {
+            setWriteError(QStringLiteral("不安全的诊断根目录：%1").arg(rootDirectory));
+            { std::lock_guard<std::mutex> guard(mutex); active = true; accepting = true; }
+            return;
+        }
         if (!QDir().mkpath(runDirectory)) setWriteError(QStringLiteral("创建运行目录失败：%1").arg(runDirectory));
         activeMarkerPath = QDir(runDirectory).filePath(QStringLiteral(".active"));
         QFile marker(activeMarkerPath);
@@ -1042,10 +1054,82 @@ struct DiagnosticRecorder::State
         activeLock->setStaleLockTime(0);
         if (!activeLock->tryLock(0)) setWriteError(QStringLiteral("获取运行锁失败：%1").arg(activeLock->error()));
         runtimeFile.setFileName(QDir(runDirectory).filePath(QStringLiteral("runtime.log"))); eventsFile.setFileName(QDir(runDirectory).filePath(QStringLiteral("events.jsonl"))); networkHistoryFile.setFileName(QDir(runDirectory).filePath(QStringLiteral("network_history.jsonl"))); settingsHistoryFile.setFileName(QDir(runDirectory).filePath(QStringLiteral("settings_history.jsonl"))); cardHistoryFile.setFileName(QDir(runDirectory).filePath(QStringLiteral("card_history.jsonl")));
-        ensureFile(runtimeFile.fileName(), QStringLiteral("runtime.log")); ensureFile(eventsFile.fileName(), QStringLiteral("events.jsonl")); ensureFile(networkHistoryFile.fileName(), QStringLiteral("network_history.jsonl")); ensureFile(settingsHistoryFile.fileName(), QStringLiteral("settings_history.jsonl")); ensureFile(cardHistoryFile.fileName(), QStringLiteral("card_history.jsonl"));
-        { std::lock_guard<std::mutex> guard(mutex); active = true; accepting = true; }
-        writeInitialArtifacts(); worker = std::thread([this] { workerLoop(); });
-        pruneRuns(rootDirectory,options,qMin(options.maxRetainedBytes,2*options.maxHistorySegmentBytes));
+        { std::lock_guard<std::mutex> guard(mutex); active = true; accepting = true; quotaPending = true; quotaError = QStringLiteral("诊断日志等待容量准入"); }
+        // Admission is attempted synchronously so callers can observe a blocked run immediately.
+        tryAdmission();
+        worker = std::thread([this] { workerLoop(); });
+    }
+
+    qint64 activeReservation(const QFileInfo &entry) const
+    {
+        const QString id = entry.fileName().right(36);
+        if (QUuid(id).isNull() || !entry.fileName().endsWith(QLatin1Char('-') + id)
+            || entry.isSymLink() || entry.isJunction() || !runIsActive(entry.absoluteFilePath())) return 0;
+        const QFileInfo info(QDir(entry.absoluteFilePath()).filePath(QStringLiteral(".reservation")));
+        if (info.isSymLink() || info.isJunction() || !info.isFile() || info.size() > 32) return 0;
+        QFile file(info.filePath());
+        if (!file.open(QIODevice::ReadOnly)) return 0;
+        bool ok = false; const qint64 value = file.read(33).trimmed().toLongLong(&ok);
+        return ok && value > 0 ? qMin(value, options.maxRetainedBytes) : 0;
+    }
+    qint64 addQuota(qint64 a, qint64 b) const
+    {
+        return a >= options.maxRetainedBytes || b >= options.maxRetainedBytes - a ? options.maxRetainedBytes : a + b;
+    }
+    bool tryAdmission()
+    {
+        const qint64 metadataBudget = qMin<qint64>(16LL * 1024 * 1024, qMax<qint64>(16 * 1024, options.maxRetainedBytes / 2));
+        const qint64 budget = qMin(options.maxRetainedBytes,
+            options.maxHistorySegmentBytes > (std::numeric_limits<qint64>::max() - metadataBudget) / 2
+                ? options.maxRetainedBytes : 2 * options.maxHistorySegmentBytes + metadataBudget);
+        QString failure;
+        if (!safeDirectory(rootDirectory) || !safeDirectory(runDirectory)) failure = QStringLiteral("不安全的诊断目录");
+        else if (budget <= metadataBudget + 1) failure = QStringLiteral("诊断日志容量不足，无法预留元数据和历史空间");
+        const auto lock = failure.isEmpty() && safeLockFile(rootDirectory, QStringLiteral(".retention.lock"))
+            ? diagnostic_storage::lease(rootDirectory) : nullptr;
+        if (failure.isEmpty() && !lock) failure = QStringLiteral("诊断日志保留锁繁忙，等待容量准入");
+        if (failure.isEmpty()) {
+            // Count only safe, owned run directories. Active reservations cover future growth,
+            // while inactive runs are charged their current named file sizes.
+            qint64 otherReservations = 0;
+            QDir root(rootDirectory);
+            const auto entries = root.entryInfoList({QStringLiteral("run-*")}, QDir::Dirs | QDir::NoDotAndDotDot);
+            for (const auto &entry : entries) {
+                if (entry.absoluteFilePath() == runDirectory || entry.isSymLink() || entry.isJunction()) continue;
+                const QString path = entry.absoluteFilePath();
+                const qint64 reserved = activeReservation(entry);
+                if (reserved) otherReservations = addQuota(otherReservations, qMax<qint64>(0, reserved - directoryBytes(path)));
+            }
+            pruneRuns(rootDirectory, options, addQuota(budget, otherReservations), true);
+            qint64 used = 0;
+            for (const auto &entry : root.entryInfoList({QStringLiteral("run-*")}, QDir::Dirs | QDir::NoDotAndDotDot)) {
+                if (entry.absoluteFilePath() == runDirectory || entry.isSymLink() || entry.isJunction()) continue;
+                const qint64 bytes = directoryBytes(entry.absoluteFilePath());
+                const qint64 reservation = activeReservation(entry);
+                if (reservation) { used = addQuota(used, qMax(bytes, reservation)); continue; }
+                QByteArray manifest;
+                if (!readRetentionManifest(entry.absoluteFilePath(), &manifest)) continue;
+                const auto obj = parseObject(manifest);
+                if (obj.value(QStringLiteral("formatVersion")).toInt() != 1 || obj.value(QStringLiteral("runId")).toString().isEmpty()
+                    || !entry.fileName().endsWith(QLatin1Char('-') + obj.value(QStringLiteral("runId")).toString())) continue;
+                used = addQuota(used, bytes);
+            }
+            if (used > options.maxRetainedBytes - budget) failure = QStringLiteral("诊断日志保留容量不足，等待历史记录释放");
+            else if (!writeAtomicBytes(QDir(runDirectory).filePath(QStringLiteral(".reservation")), QByteArray::number(budget), &failure)) {}
+            else {
+                metadataLimit = metadataBudget / 2;
+                segmentLimit = (budget - metadataBudget) / 2;
+                ensureFile(runtimeFile.fileName(), QStringLiteral("runtime.log")); ensureFile(eventsFile.fileName(), QStringLiteral("events.jsonl"));
+                ensureFile(networkHistoryFile.fileName(), QStringLiteral("network_history.jsonl")); ensureFile(settingsHistoryFile.fileName(), QStringLiteral("settings_history.jsonl")); ensureFile(cardHistoryFile.fileName(), QStringLiteral("card_history.jsonl"));
+                writeInitialArtifacts();
+                { std::lock_guard<std::mutex> guard(mutex); admitted = true; quotaPending = false; quotaError.clear(); }
+                progress.notify_all();
+                return true;
+            }
+        }
+        { std::lock_guard<std::mutex> guard(mutex); quotaPending = true; quotaError = failure; }
+        progress.notify_all();
+        return false;
     }
 
     void stopRun()
@@ -1053,9 +1137,11 @@ struct DiagnosticRecorder::State
         { std::lock_guard<std::mutex> guard(mutex); if (!accepting && !worker.joinable()) return; accepting = false; stopping = true; flushRequested = true; flushTarget = nextSequence ? nextSequence - 1 : 0; }
         condition.notify_all(); if (worker.joinable()) worker.join();
         quint64 boundary = 0; { std::lock_guard<std::mutex> guard(mutex); active = false; endIsoTime = nowIso(); boundary = nextSequence ? nextSequence - 1 : 0; }
-        writeRunArtifacts(boundary, false, QString());
+        if (admitted) writeRunArtifacts(boundary, false, QString());
+        if (admitted) QFile::remove(QDir(runDirectory).filePath(QStringLiteral(".reservation")));
         if (!activeMarkerPath.isEmpty()) QFile::remove(activeMarkerPath);
         if (activeLock) activeLock->unlock();
+        if (!admitted) QDir(rootDirectory).rmdir(QFileInfo(runDirectory).fileName());
         pruneRuns(rootDirectory, options);
     }
 
@@ -1063,8 +1149,17 @@ struct DiagnosticRecorder::State
     void completeLocked(quint64 sequence)
     {
         if (!sequence || sequence <= processedSequence) return;
-        completed.insert(sequence);
-        while (completed.remove(processedSequence + 1)) ++processedSequence;
+        auto next = completed.upperBound(sequence);
+        quint64 first = sequence, last = sequence;
+        if (next != completed.begin()) {
+            auto previous = next; --previous;
+            if (previous.value() >= sequence - 1) { first = previous.key(); last = qMax(last, previous.value()); completed.erase(previous); }
+        }
+        next = completed.lowerBound(first);
+        if (next != completed.end() && next.key() <= last + 1) { last = qMax(last, next.value()); completed.erase(next); }
+        completed.insert(first, last);
+        auto head = completed.begin();
+        if (head != completed.end() && head.key() <= processedSequence + 1) { processedSequence = head.value(); completed.erase(head); }
     }
     void appendFallbackLocked(const Event &event)
     {
@@ -1189,7 +1284,7 @@ struct DiagnosticRecorder::State
     {
         std::lock_guard<std::mutex> historyGuard(historyWriteMutex);
         { std::lock_guard<std::mutex> guard(mutex); if (writeError) { if (error) *error = writeErrorText; return false; } }
-        const auto limit=qMin(options.maxHistorySegmentBytes,options.maxRetainedBytes/2);
+        const auto limit=segmentLimit;
         const auto bytes=itemBytes(item);
         if (bytes>limit) { if(error)*error=QStringLiteral("单条诊断记录超出分段容量"); return false; }
         if (segmentBytes+bytes>limit && !rotateHistory(error,deferred)) return false;
@@ -1203,9 +1298,19 @@ struct DiagnosticRecorder::State
     void openAppend(QFile &file, const QString &label) { if (!file.open(QIODevice::ReadWrite | QIODevice::Append | QIODevice::Unbuffered)) setWriteError(QStringLiteral("打开 %1 失败：%2").arg(label, file.errorString())); }
     void workerLoop()
     {
-        openAppend(runtimeFile, QStringLiteral("runtime.log")); openAppend(eventsFile, QStringLiteral("events.jsonl")); openAppend(networkHistoryFile, QStringLiteral("network_history.jsonl")); openAppend(settingsHistoryFile, QStringLiteral("settings_history.jsonl")); openAppend(cardHistoryFile, QStringLiteral("card_history.jsonl"));
+        bool opened = false;
         Clock::time_point lastFlush = Clock::now();
         for (;;) {
+            if (!admitted) {
+                { std::unique_lock<std::mutex> lock(mutex);
+                  if (stopping) { for (const auto &item : queue) if (item.kind == QueueItem::Kind::Event) appendFallbackLocked(item.event); queue.clear(); break; }
+                  condition.wait_for(lock, std::chrono::milliseconds(250), [this] { return stopping; });
+                  if (stopping) continue; }
+                if (!tryAdmission()) continue;
+            }
+            if (!opened) {
+                openAppend(runtimeFile, QStringLiteral("runtime.log")); openAppend(eventsFile, QStringLiteral("events.jsonl")); openAppend(networkHistoryFile, QStringLiteral("network_history.jsonl")); openAppend(settingsHistoryFile, QStringLiteral("settings_history.jsonl")); openAppend(cardHistoryFile, QStringLiteral("card_history.jsonl")); opened = true;
+            }
             QueueItem item; bool haveItem = false, flushNow = false, finish = false;
             { std::unique_lock<std::mutex> lock(mutex); if (queue.empty() && !stopping && !flushRequested) condition.wait_for(lock, std::chrono::milliseconds(1000)); if (!queue.empty()) { item = queue.front(); queue.pop_front(); inFlight = item; hasInFlight = true; haveItem = true; } else { const bool targetReached = flushRequested && processedSequence >= flushTarget; const bool timedFlush = Clock::now() - lastFlush >= std::chrono::seconds(1); if (stopping || targetReached || timedFlush) { flushNow = true; finish = stopping; if (targetReached || stopping) flushRequested = false; } } }
             if (haveItem) { QString error; bool deferred = false; const bool ok = writeItem(item, &error, &deferred); { std::lock_guard<std::mutex> guard(mutex); if (!ok) { if(deferred) { ++drops.queueDropped; if(item.critical)++drops.criticalQueueDropped; } else setWriteErrorLocked(error.isEmpty() ? QStringLiteral("诊断日志写入失败") : error); if (item.kind == QueueItem::Kind::Event) appendFallbackLocked(item.event); } else writtenSequence = qMax(writtenSequence, item.sequence()); completeLocked(item.sequence()); hasInFlight = false; if (flushRequested && processedSequence >= flushTarget) { flushNow = true; flushRequested = false; } if (stopping && queue.empty()) { flushNow = true; finish = true; flushRequested = false; } } progress.notify_all(); if (Clock::now() - lastFlush >= std::chrono::seconds(1)) flushNow = true; }
@@ -1215,7 +1320,7 @@ struct DiagnosticRecorder::State
     }
     bool flushTo(quint64 target, int timeoutMs)
     {
-        { std::lock_guard<std::mutex> guard(mutex); if (!worker.joinable()) return flushedSequence >= target && !writeError; flushRequested = true; flushTarget = qMax(flushTarget, target); } condition.notify_all(); std::unique_lock<std::mutex> lock(mutex); const auto ready = [this, target] { return flushedSequence >= target || writeError || !worker.joinable(); }; bool reached = timeoutMs < 0 ? (progress.wait(lock, ready), true) : progress.wait_for(lock, std::chrono::milliseconds(timeoutMs), ready); return reached && flushedSequence >= target && !writeError;
+        { std::lock_guard<std::mutex> guard(mutex); if (!worker.joinable()) return flushedSequence >= target && !writeError; if (quotaPending) return false; flushRequested = true; flushTarget = qMax(flushTarget, target); } condition.notify_all(); std::unique_lock<std::mutex> lock(mutex); const auto ready = [this, target] { return flushedSequence >= target || writeError || !worker.joinable(); }; bool reached = timeoutMs < 0 ? (progress.wait(lock, ready), true) : progress.wait_for(lock, std::chrono::milliseconds(timeoutMs), ready); return reached && flushedSequence >= target && !writeError;
     }
     void requestFlush() { { std::lock_guard<std::mutex> guard(mutex); if (!worker.joinable()) return; flushRequested = true; flushTarget = qMax(flushTarget, nextSequence ? nextSequence - 1 : 0); } condition.notify_all(); }
     void writeInitialArtifacts() { writeRunArtifacts(0, true, QString()); }
@@ -1224,19 +1329,29 @@ struct DiagnosticRecorder::State
         ExportRequest request; { std::lock_guard<std::mutex> guard(mutex); request.runId = runId; request.sourceDirectory = runDirectory; request.boundarySequence = boundary; request.networkSnapshots = networkSnapshots; request.settingsSnapshots = settingsSnapshots; request.cardSnapshots = cardSnapshots; }
         const SnapshotDocuments documents = loadSnapshotDocuments(runDirectory, runId, boundary, request, truncationReasons); if (network) *network = documents.network; if (settings) *settings = documents.settings;
     }
+    bool writeMetadata(const QString &name, const QByteArray &bytes, QString *error)
+    {
+        qint64 total = bytes.size();
+        for (const QString &other : {QStringLiteral("network.json"), QStringLiteral("settings.json"), QStringLiteral("summary.txt"), QStringLiteral("manifest.json"), QStringLiteral("history-retention.json")})
+            if (other != name) total += QFileInfo(QDir(runDirectory).filePath(other)).size();
+        // Leave room for the mandatory final manifest even when optional documents are large.
+        const qint64 limit = name == QStringLiteral("manifest.json") ? metadataLimit : qMax<qint64>(0, metadataLimit - 4096);
+        if (total > limit) { if (error) *error = QStringLiteral("诊断元数据超过预留容量"); return false; }
+        return writeAtomicBytes(QDir(runDirectory).filePath(name), bytes, error);
+    }
     void writeRunArtifacts(quint64 boundary, bool activeState, const QString &note)
     {
         QStringList missing, truncationReasons; QJsonObject network, settings; loadLiveSnapshotDocuments(boundary, &network, &settings, &truncationReasons); QString error;
-        if (!writeAtomicBytes(QDir(runDirectory).filePath(QStringLiteral("network.json")), jsonBytes(network) + '\n', &error)) { missing.append(QStringLiteral("network.json")); setWriteError(error); }
-        if (!writeAtomicBytes(QDir(runDirectory).filePath(QStringLiteral("settings.json")), jsonBytes(settings) + '\n', &error)) { missing.append(QStringLiteral("settings.json")); setWriteError(error); }
+        if (!writeMetadata(QStringLiteral("network.json"), jsonBytes(network) + '\n', &error)) { missing.append(QStringLiteral("network.json")); setWriteError(error); }
+        if (!writeMetadata(QStringLiteral("settings.json"), jsonBytes(settings) + '\n', &error)) { missing.append(QStringLiteral("settings.json")); setWriteError(error); }
         QVector<Event> fallback; DropCounters dropCopy; bool writeErrorCopy = false; QString writeErrorTextCopy, startCopy, endCopy;
         { std::lock_guard<std::mutex> guard(mutex); fallback = fallbackEvents; dropCopy = drops; writeErrorCopy = writeError; writeErrorTextCopy = writeErrorText; startCopy = startIsoTime; endCopy = endIsoTime; }
         appendRetentionReason(runDirectory,&truncationReasons);
         appendDropReasons(dropCopy, &truncationReasons); const FilteredEvents events = readFilteredEvents(runDirectory, boundary, fallback, &missing, &truncationReasons); const bool complete = missing.isEmpty() && truncationReasons.isEmpty() && !writeErrorCopy;
-        if (!writeAtomicBytes(QDir(runDirectory).filePath(QStringLiteral("summary.txt")), summaryBytes(runId, startCopy, endCopy, boundary, activeState, complete, writeErrorCopy, writeErrorTextCopy, dropCopy, network, settings, events.count, note, truncationReasons), &error)) { missing.append(QStringLiteral("summary.txt")); setWriteError(error); }
+        if (!writeMetadata(QStringLiteral("summary.txt"), summaryBytes(runId, startCopy, endCopy, boundary, activeState, complete, writeErrorCopy, writeErrorTextCopy, dropCopy, network, settings, events.count, note, truncationReasons), &error)) { missing.append(QStringLiteral("summary.txt")); setWriteError(error); }
         { std::lock_guard<std::mutex> guard(mutex); writeErrorCopy = writeError; writeErrorTextCopy = writeErrorText; dropCopy = drops; }
         const QJsonObject manifest = manifestForFiles(runId, startCopy, endCopy, boundary, activeState, writeErrorCopy, writeErrorTextCopy, dropCopy, missing, truncationReasons, note, runDirectory);
-        if (!writeAtomicBytes(QDir(runDirectory).filePath(QStringLiteral("manifest.json")), jsonBytes(manifest) + '\n', &error)) setWriteError(error);
+        if (!writeMetadata(QStringLiteral("manifest.json"), jsonBytes(manifest) + '\n', &error)) setWriteError(error);
     }
     void appendRequestStateLocked(ExportRequest *request) const
     {
@@ -1246,8 +1361,8 @@ struct DiagnosticRecorder::State
         auto addItem = [&](const QueueItem &item) { if (!item.sequence() || item.sequence() > request->boundarySequence) return; switch (item.kind) { case QueueItem::Kind::Event: addEvent(item.event); break; case QueueItem::Kind::NetworkSnapshot: request->networkSnapshots.append(item.snapshot); break; case QueueItem::Kind::SettingsSnapshot: request->settingsSnapshots.append(item.snapshot); break; case QueueItem::Kind::CardSnapshot: request->cardSnapshots.append(item.card); break; } };
         for (const QueueItem &item : queue) addItem(item); if (hasInFlight) addItem(inFlight);
         request->drops = drops;
-        request->writeError = writeError;
-        request->writeErrorText = writeErrorText;
+        request->writeError = writeError || quotaPending;
+        request->writeErrorText = writeError ? writeErrorText : quotaError;
         // A bounded memory cache is not a loss when its append-only history
         // file exists. Mark truncation only when the history is unavailable.
         const bool networkHistoryMissing = !QFileInfo::exists(QDir(runDirectory).filePath(QStringLiteral("network_history.jsonl")));
@@ -1261,12 +1376,12 @@ struct DiagnosticRecorder::State
     {
         ExportRequest request; std::lock_guard<std::mutex> guard(mutex); request.runId = runId; request.sourceDirectory = runDirectory; request.startIsoTime = startIsoTime; request.endIsoTime = endIsoTime; const quint64 current = nextSequence ? nextSequence - 1 : 0; request.boundarySequence = requestedBoundary ? qMin(requestedBoundary, current) : current; request.sourceWasActive = active; request.note = note; request.networkSnapshots = networkSnapshots; request.settingsSnapshots = settingsSnapshots; request.cardSnapshots = cardSnapshots; appendRequestStateLocked(&request); return request;
     }
-    Status statusCopy() const { std::lock_guard<std::mutex> guard(mutex); Status result; result.active = active; result.writeError = writeError; result.writeErrorText = writeErrorText; result.nextSequence = nextSequence; result.writtenSequence = writtenSequence; result.drops = drops; result.queuedEntries = static_cast<int>(queue.size()); result.fallbackEntries = fallbackEvents.size(); return result; }
+    Status statusCopy() const { std::lock_guard<std::mutex> guard(mutex); Status result; result.active = active; result.writeError = writeError || quotaPending; result.writeErrorText = writeError ? writeErrorText : quotaError; result.nextSequence = nextSequence; result.writtenSequence = writtenSequence; result.drops = drops; result.queuedEntries = static_cast<int>(queue.size()); result.fallbackEntries = fallbackEvents.size(); return result; }
 
     Options options; QString rootDirectory, runId, runDirectory, activeMarkerPath, startIsoTime, endIsoTime; Clock::time_point monoStart; std::unique_ptr<QLockFile> activeLock;
     mutable std::mutex historyWriteMutex;
-    mutable std::mutex mutex; std::condition_variable condition, progress; std::deque<QueueItem> queue; QVector<Event> fallbackEvents; QVector<Snapshot> networkSnapshots, settingsSnapshots; QVector<CardSnapshot> cardSnapshots; QHash<QString, NoiseBucket> noiseBuckets; QSet<quint64> completed; DropCounters drops; QueueItem inFlight; bool hasInFlight = false;
-    QFile runtimeFile, eventsFile, networkHistoryFile, settingsHistoryFile, cardHistoryFile; std::thread worker; bool active = false, accepting = false, stopping = false, flushRequested = false, writeError = false; QString writeErrorText; quint64 nextSequence = 1, writtenSequence = 0, processedSequence = 0, flushedSequence = 0, flushTarget = 0;
+    mutable std::mutex mutex; std::condition_variable condition, progress; std::deque<QueueItem> queue; QVector<Event> fallbackEvents; QVector<Snapshot> networkSnapshots, settingsSnapshots; QVector<CardSnapshot> cardSnapshots; QHash<QString, NoiseBucket> noiseBuckets; QMap<quint64, quint64> completed; DropCounters drops; QueueItem inFlight; bool hasInFlight = false;
+    QFile runtimeFile, eventsFile, networkHistoryFile, settingsHistoryFile, cardHistoryFile; std::thread worker; bool active = false, accepting = false, stopping = false, flushRequested = false, writeError = false, admitted = false, quotaPending = false; qint64 segmentLimit = 0, metadataLimit = 0; QString writeErrorText, quotaError; quint64 nextSequence = 1, writtenSequence = 0, processedSequence = 0, flushedSequence = 0, flushTarget = 0;
 };
 
 namespace {

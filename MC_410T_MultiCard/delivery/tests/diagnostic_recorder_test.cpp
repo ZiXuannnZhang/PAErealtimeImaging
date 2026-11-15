@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLockFile>
 #include <QTemporaryDir>
 
 #include <array>
@@ -403,6 +404,53 @@ bool testAbnormalHistory()
         "abnormal history evidence/completeness incorrect");
 }
 
+bool testRetentionAdmissionRecovery()
+{
+    QTemporaryDir temp;
+    auto options = optionsFor(temp.path());
+    options.maxRetainedBytes = 65536;
+    options.maxHistorySegmentBytes = 8192;
+    QString oldPath;
+    {
+        DiagnosticRecorder old(options);
+        old.recordEvent("old", "historical", DiagnosticRecorder::Severity::Warning);
+        if (!check(old.flush(), "old run flush failed")) return false;
+        oldPath = old.runDirectory();
+    }
+    // Enlarge a known historical file so that admission requires its deletion.
+    QFile oldFile(QDir(oldPath).filePath("runtime.log"));
+    if (!oldFile.open(QIODevice::Append) || oldFile.write(QByteArray(48000, 'x')) != 48000) return false;
+    oldFile.close();
+    QLockFile pin(QDir(oldPath).filePath(".history.lock"));
+    pin.setStaleLockTime(0);
+    if (!check(pin.tryLock(0), "history pin failed")) return false;
+    DiagnosticRecorder current(options);
+    current.recordEvent("new", "after release", DiagnosticRecorder::Severity::Warning);
+    const auto now = QDateTime::currentDateTime();
+    auto request = current.captureTimeWindowRequest(now.addSecs(-60), now.addSecs(60));
+    if (!check(request.validationError.isEmpty() && request.retentionPin, "historical request did not retain root")) return false;
+    pin.unlock();
+    const auto lockDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!current.status().writeErrorText.contains(QStringLiteral("保留锁繁忙")) && std::chrono::steady_clock::now() < lockDeadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const auto pending = current.status();
+    if (!check(pending.writeErrorText.contains(QStringLiteral("保留锁繁忙")), "retry did not observe root retention pin")) return false;
+    if (!check(pending.writeError && pending.queuedEntries > 0 && !current.flush(100), "blocked admission not visible")
+        || !check(QFileInfo::exists(oldFile.fileName()) && !QFileInfo::exists(QDir(current.runDirectory()).filePath("events.jsonl")), "blocked admission wrote formal files")) return false;
+    request = {};
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (current.status().writeError && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    if (!check(!current.status().writeError && current.flush(3000), "admission did not recover")) return false;
+    QFile newFile(QDir(current.runDirectory()).filePath("events.jsonl"));
+    if (!newFile.open(QIODevice::ReadOnly)) return false;
+    qint64 total = 0;
+    for (const auto &dir : QDir(temp.path()).entryInfoList({"run-*"}, QDir::Dirs | QDir::NoDotAndDotDot))
+        for (const auto &file : QDir(dir.filePath()).entryInfoList(QDir::Files | QDir::Hidden | QDir::System)) total += file.size();
+    return check(newFile.readAll().contains("after release") && !QFileInfo::exists(oldPath) && total <= options.maxRetainedBytes,
+                 "recovery did not prune or retain the queued event within quota");
+}
+
 bool testLiveHistoryRotation()
 {
     QTemporaryDir temp;
@@ -537,6 +585,7 @@ int main(int argc, char **argv)
     ok = testConcurrentProducers() && ok;
     ok = testUnavailableDirectoryAndExistingExport() && ok;
     ok = testAbnormalHistory() && ok;
+    ok = testRetentionAdmissionRecovery() && ok;
     ok = testLiveHistoryRotation() && ok;
     ok = testExportDoesNotBlockRotation() && ok;
     return ok ? 0 : 1;
