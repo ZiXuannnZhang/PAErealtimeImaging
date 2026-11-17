@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <limits>
 
 namespace ringrecon {
 
@@ -96,14 +97,16 @@ void splitBlock(const std::vector<double>& raw, int sampDepth, int nWlBlock,
 std::vector<float> preprocessBlock(const std::vector<double>& in,
                                    int Nt, int nCol,
                                    const PreprocessParams& p) {
+    // Divide before multiplying: reject undersized input even if Nt*nCol
+    // would not fit in size_t. Validate the 1-based cut before subtracting.
+    if (Nt <= 0 || nCol <= 0 || static_cast<size_t>(nCol) > in.size() / Nt ||
+        (p.delayCut && (p.systemDelay < 1 || p.systemDelay > Nt))) return {};
     std::vector<double> tmp = in;
 
-    if (p.dbrRemove) {
-        const int zeroRows = p.maskLength + p.dbrmaskExtra;
-        const int zr = std::min(zeroRows, Nt);
+    const int zr = p.dbrRemove ? dbrZeroRows(Nt, p.maskLength, p.dbrmaskExtra) : 0;
+    if (zr > 0) {
         for (int c = 0; c < nCol; ++c) {
-            std::memset(tmp.data() + static_cast<size_t>(c) * Nt, 0,
-                        static_cast<size_t>(zr) * sizeof(double));
+            std::fill_n(tmp.data() + static_cast<size_t>(c) * Nt, zr, 0.0);
         }
     }
 
@@ -126,6 +129,31 @@ std::vector<float> preprocessBlock(const std::vector<double>& in,
         }
     }
     return out;
+}
+
+bool packDasSamples(const std::vector<std::vector<float>>& lines, DasSampleBatch& batch) {
+    constexpr auto maxInt = (std::numeric_limits<int>::max)();
+    if (lines.size() < 2 || lines.size() > maxInt) return false;
+    size_t stride = 0;
+    bool uniform = true;
+    for (const auto& line : lines) {
+        if (line.size() < 2 || line.size() > maxInt) return false;
+        uniform = uniform && line.size() == lines.front().size();
+        stride = (std::max)(stride, line.size());
+    }
+    if (lines.size() > batch.samples.max_size() / stride) return false;
+    batch.stride = static_cast<int>(stride);
+    batch.samples.resize(stride * lines.size());
+    batch.validNt.clear();
+    if (!uniform) batch.validNt.reserve(lines.size());
+    for (size_t j = 0; j < lines.size(); ++j) {
+        const auto& line = lines[j];
+        auto dst = batch.samples.begin() + j * stride;
+        std::copy(line.begin(), line.end(), dst);
+        std::fill(dst + line.size(), dst + stride, 0.f);
+        if (!uniform) batch.validNt.push_back(static_cast<int>(line.size()));
+    }
+    return true;
 }
 
 void dasReconAppend(const std::vector<float>& bscan, int Nt, int nd,

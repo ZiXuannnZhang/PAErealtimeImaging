@@ -141,6 +141,14 @@ RING_RECON_CUDA_API int ring_recon_cuda_append_angles_radii_sector(
     void* handle, const float* bscan, int nt, int nd,
     const float* thetaDeg, const float* radii,
     const float* sectorTheta0Deg, float sectorWidthDeg);
+// Each line occupies stride floats and has validNt[j] samples (2..stride).
+// Padding is never sampled, including at the linear interpolation boundary.
+// Geometry arrays stay in acquisition submission order; sectorTheta0Deg may
+// be null for non-spliced reconstruction.
+RING_RECON_CUDA_API int ring_recon_cuda_append_variable_depth(
+    void* handle, const float* bscan, int stride, int nd, const int* validNt,
+    const float* thetaDeg, const float* radii,
+    const float* sectorTheta0Deg, float sectorWidthDeg);
 RING_RECON_CUDA_API int ring_recon_cuda_get_state(void* handle, float* acc,
                                                   float* accW, int* nBlock);
 // 按圈清零累积器（d_acc/d_accW）并复位块计数

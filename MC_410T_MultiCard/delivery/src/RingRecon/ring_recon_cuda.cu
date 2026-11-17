@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -48,6 +49,7 @@ struct Handle {
     float* d_xv = nullptr;
     float* d_yv = nullptr;
     float* d_bscan = nullptr;
+    int* d_validNt = nullptr;
     float* d_detx = nullptr;
     float* d_dety = nullptr;
     float* d_radius = nullptr;       // 逐根探测器半径（多扫描半径配准）
@@ -60,7 +62,8 @@ struct Handle {
     float* d_preCoeff = nullptr;
     float* d_rb2s = nullptr;
     float* d_disp = nullptr;       // 显示快照输出（设备缓冲）
-    int    d_bscanCap = 0;
+    size_t d_bscanCap = 0;
+    int    d_validNtCap = 0;
     int    d_detCap = 0;
     int    d_dispCap = 0;
 };
@@ -215,7 +218,8 @@ __global__ void ring_blend_weights_kernel(
 }
 
 __global__ void ring_das_kernel(
-        const float* __restrict__ bscan, int nt, int nd,
+        const float* __restrict__ bscan, int stride, int nd,
+        const int* __restrict__ validNt,
         const float* __restrict__ detx, const float* __restrict__ dety,
         const float* __restrict__ wscale,
         const float* __restrict__ radius,   // 逐根探测器半径（多扫描半径配准）
@@ -308,13 +312,14 @@ __global__ void ring_das_kernel(
             tf += li * preCoeff[bi];
         }
 
+        const int nt = validNt ? validNt[j] : stride;
         float vv = 0.0f;
         if (linear) {
             const float i0f = floorf(tf);
             const float frac = tf - i0f;
             const int i0 = static_cast<int>(i0f) + 1;
             if (i0 >= 1 && i0 <= nt - 1) {
-                const size_t base = static_cast<size_t>(j) * nt;
+                const size_t base = static_cast<size_t>(j) * stride;
                 const float v0 = bscan[base + i0 - 1];
                 const float v1 = bscan[base + i0];
                 vv = v0 + frac * (v1 - v0);
@@ -322,7 +327,7 @@ __global__ void ring_das_kernel(
         } else {
             const int i0n = static_cast<int>(floorf(tf + 0.5f)) + 1;
             if (i0n >= 1 && i0n <= nt)
-                vv = bscan[static_cast<size_t>(j) * nt + i0n - 1];
+                vv = bscan[static_cast<size_t>(j) * stride + i0n - 1];
         }
 
         // Out-of-range samples contribute zero signal but retain their DAS normalization weight.
@@ -490,6 +495,7 @@ extern "C" RING_RECON_CUDA_API void ring_recon_cuda_destroy(void* handle) {
     if (h->d_xv) cudaFree(h->d_xv);
     if (h->d_yv) cudaFree(h->d_yv);
     if (h->d_bscan) cudaFree(h->d_bscan);
+    if (h->d_validNt) cudaFree(h->d_validNt);
     if (h->d_detx) cudaFree(h->d_detx);
     if (h->d_dety) cudaFree(h->d_dety);
     if (h->d_wscale) cudaFree(h->d_wscale);
@@ -566,10 +572,19 @@ static int appendImpl(void* handle, const float* bscan,
                       const float* thetaDeg, const float* radii,
                       const float* sectorTheta0Deg, float sectorWidthDeg,
                       double blockStartDeg,
-                      double blockSpanDeg) {
-    if (!handle || !bscan || nt < 2 || nd < 2) {
+                      double blockSpanDeg, const int* validNt = nullptr) {
+    if (!handle || !bscan || nt < 2 || nd < 2 ||
+        static_cast<size_t>(nd) > (std::numeric_limits<size_t>::max)() / sizeof(float) / nt) {
         setError("bad append args");
         return 1;
+    }
+    if (validNt) {
+        for (int j = 0; j < nd; ++j) {
+            if (validNt[j] < 2 || validNt[j] > nt) {
+                setError("invalid DAS line depth");
+                return 1;
+            }
+        }
     }
     Handle* h = static_cast<Handle*>(handle);
 
@@ -624,15 +639,24 @@ static int appendImpl(void* handle, const float* bscan,
     }
 
     const size_t bscanBytes = static_cast<size_t>(nt) * nd * sizeof(float);
-    if (bscanBytes > static_cast<size_t>(h->d_bscanCap)) {
+    if (bscanBytes > h->d_bscanCap) {
         if (h->d_bscan) cudaFree(h->d_bscan);
         h->d_bscan = nullptr;
+        h->d_bscanCap = 0;
         cudaError_t err = cudaMalloc(&h->d_bscan, bscanBytes);
         if (err != cudaSuccess) {
             setError(cudaGetErrorString(err));
             return 1;
         }
-        h->d_bscanCap = static_cast<int>(bscanBytes);
+        h->d_bscanCap = bscanBytes;
+    }
+    if (validNt && nd > h->d_validNtCap) {
+        int* next = nullptr;
+        const auto err = cudaMalloc(&next, static_cast<size_t>(nd) * sizeof(int));
+        if (err != cudaSuccess) { setError(cudaGetErrorString(err)); return 1; }
+        if (h->d_validNt) cudaFree(h->d_validNt);
+        h->d_validNt = next;
+        h->d_validNtCap = nd;
     }
     if (nd > h->d_detCap) {
         if (h->d_detx) cudaFree(h->d_detx);
@@ -669,6 +693,9 @@ static int appendImpl(void* handle, const float* bscan,
     }
 
     cudaError_t err = cudaMemcpy(h->d_bscan, bscan, bscanBytes, cudaMemcpyHostToDevice);
+    if (err == cudaSuccess && validNt)
+        err = cudaMemcpy(h->d_validNt, validNt, static_cast<size_t>(nd) * sizeof(int),
+                         cudaMemcpyHostToDevice);
     if (err == cudaSuccess)
         err = cudaMemcpy(h->d_detx, detx.data(), static_cast<size_t>(nd) * sizeof(float), cudaMemcpyHostToDevice);
     if (err == cudaSuccess)
@@ -692,7 +719,7 @@ static int appendImpl(void* handle, const float* bscan,
     }
 
     ring_das_kernel<<<blocks, threads>>>(
-        h->d_bscan, nt, nd,
+        h->d_bscan, nt, nd, validNt ? h->d_validNt : nullptr,
         h->d_detx, h->d_dety, h->d_wscale,
         h->d_radius,
         h->d_sectorIdx, h->sectorStartRad, sectorFovRad, h->sectorCount, sectorMask,
@@ -746,6 +773,18 @@ extern "C" RING_RECON_CUDA_API int ring_recon_cuda_append_angles_radii_sector(
         const float* sectorTheta0Deg, float sectorWidthDeg) {
     return appendImpl(handle, bscan, nt, nd, thetaDeg, radii,
                       sectorTheta0Deg, sectorWidthDeg, 0.0, 0.0);
+}
+
+extern "C" RING_RECON_CUDA_API int ring_recon_cuda_append_variable_depth(
+        void* handle, const float* bscan, int stride, int nd, const int* validNt,
+        const float* thetaDeg, const float* radii,
+        const float* sectorTheta0Deg, float sectorWidthDeg) {
+    if (!validNt || !thetaDeg) {
+        setError("variable-depth DAS requires lengths and angles");
+        return 1;
+    }
+    return appendImpl(handle, bscan, stride, nd, thetaDeg, radii,
+                      sectorTheta0Deg, sectorWidthDeg, 0.0, 0.0, validNt);
 }
 
 extern "C" RING_RECON_CUDA_API int ring_recon_cuda_get_state(void* handle, float* acc,

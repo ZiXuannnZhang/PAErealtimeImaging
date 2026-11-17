@@ -808,7 +808,7 @@ void ImagingSvc::processRingPulse(uint64_t epoch, uint64_t publicationId)
             const int phCh = static_cast<int>(ch[pos]);   // 该 A-line 的物理通道号
             const int phIdx = (phCh >= 0 && phCh < 8) ? phCh : 0;
             pp.systemDelay = m_ringSysDelayCh[phIdx][w];
-            pp.dbrmaskExtra = (w == 1 ? m_ringSysDelayCh[phIdx][1] - m_ringSysDelayCh[phIdx][0] : 0);
+            pp.dbrmaskExtra = w == 1 ? int64_t(m_ringSysDelayCh[phIdx][1]) - m_ringSysDelayCh[phIdx][0] : 0;
             pp.maskLength = m_ringConfig.maskLength;
             pp.dbrRemove = m_ringConfig.dbrSigRemove != 0;
             pp.delayCut = m_ringConfig.delayCut != 0;
@@ -822,6 +822,10 @@ void ImagingSvc::processRingPulse(uint64_t epoch, uint64_t publicationId)
                 return; // All lines are prepared before any CUDA submission.
             }
 
+            if (processed.empty()) {
+                sendError("Invalid DAS preprocessing shape or delay", 2008);
+                return;
+            }
             lists[w].push_back(std::move(processed));
             angs[w].push_back(ang[pos]);
             rads[w].push_back(static_cast<float>(
@@ -859,35 +863,35 @@ void ImagingSvc::processRingPulse(uint64_t epoch, uint64_t publicationId)
         }
     }
 
+    // Pack both wavelengths before submitting either one. Keep line and metadata
+    // order unchanged: CUDA derives the angular weight from the whole batch.
+    ringrecon::DasSampleBatch batch[2];
+    for (int w = 0; w < 2; ++w) {
+        if (!ringrecon::packDasSamples(wlData[w], batch[w])) {
+            sendError("Invalid DAS wavelength sample layout", 2008);
+            return;
+        }
+    }
     std::move(nextPrevWL2.begin(), nextPrevWL2.end(), std::begin(m_ringPrevWL2));
     std::copy(nextPrevAngle.begin(), nextPrevAngle.end(), std::begin(m_ringPrevAngle));
     std::copy(nextPrevRadius.begin(), nextPrevRadius.end(), std::begin(m_ringPrevRadius));
-    // 展平并送入 CUDA（每根 A-line 独立角度 + 独立重建半径）
-    std::vector<float> flat[2];
-    int nd[2] = {0, 0};
     for (int w = 0; w < 2; ++w) {
-        nd[w] = static_cast<int>(wlData[w].size());
-        for (auto &v : wlData[w])
-            flat[w].insert(flat[w].end(), v.begin(), v.end());
-        if (nd[w] == 0 || flat[w].empty()) {
-            sendError("波长数据为空", 2008);
-            return;
-        }
-        const int nt = static_cast<int>(flat[w].size() / nd[w]);
-        const int rc = m_ringConfig.spliceMode
-            ? ring_recon_cuda_append_angles_radii_sector(
-                  m_ringCuda[w], flat[w].data(), nt, nd[w],
-                  wlAng[w].data(), wlRad[w].data(),
-                  wlSecTh0[w].data(), static_cast<float>(sectorWidthDeg))
-            : ring_recon_cuda_append_angles_radii(
-                  m_ringCuda[w], flat[w].data(), nt, nd[w],
-                  wlAng[w].data(), wlRad[w].data());
+        const int nd = static_cast<int>(wlData[w].size());
+        const auto& b = batch[w];
+        const auto* sector = m_ringConfig.spliceMode ? wlSecTh0[w].data() : nullptr;
+        const float width = static_cast<float>(sectorWidthDeg);
+        const bool variableDepth = !b.validNt.empty();
+        const int rc = variableDepth
+            ? ring_recon_cuda_append_variable_depth(m_ringCuda[w], b.samples.data(), b.stride,
+                  nd, b.validNt.data(), wlAng[w].data(), wlRad[w].data(), sector, width)
+            : sector
+                ? ring_recon_cuda_append_angles_radii_sector(m_ringCuda[w], b.samples.data(),
+                      b.stride, nd, wlAng[w].data(), wlRad[w].data(), sector, width)
+                : ring_recon_cuda_append_angles_radii(m_ringCuda[w], b.samples.data(), b.stride,
+                      nd, wlAng[w].data(), wlRad[w].data());
         if (rc != 0) {
-            const QString fn = m_ringConfig.spliceMode
-                ? QStringLiteral("ring_recon_cuda_append_angles_radii_sector")
-                : QStringLiteral("ring_recon_cuda_append_angles_radii");
-            sendError(QString("%1 failed: %2")
-                          .arg(fn, QString::fromUtf8(ring_recon_cuda_last_error())), 2009);
+            sendError(QString("DAS append failed: %1")
+                          .arg(QString::fromUtf8(ring_recon_cuda_last_error())), 2009);
             return;
         }
     }
@@ -1019,12 +1023,14 @@ bool ImagingSvc::processFbpBlock(const QVector<float>& input,const QVector<float
                 const int w=((j%2==0)==bool(m_ringConfig.triggerWlOdd))?0:1;
                 std::copy_n(batch.data()+size_t(l)*depth,depth,d.begin());
                 ringrecon::PreprocessParams pp;
-                pp.systemDelay=m_ringSysDelayCh[c][w];pp.dbrmaskExtra=w?m_ringSysDelayCh[c][1]-m_ringSysDelayCh[c][0]:0;
+                pp.systemDelay=m_ringSysDelayCh[c][w];
+                pp.dbrmaskExtra=w?int64_t(m_ringSysDelayCh[c][1])-m_ringSysDelayCh[c][0]:0;
                 pp.maskLength=m_ringConfig.maskLength;pp.dbrRemove=m_ringConfig.dbrSigRemove!=0;
                 pp.delayCut=m_ringConfig.delayCut!=0;pp.signalImpair=m_ringConfig.singalImpair!=0;pp.imValue=m_ringConfig.imValue[w];
                 ring_fbp_stream::Line line;std::string error;
                 if(m_ringTimevarGpu.active())line.data=ringrecon::preprocessBlock(d,depth,1,pp);
                 else if(!ringTimevarPreprocess(m_ringTimevar,d,pp,line.data,&error))throw std::runtime_error(error);
+                if(line.data.empty())throw std::runtime_error("Invalid FBP preprocessing shape or delay");
                 line.angle=float(angles[pos]+m_fbpSettings.angleOffset[c]);
                 staged[c][w].push(std::move(line),step,m_fbpSettings.median,ready[c][w]);
             }
@@ -1080,7 +1086,7 @@ void ImagingSvc::processFbpDevice(const QVector<float>& raw,const QVector<float>
             p.cut=m_ringConfig.delayCut?m_ringSysDelayCh[c][w]-1:0;
             const auto extra=w?int64_t(m_ringSysDelayCh[c][1])-m_ringSysDelayCh[c][0]:0;
             p.zeroRows=m_ringConfig.dbrSigRemove
-                ?int(std::clamp(int64_t(m_ringConfig.maskLength)+extra,int64_t(0),int64_t(depth))):0;
+                ?ringrecon::dbrZeroRows(depth,m_ringConfig.maskLength,extra):0;
             p.clip=float(m_ringConfig.imValue[w]);p.clipEnabled=m_ringConfig.singalImpair!=0;
         }
     }

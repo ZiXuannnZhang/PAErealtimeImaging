@@ -33,9 +33,17 @@ struct ReconParams {
     std::vector<double> soundSpeeds;       // 分层声速 [m/s]（空=用 c）
 };
 
+// Shared by CPU preprocessing and fused FBP. Compare before adding so
+// even an extreme signed offset cannot overflow the sum.
+inline int dbrZeroRows(int depth, int maskLength, std::int64_t extra) noexcept {
+    if (depth <= 0 || extra <= -std::int64_t(maskLength)) return 0;
+    if (extra >= std::int64_t(depth) - maskLength) return depth;
+    return static_cast<int>(std::int64_t(maskLength) + extra);
+}
+
 struct PreprocessParams {
     int    systemDelay = 171;       // 本波长延时截断起点（1-based，对应 MATLAB sysDelay(w)）
-    int    dbrmaskExtra = 0;        // wl2 额外扣除行数 = sysDelay(2)-sysDelay(1)
+    std::int64_t dbrmaskExtra = 0;  // wl2 额外扣除行数 = sysDelay(2)-sysDelay(1)
     int    maskLength = 300;        // DBR 强信号扣除行数
     bool   dbrRemove = true;
     bool   delayCut = true;
@@ -85,6 +93,15 @@ void splitBlock(const std::vector<double>& raw, int sampDepth, int nWlBlock,
 std::vector<float> preprocessBlock(const std::vector<double>& in,
                                    int Nt, int nCol,
                                    const PreprocessParams& p);
+
+// Pack DAS lines in the original order. A nonempty validNt distinguishes
+// padding from real samples; uniform batches use the existing packed ABI.
+struct DasSampleBatch {
+    int stride = 0;
+    std::vector<float> samples;
+    std::vector<int> validNt;
+};
+bool packDasSamples(const std::vector<std::vector<float>>& lines, DasSampleBatch& batch);
 
 // 本块 DAS 增量反投影（等价 das_recon_incremental_loop 的一次调用）
 // blockStartDeg / blockSpanDeg 与 MATLAB BlockStartDeg/BlockSpanDeg 一致。
