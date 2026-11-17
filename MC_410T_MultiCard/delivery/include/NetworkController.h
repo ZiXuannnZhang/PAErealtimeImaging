@@ -232,6 +232,9 @@ private:
     friend class NetworkDiagnosticTestAccess;
     bool startPaimage(const AcqConfig&,std::function<void()>,std::function<void()>);
     void stopPaimage();
+    void requestPaimageStop();
+    void waitForPaimageWorkers();
+    void finishPaimageStop();
     bool configurePaimage(int,int,int,const QString&);
     bool startPaimageMeasurement();
     bool stopPaimageMeasurement();
@@ -244,6 +247,7 @@ private:
     QTimer* m_paimageTimer=nullptr;
     QTimer* m_paimageLoopMonitorTimer=nullptr;
     bool m_paimageStartPending=false;
+    bool m_paimageStopPending=false; // controller thread only; remains set until finalization
     bool m_paimageConfigReported=false;
     quint64 m_paimageGeneration=0;
     QString m_paimageSaveDir,m_paimageSaveSuffix;
@@ -388,17 +392,15 @@ private:
     bool      m_running = false;
     std::thread m_stopThread;          // 后台等待线程（stop() 在此线程里做 wait/terminate）
 
-    std::vector<std::unique_ptr<DataProcessor>>    m_processors;
-    // 每卡一个异步 Frontend Preprocessing Stage；生命周期由本类管理。
-    // DisplayBuffer / RingFeedSink 的 frontend 分发职责属于 stage，不属于
-    // DataProcessor。stage 必须先于任何 submit 启动，并在 DisplayBuffer /
-    // Ring sink 依赖销毁之前被 stop/clear。
-    std::vector<std::unique_ptr<FrontendPreprocessor>> m_frontendStages;
     FrontendPreprocessor::RingSink                 m_ringFeedSink;   // 环形实时馈送回调
     // Frontend 滤波配置副本：stage 创建前即有效，创建时写入新 stage，
     // 之后的变更逐卡下发（见 setFrontendFilterConfig）。
     frontend_filter::Config                        m_frontendFilterConfig;
     std::vector<std::unique_ptr<DisplayBuffer>>    m_displayBuffers;
+    // Explicit shutdown joins these workers; declaration order also keeps the
+    // display and Ring dependencies alive through stage member destruction.
+    std::vector<std::unique_ptr<FrontendPreprocessor>> m_frontendStages;
+    std::vector<std::unique_ptr<DataProcessor>>    m_processors;
     std::vector<std::unique_ptr<FileSaver>>        m_savers;
 
     // 上游提交已停止后调用：stop/clear 全部 frontend stage 并确定性 join。

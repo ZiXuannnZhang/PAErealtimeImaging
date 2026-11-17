@@ -277,7 +277,7 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
     if(config.nCards<1||config.nCards>32||config.samplesPerTrig()<128||
        (config.bitsPerChannel!=16&&config.bitsPerChannel!=32)||config.logicalTriggersPerRound<=0){
         emit errorOccurred(QStringLiteral("PAimage采集配置无效：检查卡数、位宽及采样点数"));if(onFailed)onFailed();return false;}
-    if(m_running||m_stopThread.joinable()){emit errorOccurred(QStringLiteral("请等待当前监听停止后再启动"));if(onFailed)onFailed();return false;}
+    if (m_paimageStopPending || m_running || m_stopThread.joinable()){emit errorOccurred(QStringLiteral("请等待当前监听停止后再启动"));if(onFailed)onFailed();return false;}
     m_config=config;m_targetIPs.clear();
     constexpr qint64 detailDurationNs = 15LL * 60 * 1000000000;
     m_paimageDiagnosticDeadlineNs = (config.diagnosticTraceEnabled || config.diagnosticLevel>=1)
@@ -464,27 +464,66 @@ void NetworkController::pollPaimageLoopMonitor(){
 
 }
 
-void NetworkController::stopPaimage(){
-    if(!m_running)return;recordPaimageSnapshot();m_running=false;m_paimageStartPending=false;
-    if(m_paimageTimer){m_paimageTimer->stop();m_paimageTimer->deleteLater();m_paimageTimer=nullptr;}
-    if(m_paimageLoopMonitorTimer){m_paimageLoopMonitorTimer->stop();m_paimageLoopMonitorTimer->deleteLater();m_paimageLoopMonitorTimer=nullptr;}
-    if(m_statsTimer){m_statsTimer->stop();m_statsTimer->deleteLater();m_statsTimer=nullptr;}
-    if(m_paimage)m_paimage->requestStop();if(m_publisher)m_publisher->requestInterruption();
-    m_stopThread=std::thread([this]{
-        if(m_paimage)m_paimage->stop();if(m_publisher)m_publisher->wait();if(m_paimageTrace)m_paimageTrace->stop();if(m_paimageTiming)m_paimageTiming->stop();
-        if(m_paimageLoopLog)m_paimageLoopLog->stop();
-        QMetaObject::invokeMethod(this,[this]{
-            if(m_stopThread.joinable())m_stopThread.join();
-            // Backend 析构合流上游提交线程；随后 stop/clear frontend stage 并
-            // 确定性 join，最后才能销毁 DisplayBuffer / Ring sink 依赖。
-            m_paimage.reset();m_paimageTrace.reset();m_paimageTiming.reset();m_paimageLoopLog.reset();
-            m_paimageTraceLease.reset();m_paimageDetailLease.reset();
+void NetworkController::requestPaimageStop() {
+    m_running = false;
+    m_paimageStopPending = true;
+    m_paimageStartPending = false;
+    for (QTimer** timer : {&m_paimageTimer, &m_paimageLoopMonitorTimer, &m_statsTimer}) {
+        if (*timer) {
+            (*timer)->stop();
+            (*timer)->deleteLater();
+            *timer = nullptr;
+        }
+    }
+    if (m_paimage) m_paimage->requestStop();
+    if (m_publisher) m_publisher->requestInterruption();
+}
+
+void NetworkController::waitForPaimageWorkers() {
+    // HostOutput and the receiver can both touch the frontend stages.
+    if (m_paimage) m_paimage->stop();
+    if (m_publisher) m_publisher->wait();
+    if (m_paimageTrace) m_paimageTrace->stop();
+    if (m_paimageTiming) m_paimageTiming->stop();
+    if (m_paimageLoopLog) m_paimageLoopLog->stop();
+}
+
+void NetworkController::finishPaimageStop() {
+    // Only the controller's Qt thread finalizes: via the queued callback on
+    // normal stop, or directly in the destructor if that event cannot run.
+    if (m_stopThread.joinable()) {
+        m_stopThread.join();
+    } else {
+        requestPaimageStop();
+        waitForPaimageWorkers();
+    }
+    m_paimage.reset();
+    m_paimageTrace.reset();
+    m_paimageTiming.reset();
+    m_paimageLoopLog.reset();
+    m_paimageTraceLease.reset();
+    m_paimageDetailLease.reset();
+    m_processors.clear();
+    stopFrontendStages();
+    m_savers.clear();
+    m_displayBuffers.clear();
+    m_publisher.reset();
+    m_measurementRunning = false;
+    m_paimageSavingRequested = false;
+    m_paimageStopPending = false;
+}
+
+void NetworkController::stopPaimage() {
+    if (!m_running) return;
+    recordPaimageSnapshot();
+    requestPaimageStop();
+    m_stopThread = std::thread([this] {
+        waitForPaimageWorkers();
+        QMetaObject::invokeMethod(this, [this] {
+            finishPaimageStop();
             diagnostic_storage::pruneTraces(QDir(QCoreApplication::applicationDirPath()).filePath("paimage-traces"));
-            m_processors.clear();
-            stopFrontendStages();
-            m_savers.clear();m_displayBuffers.clear();m_publisher.reset();
-            m_measurementRunning=false;m_paimageSavingRequested=false;emit stopped();
-        },Qt::QueuedConnection);
+            emit stopped();
+        }, Qt::QueuedConnection);
     });
 }
 

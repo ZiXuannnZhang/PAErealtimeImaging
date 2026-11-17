@@ -365,12 +365,14 @@ void NetworkController::recordIngressSnapshot(const QString& reason)
 }
 
 NetworkController::~NetworkController() {
-    if(m_paimageTimer)m_paimageTimer->stop();
-    if(m_stopThread.joinable())m_stopThread.join();
-    if(m_paimage){m_paimage->stop();m_paimage.reset();}
-    if(m_paimageTrace){m_paimageTrace->stop();m_paimageTrace.reset();}
-    m_paimageTiming.reset();m_paimageLoopLog.reset();m_paimageTraceLease.reset();m_paimageDetailLease.reset();
-    // 析构时需要同步等待后台停止线程（不能留 this 指针悬空）
+    if (m_paimage || m_paimageTimer || m_paimageStopPending) {
+        // The timeout path may run before the queued stop completion. Finish
+        // synchronously on the owning thread before member destruction starts.
+        if (m_running) recordPaimageSnapshot();
+        finishPaimageStop();
+    } else if (m_stopThread.joinable()) {
+        m_stopThread.join();
+    }
     if (m_running) {
         // 析构路径不会经过 stop()，因此这里也要先留存一次接近关闭时刻的
         // 逐卡运行快照，确保窗口关闭/异常退出不会丢掉最后一段统计。
@@ -402,8 +404,8 @@ NetworkController::~NetworkController() {
         m_feedbackThread.join();
     }
 
-    // 等待后台停止线程完成（不能 detach，那样 this 会悬空）
-    if (m_stopThread.joinable()) m_stopThread.join();
+    // Covers legacy or partially initialized controller state as well.
+    stopFrontendStages();
     cleanupControlSocket();
 }
 
@@ -466,7 +468,8 @@ void NetworkController::rollbackStart()
 // stop()  有序停止
 // ─────────────────────────────────────────────────────────────────────
 void NetworkController::stop() {
-    if(m_paimage){stopPaimage();return;}
+    if (m_paimageStopPending) return;
+    if (m_paimage || m_paimageTimer) { stopPaimage(); return; }
     // 防止重复调用
     if (!m_running && !m_stopThread.joinable()) {
         QMetaObject::invokeMethod(this, [this]() { emit stopped(); }, Qt::QueuedConnection);

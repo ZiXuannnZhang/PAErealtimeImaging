@@ -11,6 +11,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QHash>
+#include <QEventLoop>
+#include <chrono>
+#include <future>
 #include <ws2tcpip.h>
 
 namespace {
@@ -284,6 +287,138 @@ public:
         return ok;
     }
 
+    static bool frontendShutdownOrdering()
+    {
+        using namespace std::chrono_literals;
+        enum class Mode { Normal, QueuedButNotDispatched, DirectDelete };
+        for (const auto mode : {Mode::Normal, Mode::QueuedButNotDispatched, Mode::DirectDelete}) {
+            struct Gate {
+                std::promise<void> entered, purged, resume;
+            } gates[2];
+            std::atomic<int> exited{0};
+            int exitsAtSinkRelease = -1;
+            int exitsAtPublisherRelease = -1;
+            int stopped = 0;
+            bool stoppedAfterCleanup = false;
+            auto controller = std::make_unique<NetworkController>();
+            auto* c = controller.get();
+            paimage::Backend::Settings settings;
+            settings.acquisition.cards = 2;
+            settings.targets = {"127.0.0.2", "127.0.0.3"};
+            c->m_config.nCards = 2;
+            std::vector<DataProcessor*> processors;
+            std::vector<FileSaver*> savers;
+            for (int card = 0; card < 2; ++card) {
+                c->m_processors.push_back(std::make_unique<DataProcessor>(card, nullptr, nullptr, c->m_config));
+                c->m_savers.push_back(std::make_unique<FileSaver>(card));
+                processors.push_back(c->m_processors.back().get());
+                savers.push_back(c->m_savers.back().get());
+            }
+            c->m_paimage = std::make_unique<paimage::Backend>(
+                settings, std::move(processors), std::move(savers), nullptr);
+            c->m_publisher = std::make_unique<FramePublisher>(c);
+            QObject::connect(c->m_publisher.get(), &QObject::destroyed, [&] {
+                exitsAtPublisherRelease = exited.load();
+            });
+            c->m_running = true;
+
+            // Observe the controller-owned Ring dependency independently of the
+            // copies inside each stage. The exit counter is set at thread exit,
+            // not merely when the in-flight callback returns.
+            auto ringOwner = std::shared_ptr<int>(new int, [&](int* p) {
+                exitsAtSinkRelease = exited.load();
+                delete p;
+            });
+            c->setRingFeedSink([owner = std::move(ringOwner)](const TriggerGroupConstPtr&) {
+                return ImagingSubmitResult::Accepted;
+            });
+            QObject::connect(c, &NetworkController::stopped, [&] {
+                ++stopped;
+                stoppedAfterCleanup = exited.load() == 2 && !c->displayBuffer(0)
+                    && !c->displayBuffer(1) && !c->frontendSnapshot(0);
+            });
+
+            bool admitted = true;
+            for (int i = 0; i < 2; ++i) {
+                auto& gate = gates[i];
+                c->m_displayBuffers.push_back(std::make_unique<DisplayBuffer>());
+                auto stage = std::make_unique<FrontendPreprocessor>(i);
+                stage->setDisplayBuffer(c->displayBuffer(i));
+                stage->setRingSink([&gate, &exited, resume = gate.resume.get_future().share()]
+                                   (const TriggerGroupConstPtr&) {
+                    struct ExitWitness {
+                        std::atomic<int>& counter;
+                        ~ExitWitness() { ++counter; }
+                    };
+                    thread_local ExitWitness exitWitness{exited};
+                    gate.entered.set_value();
+                    resume.wait();
+                    return ImagingSubmitResult::Accepted;
+                });
+                frontend_filter::Config noFilter;
+                noFilter.hpEnable = noFilter.lpEnable = false;
+                stage->setFilterConfig(noFilter);
+                stage->beginSession(1);
+                stage->start();
+                c->m_frontendStages.push_back(std::move(stage));
+                auto& worker = *c->m_frontendStages.back();
+                auto frame = std::make_shared<TriggerGroup>();
+                frame->sampleCount = 1;
+                frame->freqA = {1};
+                frame->freqB = {-1};
+                if (worker.submit(frame) != FrontendSubmitResult::Accepted
+                    || gate.entered.get_future().wait_for(5s) != std::future_status::ready) {
+                    admitted = false;
+                    break;
+                }
+                // Dropped on shutdown while this worker is still in its first
+                // callback. Its deleter releases the gate without polling/sleeps.
+                auto pending = TriggerGroupPtr(new TriggerGroup(*frame), [&gate](TriggerGroup* p) {
+                    delete p;
+                    gate.purged.set_value();
+                });
+                if (worker.submit(pending) != FrontendSubmitResult::Accepted) {
+                    admitted = false;
+                    break;
+                }
+            }
+
+            bool purgedWhileInFlight = true;
+            std::thread releaseWorkers([&] {
+                for (auto& gate : gates) {
+                    if (admitted && gate.purged.get_future().wait_for(5s) != std::future_status::ready)
+                        purgedWhileInFlight = false;
+                    gate.resume.set_value();
+                }
+            });
+            if (mode != Mode::DirectDelete) {
+                QEventLoop loop;
+                QObject::connect(c, &NetworkController::stopped, &loop, &QEventLoop::quit);
+                c->stop();
+                c->stop();
+                if (mode == Mode::Normal) {
+                    QTimer::singleShot(15000, &loop, &QEventLoop::quit);
+                    loop.exec();
+                } else if (c->m_stopThread.joinable()) {
+                    // Guarantee completion was queued, but do not dispatch it.
+                    c->m_stopThread.join();
+                }
+            }
+            controller.reset();
+            releaseWorkers.join();
+
+            const bool normal = mode == Mode::Normal;
+            if (!require(admitted && purgedWhileInFlight, "R5 workers had in-flight and queued work")
+                || !require(exitsAtPublisherRelease == 2 && exitsAtSinkRelease == 2,
+                            "R5 all workers exited before publisher and Ring dependency release")
+                || !require(stopped == (normal ? 1 : 0) && stoppedAfterCleanup == normal,
+                            "R5 only normal completion emits stopped, after display cleanup"))
+                return false;
+        }
+        QTextStream(stdout) << "PASS R5 normal/repeated stop and destruction without Qt dispatch" << Qt::endl;
+        return true;
+    }
+
     static bool measurementBoundaryEvidence()
     {
         NetworkController controller;
@@ -427,7 +562,8 @@ int main(int argc, char **argv) {
     DiagnosticRecorder::Options options;
     options.rootDirectory=temporary.path(); options.noiseBurst=0;
     auto *recorder=DiagnosticRecorder::initialize(options);
-    const bool ok=runtimeStatsFieldMapping()
+    const bool ok=NetworkDiagnosticTestAccess::frontendShutdownOrdering()
+        && runtimeStatsFieldMapping()
         && roundPolicyPropagation()
         && NetworkDiagnosticTestAccess::exercise(4) && NetworkDiagnosticTestAccess::exercise(5)
         && NetworkDiagnosticTestAccess::pendingSessionCleanup()
