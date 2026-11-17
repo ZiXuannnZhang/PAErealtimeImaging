@@ -262,9 +262,11 @@ struct RoundFixture {
 
 TriggerGroupPtr makeGroup(std::uint16_t trig, std::uint64_t roundGen, int value,
                           std::uint64_t sessionGen = 0,
-                          std::uint32_t sourceIPv4 = 0x0100007f)
+                          std::uint32_t sourceIPv4 = 0x0100007f,
+                          std::uint64_t measurementSession = 0)
 {
     auto g = std::make_shared<TriggerGroup>();
+    g->measurementSession = measurementSession;
     g->cardId = 0;
     g->triggerSeq = trig;
     g->sampleCount = kSamples;
@@ -715,6 +717,87 @@ int main(int argc, char** argv)
     } catch (const std::exception& e) {
         check(false, (QString("T13 exception: ") + e.what()).toUtf8().constData());
     }
+
+    // R3: keep saving active across two measurements whose first rounds are
+    // both zero. Queue old groups before the boundary and deliver one after it.
+    for (const std::uint64_t saveGen : {0, 7}) {
+        try {
+            QTemporaryDir dir;
+            require(dir.isValid(), "R3 temp dir");
+            const QString root = saveGen ? dir.filePath("auto") : dir.path();
+            FileSaver saver(0);
+            saver.setSessionDirResolver([&](std::uint64_t gen) {
+                return gen == saveGen ? root : QString();
+            });
+            saver.startSaving(dir.path(), 100, "r3");
+            auto enqueue = [&](int marker, std::uint64_t session) {
+                saver.saveTriggerGroup(makeGroup(marker, 0, marker, saveGen, 0x0100007f, session));
+            };
+            enqueue(101, 1);
+            enqueue(102, 1);
+            enqueue(201, 2);
+            enqueue(103, 1);
+            enqueue(202, 2);
+            TriggerGroupPtr group;
+            while (saver.saveQueue()->try_dequeue(group))
+                check(saver.consumeTriggerGroup(group), "R3 queued record accepted");
+            saver.stopSaving();
+
+            check(verifyFile(root + "/Card1_ChA_r3_000.dat", halvesOf({101, 102})) &&
+                  verifyFile(root + "/Card1_ChB_r3_000.dat", halvesOf({-101, -102})),
+                  "R3 first measurement retains both queued old records on A/B");
+            check(verifyFile(root + "/Card1_ChA_r3_001.dat", halvesOf({201, 202})) &&
+                  verifyFile(root + "/Card1_ChB_r3_001.dat", halvesOf({-201, -202})),
+                  "R3 second measurement has a separate A/B pair with no late bytes");
+            const QString late = root + "/_late/session-1-round-0";
+            check(verifyFile(late + "/Card1_ChA_r3_000.dat", halvesOf({103})) &&
+                  verifyFile(late + "/Card1_ChB_r3_000.dat", halvesOf({-103})),
+                  "R3 late old measurement is isolated on both channels");
+            const auto& rollover = saver.lastFileRollover();
+            check(saver.fileRolloverCount() == 1 && saver.physicalRoundRolloverCount() == 1 &&
+                  rollover.oldRoundGeneration == 0 && rollover.newRoundGeneration == 0 &&
+                  rollover.oldFileSequence == 0 && rollover.newFileSequence == 1 &&
+                  rollover.oldFileTriggerCount == 2 && rollover.manualMode == (saveGen == 0),
+                  "R3 identity change advances exactly once after first directory binding");
+            check(saver.savedCount() == 5 && saver.acceptedCount() == 5,
+                  "R3 all five records confirmed without dropping late data");
+        } catch (const std::exception& e) {
+            check(false, (QString("R3 exception: ") + e.what()).toUtf8().constData());
+        }
+    }
+
+#ifdef FILESAVER_TEST_SEAM
+    // Fail B's flush exactly at the same-round-number measurement transition.
+    // Keep one earlier confirmed batch so the test can check rollback content.
+    try {
+        QTemporaryDir dir;
+        require(dir.isValid(), "R3 flush temp dir");
+        FileSaver saver(0);
+        int faults = 0;
+        QObject::connect(&saver, &FileSaver::errorOccurred, [&] { ++faults; });
+        saver.startSaving(dir.path(), 100, "r3fault");
+        for (int i = 0; i < 16; ++i)
+            require(saver.consumeTriggerGroup(makeGroup(101 + i, 0, 101 + i, 0, 0x0100007f, 1)),
+                    "R3 first batch accepted");
+        require(saver.savedCount() == 16, "R3 first batch confirmed");
+        require(saver.consumeTriggerGroup(makeGroup(117, 0, 117, 0, 0x0100007f, 1)),
+                "R3 old measurement tail buffered");
+        saver.setFlushFaultForTest(2);
+        check(!saver.consumeTriggerGroup(makeGroup(201, 0, 201, 0, 0x0100007f, 2)),
+              "R3 rollover flush failure rejects first new record");
+        check(!saver.isSaving() && faults == 1 && saver.fileRolloverCount() == 0 &&
+              saver.acceptedCount() == 17 && saver.savedCount() == 16,
+              "R3 rollover failure stops saving before advancing or accepting new data");
+        check(verifyFile(dir.filePath("Card1_ChA_r3fault_000.dat"), halvesOfRange(101, 16)) &&
+              verifyFile(dir.filePath("Card1_ChB_r3fault_000.dat"), negHalvesOfRange(101, 16)),
+              "R3 flush failure rolls both channels back to the exact confirmed batch");
+        check(!QFile::exists(dir.filePath("Card1_ChA_r3fault_001.dat")) &&
+              !QFile::exists(dir.filePath("Card1_ChB_r3fault_001.dat")),
+              "R3 no new pair created on failure");
+    } catch (const std::exception& e) {
+        check(false, (QString("R3 flush exception: ") + e.what()).toUtf8().constData());
+    }
+#endif
 
     // ── W1..W6: 写盘失败必须「停保存 + 告警 + A/B 双侧按记录边界回退」────────
     // .dat 是定长记录、无文件头：一次 IO 失败/短写若留下半条记录，该文件后续

@@ -3,13 +3,14 @@
 #include <QFile>
 #include <atomic>
 #include <functional>
+#include <optional>
 #include "DataTypes.h"
 #include "RoundIdentity.h"
 #include "third_party/concurrentqueue.h"
 
 // Low-frequency observability for file rollovers. Distinguishes capacity
 // rollovers (triggersPerFile) from physical-round rollovers
-// (TriggerGroup::roundGeneration) as required by the round-boundary contract.
+// (measurement session and round generation).
 // "sequence_collision" records that the next free sequence had to be found by
 // skipping names that already exist on disk (see the no-overwrite invariant).
 struct FileRolloverInfo {
@@ -97,8 +98,8 @@ public:
     const FileRolloverInfo& lastFileRollover() const { return m_lastRollover; }
     uint64_t fileRolloverCount()         const { return m_rolloverCount; }
     uint64_t physicalRoundRolloverCount() const { return m_roundRolloverCount; }
-    bool     hasCurrentPhysicalRound()   const { return m_haveCurrentPhysicalRound; }
-    uint64_t currentPhysicalRoundGeneration() const { return m_currentPhysicalRoundGeneration; }
+    bool     hasCurrentPhysicalRound()   const { return m_fileRound.has_value(); }
+    uint64_t currentPhysicalRoundGeneration() const { return m_fileRound ? m_fileRound->roundGeneration : 0; }
 
 signals:
     void statusMessage(const QString& message);
@@ -165,11 +166,11 @@ private:
     QFile*   m_fileChannelA = nullptr;
     QFile*   m_fileChannelB = nullptr;
 
-    // Physical-round file boundary state (data-plane authoritative):
-    // TriggerGroup::roundGeneration drives the rollover before the first group
-    // of a new generation is written; triggersPerFile remains the capacity cap.
-    bool     m_haveCurrentPhysicalRound = false;
-    uint64_t m_currentPhysicalRoundGeneration = 0;
+    // Round assigned to this file sequence. Unset before the first group or
+    // after a directory/save-generation reset. A legacy group can have a round
+    // number without a valid measurement session.
+    std::optional<paimage::RoundIdentity> m_fileRound;
+    // Ordering watermark for late routing; survives a save-generation change.
     paimage::RoundIdentity m_currentIdentity;
     paimage::RoundIdentity m_sealedThrough;
     bool m_isLateWriter=false;

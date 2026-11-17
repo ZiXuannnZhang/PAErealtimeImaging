@@ -163,8 +163,7 @@ int FileSaver::queueDepth() const {
 }
 
 void FileSaver::resetPhysicalRoundState() {
-    m_haveCurrentPhysicalRound = false;
-    m_currentPhysicalRoundGeneration = 0;
+    m_fileRound.reset();
 }
 
 void FileSaver::recordRollover(const FileRolloverInfo& info) {
@@ -219,8 +218,8 @@ int FileSaver::resolveFreeSequence() {
             FileRolloverInfo info;
             info.happened = true;
             info.reason = QStringLiteral("sequence_collision");
-            info.oldRoundGeneration = m_currentPhysicalRoundGeneration;
-            info.newRoundGeneration = m_currentPhysicalRoundGeneration;
+            info.oldRoundGeneration = currentPhysicalRoundGeneration();
+            info.newRoundGeneration = currentPhysicalRoundGeneration();
             info.oldFileSequence = start;
             info.oldFileTriggerCount = m_currentFileTriggers;
             info.newFileSequence = seq;
@@ -491,40 +490,43 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     if (m_dropGen != 0 && gen == m_dropGen)
         return false;
 
-    // 物理轮次边界（数据面权威）：TriggerGroup::roundGeneration 决定保存
-    // 文件边界。判定必须发生在写当前 TriggerGroup 之前；即使上一轮数据
-    // 仍在 saver 队列中排队，FIFO 消费顺序也能保证旧 generation 完整写入
-    // 旧文件后，首个新 generation 组才触发轮转。仅 normalizer 分类过的
-    // LogicalScan 参与轮次判定，保持旧路径/旧数据行为不变。
+    // The consumer owns the boundary: queued old groups finish first, and
+    // late groups have already been routed above. A save-generation change
+    // has already closed the pair and reset m_fileRound, so do not advance
+    // the file sequence again when adopting the first identity there.
     if (group->normalizationApplied &&
         group->physicalDecision == paimage::PhysicalTriggerDecision::LogicalScan) {
-        if(m_currentIdentity.valid() && m_currentIdentity<identity &&
-           (!m_sealedThrough.valid() || m_sealedThrough<m_currentIdentity))m_sealedThrough=m_currentIdentity;
-        m_currentIdentity=identity;
-        if (!m_haveCurrentPhysicalRound) {
-            m_haveCurrentPhysicalRound = true;
-            m_currentPhysicalRoundGeneration = group->roundGeneration;
-        } else if (group->roundGeneration != m_currentPhysicalRoundGeneration) {
-            // 轮转前那次刷盘若失败，整段已回退丢弃；此时不得推进序号并开新文件，
-            // 否则记录边界会带着缺口继续。停保存并让操作员介入。
+        const bool roundChanged = m_fileRound &&
+            (identity.valid() && m_fileRound->valid()
+                ? *m_fileRound != identity
+                : m_fileRound->roundGeneration != identity.roundGeneration);
+        FileRolloverInfo info;
+        if (roundChanged) {
             if (!closeFiles()) {
                 handleWriteFault(QStringLiteral("物理轮次轮转时的落盘"));
                 return false;
             }
-            FileRolloverInfo info;
             info.happened = true;
             info.reason = QStringLiteral("physical_round");
-            info.oldRoundGeneration = m_currentPhysicalRoundGeneration;
-            info.newRoundGeneration = group->roundGeneration;
+            info.oldRoundGeneration = m_fileRound->roundGeneration;
+            info.newRoundGeneration = identity.roundGeneration;
             info.oldFileSequence = m_fileSequence;
             info.oldFileTriggerCount = m_currentFileTriggers;
-            ++m_fileSequence;   // 安全推进：绝不覆盖上一物理轮次的文件
+            ++m_fileSequence;
             m_currentFileTriggers = 0;
             info.newFileSequence = m_fileSequence;
             info.manualMode = (m_currentGen == 0);
-            m_currentPhysicalRoundGeneration = group->roundGeneration;
-            recordRollover(info);
         }
+        if (!m_fileRound || roundChanged || identity.valid())
+            m_fileRound = identity;
+        if (identity.valid()) {
+            if (m_currentIdentity.valid() && m_currentIdentity < identity &&
+                (!m_sealedThrough.valid() || m_sealedThrough < m_currentIdentity))
+                m_sealedThrough = m_currentIdentity;
+            m_currentIdentity = identity;
+        }
+        if (roundChanged)
+            recordRollover(info);
     }
 
     // 打开文件（首次 或 IP 来源变化时）。
@@ -548,8 +550,8 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         FileRolloverInfo info;
         info.happened = true;
         info.reason = QStringLiteral("capacity");
-        info.oldRoundGeneration = m_currentPhysicalRoundGeneration;
-        info.newRoundGeneration = m_currentPhysicalRoundGeneration;
+        info.oldRoundGeneration = currentPhysicalRoundGeneration();
+        info.newRoundGeneration = currentPhysicalRoundGeneration();
         info.oldFileSequence = m_fileSequence;
         info.oldFileTriggerCount = m_currentFileTriggers;
         ++m_fileSequence;
