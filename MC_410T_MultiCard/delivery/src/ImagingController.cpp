@@ -519,10 +519,10 @@ void ImagingController::closeRingAdmission()
     clearRingInput();
 }
 
-bool ImagingController::setupRingSharedMemory(RingLayout layout)
+bool ImagingController::setupRingSharedMemory(RingLayout layout, const wchar_t *name)
 {
     const size_t total = layout.bytes.mappingBytes;
-    const auto created = m_ringMapping.create(total);
+    const auto created = m_ringMapping.create(total, name);
     if (created != ring_input::Result::Ok || m_ringMapping.capacity() < total) {
         emit svcError(QStringLiteral("环形 v3 映射创建失败（可能存在旧进程），result=%1").arg(int(created)));
         return false;
@@ -875,9 +875,6 @@ void ImagingController::processRingFrame(int seq,
         }
         m_ringOutputMutex.unlock();
     }
-#ifdef RING_INPUT_TEST_SEAM
-    if (m_testAfterRingCopy) m_testAfterRingCopy();
-#endif
     if (copied != ring_snapshot::CopyResult::Copied) {
         m_dispConsumed[target].store(true, std::memory_order_release);
         emit svcStatus(QStringLiteral("[RingSnapshot] copy rejected result=%1 notify_seq=%2 shm_seq=%3")

@@ -4,6 +4,7 @@
 #include <QProcess>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QUuid>
 #include <cmath>
 #include <iostream>
 #include <algorithm>
@@ -316,10 +317,12 @@ struct RingLayoutRegression {
             cfg.alinesPerChannelPerBlock = alines;
             return ctrl.configureRing(cfg, tv);
         };
+        const auto mapping = (QStringLiteral("Local\ring-layout-") + QUuid::createUuid().toString()).toStdWString();
         auto start = [&]{
             // Use the real native mapping/worker and bypass process startup and GPU.
-            if (!ctrl.setupRingSharedMemory(ctrl.m_pendingRingLayout)) return false;
+            if (!ctrl.setupRingSharedMemory(ctrl.m_pendingRingLayout, mapping.c_str())) return false;
             ctrl.m_svcResourcesActive = true;
+            ctrl.m_suppressSvcCrashError = false;
             ctrl.m_running = true;
             ctrl.m_ringWorkerStop = false;
             ctrl.m_ringAdmission = true;

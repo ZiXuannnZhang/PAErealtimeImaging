@@ -141,7 +141,7 @@ private:
         ring_snapshot::Layout bytes;
         size_t capacity = 0;
     };
-    bool setupRingSharedMemory(RingLayout layout);
+    bool setupRingSharedMemory(RingLayout layout, const wchar_t *name = ring_input::kNativeMappingName);
     void closeRingAdmission();
     void pumpRingInput();
     void clearRingInput();
@@ -201,7 +201,6 @@ private:
     std::atomic<int> m_testFailRingNotifications{0};
     friend struct RingLayoutRegression;
     std::function<void()> m_testBeforeRingCopy;
-    std::function<void()> m_testAfterRingCopy;
 #endif
     ring_input::Mutex m_ringOutputMutex{ring_input::kOutputMutexName};
     struct RingBlock {
