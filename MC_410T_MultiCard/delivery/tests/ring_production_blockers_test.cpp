@@ -74,19 +74,36 @@ void copyTest() {
     float out[2] = {-1, -1};
     std::uint32_t actual = 0;
     using R = ring_snapshot::CopyResult;
-    check(ring_snapshot::copy(shm, 1, 0, 0, 1, out, actual) == R::SequenceMismatch
+    ring_snapshot::Layout layout;
+    check(ring_snapshot::checkedLayout(0, 0, 1, layout), "tiny copy layout");
+    auto copy = [&](std::uint32_t seq) {
+        return ring_snapshot::copy(shm, seq, layout, shm.bytes.size(), out, 2, actual);
+    };
+    check(ring_snapshot::copy(shm, 2, layout, layout.frameOffset + layout.frameBytes - 1,
+                             out, 2, actual) == R::InvalidBounds && shm.locks == 0 && out[0] == -1,
+          "truncated mapping rejected before header or pixel access");
+    check(ring_snapshot::copy(shm, 2, layout, shm.bytes.size(), out, 1, actual) == R::InvalidBounds
+          && shm.locks == 0 && out[1] == -1, "short destination rejected without writing");
+    const auto max = (std::numeric_limits<std::size_t>::max)();
+    ring_snapshot::Layout invalid;
+    check(!ring_snapshot::checkedLayout(max, 1, 1, invalid) &&
+          !ring_snapshot::checkedLayout(1, max, 1, invalid) &&
+          !ring_snapshot::checkedLayout(1, 1, max, invalid) &&
+          !ring_snapshot::checkedLayout(max / sizeof(float), 1, 1, invalid),
+          "overflow in sizes and combined offsets rejected");
+    check(copy(1) == R::SequenceMismatch
           && actual == 2 && out[0] == -1, "old notification never copies newer pixels");
     shm.mutateAtUnlock = true;
-    check(ring_snapshot::copy(shm, 2, 0, 0, 1, out, actual) == R::Copied
+    check(copy(2) == R::Copied
           && out[0] == 10 && out[1] == 20 && h->frame_seq == 3, "check and copy occur before unlock mutation");
     shm.mutateAtUnlock = false;
-    check(ring_snapshot::copy(shm, 3, 0, 0, 1, out, actual) == R::Copied
+    check(copy(3) == R::Copied
           && out[0] == 99, "new notification still succeeds after stale drop");
     shm.missing = true;
-    check(ring_snapshot::copy(shm, 3, 0, 0, 1, out, actual) == R::MissingData, "missing data unlocks");
+    check(copy(3) == R::MissingData, "missing data unlocks");
     check(shm.locks == shm.unlocks && !shm.locked, "every acquired lock released");
     shm.failLock = true;
-    check(ring_snapshot::copy(shm, 3, 0, 0, 1, out, actual) == R::LockFailed, "failed lock never reads");
+    check(copy(3) == R::LockFailed, "failed lock never reads");
 
     QSharedMemory real(QStringLiteral("ring-copy-") + QUuid::createUuid().toString());
     check(real.create(128), "real SHM created");
@@ -96,7 +113,7 @@ void copyTest() {
     h->frame_seq = UINT32_MAX;
     std::memcpy(h+1, pixels, sizeof(pixels));
     real.unlock();
-    check(ring_snapshot::copy(real, UINT32_MAX, 0, 0, 1, out, actual) == R::Copied
+    check(ring_snapshot::copy(real, UINT32_MAX, layout, real.size(), out, 2, actual) == R::Copied
           && out[1] == 20, "real QSharedMemory uses same copy transaction");
 }
 

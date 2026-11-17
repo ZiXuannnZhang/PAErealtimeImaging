@@ -279,8 +279,125 @@ static int faultsTest(QCoreApplication &app)
 }
 
 // Real controller -> ZMQ -> deployed ImagingSvc -> CUDA -> SHM readiness test.
+struct RingLayoutRegression {
+    static int run()
+    {
+        ImagingController ctrl;
+        RingReconCudaConfig cfg{};
+        ring_recon_cuda_set_defaults(&cfg);
+        cfg.sampDepth = 512;
+        cfg.daqHz = 10e6;
+        cfg.gridSize = .001;
+        cfg.enabledChannelCount = 1;
+        cfg.alinesPerChannelPerBlock = 4;
+        cfg.sectorStartDeg = 180;
+        cfg.sectorCcw = 0;
+        for (int ch = 0; ch < 8; ++ch) cfg.enabledChannels[ch] = ch == 0;
+        RingTimevarLowpassConfig tv;
+        tv.fcMaxMhz = 4; tv.fcMinMhz = 1;
+        int emitted = 0, restart = 0, errors = 0, directions = 0;
+        bool pixelsCorrect = true;
+        int lastSeq = 0;
+        QObject::connect(&ctrl, &ImagingController::ringConfigChangedWhileRunning, [&]{ ++restart; });
+        QObject::connect(&ctrl, &ImagingController::ringDirectionChanged, [&](int){ ++directions; });
+        QObject::connect(&ctrl, &ImagingController::svcError, [&](const QString &){ ++errors; });
+        QObject::connect(&ctrl, &ImagingController::ringSnapshotReady,
+            [&](int seq, quint64, bool, quint64, quint64, bool, int buffer){
+                ++emitted;
+                lastSeq = seq;
+                const auto *data = ctrl.snapshotBuffer(buffer);
+                const auto n = ctrl.m_ringLayout.bytes.frameBytes / sizeof(float);
+                pixelsCorrect = pixelsCorrect && data && std::all_of(data, data + n,
+                    [seq](float value){ return value == float(seq); });
+                ctrl.releaseSnapshotBuffer(buffer);
+            });
+        auto configure = [&](int nx, int alines){
+            cfg.fov = (nx - .25) * cfg.gridSize;
+            cfg.alinesPerChannelPerBlock = alines;
+            return ctrl.configureRing(cfg, tv);
+        };
+        auto start = [&]{
+            // Use the real native mapping/worker and bypass process startup and GPU.
+            if (!ctrl.setupRingSharedMemory(ctrl.m_pendingRingLayout)) return false;
+            ctrl.m_svcResourcesActive = true;
+            ctrl.m_running = true;
+            ctrl.m_ringWorkerStop = false;
+            ctrl.m_ringAdmission = true;
+            return true;
+        };
+        auto queue = [&](int seq){
+            auto *h = static_cast<RingImagingShmHeader *>(ctrl.m_ringMapping.data());
+            auto *pixels = reinterpret_cast<float *>(reinterpret_cast<unsigned char *>(h + 1) +
+                ringFramesOffset(h->block_size, h->alines));
+            std::fill_n(pixels, size_t(h->frame_size) * 2, float(seq));
+            h->frame_ready = 1; h->frame_seq = seq;
+            ctrl.startRingFrameWorker(seq, seq, true, {1, 0}, false);
+        };
+        auto fail = [](const char *why){ std::cerr << "R4: " << why << '\n'; return 1; };
+        if (!configure(5, 4) || !start()) return fail("initial mapping");
+        ctrl.applyMotorRingDirection(1);
+        if (restart || directions != 1 || !ctrl.m_ringAdmission) return fail("direction-only change rebuilt mapping");
+        for (int i = 0; i < 2; ++i) {
+            std::mutex mutex;
+            std::condition_variable cv;
+            bool entered = false, proceed = false;
+            ctrl.m_testBeforeRingCopy = [&]{
+                std::unique_lock<std::mutex> lock(mutex);
+                entered = true;
+                cv.notify_one();
+                cv.wait(lock, [&]{ return proceed; });
+            };
+            const int oldNx = ctrl.ringDisplayNx();
+            const int oldSeq = 31 + i;
+            queue(oldSeq);
+            bool parked;
+            {
+                std::unique_lock<std::mutex> lock(mutex);
+                parked = cv.wait_for(lock, std::chrono::seconds(3), [&]{ return entered; });
+            }
+            const int newNx = i == 0 ? 23 : 3;
+            const bool pending = parked && configure(newNx, i == 0 ? 18 : 2) &&
+                restart == i + 1 && !ctrl.m_ringAdmission && ctrl.ringDisplayNx() == oldNx;
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                proceed = true;
+            }
+            cv.notify_one();
+            if (i == 0) ctrl.stopSvc();
+            else ctrl.onSvcErrorOccurred(QProcess::FailedToStart);
+            ctrl.m_testBeforeRingCopy = {};
+            const auto &old = ctrl.m_dispBuf[0];
+            if (!pending || old.size() != size_t(2 * oldNx * oldNx) ||
+                !std::all_of(old.begin(), old.end(), [oldSeq](float v){ return v == float(oldSeq); }))
+                return fail("in-flight request did not read precisely the old mapping");
+            if (i == 1 && !configure(newNx, 2)) return fail("reconfigure after service error");
+            if (ctrl.m_ringWorker.joinable() || ctrl.m_ringMapping.data() || !start())
+                return fail("old worker or mapping survived restart");
+            const int before = emitted;
+            const int newSeq = 81 + i;
+            queue(newSeq);
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (emitted == before && std::chrono::steady_clock::now() < deadline) {
+                QCoreApplication::sendPostedEvents(&ctrl, QEvent::MetaCall);
+                std::this_thread::yield();
+            }
+            if (emitted != before + 1 || lastSeq != newSeq || !pixelsCorrect || ctrl.ringDisplayNx() != newNx)
+                return fail("stale notification or incorrect new pixels/grid");
+            // Join the completed worker before installing the next copy barrier.
+            ctrl.stopRingWorker();
+            ctrl.m_ringWorkerStop = false;
+            ctrl.m_dispActive = -1;
+        }
+        ctrl.stopSvc();
+        if (errors != 1) return fail("expected one service error");
+        std::cout << "PASS R4 mapping growth/shrink, in-flight snapshots and recovery after service error\n";
+        return 0;
+    }
+};
+
 int main(int argc,char**argv){
     QCoreApplication app(argc,argv);
+    if (app.arguments().contains(QStringLiteral("--layout"))) return RingLayoutRegression::run();
     if (app.arguments().contains(QStringLiteral("--burst"))) return burstTest(app);
     if (app.arguments().contains(QStringLiteral("--faults"))) return faultsTest(app);
     ImagingController controller;

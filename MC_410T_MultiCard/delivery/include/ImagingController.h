@@ -5,6 +5,9 @@
 #include <atomic>
 #include <thread>
 #include <condition_variable>
+#ifdef RING_INPUT_TEST_SEAM
+#include <functional>
+#endif
 #include <QProcess>
 #include <QSharedMemory>
 #include <QVector>
@@ -20,6 +23,7 @@
 #include "RingTimevarLowpassConfig.h"
 #include "RingFbpSettings.h"
 #include "RingShmObservability.h"
+#include "RingSnapshotCopy.h"
 #include "RoundIdentity.h"
 #include "ring_recon_cuda.h"
 
@@ -96,7 +100,7 @@ public:
     int frameHeight() const;
 
     int ringBlocksPerFrame() const;   // 配置块数，仅用于进度显示，完成由 round_complete 决定
-    int ringDisplayNx() const { return m_ringDisplayNx; }  // 方案A：= nx（显示=全分辨率）
+    int ringDisplayNx() const { return m_ringLayout.nx ? m_ringLayout.nx : m_pendingRingLayout.nx; }
     std::uint64_t ringLastSubmitIndex() const;
 
     // 固定双缓冲访问（仅 UI 线程调用）：
@@ -132,7 +136,13 @@ private:
     void sendConfigureAndStart();
     QImage frameDataToImage(const QVector<float> &data, int nx, int ny) const;
     void setupSharedMemory(int pulseSize, int frameSize);
-    bool setupRingSharedMemory(int blockSize, int frameSize, int alines, int nx);
+    struct RingLayout {
+        int nx = 0, blockSize = 0, alines = 0, frameSize = 0;
+        ring_snapshot::Layout bytes;
+        size_t capacity = 0;
+    };
+    bool setupRingSharedMemory(RingLayout layout);
+    void closeRingAdmission();
     void pumpRingInput();
     void clearRingInput();
     void processMessage(const QJsonObject &msg);
@@ -143,12 +153,12 @@ private:
                               const paimage::RoundIdentity &round, bool roundComplete);   // 请求环形帧转换（最新一帧覆盖）
     void ensureRingWorkerStarted();
     void stopRingWorker();
-    void ringWorkerLoop(quint64 lifecycle);
+    void ringWorkerLoop(quint64 lifecycle, const RingLayout &layout);
     void processRingFrame(int seq,
                           std::uint64_t submitIndex,
                           bool hasSubmitIndex,
                           const paimage::RoundIdentity &round, bool roundComplete,
-                          quint64 lifecycle);       // 常驻工作线程内的单帧读取/转换/投递
+                          quint64 lifecycle, const RingLayout &layout);       // 常驻工作线程内的单帧读取/转换/投递
     void finishStopSvc();              // 异步停止的收尾清理
 
     QProcess      *m_svcProcess;
@@ -170,7 +180,10 @@ private:
     ReconParams    m_reconParams;
 
     // 环形扫描并行分支
-    RingReconCudaConfig m_ringConfig;
+    RingReconCudaConfig m_ringConfig; // pending settings, owner thread only
+    RingLayout m_pendingRingLayout;
+    RingLayout m_ringLayout; // installed under queue lock; immutable until worker joins
+    std::atomic<bool> m_ringAdmission{false};
     RingTimevarLowpassConfig   m_ringTimevarConfig;
     RingFbpSettings m_fbpSettings;
     std::atomic<bool> m_fbpPreparing{false};
@@ -186,6 +199,9 @@ private:
     ring_input::Mutex m_ringInputMutex;
 #ifdef RING_INPUT_TEST_SEAM
     std::atomic<int> m_testFailRingNotifications{0};
+    friend struct RingLayoutRegression;
+    std::function<void()> m_testBeforeRingCopy;
+    std::function<void()> m_testAfterRingCopy;
 #endif
     ring_input::Mutex m_ringOutputMutex{ring_input::kOutputMutexName};
     struct RingBlock {
@@ -224,12 +240,6 @@ private:
     RingBlock m_ringInFlight;
     bool m_ringHasInFlight = false, m_ringPublished = false, m_ringResetPending = false;
     std::chrono::steady_clock::time_point m_ringDeadline, m_ringNextNotify;
-    int                 m_ringBlockSize = 0;
-    int                 m_ringAlineCount = 0;
-    int                 m_ringFrameSize = 0;
-    int                 m_ringDisplayNx = 0;        // 显示网格 dn
-    int                 m_ringDisplayStep = 0;      // 显示降采样步长
-    int                 m_ringDisplayFrameSize = 0; // dn*dn
     ring_shm_obs::Tracker m_ringObs;
 
     QVector<float> m_latestFrame;
