@@ -451,6 +451,40 @@ bool testRetentionAdmissionRecovery()
                  "recovery did not prune or retain the queued event within quota");
 }
 
+bool testSerializedSnapshotQuota()
+{
+    QTemporaryDir temp;
+    auto options = optionsFor(temp.path());
+    // Give both records identical top-level shape but very different UTF-8 sizes.
+    options.maxHistorySegmentBytes = 2048;
+    DiagnosticRecorder recorder(options);
+    const QDir run(recorder.runDirectory());
+    const auto size = [&](const QString &name) { return QFileInfo(run.filePath(name)).size(); };
+    const auto payload = [](int length) {
+        return QJsonObject{{"nested", QJsonObject{{"content", QString(length, QChar(0x4e2d))}}}};
+    };
+    recorder.recordNetworkSnapshot(payload(5));
+    if (!check(recorder.flush(), "small snapshot failed")) return false;
+    const qint64 first = size("network_history.jsonl");
+    recorder.recordNetworkSnapshot(payload(490));
+    if (!check(recorder.flush(), "large snapshot failed")) return false;
+    const qint64 total = size("network_history.jsonl");
+    if (!check(first > 15 && total - first > 1470 && total < 2048,
+               "snapshot increments did not reflect UTF-8 serialization")) return false;
+    recorder.recordSettingsSnapshot(payload(490));
+    if (!check(recorder.flush(), "cross-file snapshot rotation failed")) return false;
+    const qint64 current = size("settings_history.jsonl");
+    if (!check(size("network_history.jsonl.previous") == total && size("network_history.jsonl") == 0
+                   && current > 1470 && current <= 2048,
+               "aggregate snapshot bytes did not drive rotation")) return false;
+    recorder.recordSettingsSnapshot(payload(700));
+    if (!check(!recorder.flush() && recorder.status().writeErrorText.contains(QStringLiteral("单条"))
+                   && size("settings_history.jsonl") == current,
+               "oversize snapshot reached disk or did not report failure")) return false;
+    return check(size(".reservation") > 0 && !recorder.captureExportRequest().captureError.size(),
+                 "rotated snapshots did not fit the unchanged export admission limit");
+}
+
 bool testLiveHistoryRotation()
 {
     QTemporaryDir temp;
@@ -586,6 +620,7 @@ int main(int argc, char **argv)
     ok = testUnavailableDirectoryAndExistingExport() && ok;
     ok = testAbnormalHistory() && ok;
     ok = testRetentionAdmissionRecovery() && ok;
+    ok = testSerializedSnapshotQuota() && ok;
     ok = testLiveHistoryRotation() && ok;
     ok = testExportDoesNotBlockRotation() && ok;
     return ok ? 0 : 1;

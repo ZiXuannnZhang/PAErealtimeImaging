@@ -1,4 +1,5 @@
 #include "ZipTestPayload.h"
+#include <QTimer>
 #include "DiagnosticRecorder.h"
 #include "DiagnosticStorage.h"
 
@@ -376,13 +377,12 @@ bool testManualActiveSnapshotDoesNotBlockRotation()
     }
     const auto runs = DiagnosticRecorder::enumerateRuns(temp.path());
     if (!check(runs.size() == 1, "active run missing")) return false;
-    DiagnosticRecorder::TimeWindowRequest request;
-    request.requestedStartTime = QDateTime::currentDateTime().addSecs(-60).toString(Qt::ISODateWithMs);
-    request.requestedEndTime = QDateTime::currentDateTime().addSecs(60).toString(Qt::ISODateWithMs);
-    request.exportCapturedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-    request.rootDirectory = temp.path();
-    request.sources.append(sourceFromRun(runs.first(), recorder.captureBoundary(), true,
-                                         [&] { return recorder.flush(5000); }));
+    const auto now = QDateTime::currentDateTime();
+    auto request = recorder.registerTimeWindowRequest(now.addSecs(-60), now.addSecs(60));
+    if (!check(request.pendingHistory && request.sources.size() == 1 && !request.sources.first().historySnapshot,
+               "click handler did not return a lightweight request")) return false;
+    // Evict all of the original named segments before starting the export.
+    if (!check(batch("between-", 36), "rotation before export failed")) return false;
     std::promise<void> enteredPromise, releasePromise;
     auto entered = enteredPromise.get_future();
     auto release = releasePromise.get_future().share();
@@ -390,6 +390,9 @@ bool testManualActiveSnapshotDoesNotBlockRotation()
     const QString target = temp.filePath("manual-window.zip");
     auto worker = std::async(std::launch::async, [&] { return DiagnosticRecorder::exportTimeWindow(request, target); });
     const bool paused = entered.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    bool eventLoopAdvanced = false;
+    QTimer::singleShot(0, [&] { eventLoopAdvanced = true; });
+    QCoreApplication::processEvents();
     const bool flushed = paused && batch("after-", 36);
     const auto status = recorder.status();
     QByteArray tail;
@@ -402,7 +405,7 @@ bool testManualActiveSnapshotDoesNotBlockRotation()
     DiagnosticRecorder::setSnapshotReadHookForTest({});
     QString error;
     const QByteArray exported = readZip(target, &error).value("events.jsonl");
-    bool ok = check(paused && flushed, QStringLiteral("manual snapshot blocked writer rotation: paused=%1 writeError=%2 exportError=%3")
+    bool ok = check(paused && eventLoopAdvanced && flushed, QStringLiteral("registered export blocked the event loop or writer: paused=%1 writeError=%2 exportError=%3")
                         .arg(paused).arg(status.writeErrorText, result.error))
         && check(!status.writeError && status.drops.queueDropped == 0 && status.drops.criticalQueueDropped == 0,
                  QStringLiteral("manual snapshot caused writer loss: %1").arg(status.writeErrorText))

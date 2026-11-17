@@ -1738,20 +1738,20 @@ void MainWindow::onExportDiagnosticClicked()
     if (dialog.exec() != QDialog::Accepted) return;
 
     const DiagnosticExportDialog::Selection selected = dialog.selection();
-    QString targetPath = uniqueDiagnosticZipPath(selected.targetPath);
-    if (targetPath.isEmpty()) {
+    const QString requestedPath = selected.targetPath;
+    if (requestedPath.trimmed().isEmpty()) {
         QMessageBox::warning(this, QStringLiteral("导出诊断日志"),
                              QStringLiteral("请选择有效的 ZIP 保存位置。"));
         return;
     }
 
     recordDiagnosticAction(QStringLiteral("diagnostic_export"),
-                           {{QStringLiteral("targetPath"), targetPath},
+                           {{QStringLiteral("targetPath"), requestedPath},
                             {QStringLiteral("requestedStartTime"), selected.startTime.toString(Qt::ISODateWithMs)},
                             {QStringLiteral("requestedEndTime"), selected.endTime.toString(Qt::ISODateWithMs)}});
 
     const DiagnosticRecorder::TimeWindowRequest request =
-        recorder->captureTimeWindowRequest(selected.startTime, selected.endTime, selected.note);
+        recorder->registerTimeWindowRequest(selected.startTime, selected.endTime, selected.note);
 
     statusBar()->showMessage(QStringLiteral("正在后台导出诊断日志…"), 3000);
     const QPointer<MainWindow> guard(this);
@@ -1794,8 +1794,8 @@ void MainWindow::onExportDiagnosticClicked()
                     QStringLiteral("诊断日志导出完成：%1").arg(result.targetPath), 8000);
             });
     watcher->setFuture(QtConcurrent::run(
-        [request, targetPath]() mutable {
-            return DiagnosticRecorder::exportTimeWindow(request, targetPath);
+        [request, requestedPath]() {
+            return DiagnosticRecorder::exportTimeWindow(request, uniqueDiagnosticZipPath(requestedPath));
     }));
 }
 

@@ -20,18 +20,19 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
     DiagnosticRecorder::setBundleCapture([root,toolsDirectory](qint64 start,qint64 end){
         // Capture just identities and sequence fences on the UI thread. File
         // reads, writer flush waits, filtering and hashing run in the exporter.
-        const bool rootExists=QDir(root).exists();
-        const auto lease=rootExists ? diagnostic_storage::exportLease(root) : nullptr;
-        if(rootExists&&!lease)
-            return DiagnosticRecorder::BundleExtension([](const auto&,QString* error){
-                if(error)*error=QStringLiteral("诊断目录正在清理，请重试导出");return false;
-            });
         auto cuts=TraceWriter::captureCuts();
         auto timingCuts=TimingWriter::captureCuts();
         auto loopCuts=LoopLog::captureCuts();
-        auto dirs=QDir(root).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name);
-        return DiagnosticRecorder::BundleExtension([root,toolsDirectory,start,end,lease,cuts=std::move(cuts),timingCuts=std::move(timingCuts),loopCuts=std::move(loopCuts),dirs=std::move(dirs)]
+        const auto capturedAt=QDateTime::currentMSecsSinceEpoch();
+        return DiagnosticRecorder::BundleExtension([root,toolsDirectory,start,end,capturedAt,cuts=std::move(cuts),timingCuts=std::move(timingCuts),loopCuts=std::move(loopCuts)]
             (const DiagnosticRecorder::BundleSink& sink,QString* error){
+            const bool rootExists=QDir(root).exists();
+            const auto lease=rootExists ? diagnostic_storage::exportLease(root) : nullptr;
+            if(rootExists&&!lease){
+                if(error)*error=QStringLiteral("诊断目录正在清理，请重试导出");
+                return false;
+            }
+            const auto dirs=QDir(root).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name);
             QJsonArray runs,files,skippedRuns;bool bundleIncomplete=false;
             auto write=[&](const QString& name,const QByteArray& bytes){
                 if(!sink(name,bytes)){if(error&&error->isEmpty())*error="PAimage trace ZIP write failed";return false;}
@@ -60,6 +61,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 const bool timingMissing=timingEnabled.isBool()&&timingEnabled.toBool()&&!timingEvidence;
                 const bool loopMissing=loopEnabled.isBool()&&loopEnabled.toBool()&&!loopEvidence;
                 const qint64 wall=metadata.value("wallAnchorMs").toVariant().toLongLong();
+                if (wall > capturedAt) continue;
                 const qint64 mono=metadata.value("monotonicAnchorNs").toString().toLongLong();
                 bool anchorKnown=wall&&mono;
                 if(!anchorKnown && start!=std::numeric_limits<qint64>::min()){

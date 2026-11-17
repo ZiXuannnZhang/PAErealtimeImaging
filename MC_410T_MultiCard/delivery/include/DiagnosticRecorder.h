@@ -140,6 +140,7 @@ public:
     };
 
     struct RetentionPin;
+    struct PendingHistoryCut;
     struct TimeWindowRequest {
         BundleExtension bundleExtension;
         std::shared_ptr<void> storageLease;
@@ -151,6 +152,8 @@ public:
         QString rootDirectory;
         QString validationError;
         QVector<ExportRequest> sources;
+        std::shared_ptr<PendingHistoryCut> pendingHistory;
+        bool discoverSources = false;
     };
 
     struct ExportResult {
@@ -216,6 +219,10 @@ public:
     ExportRequest captureExportRequest(quint64 boundarySequence = 0,
                                        const QString &note = QString()) const;
 
+    // Register the live boundary without waiting for filesystem work.
+    TimeWindowRequest registerTimeWindowRequest(const QDateTime &startLocal,
+                                                 const QDateTime &endLocal,
+                                                 const QString &note = QString()) const;
     TimeWindowRequest captureTimeWindowRequest(const QDateTime &startLocal,
                                                const QDateTime &endLocal,
                                                const QString &note = QString()) const;
