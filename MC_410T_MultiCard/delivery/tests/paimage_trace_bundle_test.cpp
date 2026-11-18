@@ -402,6 +402,73 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     require(windowManifest(faultyZip).value("traceIncomplete").toBool() &&
         windowManifest(faultyZip).value("skippedRuns").toArray().size() == 2);
 
+    const auto scopedRoot = root.filePath("scoped-windows");
+    const auto scopedRun = scopedRoot + "/listener";
+    require(QDir().mkpath(scopedRun));
+    paimage::installTraceBundle(scopedRoot,tools);
+    const auto scopedWall=QDateTime::currentDateTime().addSecs(-65);
+    write(scopedRun+"/run-config.json",QJsonDocument(QJsonObject{
+        {"runId","listener"},{"wallAnchorMs",double(scopedWall.toMSecsSinceEpoch())},
+        {"monotonicAnchorNs","1000000"},{"diagnosticTraceEnabled",false},
+        {"timingEnabled",false},{"loopLogEnabled",true}}).toJson());
+    QJsonArray scopedWindows;
+    auto addScopedWindow = [&](int id, qint64 firstSecond, bool truncated) {
+        const auto firstNs=1000000+firstSecond*1000000000ll;
+        auto record=keep;
+        record.sequence=(id-1)*3+1;
+        record.timeNs=firstNs;
+        auto binary=recordBytes(record);
+        auto marker=burst;
+        marker.sequence=++record.sequence;
+        marker.timeNs=firstNs+5000000000ull;
+        binary+=recordBytes(marker);
+        ++record.sequence;
+        record.timeNs=firstNs+10000000000ull;
+        binary+=recordBytes(record);
+        const auto name=QStringLiteral("looplog-window-%1.bin").arg(id);
+        write(scopedRun+"/"+name,binary);
+        scopedWindows.append(QJsonObject{{"windowId",id},{"startNs",firstNs},{"endNs",qint64(record.timeNs)},
+            {"file",name},{"recordCount",3},{"bytes",binary.size()},{"preWindowTruncated",truncated}});
+    };
+    addScopedWindow(1,1,true);
+    addScopedWindow(2,51,false);
+    write(scopedRun+"/looplog-summary.json",QJsonDocument(QJsonObject{
+        {"mode","rolling-burst-windows"},{"recordBytes",int(sizeof(keep))},
+        {"recordsIssued",6},{"recordsWritten",6},{"loopLogIncomplete",false},{"windows",scopedWindows}}).toJson());
+    const auto exportScoped = [&](qint64 startSecond,const QString& name) {
+        const auto path=root.filePath(name);
+        const auto request=recorder.registerTimeWindowRequest(scopedWall.addSecs(startSecond),scopedWall.addSecs(62));
+        require(DiagnosticRecorder::exportTimeWindow(request,path).success);
+        return zipEntries(path);
+    };
+    const auto onlyHealthy=exportScoped(50,"scoped-healthy.zip");
+    const auto onlyHealthySummary=readLoopSummary(onlyHealthy,"listener");
+    const auto oldWindow=onlyHealthySummary.value("exportWindows").toArray().first().toObject();
+    require(oldWindow.value("status")=="truncated"&&oldWindow.value("exportRecords").toInt()==0&&
+        !onlyHealthySummary.value("loopLogIncomplete").toBool(true)&&
+        onlyHealthySummary.value("exportCountCovered").toBool()&&
+        onlyHealthySummary.value("recordsWritten").toInt()==3&&
+        !windowManifest(onlyHealthy).value("traceIncomplete").toBool(true));
+    const auto partial=exportScoped(10,"scoped-partial.zip");
+    const auto partialSummary=readLoopSummary(partial,"listener");
+    require(partialSummary.value("recordsWritten").toInt()==4&&
+        partialSummary.value("loopLogIncomplete").toBool()&&
+        windowManifest(partial).value("traceIncomplete").toBool());
+    require(!oldWindow.value("inRequestedWindow").toBool(true)&&
+        partialSummary.value("exportWindows").toArray().first().toObject().value("inRequestedWindow").toBool()&&
+        partialSummary.value("exportClipped").toBool());
+    const auto oldFile=scopedRun+"/looplog-window-1.bin";
+    write(oldFile,readFile(oldFile)+QByteArray("x"));
+    const auto oldCorrupt=exportScoped(50,"scoped-old-corrupt.zip");
+    const auto corruptSummary=readLoopSummary(oldCorrupt,"listener");
+    require(!corruptSummary.value("exportFormatError").toBool(true)&&
+        !corruptSummary.value("loopLogIncomplete").toBool(true)&&
+        corruptSummary.value("exportWindows").toArray().first().toObject().value("status")=="corrupt"&&
+        !windowManifest(oldCorrupt).value("traceIncomplete").toBool(true));
+    const auto overlappingCorrupt=exportScoped(11,"scoped-overlapping-corrupt.zip");
+    require(readLoopSummary(overlappingCorrupt,"listener").value("exportFormatError").toBool()&&
+        windowManifest(overlappingCorrupt).value("traceIncomplete").toBool());
+
     const auto liveRoot=root.filePath("live-burst");
     const auto liveRun=liveRoot+"/listener";
     require(QDir().mkpath(liveRun));

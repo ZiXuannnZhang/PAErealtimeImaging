@@ -46,10 +46,26 @@ struct LoopWindowCoverage {
     QString status;
     QJsonArray windows;
     bool incomplete = false;
+    bool sourceWindowFailure = false;
 };
 
-LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
-                                     const QHash<QString, LoopFileExport> &files)
+struct LoopExportRange {
+    qint64 wall, mono, start, end;
+    bool anchorKnown;
+
+    qint64 wallTime(qint64 timeNs) const { return wall + (timeNs - mono) / 1000000; }
+
+    bool intersects(const QJsonObject &window) const {
+        const auto first = window.value("startNs").toInteger(-1);
+        const auto last = window.value("endNs").toInteger(-1);
+        // Older or invalid bounds cannot establish that a failure is out of scope.
+        return !anchorKnown || first < 0 || last < first ||
+            (wallTime(first) <= end && wallTime(last) >= start);
+    }
+};
+
+LoopWindowCoverage checkLoopWindows(const QJsonObject &summary, const LoopExportRange &range,
+                                   const QHash<QString, LoopFileExport> &files)
 {
     LoopWindowCoverage result;
     if (!summary.value("windows").isArray()) {
@@ -62,9 +78,10 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
     }
     const auto windows = summary.value("windows").toArray();
     bool matches = summary.value("recordBytes").toInt() == sizeof(LoopRecord);
-    bool budget = summary.value("budgetExhausted").toBool();
-    bool writeFailure = summary.value("writeFailed").toBool();
+    bool budget = false, writeFailure = false;
+    bool hasBudgetWindow = false, hasWriteFailureWindow = false;
     bool truncated = false;
+    bool hasRequestedWindow = false;
     qint64 expectedRecords = 0;
     QSet<QString> expected;
     QSet<qint64> ids;
@@ -78,8 +95,11 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
         const bool isTruncated = window.value("preWindowTruncated").toBool() ||
             window.value("beforeListenerStart").toBool() || window.value("postWindowTruncated").toBool() ||
             window.value("windowTruncated").toBool();
-        truncated |= isTruncated;
-        QJsonObject detail{{"windowId", id}, {"sourceFile", name}, {"truncated", isTruncated}};
+        const bool intersects = range.intersects(window);
+        hasRequestedWindow |= intersects;
+        truncated |= intersects && isTruncated;
+        QJsonObject detail{{"windowId", id}, {"sourceFile", name}, {"truncated", isTruncated},
+                           {"inRequestedWindow", intersects}};
         QString status;
         if (id <= 0 || ids.contains(id) || count < 0 || bytes < 0 ||
             bytes % sizeof(LoopRecord) || bytes / qint64(sizeof(LoopRecord)) != count ||
@@ -88,13 +108,15 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
             matches = false;
         } else if (window.value("budgetOmitted").toBool()) {
             status = "budget_omitted";
-            budget = true;
+            hasBudgetWindow = true;
+            budget |= intersects;
         } else if (count == 0) {
             status = "not_retained_by_policy";
         } else if (name.isEmpty()) {
             status = "write_failed";
-            writeFailure = true;
-            matches = false;
+            hasWriteFailureWindow = true;
+            writeFailure |= intersects;
+            matches &= !intersects;
         } else {
             expected.insert(name);
             if (count > (std::numeric_limits<qint64>::max)() - expectedRecords)
@@ -109,7 +131,7 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
             if (file.bytes < 0) status = "missing_or_unreadable";
             else if (file.bytes != bytes || file.formatError) status = "corrupt";
             else status = isTruncated ? "truncated" : "verified";
-            matches &= file.bytes == bytes && !file.formatError;
+            matches &= !intersects || (file.bytes == bytes && !file.formatError);
         }
         ids.insert(id);
         detail.insert("status", status);
@@ -120,6 +142,13 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
         if (!expected.contains(it.key())) matches = false;
     if (summary.value("recordsWritten").isDouble())
         matches &= summary.value("recordsWritten").toInteger(-1) == expectedRecords;
+    // Run-wide flags with no supporting inventory entry cannot be scoped.
+    const bool sourceBudget = summary.value("budgetExhausted").toBool();
+    const bool sourceWriteFailure = summary.value("writeFailed").toBool();
+    budget |= sourceBudget && !hasBudgetWindow;
+    writeFailure |= sourceWriteFailure && !hasWriteFailureWindow;
+    result.sourceWindowFailure = (sourceBudget && hasBudgetWindow) ||
+        (sourceWriteFailure && hasWriteFailureWindow);
     result.covered = matches;
     result.incomplete = !matches || budget || writeFailure || truncated;
     if (writeFailure) result.status = "write_failed";
@@ -128,7 +157,7 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
     else if (summary.value("openWindowPending").toBool()) result.status = "open_window_pending";
     else if (windows.isEmpty() && summary.value("queueDropped").toDouble()>0) result.status = "queue_dropped";
     else if (windows.isEmpty() && summary.value("burstMarkEpochs").toInteger() == 0) result.status = "no_burst";
-    else if (files.isEmpty()) result.status = "not_retained_by_policy";
+    else if (!hasRequestedWindow || files.isEmpty()) result.status = "not_retained_by_policy";
     else result.status = "windows_retained";
     return result;
 }
@@ -355,15 +384,27 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 });
                 int loopPart=0; quint64 loopSelected=0,loopFiltered=0,loopAfterCut=0; bool loopBad=false;
                 QHash<QString, LoopFileExport> loopFiles;
+                const LoopExportRange loopRange{wall,mono,start,end,anchorKnown};
+                QSet<QString> outsideLoopFiles, requestedLoopFiles;
+                if (loopWindowMode) {
+                    for (const auto& entry : loopSummary.value("windows").toArray()) {
+                        const auto window = entry.toObject();
+                        const auto name = window.value("file").toString();
+                        if (loopRange.intersects(window)) requestedLoopFiles.insert(name);
+                        else outsideLoopFiles.insert(name);
+                    }
+                    outsideLoopFiles.subtract(requestedLoopFiles);
+                }
                 for(const auto& name:loopNames){
                     auto &file = loopFiles[name];
+                    const bool inRange = !outsideLoopFiles.contains(name);
                     const QFileInfo info(QDir(path).filePath(name));
                     QFile input(info.filePath());
                     if (!info.exists() && !info.isSymLink() && !info.isJunction()) continue;
                     if (!info.isFile() || info.isSymLink() || info.isJunction() ||
-                        !input.open(QIODevice::ReadOnly)) { loopBad = true; continue; }
+                        !input.open(QIODevice::ReadOnly)) { loopBad |= inRange; continue; }
                     const auto bytes = input.readAll();
-                    if (input.error() != QFileDevice::NoError) { loopBad = true; continue; }
+                    if (input.error() != QFileDevice::NoError) { loopBad |= inRange; continue; }
                     file.bytes = bytes.size();
                     file.formatError = bytes.size() % sizeof(LoopRecord) != 0;
                     QByteArray chosen;
@@ -375,11 +416,16 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                             file.formatError = true;
                             continue;
                         }
-                        const qint64 time=anchorKnown?wall+(qint64(r.timeNs)-mono)/1000000:0;
+                        const qint64 time=anchorKnown?loopRange.wallTime(qint64(r.timeNs)):0;
                         if(anchorKnown&&(time<start||time>end)){++file.filtered;continue;}
+                        if (!inRange) {
+                            // A record in the request contradicts this file's declared bounds.
+                            file.formatError = loopBad = true;
+                            continue;
+                        }
                         chosen.append(bytes.constData()+at,recordBytes);++file.selected;}
                     loopSelected += file.selected; loopFiltered += file.filtered;
-                    loopAfterCut += file.afterCut; loopBad |= file.formatError;
+                    loopAfterCut += file.afterCut; loopBad |= inRange && file.formatError;
                     if(!chosen.isEmpty()){
                         file.exportedName = QString("paimage/%1/looplog-%2.bin").arg(dir).arg(loopPart++);
                         if(!write(file.exportedName,chosen))return false;
@@ -396,14 +442,18 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 const bool timingPresent=timingEvidence||timingMissing;
                 const bool timingIncomplete=timingMissing||(timingPresent&&(timingSummary.value("timingIncomplete").toBool()||
                     !timingFlushed||timingBad||!anchorKnown||!timingCountCovered));
-                auto coverage = loopWindowMode ? checkLoopWindows(loopSummary, loopFiles) : LoopWindowCoverage{};
+                auto coverage = loopWindowMode ? checkLoopWindows(loopSummary, loopRange, loopFiles) : LoopWindowCoverage{};
+                if (loopWindowMode && loopBad) coverage.covered = false;
                 // Schema 1 used continuous files. Only that legacy contract
                 // ties recordsIssued to the on-disk record count.
                 const bool legacyCount = !loopWindowMode && loopSummary.value("mode").toString().isEmpty() &&
                     loopSummary.value("schemaVersion").toInt(1) == 1 && loopBoundaryKnown;
                 if (legacyCount) coverage.covered = loopSelected + loopFiltered == loopBoundary;
                 const bool loopPresent=loopEvidence||loopMissing;
-                const bool loopStreamIncomplete=loopMissing||(loopPresent&&(loopSummary.value("loopLogIncomplete").toBool()||
+                const bool sourceLoopIncomplete = loopSummary.value("loopLogIncomplete").toBool();
+                const bool unscopedLoopFailure = (sourceLoopIncomplete && !coverage.sourceWindowFailure) ||
+                    loopSummary.value("writerUnwritten").toDouble()>0 || loopSummary.value("tailBytesOmitted").toDouble()>0;
+                const bool loopStreamIncomplete=loopMissing||(loopPresent&&(unscopedLoopFailure||
                     loopDropped||loopBad||!loopFlushed||coverage.incomplete||
                     (coverage.covered.isBool()&&!coverage.covered.toBool())||
                     (!anchorKnown&&(loopSelected||loopFiltered))));
@@ -446,6 +496,8 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     if(!write(prefix+"timing-summary.json",QJsonDocument(timingSummary).toJson()))return false;
                 }
                 if(loopPresent){loopSummary.insert("exportFlushCompleted",loopFlushed);
+                    if (loopSummary.contains("loopLogIncomplete"))
+                        loopSummary.insert("sourceLoopLogIncomplete",sourceLoopIncomplete);
                     if (loopSummary.contains("recordsWritten"))
                         loopSummary.insert("sourceRecordsWritten", loopSummary.value("recordsWritten"));
                     loopSummary.insert("recordsWritten",double(loopSelected));loopSummary.insert("exportFilteredRecords",double(loopFiltered));
