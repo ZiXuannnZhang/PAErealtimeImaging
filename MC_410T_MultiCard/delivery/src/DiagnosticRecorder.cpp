@@ -1837,7 +1837,7 @@ void materializeTimeWindow(DiagnosticRecorder::TimeWindowRequest &result)
             result.validationError=QStringLiteral("不安全的日志锁文件"); return;
         }
         result.retentionPin=std::make_shared<DiagnosticRecorder::RetentionPin>();
-        result.retentionPin->lease=diagnostic_storage::exportLease(result.rootDirectory);
+        result.retentionPin->lease=diagnostic_storage::awaitExportLease(result.rootDirectory);
         if(!result.retentionPin->lease){result.validationError=QStringLiteral("日志目录正在清理，请重试导出");return;}
         // This copy can drop its intent once its filesystem lease protects the reads.
         result.exportIntent.reset();

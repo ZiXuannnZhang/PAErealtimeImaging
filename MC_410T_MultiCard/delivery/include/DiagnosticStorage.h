@@ -3,12 +3,14 @@
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLockFile>
 #include <QRegularExpression>
+#include <QThread>
 #include <QUuid>
 #include <algorithm>
 #include <memory>
@@ -178,6 +180,19 @@ inline std::shared_ptr<QLockFile> exportLease(const QString &root)
     auto acquired = lease(path);
     leases[path] = acquired;
     return acquired;
+}
+
+// Called only after registration, off the click path. Do not hold the lease
+// registry mutex across a wait, including when exports use different roots.
+inline std::shared_ptr<QLockFile> awaitExportLease(const QString &root)
+{
+    QElapsedTimer elapsed;
+    elapsed.start();
+    do {
+        if (auto acquired = exportLease(root)) return acquired;
+        QThread::msleep(20);
+    } while (elapsed.elapsed() < 2500);
+    return {};
 }
 
 inline constexpr qint64 MiB = 1024 * 1024;

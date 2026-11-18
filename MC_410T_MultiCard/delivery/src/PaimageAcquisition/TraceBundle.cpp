@@ -63,7 +63,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
             const QFileInfo rootInfo(root);
             const bool rootExists=rootInfo.exists();
             const auto lease=rootInfo.isDir()&&!rootInfo.isSymLink()&&!rootInfo.isJunction()
-                ? diagnostic_storage::exportLease(root) : nullptr;
+                ? diagnostic_storage::awaitExportLease(root) : nullptr;
             if(rootExists&&!lease){
                 if(error)*error=QStringLiteral("无法锁定 PAimage 诊断目录，请重试导出");
                 return false;
