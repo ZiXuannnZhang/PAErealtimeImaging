@@ -54,8 +54,12 @@ private:
     bool saving_=false;
     std::uint64_t saveGeneration_=0;
     std::atomic<std::uint64_t> saveApplied_{0};
-    std::function<void()> saveApply_,saveIdle_,saveExit_;
-    struct SaveBarrier { std::uint64_t after; std::function<void()> apply; };
+    std::function<void()> saveIdle_,saveExit_;
+    struct SaveBarrier {
+        std::uint64_t after;
+        std::function<void()> apply;
+        std::uint64_t generation = 0;
+    };
     std::deque<SaveBarrier> saveBarriers_;
     std::uint64_t acceptedOrdinal_=0, completedOrdinal_=0;
     std::thread cardWorker_,syncWorker_;

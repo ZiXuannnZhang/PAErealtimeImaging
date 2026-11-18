@@ -124,6 +124,7 @@ public:
     void disableAutoSave();
     bool autoSaveEnabled() const;
     bool autoSaveFaulted() const;
+    std::uint64_t autoSaveRequestId() const noexcept { return m_autoSaveCoordinator.requestId(); }
     uint64_t autoSessionGen() const;
     QString sessionDir(uint64_t gen) const;
     // Round-aware resolver used by HostOutput before a TriggerGroup enters

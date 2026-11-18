@@ -171,20 +171,27 @@ int main(int argc, char** argv)
         check(unresolved.failed &&
                   unresolved.sessionGen == AutoSaveRoundCoordinator::kFailedGeneration,
               "A5 failed coordinator keeps round lookup fail-closed");
-        saver.saveTriggerGroup(makeGroup(coordinator.currentGeneration(), 1, 302));
+        const auto old = coordinator.resolveRound(1, 0);
+        check(old.resolved && old.sessionGen == first.newSessionGen,
+              "A5 failed directory preserves existing round binding");
+        saver.saveTriggerGroup(makeGroup(old.sessionGen, 0, 302));
+        saver.saveTriggerGroup(makeGroup(coordinator.currentGeneration(), 1, 303));
         drain(saver);
         saver.stopSaving();
-        check(saver.acceptedCount() == 1,
-              "A5 failed generation is not saved into old directory");
+        check(saver.acceptedCount() == 2,
+              "A5 only the bound old groups were written");
         check(!exists(failed.directory),
               "A5 failed directory is not registered/created");
         check(QFileInfo(QDir(first.directory).filePath(
-                             QStringLiteral("Card1_ChA_failure_000.dat"))).size() == 32,
-              "A5 old directory contains only pre-failure data");
+                             QStringLiteral("Card1_ChA_failure_000.dat"))).size() == 64,
+              "A5 old directory includes the final old group");
         coordinator.disable();
         check(!coordinator.enabled() &&
               coordinator.currentGeneration() == AutoSaveRoundCoordinator::kFailedGeneration,
               "A5 disable keeps fail-closed sentinel until reconfigure");
+        coordinator.configure(root.path(), 1);
+        check(failed.requestId != coordinator.requestId(),
+              "A5 a delayed failure cannot refer to the new request");
     }
 
     // A6: a new controller/lifecycle configuration clears old bindings and

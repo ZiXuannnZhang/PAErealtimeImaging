@@ -32,6 +32,7 @@ void AutoSaveRoundCoordinator::configure(const QString& baseDirectory,
     baseDirectory_ = baseDirectory.trimmed().isEmpty()
         ? QString()
         : QDir(baseDirectory).absolutePath();
+    ++requestId_;
     nextDirectoryNumber_ = lastDirectoryNumber;
     directories_.clear();
     boundaryBindings_.clear();
@@ -50,6 +51,7 @@ void AutoSaveRoundCoordinator::configure(const QString& baseDirectory,
 void AutoSaveRoundCoordinator::disable()
 {
     std::lock_guard<std::mutex> lock(mutex_);
+    ++requestId_;
     configured_ = false;
     enabled_.store(false, std::memory_order_release);
     // Keep a failed coordinator fail-closed until the next configure().
@@ -189,6 +191,7 @@ AutoSaveRoundCoordinator::CommitResult AutoSaveRoundCoordinator::bindMeasurement
     {
         std::lock_guard<std::mutex> lock(mutex_);
         result.enabled = enabled_.load(std::memory_order_relaxed);
+        result.requestId = requestId_.load(std::memory_order_relaxed);
         result.oldSessionGen = currentGeneration_.load(std::memory_order_relaxed);
         result.oldDirectory = directories_.value(result.oldSessionGen);
 
@@ -259,6 +262,7 @@ AutoSaveRoundCoordinator::CommitResult AutoSaveRoundCoordinator::commitBoundary(
     {
         std::lock_guard<std::mutex> lock(mutex_);
         result.enabled = enabled_.load(std::memory_order_relaxed);
+        result.requestId = requestId_.load(std::memory_order_relaxed);
         result.oldSessionGen = currentGeneration_.load(std::memory_order_relaxed);
         result.oldDirectory = directories_.value(result.oldSessionGen);
 
@@ -390,16 +394,11 @@ AutoSaveRoundCoordinator::ResolveResult AutoSaveRoundCoordinator::resolveRound(
     {
         std::lock_guard<std::mutex> lock(mutex_);
         result.enabled = enabled_.load(std::memory_order_relaxed);
-        if (faulted_.load(std::memory_order_relaxed)) {
-            result.failed = true;
-            result.sessionGen = kFailedGeneration;
-            result.error = QStringLiteral("自动保存协调器已故障，拒绝 round lookup");
-            return result;
-        }
-        if (!result.enabled)
+        const bool faulted = faulted_.load(std::memory_order_relaxed);
+        if (!result.enabled && !faulted)
             return result;
 
-        if (!configured_) {
+        if (!configured_ && !faulted) {
             result.failed = true;
             result.sessionGen = kFailedGeneration;
             result.error = QStringLiteral("自动保存协调器不可用，拒绝未绑定 round");
@@ -420,6 +419,11 @@ AutoSaveRoundCoordinator::ResolveResult AutoSaveRoundCoordinator::resolveRound(
             } else {
                 return result;
             }
+        } else if (faulted) {
+            result.failed = true;
+            result.sessionGen = kFailedGeneration;
+            result.error = QStringLiteral("自动保存协调器故障，拒绝未绑定的轮次");
+            return result;
         } else {
             result.failed = true;
             result.sessionGen = kFailedGeneration;

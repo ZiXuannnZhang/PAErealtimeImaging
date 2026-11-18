@@ -32,6 +32,7 @@ public:
         (std::numeric_limits<std::uint64_t>::max)();
 
     struct CommitResult {
+        std::uint64_t requestId = 0;
         bool enabled = false;
         bool committed = false;
         bool alreadyApplied = false;
@@ -140,6 +141,7 @@ public:
     std::uint64_t currentGeneration() const noexcept;
     bool enabled() const noexcept;
     bool faulted() const noexcept;
+    std::uint64_t requestId() const noexcept { return requestId_.load(); }
 
     QString directoryFor(std::uint64_t generation) const;
     QString baseDirectory() const;
@@ -171,6 +173,7 @@ private:
     EventSink eventSink_;
 
     std::atomic<std::uint64_t> currentGeneration_{0};
+    std::atomic<std::uint64_t> requestId_{0};
     std::atomic<bool> enabled_{false};
     std::atomic<bool> faulted_{false};
 };

@@ -465,6 +465,46 @@ int main(int argc, char** argv)
               "C7 stale apply cannot roll back or allocate");
     }
 
+    // The boundary callback runs before the final old group is enqueued.
+    {
+        QTemporaryDir root;
+        AutoSaveRoundCoordinator coordinator;
+        coordinator.configure(root.path(), 0);
+        const auto first = coordinator.beginSession(0);
+        coordinator.setDirectoryPreparer([](const QString&) { return false; });
+        FileSaver saver(0);
+        saver.setSessionDirResolver([&](auto gen) { return coordinator.directoryFor(gen); });
+        AcqConfig config;
+        config.acqTimeNs = 64;
+        DataProcessor processor(0, nullptr, nullptr, config);
+        HostOutput output(32, 50, {&processor}, {&saver}, nullptr, nullptr, 2,
+            [&](const PhysicalRoundEvent& event) {
+                if (event.kind == PhysicalRoundEvent::Kind::CountBoundary &&
+                    coordinator.enabled())
+                    coordinator.commitBoundary(event.measurementSession, event.roundGeneration,
+                        AutoSaveBoundaryKind::Count, QStringLiteral("test_failed_next_directory"));
+            }, 0.0, 0);
+        output.setMeasurementSessionBinder([&](auto session) {
+            return coordinator.bindMeasurementSession(session).newSessionGen;
+        });
+        output.setSaveSessionResolver([&](auto session, auto round) {
+            return coordinator.resolveRound(session, round).sessionGen;
+        });
+        output.beginSession(900);
+        output.start();
+        output.startSaving(first.directory, 100, QStringLiteral("fault"));
+        output.card(makeFrame(900, 0, 110, 1000, 1));
+        output.card(makeFrame(900, 0, 111, 2000, 2));
+        check(coordinator.faulted(), "failed next directory leaves old boundary active");
+        output.card(makeFrame(900, 0, 112, 3000, 3));
+        const auto stopped = output.stopSaving();
+        check(until([&] { return output.savingApplied(stopped); }), "fault stop drained");
+        check(saver.savedCount() == 2 &&
+              hasSize(dataFile(first.directory, 0, "fault"), 64),
+              "fault stop saved exactly the old round including its final group");
+        output.stop();
+    }
+
     // C8: timeout uses the same round-aware binding resolver; the next round
     // is routable immediately after the source boundary.
     {

@@ -1,4 +1,5 @@
 #include "FileSaver.h"
+#include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 #include <QDir>
 #include <QDateTime>
 #include <QDebug>
@@ -413,7 +414,8 @@ void FileSaver::sealRound(paimage::RoundIdentity identity){
 }
 
 bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
-    if (!group) return false;
+    if (!group || group->sessionGen == paimage::AutoSaveRoundCoordinator::kFailedGeneration)
+        return false;
     if (!m_saving.load()) {
         // 保存已停止 → 丢弃队列中的残余数据
         // 不做刷盘/关文件，因为 stopSaving() 已处理
