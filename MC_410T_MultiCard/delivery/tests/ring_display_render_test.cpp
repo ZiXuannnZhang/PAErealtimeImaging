@@ -327,6 +327,35 @@ int main(int argc, char **argv)
         check(outsideSame, "环外块与掩膜关闭输出逐位一致");
     }
 
+    // Final jobs retain their own wavelength pixels after the caller moves
+    // on, and write exactly one named pair to the bound round directory.
+    {
+        QTemporaryDir root(QDir::currentPath() + "/final-png-XXXXXX");
+        check(root.isValid(), "final PNG fixture directory");
+        const RingImageWidget::Range range{0.0, 1.0};
+        auto a = std::make_shared<std::vector<float>>(std::initializer_list<float>{.25f, .50f});
+        auto b = std::make_shared<std::vector<float>>(std::initializer_list<float>{.75f, 1.f});
+        const auto writeA = ImagingDisplayWindow::makePngWriter(a, 1, range, range, {}, "_session1_round1_frame7");
+        const auto writeB = ImagingDisplayWindow::makePngWriter(b, 1, range, range, {}, "_session1_round2_frame8");
+        a.reset(); b.reset();
+        const auto dirA = root.filePath("A/recon_png"), dirB = root.filePath("B/recon_png");
+        check(QDir().mkpath(dirA) && QDir().mkpath(dirB) && writeB(dirB, "final") && writeA(dirA, "final"),
+              "both terminal jobs write successfully in reverse order");
+        for (const auto &dir : {dirA, dirB}) {
+            const bool isA = dir == dirA;
+            const QDir folder(dir);
+            check(folder.entryList({"*.png"}, QDir::Files).size() == 2, "one pair per round directory");
+            const auto tag = isA ? "_session1_round1_frame7_" : "_session1_round2_frame8_";
+            for (const auto wavelength : {"532", "1064"}) {
+                const auto hits = folder.entryList({QString("final_*%1%2nm.png").arg(tag, wavelength)}, QDir::Files);
+                const auto image = hits.size() == 1 ? QImage(folder.filePath(hits.first())) : QImage{};
+                const int expected = QByteArray(wavelength) == "532" ? (isA ? 64 : 191) : (isA ? 128 : 255);
+                check(image.size() == QSize(1600, 1600) && qGray(image.pixel(1200, 900)) == expected,
+                      "final PNG pixels, wavelength and directory belong to the same round");
+            }
+        }
+    }
+
     if (g_failures == 0) {
         std::printf("ring_display_render_test: PASS\n");
         return 0;

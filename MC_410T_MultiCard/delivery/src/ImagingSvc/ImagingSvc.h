@@ -116,6 +116,7 @@ private:
     ring_input::Mutex m_ringOutputMutex{ring_input::kOutputMutexName};
     ring_input::Mutex m_ringTerminalMutex{ring_terminal::kMutexName};
     ring_snapshot::Layout m_ringTerminalLayout;
+    uint32_t m_ringSnapshotSeq = 0;
     uint64_t m_ringEpoch = 0;
     uint64_t m_ringExpectedSeq = 0;
     bool m_ringSequenceIncomplete = false;

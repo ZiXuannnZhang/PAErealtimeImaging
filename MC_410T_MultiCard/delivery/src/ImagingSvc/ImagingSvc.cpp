@@ -680,6 +680,7 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     m_ringInputMutex.unlock();
     if (!shmOk) { m_ringSharedMemory.close(); sendError("环形共享内存版本或配置不匹配（需要 v3）", 2010); return; }
 
+    m_ringSnapshotSeq = 0;
     m_ringConfigReady = true;
     qDebug() << "ImagingSvc ring mode: channels=" << cnt
              << "perChannelBlock=" << cfg.alinesPerChannelPerBlock
@@ -927,23 +928,24 @@ void ImagingSvc::processRingPulse(uint64_t epoch, uint64_t publicationId)
     }
 
     const bool terminal = completion.reconstructionComplete && m_ringTerminalLayout.mappingBytes;
-    const auto outputLock = m_ringOutputMutex.lock(20);
-    if (outputLock != ring_input::Result::Ok && outputLock != ring_input::Result::Abandoned) {
-        if (sourceRoundComplete) { m_ringRound.close(); resetRingRecon(); }
-        sendError(QStringLiteral("环形输出锁失败 session=%1 round=%2 submit=%3")
-                      .arg(round.measurementSession).arg(round.roundGeneration).arg(submitIndex), 2011);
-        return;
-    }
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory.data());
-    h->frame_ready = 0;
-    const uint32_t snapshotSeq = ++h->frame_seq;
+    const uint32_t snapshotSeq = ++m_ringSnapshotSeq;
     if (!terminal) {
+        const auto outputLock = m_ringOutputMutex.lock(20);
+        if (outputLock != ring_input::Result::Ok && outputLock != ring_input::Result::Abandoned) {
+            if (sourceRoundComplete) { m_ringRound.close(); resetRingRecon(); }
+            sendError(QStringLiteral("环形输出锁失败 session=%1 round=%2 submit=%3")
+                          .arg(round.measurementSession).arg(round.roundGeneration).arg(submitIndex), 2011);
+            return;
+        }
+        auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory.data());
+        h->frame_ready = 0;
         float *fb = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) + ringFramesOffset(blockSize, alines));
         std::memcpy(fb, m_ringDisplay0.data(), static_cast<size_t>(m_ringFrameSize) * sizeof(float));
         std::memcpy(fb + m_ringFrameSize, m_ringDisplay1.data(), static_cast<size_t>(m_ringFrameSize) * sizeof(float));
+        h->frame_seq = snapshotSeq;
         h->frame_ready = 1;
+        m_ringOutputMutex.unlock();
     }
-    m_ringOutputMutex.unlock();
 
     bool published = true;
     if (terminal) {
