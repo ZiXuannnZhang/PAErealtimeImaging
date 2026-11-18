@@ -12,6 +12,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLockFile>
+#include <QProcess>
 #include <QTemporaryDir>
 #include <QTextStream>
 
@@ -351,6 +352,109 @@ bool testMixedWindowReleasesRetentionPin()
                  "mixed window did not export both runs exactly once");
 }
 
+bool testPendingWindowProtectsEndedRuns()
+{
+    QTemporaryDir temp;
+    if (!check(temp.isValid(), "temporary directory unavailable")) return false;
+    DiagnosticRecorder::Options options;
+    options.rootDirectory = temp.path();
+    options.maxRetainedRuns = 1;
+    DiagnosticRecorder recorder(options);
+    auto cleaner = std::make_unique<DiagnosticRecorder>(options);
+    if (!check(recorder.flush(3000) && cleaner->flush(3000), "recorder setup failed")) return false;
+
+    const auto now = QDateTime::currentDateTime();
+    const auto start = now.addSecs(-20);
+    const auto end = now.addSecs(20);
+    const QString first = now.addSecs(-10).toString("yyyy-MM-dd HH:mm:ss");
+    const QString last = now.addSecs(-5).toString("yyyy-MM-dd HH:mm:ss");
+    createRun(temp.path(), "protected-A", first, last, false, {{101, first}});
+    createRun(temp.path(), "protected-B", first, last, false, {{202, first}});
+    const QString runA = temp.filePath("run-protected-A/events.jsonl");
+    const QString runB = temp.filePath("run-protected-B/events.jsonl");
+    if (!check(QFile::exists(runA) && QFile::exists(runB), "ended run fixtures missing")) return false;
+
+    auto pending = recorder.registerTimeWindowRequest(start, end);
+    auto request = pending;
+    pending = {}; // The queued copy still owns the registration.
+    if (!check(request.validationError.isEmpty() && request.discoverSources && !request.retentionPin,
+               "registration should defer historical discovery and filesystem locking")) return false;
+
+    std::promise<void> releaseExport;
+    const auto released = releaseExport.get_future();
+    const QString target = temp.filePath("retained-window.zip");
+    auto worker = std::async(std::launch::async, [&] {
+        released.wait();
+        return DiagnosticRecorder::exportTimeWindow(request, target);
+    });
+    bool eventLoopAdvanced = false;
+    {
+        const auto rootLease = diagnostic_storage::lease(temp.path());
+        QTimer::singleShot(0, [&] { eventLoopAdvanced = true; });
+        QCoreApplication::processEvents();
+        eventLoopAdvanced = eventLoopAdvanced && bool(rootLease);
+    }
+    cleaner.reset(); // Drops the active lease and runs the production quota cleaner synchronously.
+    const bool survived = QFile::exists(runA) && QFile::exists(runB);
+    releaseExport.set_value();
+    const auto result = worker.get();
+    request = {};
+
+    QString error;
+    const auto files = readZip(target, &error);
+    const auto events = files.value("events.jsonl");
+    const auto ids = QJsonDocument::fromJson(files.value("manifest.json")).object()
+                         .value("sourceRunIds").toArray();
+    // With the request gone, the same quota now forces delete of at least one fixture.
+    { DiagnosticRecorder cleanup(options); }
+    return check(eventLoopAdvanced, "pending registration took a root file lock or blocked Qt events")
+        && check(survived, "quota cleaner deleted a historical source before background discovery")
+        && check(result.success && error.isEmpty()
+                     && ids.contains(QJsonValue(QStringLiteral("protected-A")))
+                     && ids.contains(QJsonValue(QStringLiteral("protected-B")))
+                     && events.count("event-101") == 1 && events.count("event-202") == 1,
+                 QStringLiteral("historical source missing from ZIP: %1 %2").arg(result.error, error))
+        && check(!QFile::exists(runA) || !QFile::exists(runB), "quota cleaner did not resume after export");
+}
+
+bool testWindowIntentCancellationAndPruneConflict()
+{
+    QTemporaryDir temp;
+    if (!check(temp.isValid(), "temporary directory unavailable")) return false;
+    DiagnosticRecorder::Options options;
+    options.rootDirectory = temp.path();
+    DiagnosticRecorder recorder(options);
+    if (!check(recorder.flush(3000), "recorder setup failed")) return false;
+    const auto now = QDateTime::currentDateTime();
+    const auto start = now.addSecs(-10);
+    auto pending = recorder.registerTimeWindowRequest(start, now);
+    {
+        const auto abandoned = pending;
+        pending = {};
+        if (!check(abandoned.validationError.isEmpty() && !diagnostic_storage::tryPrune(temp.path()),
+                   "an outstanding request copy must block pruning")) return false;
+    }
+    std::promise<bool> acquiredPermit;
+    auto acquired = acquiredPermit.get_future();
+    std::promise<void> releasePermit;
+    const auto released = releasePermit.get_future();
+    auto pruner = std::async(std::launch::async, [&] {
+        const auto permit = diagnostic_storage::tryPrune(temp.path());
+        acquiredPermit.set_value(bool(permit));
+        released.wait();
+    });
+    const bool permitAcquired = acquired.get();
+    const auto rejected = recorder.registerTimeWindowRequest(start, now);
+    releasePermit.set_value();
+    pruner.get();
+    if (!check(permitAcquired, "abandoned request did not release the export intent")) return false;
+    const QString target = temp.filePath("conflicted-window.zip");
+    const auto result = DiagnosticRecorder::exportTimeWindow(rejected, target);
+    return check(!rejected.validationError.isEmpty() && !result.success
+                     && result.error == rejected.validationError && !QFileInfo::exists(target),
+                 "a request registered during deletion must fail without publishing a ZIP");
+}
+
 bool testManualActiveSnapshotDoesNotBlockRotation()
 {
     QTemporaryDir temp;
@@ -418,17 +522,48 @@ bool testManualActiveSnapshotDoesNotBlockRotation()
     return ok;
 }
 
+#ifdef Q_OS_WIN
+bool testCrossProcessIntent()
+{
+    QTemporaryDir temp;
+    if (!check(temp.isValid(), "temporary directory unavailable")) return false;
+    auto probe = [&] {
+        QProcess child;
+        child.start(QCoreApplication::applicationFilePath(), {"--probe-prune", temp.path()});
+        if (!child.waitForStarted(5000) || !child.waitForFinished(5000)
+            || child.exitStatus() != QProcess::NormalExit) return -1;
+        return child.exitCode();
+    };
+    auto intent = diagnostic_storage::registerExportIntent(temp.path());
+    if (!check(bool(intent), "could not register cross-process test intent")) return false;
+    const int protectedResult = probe();
+    intent.reset();
+    return check(protectedResult == 1, "another process acquired a prune permit during export intent")
+        && check(probe() == 0, "another process could not prune after intent release");
+}
+#endif
+
 } // namespace
 
 int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
+#ifdef Q_OS_WIN
+    const auto args = app.arguments();
+    if (args.size() == 3 && args.at(1) == "--probe-prune")
+        return diagnostic_storage::tryPrune(args.at(2)) ? 0 : 1;
+#endif
     bool ok = testTimeWindowAcrossRuns();
+#ifdef Q_OS_WIN
+    ok = testCrossProcessIntent() && ok;
+#endif
     ok = testActiveImmutableBoundary() && ok;
     ok = testMixedWindowReleasesRetentionPin() && ok;
+    ok = testPendingWindowProtectsEndedRuns() && ok;
+    ok = testWindowIntentCancellationAndPruneConflict() && ok;
     ok = testManualActiveSnapshotDoesNotBlockRotation() && ok;
     QTextStream(stdout) << (ok ? QStringLiteral("PASS") : QStringLiteral("FAIL"))
-                        << QStringLiteral(" diagnostic time-window multi-run/active-boundary/empty-window export")
+                        << QStringLiteral(" diagnostic time-window export and retention")
                         << Qt::endl;
     return ok ? 0 : 1;
 }

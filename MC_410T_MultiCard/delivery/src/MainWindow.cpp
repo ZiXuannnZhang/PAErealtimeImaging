@@ -1750,8 +1750,7 @@ void MainWindow::onExportDiagnosticClicked()
                             {QStringLiteral("requestedStartTime"), selected.startTime.toString(Qt::ISODateWithMs)},
                             {QStringLiteral("requestedEndTime"), selected.endTime.toString(Qt::ISODateWithMs)}});
 
-    const DiagnosticRecorder::TimeWindowRequest request =
-        recorder->registerTimeWindowRequest(selected.startTime, selected.endTime, selected.note);
+    auto request = recorder->registerTimeWindowRequest(selected.startTime, selected.endTime, selected.note);
 
     statusBar()->showMessage(QStringLiteral("正在后台导出诊断日志…"), 3000);
     const QPointer<MainWindow> guard(this);
@@ -1794,8 +1793,9 @@ void MainWindow::onExportDiagnosticClicked()
                     QStringLiteral("诊断日志导出完成：%1").arg(result.targetPath), 8000);
             });
     watcher->setFuture(QtConcurrent::run(
-        [request, requestedPath]() {
-            return DiagnosticRecorder::exportTimeWindow(request, uniqueDiagnosticZipPath(requestedPath));
+        [request = std::move(request), requestedPath]() mutable {
+            auto pending = std::move(request);
+            return DiagnosticRecorder::exportTimeWindow(pending, uniqueDiagnosticZipPath(requestedPath));
     }));
 }
 

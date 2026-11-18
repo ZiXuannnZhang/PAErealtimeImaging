@@ -992,7 +992,10 @@ void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &
         for (const auto &child : children) {
             if (!child.isFile() || child.isSymLink() || child.isJunction() || !known.match(child.fileName()).hasMatch()) { removed = false; break; }
         }
-        if (removed) for (const auto &child : children) {
+        if (!removed) continue;
+        const auto prunePermit = diagnostic_storage::tryPrune(rootDirectory);
+        if (!prunePermit) continue;
+        for (const auto &child : children) {
             if (child.fileName() == QStringLiteral(".active.lock") || child.fileName() == QStringLiteral(".history.lock")) continue;
             if (!QFile::remove(child.absoluteFilePath())) { removed = false; break; }
         }
@@ -1836,6 +1839,8 @@ void materializeTimeWindow(DiagnosticRecorder::TimeWindowRequest &result)
         result.retentionPin=std::make_shared<DiagnosticRecorder::RetentionPin>();
         result.retentionPin->lease=diagnostic_storage::exportLease(result.rootDirectory);
         if(!result.retentionPin->lease){result.validationError=QStringLiteral("日志目录正在清理，请重试导出");return;}
+        // This copy can drop its intent once its filesystem lease protects the reads.
+        result.exportIntent.reset();
     }
     if (result.pendingHistory) {
         result.pendingHistory->materialize(result.sources.first());
@@ -1909,7 +1914,6 @@ DiagnosticRecorder::TimeWindowRequest DiagnosticRecorder::registerTimeWindowRequ
     TimeWindowRequest result;
     result.requestedStartTime = startLocal.toString(Qt::ISODateWithMs);
     result.requestedEndTime = endLocal.toString(Qt::ISODateWithMs);
-    result.exportCapturedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
     result.note = note;
     result.rootDirectory = m_state ? m_state->rootDirectory : QString();
 
@@ -1922,10 +1926,18 @@ DiagnosticRecorder::TimeWindowRequest DiagnosticRecorder::registerTimeWindowRequ
         return result;
     }
 
+    if (!result.rootDirectory.isEmpty()) {
+        result.exportIntent = diagnostic_storage::registerExportIntent(result.rootDirectory);
+        if (!result.exportIntent) {
+            result.validationError = QStringLiteral("无法保护待导出的历史日志，目录可能正在清理，请重试导出");
+            return result;
+        }
+    }
+    // Capture the extension first so both roots are protected before the recorder's timestamp.
+    result.bundleExtension = captureBundle(startLocal.toMSecsSinceEpoch(), endLocal.toMSecsSinceEpoch());
+    result.exportCapturedAt = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
     result.discoverSources = true;
     if (m_state) m_state->registerTimeWindowCut(result, startLocal.toMSecsSinceEpoch(), endLocal.toMSecsSinceEpoch());
-    result.bundleExtension = captureBundle(startLocal.toMSecsSinceEpoch(),
-        qMin(endLocal.toMSecsSinceEpoch(), isoMillisLocal(result.exportCapturedAt)));
     return result;
 }
 

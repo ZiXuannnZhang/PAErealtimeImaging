@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
+#include <QTimer>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -18,6 +19,19 @@ void checked(bool b,int line){if(!b)throw std::runtime_error("fixed trace export
 #define require(b) checked((b),__LINE__)
 void write(const QString& path,const QByteArray& data){QFile f(path);require(f.open(QIODevice::WriteOnly));require(f.write(data)==data.size());}
 quint32 number(const QByteArray& b,int at,int n){quint32 value=0;std::memcpy(&value,b.constData()+at,n);return value;}
+QByteArray readFile(const QString& path){QFile f(path);require(f.open(QIODevice::ReadOnly));return f.readAll();}
+QHash<QString,QByteArray> zipEntries(const QString& path){
+    const auto bytes=readFile(path);QHash<QString,QByteArray> entries;
+    for(int at=0;at+30<=bytes.size()&&number(bytes,at,4)==0x04034b50;){
+        int size=number(bytes,at+18,4),name=number(bytes,at+26,2),extra=number(bytes,at+28,2),data=at+30+name+extra;
+        require(data+size<=bytes.size());QByteArray payload;
+        require(decodeZipPayload(bytes.mid(data,size),number(bytes,at+8,2),number(bytes,at+22,4),payload));
+        entries.insert(QString::fromUtf8(bytes.mid(at+30,name)),payload);at=data+size;
+    }
+    return entries;
+}
+template<typename Record>
+QByteArray recordBytes(const Record& record){return QByteArray(reinterpret_cast<const char*>(&record),sizeof(record));}
 int main(int argc,char** argv){QCoreApplication app(argc,argv);
     QTemporaryDir root(QDir::currentPath()+"/trace-export-XXXXXX");require(root.isValid());
     const QString traces=root.path()+"/traces",run=traces+"/run1",tools=root.path()+"/tools";
@@ -86,13 +100,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     auto later=first;later.correlation=202;writer.push(later);
     auto laterLoop=firstLoop;laterLoop.timeNs=1000000;loopLog.push(laterLoop);
     auto result=DiagnosticRecorder::exportTimeWindow(cut,root.path()+"/export.zip");require(result.success);
-    QFile zip(root.path()+"/export.zip");require(zip.open(QIODevice::ReadOnly));auto bytes=zip.readAll();QHash<QString,QByteArray> entries;
-    for(int at=0;at+30<=bytes.size()&&number(bytes,at,4)==0x04034b50;){
-        int size=number(bytes,at+18,4),name=number(bytes,at+26,2),extra=number(bytes,at+28,2),data=at+30+name+extra;
-        require(data+size<=bytes.size());QByteArray payload;
-        require(decodeZipPayload(bytes.mid(data,size),number(bytes,at+8,2),number(bytes,at+22,4),payload));
-        entries.insert(QString::fromUtf8(bytes.mid(at+30,name)),payload);at=data+size;
-    }
+    const auto entries=zipEntries(root.path()+"/export.zip");
     auto trace=entries.value("paimage/run1/trace-0.bin");require(trace.size()==64);paimage::TraceRecord record;std::memcpy(&record,trace.constData(),64);
     require(record.sequence==1&&record.correlation==101);
     require(entries.value("paimage/run1/looplog-0.bin").size()==160);
@@ -179,8 +187,13 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         cleanManifest.value("runs").toArray().first().toObject().value("runId").toString()=="run2"&&
         cleanManifest.value("skippedRuns").toArray().isEmpty());
     paimage::installTraceBundle(traces,tools);
-    auto failed=DiagnosticRecorder::exportTimeWindow(cut,root.path());require(!failed.success);
-    auto retried=DiagnosticRecorder::exportTimeWindow(cut,root.path()+"/retry.zip");require(retried.success);
+    const QString failedPath=root.path()+"/already-exists.zip";
+    write(failedPath,"existing file");
+    auto retryCut=recorder.captureTimeWindowRequest(QDateTime::fromMSecsSinceEpoch(wall-1000),QDateTime::fromMSecsSinceEpoch(wall+1000));
+    auto failed=DiagnosticRecorder::exportTimeWindow(retryCut,failedPath);require(!failed.success);
+    require(readFile(failedPath)=="existing file");
+    retryCut=recorder.captureTimeWindowRequest(QDateTime::fromMSecsSinceEpoch(wall-1000),QDateTime::fromMSecsSinceEpoch(wall+1000));
+    auto retried=DiagnosticRecorder::exportTimeWindow(retryCut,root.path()+"/retry.zip");require(retried.success);
     writer.stop();loopLog.stop();timer.stop();
     auto stoppedCut=recorder.captureTimeWindowRequest(QDateTime::fromMSecsSinceEpoch(wall-1000),QDateTime::fromMSecsSinceEpoch(wall+1000));
     require(DiagnosticRecorder::exportTimeWindow(stoppedCut,root.path()+"/stopped.zip").success);
@@ -203,5 +216,97 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     }
     diagnostic_storage::pruneTraces(managed,0,1);
     require(!QDir(oldPath).exists()&&QDir(activePath).exists()&&QDir(unknownPath).exists());
-    std::cout<<"PASS active writer flush, fixed sequence cut, excluded post-click record with old timestamp, ZIP manifest"<<std::endl;
+
+    const QString stoppedRoot=root.path()+"/stop-prune";
+    const QString id=QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString stoppedRun=stoppedRoot+"/"+id;
+    require(QDir().mkpath(stoppedRun));
+    const QByteArray config=QJsonDocument(QJsonObject{{"runId",id},{"backendId","paimage-receiver-diagnostics"},
+        {"wallAnchorMs",double(wall)},{"monotonicAnchorNs","1000000"},{"diagnosticTraceEnabled",true},
+        {"timingEnabled",true},{"loopLogEnabled",true}}).toJson();
+    write(stoppedRun+"/run-config.json",config);
+    paimage::installTraceBundle(stoppedRoot,tools);
+    const auto start=QDateTime::fromMSecsSinceEpoch(wall-1000),end=QDateTime::fromMSecsSinceEpoch(wall+1000);
+    DiagnosticRecorder::TimeWindowRequest pending;
+    auto expectedTrace=first;expectedTrace.sequence=1;
+    auto expectedTiming=t;expectedTiming.sequence=1;expectedTiming.startNs=expectedTiming.endNs=1000000;
+    expectedTiming.correlation=303;
+    auto expectedLoop=firstLoop;expectedLoop.sequence=1;expectedLoop.value0=404;
+    auto expectedBurst=burst;expectedBurst.sequence=2;
+    {
+        QLockFile listening(stoppedRun+"/.active.lock");require(listening.tryLock(0));
+        {
+            const std::filesystem::path path(stoppedRun.toStdWString());
+            paimage::TraceWriter traceWriter(path);
+            paimage::TimingWriter timingWriter(path);
+            paimage::LoopLog loopWriter(path,paimage::LoopLog::Budget{64});
+            traceWriter.push(expectedTrace);
+            timingWriter.observe(expectedTiming,true);
+            loopWriter.push(expectedLoop);
+            loopWriter.push(expectedBurst);
+            pending=recorder.registerTimeWindowRequest(start,end);
+            require(bool(pending.bundleExtension));
+
+            // The worker has not started. These timestamps are inside the window,
+            // so the sequence boundary alone must exclude the later records.
+            auto postTrace=expectedTrace;postTrace.correlation=1111;traceWriter.push(postTrace);
+            auto postTiming=expectedTiming;postTiming.correlation=2222;timingWriter.observe(postTiming,true);
+            auto postLoop=expectedLoop;postLoop.value0=3333;loopWriter.push(postLoop);
+            traceWriter.stop();timingWriter.stop();loopWriter.stop();
+        } // Unregister the writers, as on listener stop.
+    } // Release the active-run lock before stop-triggered cleanup.
+    require(!QFileInfo::exists(stoppedRun+"/.active.lock"));
+    require(readFile(stoppedRun+"/trace-0.bin").size()==2*sizeof(expectedTrace));
+    require(readFile(stoppedRun+"/timing-0.bin").size()==2*sizeof(expectedTiming));
+    require(readFile(stoppedRun+"/looplog-window-1.bin").size()==3*sizeof(expectedLoop));
+    {
+        const auto lease=diagnostic_storage::lease(stoppedRoot);
+        require(bool(lease)); // Registration must not acquire the worker's disk lease.
+    }
+    diagnostic_storage::pruneTraces(stoppedRoot,0,1);
+    require(QDir(stoppedRun).exists());
+    bool eventDispatched=false;
+    QTimer::singleShot(0,&app,[&]{eventDispatched=true;});
+    QCoreApplication::processEvents();
+    require(eventDispatched);
+
+    // Keep a copy alive to verify that a handoff releases the pending intent
+    // for all copies, not just the copy used by the exporter.
+    auto queuedCopy=pending;
+    const auto stopZip=root.path()+"/stop-prune.zip";
+    require(recorder.exportTimeWindowAsync(queuedCopy,stopZip).get().success);
+    const auto preserved=zipEntries(stopZip);
+    const auto prefix="paimage/"+id+"/";
+    require(preserved.value(prefix+"trace-0.bin")==recordBytes(expectedTrace));
+    require(preserved.value(prefix+"timing-0.bin")==recordBytes(expectedTiming));
+    require(preserved.value(prefix+"looplog-0.bin")==recordBytes(expectedLoop)+recordBytes(expectedBurst));
+    const auto preservedManifest=QJsonDocument::fromJson(preserved.value("paimage/manifest.json")).object();
+    require(!preservedManifest.value("traceIncomplete").toBool(true));
+    require(preservedManifest.value("runs").toArray().size()==1);
+    diagnostic_storage::pruneTraces(stoppedRoot,0,1);
+    require(!QDir(stoppedRun).exists());
+    const auto reuseZip=root.path()+"/reused.zip";
+    require(!DiagnosticRecorder::exportTimeWindow(pending,reuseZip).success&&!QFileInfo::exists(reuseZip));
+
+    // Simulate loss outside managed cleanup. A timing-only registered identity
+    // must still be found missing, and the failed archive must not be published.
+    require(QDir().mkpath(stoppedRun));
+    write(stoppedRun+"/run-config.json",config);
+    DiagnosticRecorder::TimeWindowRequest lost;
+    {
+        paimage::TimingWriter lostWriter(std::filesystem::path(stoppedRun.toStdWString()));
+        lostWriter.observe(expectedTiming,true);
+        lost=recorder.registerTimeWindowRequest(start,end);
+        lostWriter.stop();
+    }
+    require(QDir(stoppedRun).removeRecursively());
+    const auto lostZip=root.path()+"/lost.zip";
+    const auto lostResult=DiagnosticRecorder::exportTimeWindow(lost,lostZip);
+    require(!lostResult.success&&lostResult.error.contains(id)&&!QFileInfo::exists(lostZip));
+    require(QDir().mkpath(stoppedRun));
+    write(stoppedRun+"/run-config.json",config);
+    diagnostic_storage::pruneTraces(stoppedRoot,0,1);
+    require(!QDir(stoppedRun).exists()); // Failure released the pending intent too.
+    DiagnosticRecorder::setBundleCapture({});
+    std::cout<<"PASS trace export boundaries, stop/prune handoff and missing-run failure"<<std::endl;
 }

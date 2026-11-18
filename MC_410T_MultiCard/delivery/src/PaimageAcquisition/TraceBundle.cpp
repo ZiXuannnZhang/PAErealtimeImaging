@@ -9,30 +9,94 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QCryptographicHash>
+#include <QHash>
+#include <QSet>
 #include <cstring>
 #include <limits>
+#include <mutex>
+#include <utility>
 namespace paimage {
 namespace {
 QByteArray read(const QString& name){QFile f(name);return f.open(QIODevice::ReadOnly)?f.readAll():QByteArray{};}
 QJsonObject object(const QString& name){return QJsonDocument::fromJson(read(name)).object();}
+QString cutPath(const std::filesystem::path& path){
+    return QDir::cleanPath(QDir(QString::fromStdWString(path.wstring())).absolutePath());
+}
+
+// All copies of a queued request share a single handoff (or cancellation).
+struct TraceExportIntent {
+    std::mutex mutex;
+    std::shared_ptr<diagnostic_storage::ExportIntent> pending;
+
+    std::shared_ptr<diagnostic_storage::ExportIntent> take(){
+        std::lock_guard<std::mutex> lock(mutex);
+        return std::exchange(pending,nullptr);
+    }
+};
 }
 void installTraceBundle(const QString& root,const QString& toolsDirectory){
-    DiagnosticRecorder::setBundleCapture([root,toolsDirectory](qint64 start,qint64 end){
-        // Capture just identities and sequence fences on the UI thread. File
-        // reads, writer flush waits, filtering and hashing run in the exporter.
+    const auto traceRoot=QDir::cleanPath(QDir(root).absolutePath());
+    DiagnosticRecorder::setBundleCapture([root=traceRoot,toolsDirectory](qint64 start,qint64 end){
+        // Register before observing the live writers: a writer can stop as soon
+        // as its fence is captured, making its run eligible for pruning.
+        auto intent=std::make_shared<TraceExportIntent>();
+        intent->pending=diagnostic_storage::registerExportIntent(root);
+        if(!intent->pending){
+            return DiagnosticRecorder::BundleExtension([](const DiagnosticRecorder::BundleSink&,QString* error){
+                if(error)*error=QStringLiteral("无法保护 PAimage 诊断目录，请重试导出");
+                return false;
+            });
+        }
+        const auto capturedAt=QDateTime::currentMSecsSinceEpoch();
+        const auto fixedEnd=qMin(end,capturedAt);
+        // File reads, writer flush waits, filtering and hashing run in the exporter.
         auto cuts=TraceWriter::captureCuts();
         auto timingCuts=TimingWriter::captureCuts();
         auto loopCuts=LoopLog::captureCuts();
-        const auto capturedAt=QDateTime::currentMSecsSinceEpoch();
-        return DiagnosticRecorder::BundleExtension([root,toolsDirectory,start,end,capturedAt,cuts=std::move(cuts),timingCuts=std::move(timingCuts),loopCuts=std::move(loopCuts)]
+        return DiagnosticRecorder::BundleExtension([root,toolsDirectory,start,end=fixedEnd,capturedAt,intent=std::move(intent),cuts=std::move(cuts),timingCuts=std::move(timingCuts),loopCuts=std::move(loopCuts)]
             (const DiagnosticRecorder::BundleSink& sink,QString* error){
-            const bool rootExists=QDir(root).exists();
-            const auto lease=rootExists ? diagnostic_storage::exportLease(root) : nullptr;
-            if(rootExists&&!lease){
-                if(error)*error=QStringLiteral("诊断目录正在清理，请重试导出");
+            auto pending=intent->take();
+            if(!pending){
+                if(error)*error=QStringLiteral("PAimage 诊断导出请求已使用，请重新发起导出");
                 return false;
             }
-            const auto dirs=QDir(root).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name);
+            const QFileInfo rootInfo(root);
+            const bool rootExists=rootInfo.exists();
+            const auto lease=rootInfo.isDir()&&!rootInfo.isSymLink()&&!rootInfo.isJunction()
+                ? diagnostic_storage::exportLease(root) : nullptr;
+            if(rootExists&&!lease){
+                if(error)*error=QStringLiteral("无法锁定 PAimage 诊断目录，请重试导出");
+                return false;
+            }
+            pending.reset();
+
+            // Check captured identities independently of the directory listing.
+            // Paths outside this root belong to a different trace bundle.
+            QSet<QString> knownRuns;
+            const auto rememberRuns=[&](const auto& streamCuts){
+                for(const auto& cut:streamCuts){
+                    const auto path=cutPath(cut.root);
+                    if(QFileInfo(path).path()==root)knownRuns.insert(QFileInfo(path).fileName());
+                }
+            };
+            rememberRuns(cuts);
+            rememberRuns(timingCuts);
+            rememberRuns(loopCuts);
+            const QDir traceDir(root);
+            const auto dirs=lease?traceDir.entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name):QStringList{};
+            QHash<QString,QJsonObject> knownMetadata;
+            for(const auto& dir:knownRuns){
+                const QString path=traceDir.filePath(dir);
+                const QFileInfo runInfo(path),configInfo(QDir(path).filePath("run-config.json"));
+                auto metadata=dirs.contains(dir)&&!runInfo.isSymLink()&&!runInfo.isJunction()&&
+                    configInfo.isFile()&&!configInfo.isSymLink()&&!configInfo.isJunction()
+                    ? object(configInfo.filePath()) : QJsonObject{};
+                if(metadata.value("runId").toString()!=dir){
+                    if(error)*error=QStringLiteral("无法读取已登记的 PAimage 诊断运行：%1").arg(dir);
+                    return false;
+                }
+                knownMetadata.insert(dir,std::move(metadata));
+            }
             QJsonArray runs,files,skippedRuns;bool bundleIncomplete=false;
             auto write=[&](const QString& name,const QByteArray& bytes){
                 if(!sink(name,bytes)){if(error&&error->isEmpty())*error="PAimage trace ZIP write failed";return false;}
@@ -42,7 +106,9 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
             for(const auto& dir:dirs){
                 const auto runInfo=QFileInfo(QDir(root).filePath(dir));
                 if(runInfo.isSymLink()||runInfo.isJunction())continue;
-                const QString path=QDir(root).filePath(dir);auto metadata=object(QDir(path).filePath("run-config.json"));
+                const QString path=traceDir.filePath(dir);
+                const auto saved=knownMetadata.constFind(dir);
+                auto metadata=saved==knownMetadata.cend()?object(QDir(path).filePath("run-config.json")):saved.value();
                 if(metadata.isEmpty())continue;
                 const auto enabledState=[&](const char* key){
                     const auto value=metadata.value(key);
@@ -51,7 +117,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 const auto timingEnabled=enabledState("timingEnabled"),loopEnabled=enabledState("loopLogEnabled");
                 const auto hasCut=[&](const auto& streamCuts){
                     for(const auto& cut:streamCuts)
-                        if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path))return true;
+                        if(cutPath(cut.root)==path)return true;
                     return false;
                 };
                 const bool timingEvidence=hasCut(timingCuts)||QFileInfo::exists(QDir(path).filePath("timing-summary.json"))||
@@ -85,7 +151,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 }
                 auto summary=object(QDir(path).filePath("trace-summary.json"));
                 quint64 boundary=quint64(summary.value("recordsIssued").toDouble());bool flushed=!summary.isEmpty(),boundaryKnown=summary.contains("recordsIssued");
-                for(const auto& cut:cuts)if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){boundary=cut.sequence;boundaryKnown=true;flushed=cut.flush();break;}
+                for(const auto& cut:cuts)if(cutPath(cut.root)==path){boundary=cut.sequence;boundaryKnown=true;flushed=cut.flush();break;}
                 bool traceBad=false;
                 quint64 selected=0,filtered=0,maxSequence=0;int part=0;
                 qint64 firstMs=std::numeric_limits<qint64>::max(),lastMs=std::numeric_limits<qint64>::min();
@@ -109,7 +175,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 bool timingFlushed=true, timingLive=false;
                 quint64 timingBoundary=0;
                 for(const auto& cut:timingCuts)
-                    if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){
+                    if(cutPath(cut.root)==path){
                         timingLive=true;timingBoundary=cut.sequence;timingFlushed=cut.flush();break;
                     }
                 if(!timingLive)timingBoundary=quint64(timingSummary.value("recordsIssued").toDouble());
@@ -142,7 +208,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 const QString prefix="paimage/"+dir+"/";
                 bool loopFlushed=true,loopIncomplete=false,loopBudgetExhausted=false,loopWriteFailed=false;
                 quint64 loopBoundary=0,loopDropped=0,loopFreezeEpoch=0; bool loopLive=false;
-                for(const auto& cut:loopCuts)if(QDir::fromNativeSeparators(QString::fromStdWString(cut.root.wstring()))==QDir::fromNativeSeparators(path)){
+                for(const auto& cut:loopCuts)if(cutPath(cut.root)==path){
                     loopLive=true;loopBoundary=cut.sequence;loopDropped=cut.dropped;loopFreezeEpoch=cut.freezeEpoch;
                     loopIncomplete=cut.incomplete;loopBudgetExhausted=cut.budgetExhausted;loopWriteFailed=cut.writeFailed;
                     loopFlushed=cut.flush();break;}

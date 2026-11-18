@@ -10,6 +10,10 @@
 #include <functional>
 #include <memory>
 
+namespace diagnostic_storage {
+class ExportIntent;
+}
+
 // Thread-safe, process-local diagnostic recorder used by the receiver UI and
 // network workers.  The recorder owns one directory per process run.  Logging
 // calls only copy their arguments into a bounded queue; disk I/O is performed
@@ -153,6 +157,7 @@ public:
         QString validationError;
         QVector<ExportRequest> sources;
         std::shared_ptr<PendingHistoryCut> pendingHistory;
+        std::shared_ptr<diagnostic_storage::ExportIntent> exportIntent;
         bool discoverSources = false;
     };
 
