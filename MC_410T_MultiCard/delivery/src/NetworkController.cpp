@@ -688,7 +688,7 @@ void NetworkController::setLogicalTriggersPerRound(std::uint64_t count) {
     if (count == 0 || count > static_cast<std::uint64_t>(std::numeric_limits<int>::max()))
         return;
     m_config.logicalTriggersPerRound = static_cast<int>(count);
-    if (m_paimage)
+    if (m_paimage && !m_measurementRunning && !m_paimageStartPending)
         m_paimage->output().setConfiguredLogicalTriggersPerRound(count);
 }
 
@@ -696,19 +696,19 @@ void NetworkController::setPhysicalRoundTimeout(double seconds) {
     if (!std::isfinite(seconds) || seconds < 0.0)
         return;
     m_physicalRoundTimeoutSec = seconds;
-    if (m_paimage)
+    if (m_paimage && !m_measurementRunning && !m_paimageStartPending)
         m_paimage->output().setPhysicalRoundTimeout(seconds);
 }
 
 void NetworkController::setStartupFilterTriggerCount(std::uint64_t count) {
     m_startupFilterTriggerCount = count;
-    if (m_paimage)
+    if (m_paimage && !m_measurementRunning && !m_paimageStartPending)
         m_paimage->output().setStartupFilterTriggerCount(count);
 }
 
 void NetworkController::setDisableCountBoundary(bool disable) {
     m_disableCountBoundary = disable;
-    if (m_paimage)
+    if (m_paimage && !m_measurementRunning && !m_paimageStartPending)
         m_paimage->output().setDisableCountBoundary(disable);
 }
 

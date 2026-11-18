@@ -528,7 +528,7 @@ void NetworkController::stopPaimage() {
 }
 
 bool NetworkController::configurePaimage(int ns,int a,int b,const QString& trigger){
-    if(!m_running||m_measurementRunning)return false;
+    if(!m_running||m_measurementRunning||m_paimageStartPending)return false;
     m_currentConfigId=QString("config-%1").arg(m_nextConfigId++);
     if(ns!=m_config.acqTimeNs){
         // Source 141c70 copies configuration only while listener is stopped.
@@ -571,6 +571,11 @@ bool NetworkController::startPaimageMeasurement(){
     if(m_paimage->configuring()){m_paimageStartPending=true;m_pendingMeasurementSessionId=newMeasurementSessionId();return true;}
     const QString id=m_pendingMeasurementSessionId.isEmpty()?newMeasurementSessionId():m_pendingMeasurementSessionId;
     m_pendingMeasurementSessionId.clear();
+    auto &output = m_paimage->output();
+    output.setConfiguredLogicalTriggersPerRound(m_config.logicalTriggersPerRound);
+    output.setPhysicalRoundTimeout(m_physicalRoundTimeoutSec);
+    output.setStartupFilterTriggerCount(m_startupFilterTriggerCount);
+    output.setDisableCountBoundary(m_disableCountBoundary);
     bool ok=m_paimage->startMeasurement(++m_measurementSessionToken);
     recordDiagnosticEvent("paimage.measure",ok?"measurement_started":"measurement_start_failed",DiagnosticRecorder::Severity::Info,
         {{"measurementSessionId",id},{"traceSession",QString::number(m_measurementSessionToken)},{"configId",m_currentConfigId},{"backendId","paimage-derived"}});

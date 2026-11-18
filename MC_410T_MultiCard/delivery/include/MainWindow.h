@@ -344,6 +344,8 @@ private:
     void startRingFeedWorker();        // 环形模式：独立工作线程消费触发队列→组包器
     void stopRingFeedWorker();
     ImagingSubmitResult ringFeedSink(const TriggerGroupConstPtr& frame);
+    void freezeMeasurementConfig(bool frozen);
+    bool m_measurementConfigFrozen = false;
     void configureRingAssembler();     // 按控制器环形配置初始化组包器
     void ensureRingConfigDialog();     // 惰性创建环形参数窗口并接通物理轮次策略转发
     // 显示窗口几何/掩膜注入（显示层任务）：窗口创建时与每次 applyConfig 后，

@@ -2066,8 +2066,9 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     if (m_motorScanMonitor) m_motorScanMonitor->setApplyGate(true);
     connect(m_netController, &NetworkController::stopped, this,
             [this, controller = m_netController]() {
-        if (m_netController == controller && m_motorScanMonitor)
-            m_motorScanMonitor->setApplyGate(true);
+        if (m_netController != controller) return;
+        freezeMeasurementConfig(false);
+        if (m_motorScanMonitor) m_motorScanMonitor->setApplyGate(true);
     });
     m_netController->setDiagnosticContext(
         m_diagnosticListenId,
@@ -2314,12 +2315,14 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     });
     connect(m_netController, &NetworkController::measurementStartFailed,
             this, [this](const QString& sessionId, const QString& reason) {
+        freezeMeasurementConfig(false);
         logMessage(QString("❌ 测量会话启动失败并已回滚：%1（%2）")
                    .arg(sessionId, reason));
     });
     connect(m_netController, &NetworkController::measurementStopped,
             this, [this](const QString& sessionId, bool) {
         m_isMeasuring = false;
+        freezeMeasurementConfig(false);
         setBtnText(ui->btnStartMeasure, "开始测量");
         ui->btnStartMeasure->setProperty("state", QVariant());
         ui->btnStartMeasure->style()->unpolish(ui->btnStartMeasure);
@@ -2481,16 +2484,28 @@ void MainWindow::onConfigParamsClicked(bool fromStartMeasure)
 void MainWindow::onStartMeasureClicked()
 {
     if (!m_isMeasuring) {
+        if (!m_netController || m_measurementConfigFrozen) return;
+        if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
+            ensureRingConfigDialog();
+            m_ringConfigDialog->setAcquisitionParams(
+                m_sampleIntervalNs, ui->edtDataTime->text().toInt());
+            QString error;
+            if (!m_ringConfigDialog->prepareMeasurement(&error)) {
+                logMessage(QStringLiteral("环形测量配置无效：%1").arg(error));
+                return;
+            }
+        }
         recordDiagnosticAction(QStringLiteral("measure_button"),
                                {{QStringLiteral("phase"), QStringLiteral("start")}});
         // 功能整合：开始测量前先下发配置参数，再发送开始测量命令
         logMessage("开始测量：先下发配置参数");
         onConfigParamsClicked(true);
-        if (m_netController) {
-            if (m_netController->sendStartMeasure())
-                logMessage("开始测量请求已提交，等待 PAimage CONFIG 确认及 START 发送结果");
-            else
-                logMessage("开始测量请求失败，未进入测量状态");
+        freezeMeasurementConfig(true);
+        if (m_netController->sendStartMeasure()) {
+            logMessage("开始测量请求已提交，等待 PAimage CONFIG 确认及 START 发送结果");
+        } else {
+            freezeMeasurementConfig(false);
+            logMessage("开始测量请求失败，未进入测量状态");
         }
     } else {
         recordDiagnosticAction(QStringLiteral("measure_button"),
@@ -2794,9 +2809,10 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
         setImagingParamControlsEnabled(false);
         if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
             ensureRingConfigDialog();
-            m_ringConfigDialog->setAcquisitionParams(
-                m_sampleIntervalNs, ui->edtDataTime->text().toInt());
-            if (!m_ringConfigDialog->applyConfig()) {
+            if (!m_measurementConfigFrozen)
+                m_ringConfigDialog->setAcquisitionParams(
+                    m_sampleIntervalNs, ui->edtDataTime->text().toInt());
+            if (!m_measurementConfigFrozen && !m_ringConfigDialog->applyConfig()) {
                 // 校验拒绝只撤销本次 UI 请求；不能走停止回调，影响已有服务。
                 QSignalBlocker blocker(m_chkRealtimeImaging);
                 m_chkRealtimeImaging->setChecked(false);
@@ -2888,9 +2904,22 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
 // 勾选时禁用：成像参数按钮 + 采集控制框的采集时间/A延时/B延时；
 // 恢复统一放在 svcStopped（或启动失败/成像错误）之后，避免停止中途可改参数。
 // =====================================================================
+void MainWindow::freezeMeasurementConfig(bool frozen)
+{
+    m_measurementConfigFrozen = frozen;
+    if (m_ringConfigDialog) m_ringConfigDialog->setMeasurementConfigFrozen(frozen);
+    if (m_cmbImagingMode) m_cmbImagingMode->setEnabled(!frozen);
+    const bool serviceActive = (m_imagingController && m_imagingController->isRunning()) ||
+        (m_chkRealtimeImaging && m_chkRealtimeImaging->isChecked());
+    setImagingParamControlsEnabled(!serviceActive);
+}
+
 void MainWindow::setImagingParamControlsEnabled(bool enable)
 {
-    if (m_btnImagingConfig) m_btnImagingConfig->setEnabled(enable);
+    const bool canStageRingConfig = m_measurementConfigFrozen && m_cmbImagingMode &&
+        m_cmbImagingMode->currentIndex() == 1;
+    if (m_btnImagingConfig) m_btnImagingConfig->setEnabled(enable || canStageRingConfig);
+    enable = enable && !m_measurementConfigFrozen;
     if (ui->edtDataTime)    ui->edtDataTime->setEnabled(enable);
     if (ui->edtADelay)      ui->edtADelay->setEnabled(enable);
     if (ui->edtBDelay)      ui->edtBDelay->setEnabled(enable);
@@ -4155,6 +4184,7 @@ void MainWindow::ensureRingConfigDialog()
 {
     if (m_ringConfigDialog) return;
     m_ringConfigDialog = new RingConfigDialog(m_imagingController, this);
+    m_ringConfigDialog->setMeasurementConfigFrozen(m_measurementConfigFrozen);
     if (m_motorScanMonitor) {
         m_ringConfigDialog->setMotorScanLinkageStatus(m_motorScanMonitor->lastStatus());
         m_ringConfigDialog->setMotorScanParamsFile(m_motorScanMonitor->paramsFile());
@@ -4184,13 +4214,13 @@ void MainWindow::ensureRingConfigDialog()
         if (!m_netController) return;
         m_netController->setFrontendFilterConfig(config);
     });
-    // 每圈设计触发数（= 单圈总A-line数 / 启用通道数）：前端刷新闸门阈值的唯一
-    // 来源。改参数即下发，不等实时成像开启、不等 svcReady——否则阈值会长期停在
-    // 注册表默认 4000。
+    // 采集侧使用同一份已应用的组包几何和超时设置，独立于实时成像启动。
     connect(m_ringConfigDialog, &RingConfigDialog::ringRoundTriggersChanged,
             this, [this](quint64 logicalTriggersPerRound) {
         if (!m_netController) return;
         m_netController->setLogicalTriggersPerRound(logicalTriggersPerRound);
+        m_netController->setPhysicalRoundTimeout(
+            m_imagingController->ringConfig().timeoutResetSec);
     });
     // 显示掩膜（工作一，仅显示层）：持有最新值；显示窗口已存在则即时下发，
     // 未创建则缓存（创建窗口时注入）。applyConfig 每次成功都会发出该信号，
@@ -4231,12 +4261,6 @@ void MainWindow::onImagingConfigClicked()
         m_ringConfigDialog->setAcquisitionParams(
             m_sampleIntervalNs, ui->edtDataTime->text().toInt());
         m_ringConfigDialog->exec();
-        // Keep the production normalizer configured even while ImagingSvc is
-        // stopped; configureRingAssembler() repeats this at svcReady.
-        if (m_netController && m_imagingController &&
-            m_imagingController->isRingMode())
-            m_netController->setPhysicalRoundTimeout(
-                m_imagingController->ringConfig().timeoutResetSec);
         return;
     }
 
@@ -5221,12 +5245,6 @@ void MainWindow::configureRingAssembler()
     }
     const int logicalTriggersPerRound =
         ringLogicalTriggersPerRound(cfg.alinesPerFrame, cfg.enabledChannelCount);
-    if (m_netController) {
-        m_netController->setLogicalTriggersPerRound(
-            static_cast<std::uint64_t>(logicalTriggersPerRound));
-        m_netController->setPhysicalRoundTimeout(cfg.timeoutResetSec);
-    }
-
     int enabled[8];
     for (int i = 0; i < 8; ++i) enabled[i] = cfg.enabledChannels[i] ? 1 : 0;
     if (m_imagingBypass) {
@@ -5325,7 +5343,9 @@ void MainWindow::onMotorScanLinkageParams(const motor_scan_linkage::Params &para
         return;
 
     ensureRingConfigDialog();
-    m_ringConfigDialog->setAcquisitionParams(m_sampleIntervalNs, ui->edtDataTime->text().toInt());
+    if (!m_measurementConfigFrozen)
+        m_ringConfigDialog->setAcquisitionParams(
+            m_sampleIntervalNs, ui->edtDataTime->text().toInt());
 
     const QString direction = motor_scan_linkage::describeDirection(params.directionCcw);
     QJsonObject fields{{QStringLiteral("seq"), static_cast<qint64>(params.seq)},

@@ -64,7 +64,7 @@ public:
                        const int (*sysDelayCh)[2] = nullptr,
                        const RingFbpSettings &fbp = RingFbpSettings{});
     bool isRingMode() const { return m_ringMode; }
-    void applyMotorRingDirection(int sectorCcw);
+    void applyMotorRingDirection(int sectorCcw, bool updateOrigin = true);
     const RingReconCudaConfig &ringConfig() const { return m_ringConfig; }
     const RingTimevarLowpassConfig &ringTimevarConfig() const { return m_ringTimevarConfig; }
 
