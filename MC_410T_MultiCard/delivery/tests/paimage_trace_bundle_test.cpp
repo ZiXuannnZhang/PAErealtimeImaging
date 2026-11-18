@@ -281,7 +281,13 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     require(preserved.value(prefix+"timing-0.bin")==recordBytes(expectedTiming));
     require(preserved.value(prefix+"looplog-0.bin")==recordBytes(expectedLoop)+recordBytes(expectedBurst));
     const auto preservedManifest=QJsonDocument::fromJson(preserved.value("paimage/manifest.json")).object();
-    require(!preservedManifest.value("traceIncomplete").toBool(true));
+    const auto preservedLoop = QJsonDocument::fromJson(preserved.value(prefix+"looplog-summary.json")).object();
+    // The fixture starts less than five seconds into the synthetic clock.
+    // Its pre-window is truncated, even though both records at the click cut survived.
+    require(preservedManifest.value("traceIncomplete").toBool() &&
+        preservedLoop.value("exportCountCovered").toBool() &&
+        preservedLoop.value("exportClipped").toBool() &&
+        preservedLoop.value("exportWindows").toArray().first().toObject().value("status") == "truncated");
     require(preservedManifest.value("runs").toArray().size()==1);
     diagnostic_storage::pruneTraces(stoppedRoot,0,1);
     require(!QDir(stoppedRun).exists());

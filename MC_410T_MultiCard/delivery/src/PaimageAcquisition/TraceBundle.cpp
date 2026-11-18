@@ -53,7 +53,11 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
 {
     LoopWindowCoverage result;
     if (!summary.value("windows").isArray()) {
-        result.status = "window_inventory_unavailable";
+        const bool writeFailed = summary.value("writeFailed").toBool();
+        const bool budgetExhausted = summary.value("budgetExhausted").toBool();
+        result.incomplete = writeFailed || budgetExhausted;
+        result.status = writeFailed ? "write_failed" :
+            budgetExhausted ? "budget_omitted" : "window_inventory_unavailable";
         return result;
     }
     const auto windows = summary.value("windows").toArray();

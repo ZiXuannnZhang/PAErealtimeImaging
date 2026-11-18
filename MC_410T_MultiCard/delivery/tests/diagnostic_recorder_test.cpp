@@ -406,9 +406,11 @@ bool testAbnormalHistory()
 
 bool testStableRetentionAge()
 {
-    QTemporaryDir temp;
-    if (!temp.isValid()) return false;
+    QTemporaryDir temp(QDir::currentPath() + "/stable-retention-XXXXXX");
+    if (!check(temp.isValid(), "stable retention fixture directory unavailable")) return false;
     auto options = optionsFor(temp.path());
+    options.maxHistorySegmentBytes = 4096;
+    options.maxRetainedBytes = 128LL * 1024 * 1024;
     const auto now = QDateTime::currentDateTime();
     const auto create = [&](const QString &id, int days, bool legacy) {
         const auto path = temp.filePath("run-" + id);
@@ -420,8 +422,10 @@ bool testStableRetentionAge()
         manifest.write(QJsonDocument(meta).toJson());
         manifest.close();
         QFile events(QDir(path).filePath("events.jsonl"));
-        if (!events.open(QIODevice::ReadWrite) || events.write("event") != 5 || !events.flush() ||
-            (legacy && !events.setFileTime(now.addDays(-days), QFileDevice::FileModificationTime))) return QString{};
+        if (!events.open(QIODevice::WriteOnly) || events.write("event") != 5) return QString{};
+        events.close();
+        if (legacy && (!events.open(QIODevice::ReadWrite) ||
+            !events.setFileTime(now.addDays(-days), QFileDevice::FileModificationTime))) return QString{};
         return path;
     };
     const auto expired = create("expired", 9, false);
@@ -430,20 +434,24 @@ bool testStableRetentionAge()
     const auto newer = create("newer", 2, false);
     const auto active = create("active", 10, false);
     const auto unknown = create("unknown", 10, false);
-    if (expired.isEmpty() || expiredLegacy.isEmpty() || older.isEmpty() || newer.isEmpty() ||
-        active.isEmpty() || unknown.isEmpty()) return false;
+    if (!check(!expired.isEmpty() && !expiredLegacy.isEmpty() && !older.isEmpty() &&
+               !newer.isEmpty() && !active.isEmpty() && !unknown.isEmpty(),
+               "could not create and timestamp stable retention fixtures")) return false;
     QFile sentinel(QDir(unknown).filePath("user-file"));
-    if (!sentinel.open(QIODevice::WriteOnly)) return false;
+    if (!check(sentinel.open(QIODevice::WriteOnly), "could not create unknown file fixture")) return false;
     sentinel.close();
     QLockFile activeLock(QDir(active).filePath(".active.lock"));
-    if (!activeLock.tryLock(0)) return false;
+    if (!check(activeLock.tryLock(0), "could not pin active fixture")) return false;
     for (int i = 0; i < 4; ++i)
         DiagnosticRecorder::enumerateRuns(temp.path());
     DiagnosticRecorder ageOnly(options);
     ageOnly.recordEvent("stable-retention", "age-pruned");
-    if (!check(ageOnly.flush(3000) && !QDir(expired).exists() && !QDir(expiredLegacy).exists() &&
+    const bool ageFlushed = ageOnly.flush(3000);
+    if (!check(ageFlushed && !QDir(expired).exists() && !QDir(expiredLegacy).exists() &&
                QDir(older).exists() && QDir(newer).exists(),
-               "age-only pruning expires old ended and legacy runs after repeated enumeration"))
+               QStringLiteral("age prune: flush=%1 expired=%2 legacy=%3 older=%4 newer=%5 (%6)")
+                   .arg(ageFlushed).arg(QDir(expired).exists()).arg(QDir(expiredLegacy).exists())
+                   .arg(QDir(older).exists()).arg(QDir(newer).exists()).arg(ageOnly.status().writeErrorText)))
         return false;
     options.maxRetainedRuns = 1;
     DiagnosticRecorder current(options);
@@ -544,7 +552,8 @@ bool testLiveHistoryRotation()
     DiagnosticRecorder recorder(options);
     for(int i=0;i<64;++i)
         recorder.recordEvent("rotation",QString("%1:%2").arg(i).arg(QString(256,'x')));
-    if(!check(recorder.flush()&&!recorder.status().writeError,"rotation stopped logging"))return false;
+    if(!check(recorder.flush()&&!recorder.status().writeError,
+              "rotation stopped logging: " + recorder.status().writeErrorText))return false;
     const QDir run(recorder.runDirectory());
     if(!check(run.exists("events.jsonl.previous")&&run.exists("history-retention.json"),"rotation receipt missing"))return false;
     const auto target=temp.filePath("rotated.zip");
@@ -574,7 +583,7 @@ bool testExportDoesNotBlockRotation()
     if (!check(writeBatch("early-", 4), "initial flush failed")) return false;
     auto first = recorder.captureExportRequest();
     // Hold a captured request without starting the exporter while its source rotates.
-    if (!check(writeBatch("middle-", 24), "pre-export rotation flush failed")) return false;
+    if (!check(writeBatch("middle-", 24), "pre-export rotation flush failed: " + recorder.status().writeErrorText)) return false;
     auto second = recorder.captureExportRequest();
     { auto abandoned = recorder.captureExportRequest(); Q_UNUSED(abandoned); }
 

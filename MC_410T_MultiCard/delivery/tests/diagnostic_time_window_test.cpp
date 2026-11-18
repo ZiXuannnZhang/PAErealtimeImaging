@@ -277,8 +277,8 @@ bool testTimeWindowAcrossRuns()
 
 bool testHistoricalRunIntegrity()
 {
-    QTemporaryDir temp;
-    if (!temp.isValid()) return false;
+    QTemporaryDir temp(QDir::currentPath() + "/historical-integrity-XXXXXX");
+    if (!check(temp.isValid(), "historical integrity fixture directory unavailable")) return false;
     const auto now = QDateTime::currentDateTime();
     const auto first = now.addSecs(-90).toString("yyyy-MM-dd HH:mm:ss");
     const auto last = now.addSecs(-60).toString("yyyy-MM-dd HH:mm:ss");
@@ -540,7 +540,7 @@ bool testManualActiveSnapshotDoesNotBlockRotation()
                                  DiagnosticRecorder::Severity::Warning);
         return recorder.flush(5000);
     };
-    if (!check(batch("before-", 12), "initial rotation failed")) return false;
+    if (!check(batch("before-", 12), "initial rotation failed: " + recorder.status().writeErrorText)) return false;
     const QDir run(recorder.runDirectory());
     QByteArray retained;
     for (const QString &name : {QStringLiteral("events.jsonl.previous"), QStringLiteral("events.jsonl")}) {
