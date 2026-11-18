@@ -328,8 +328,9 @@ void LoopLog::run() {
         const auto requested=exportProgress_->requested.load(std::memory_order_acquire);
         if (requested>exportProgress_->flushed.load(std::memory_order_relaxed)
             && read_>=requested) {
-            exportProgress_->flushed.store(read_,std::memory_order_release);
+            if (activeWindow_ && steadyNs()>=activeWindow_->meta.endNs) finalizeWindow(false);
             exportProgress_->failed.store(failed||writeFailed_.load(),std::memory_order_release);
+            exportProgress_->flushed.store(read_,std::memory_order_release);
         }
         batch.clear();
         while (batch.size()<4096) {

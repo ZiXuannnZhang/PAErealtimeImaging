@@ -307,6 +307,71 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     write(stoppedRun+"/run-config.json",config);
     diagnostic_storage::pruneTraces(stoppedRoot,0,1);
     require(!QDir(stoppedRun).exists()); // Failure released the pending intent too.
+
+    const auto windowRoot = root.filePath("burst-windows");
+    paimage::installTraceBundle(windowRoot, tools);
+    lo.kind = uint16_t(paimage::LoopKind::Loop);
+    auto keep = lo;
+    auto clip = lo;
+    clip.sequence = 2;
+    clip.timeNs += 5000000000ULL;
+    auto makeWindowRun = [&](const QString &runId, const QString &kind) {
+        const auto path = QDir(windowRoot).filePath(runId);
+        require(QDir().mkpath(path));
+        write(path+"/run-config.json", QJsonDocument(QJsonObject{
+            {"runId", runId}, {"wallAnchorMs", double(wall)}, {"monotonicAnchorNs", "1000000"},
+            {"diagnosticTraceEnabled", false}, {"timingEnabled", false}, {"loopLogEnabled", true}}).toJson());
+        const bool noBurst = kind == "no_burst", budget = kind == "budget_omitted";
+        QJsonArray windows;
+        if (!noBurst) windows.append(QJsonObject{
+            {"windowId", 1}, {"file", budget ? "" : "looplog-window-1.bin"},
+            {"recordCount", 2}, {"bytes", 2*int(sizeof(lo))}, {"budgetOmitted", budget}});
+        if (kind == "verified" || kind == "corrupt")
+            write(path+"/looplog-window-1.bin", recordBytes(keep)+recordBytes(clip)+
+                (kind == "corrupt" ? QByteArray("x") : QByteArray{}));
+        write(path+"/looplog-summary.json", QJsonDocument(QJsonObject{
+            {"schemaVersion", 2}, {"mode", "rolling-burst-windows"}, {"recordBytes", int(sizeof(lo))},
+            {"recordsIssued", 100}, {"recordsWritten", noBurst||budget ? 0 : 2},
+            {"burstMarkEpochs", noBurst ? 0 : 1}, {"budgetExhausted", budget}, {"windows", windows}}).toJson());
+    };
+    makeWindowRun("quiet", "no_burst");
+    makeWindowRun("healthy", "verified");
+    auto healthyPath = root.filePath("healthy-windows.zip");
+    require(DiagnosticRecorder::exportTimeWindow(recorder.registerTimeWindowRequest(start,end), healthyPath).success);
+    const auto healthyZip = zipEntries(healthyPath);
+    const auto windowManifest = [](const auto &zip) {
+        return QJsonDocument::fromJson(zip.value("paimage/manifest.json")).object();
+    };
+    const auto readLoopSummary = [](const auto &zip, const QString &id) {
+        return QJsonDocument::fromJson(zip.value("paimage/"+id+"/looplog-summary.json")).object();
+    };
+    const auto quiet = readLoopSummary(healthyZip, "quiet");
+    const auto healthyLoop = readLoopSummary(healthyZip, "healthy");
+    require(!windowManifest(healthyZip).value("traceIncomplete").toBool(true));
+    require(windowManifest(healthyZip).value("skippedRuns").toArray().isEmpty());
+    require(quiet.value("exportRetentionStatus") == "no_burst" &&
+        !quiet.value("loopLogIncomplete").toBool(true) && quiet.value("recordsWritten").toInt(-1) == 0);
+    require(healthyLoop.value("exportCountCovered").toBool() &&
+        healthyLoop.value("exportClipped").toBool() && !healthyLoop.value("loopLogIncomplete").toBool(true));
+    require(healthyZip.value("paimage/healthy/looplog-0.bin") == recordBytes(keep));
+
+    makeWindowRun("lost-window", "missing_or_unreadable");
+    makeWindowRun("corrupt-window", "corrupt");
+    makeWindowRun("budget", "budget_omitted");
+    const auto faultyPath = root.filePath("faulty-windows.zip");
+    require(DiagnosticRecorder::exportTimeWindow(recorder.registerTimeWindowRequest(start,end), faultyPath).success);
+    const auto faultyZip = zipEntries(faultyPath);
+    auto windowStatus = [&](const char *id) {
+        const auto summary = readLoopSummary(faultyZip, id);
+        require(summary.value("loopLogIncomplete").toBool());
+        return summary.value("exportWindows").toArray().at(0).toObject().value("status").toString();
+    };
+    require(windowStatus("lost-window") == "missing_or_unreadable");
+    require(windowStatus("corrupt-window") == "corrupt");
+    require(windowStatus("budget") == "budget_omitted");
+    require(windowManifest(faultyZip).value("traceIncomplete").toBool() &&
+        windowManifest(faultyZip).value("skippedRuns").toArray().size() == 2);
+
     DiagnosticRecorder::setBundleCapture({});
-    std::cout<<"PASS trace export boundaries, stop/prune handoff and missing-run failure"<<std::endl;
+    std::cout<<"PASS trace boundaries, stop/prune handoff and LoopLog burst window integrity"<<std::endl;
 }
