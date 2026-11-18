@@ -6,6 +6,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <memory>
 
 // F16C 快速路径：/arch:AVX2 时 MSVC 定义 __AVX__，启用 F16C 指令集
 // _mm256_cvtps_ph: 8×float32 → 8×float16，一条指令，约为标量实现速度的8倍
@@ -250,21 +251,39 @@ void FileSaver::openNewFiles(uint32_t sourceIPv4) {
     // 后者保证即使并发下撞名也以失败告警，而不是静默截断已有数据。
     resolveFreeSequence();
 
-    m_fileChannelA = new QFile(generateFileName("A"));
-    m_fileChannelB = new QFile(generateFileName("B"));
-
-    if (!m_fileChannelA->open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
-        emit errorOccurred(QString("Card%1: 无法打开文件 %2: %3")
-            .arg(m_cardId + 1).arg(m_fileChannelA->fileName())
-            .arg(m_fileChannelA->errorString()));
-        delete m_fileChannelA; m_fileChannelA = nullptr;
+    auto a = std::make_unique<QFile>(generateFileName("A"));
+    auto b = std::make_unique<QFile>(generateFileName("B"));
+#ifdef FILESAVER_TEST_SEAM
+    if (m_openRaceForTest) m_openRaceForTest(a->fileName(), b->fileName());
+#endif
+    const bool openedA = a->open(QIODevice::WriteOnly | QIODevice::NewOnly);
+    const bool openedB = b->open(QIODevice::WriteOnly | QIODevice::NewOnly);
+    if (!openedA || !openedB) {
+        auto noteOpenFailure = [&](const QFile &file) {
+            m_faultDetail += QStringLiteral("; 无法打开 %1: %2").arg(file.fileName(), file.errorString());
+        };
+        if (!openedA) noteOpenFailure(*a);
+        if (!openedB) noteOpenFailure(*b);
+        // NewOnly proves ownership only on success. Neither local handle has
+        // entered the write path, so it is safe to roll back that creation.
+        auto removeCreated = [&](QFile &file) {
+#ifdef FILESAVER_TEST_SEAM
+            if (m_removeFaultForTest) {
+                m_faultDetail += QStringLiteral("; 未能回收残留文件 %1: injected").arg(file.fileName());
+                return;
+            }
+#endif
+            if (!file.remove())
+                m_faultDetail += QStringLiteral("; 未能回收残留文件 %1: %2").arg(file.fileName(), file.errorString());
+        };
+        if (openedA) removeCreated(*a);
+        if (openedB) removeCreated(*b);
+        a.reset(); b.reset();
+        handleWriteFault(QStringLiteral("创建 A/B 文件对"));
+        return;
     }
-    if (!m_fileChannelB->open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
-        emit errorOccurred(QString("Card%1: 无法打开文件 %2: %3")
-            .arg(m_cardId + 1).arg(m_fileChannelB->fileName())
-            .arg(m_fileChannelB->errorString()));
-        delete m_fileChannelB; m_fileChannelB = nullptr;
-    }
+    m_fileChannelA = a.release();
+    m_fileChannelB = b.release();
     m_currentFileTriggers = 0;
     m_confirmedA = m_confirmedB = 0;
 }
@@ -536,6 +555,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     if (!m_fileChannelA || !m_fileChannelB ||
         group->sourceIPv4 != m_currentSourceIPv4) {
         openNewFiles(group->sourceIPv4);
+        if (!m_fileChannelA || !m_fileChannelB) return false;
     }
     m_currentSamples=group->sampleCount;
 
@@ -559,17 +579,8 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         info.manualMode = (m_currentGen == 0);
         if (!closeFiles()) { handleWriteFault(QStringLiteral("容量轮转关闭文件")); return false; }
         openNewFiles(m_currentSourceIPv4);
+        if (!m_fileChannelA || !m_fileChannelB) return false;
         recordRollover(info);
-    }
-
-    if (!m_fileChannelA || !m_fileChannelB) {
-        // 写盘故障已由 handleWriteFault 停止保存并报告过，这里不再重复报一条。
-        if (!m_saving.load(std::memory_order_acquire)) return false;
-        emit errorOccurred(QString("Card%1: 保存文件未成功打开，已自动停止保存")
-                           .arg(m_cardId + 1));
-        m_saving.store(false, std::memory_order_release);
-        if (!closeFiles()) handleWriteFault(QStringLiteral("打开失败后关闭文件"));
-        return false;
     }
 
     int n = group->sampleCount;

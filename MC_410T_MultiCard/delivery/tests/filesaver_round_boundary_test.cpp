@@ -811,6 +811,43 @@ int main(int argc, char** argv)
             return dir.path() + QString("/Card1_Ch%1_%2_000.dat").arg(ch).arg(suffix);
         };
 
+        for (int mode = 0; mode < 3; ++mode) {
+            FileSaver saver(0);
+            const auto suffix = QByteArray("open") + QByteArray::number(mode);
+            QString alert;
+            QObject::connect(&saver, &FileSaver::errorOccurred, &app, [&](const QString &msg) { alert = msg; });
+            const auto busy = path(suffix.constData(), mode == 0 ? "A" : "B");
+            const auto owned = path(suffix.constData(), mode == 0 ? "B" : "A");
+            saver.setOpenRaceForTest([&](const QString &, const QString &) {
+                QFile existing(busy);
+                require(existing.open(QIODevice::WriteOnly | QIODevice::NewOnly), "create competing file");
+                require(existing.write("keep") == 4, "seed competing file");
+            });
+            saver.setRemoveFaultForTest(mode == 2);
+            saver.startSaving(dir.path(), 100, QString::fromLatin1(suffix));
+            saver.consumeTriggerGroup(makeGroup(1, 0, 40));
+            check(!saver.isSaving() && saver.savedCount() == 0 && alert.contains(busy),
+                  "partial creation stops saving without recording a trigger and identifies the open error");
+            check(mode == 2 ? QFile::exists(owned) && fileSizeOf(owned) == 0 && alert.contains(owned)
+                            : !QFile::exists(owned),
+                  "partial creation removes only its own file or reports the residual path");
+            QFile existing(busy);
+            check(existing.open(QIODevice::ReadOnly) && existing.readAll() == QByteArray("keep"),
+                  "competing file bytes survive partial creation");
+            existing.close();
+            require(existing.remove(), "remove competing fixture");
+            if (mode == 2) require(QFile::remove(owned), "remove residual fixture");
+            saver.setOpenRaceForTest({});
+            saver.setRemoveFaultForTest(false);
+            saver.startSaving(dir.path(), 100, QString::fromLatin1(suffix));
+            saver.consumeTriggerGroup(makeGroup(1, 0, 40));
+            saver.stopSaving();
+            check(saver.savedCount() == 1 &&
+                  verifyFile(path(suffix.constData(), "A"), halvesOf({40})) &&
+                  verifyFile(path(suffix.constData(), "B"), halvesOf({-40})),
+                  "restarting creates a complete pair at the original sequence");
+        }
+
         // 断言分两层：故障当场只断言内部记账（QIODevice::write 有内部缓冲，
         // 未落盘时外部 stat 看不到）；逐字节内容断言统一放到 stopSaving() 关文件
         // 之后——那时读到的就是最终落盘结果。

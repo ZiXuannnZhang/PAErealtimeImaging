@@ -210,7 +210,12 @@ public:
     void setLateWriteFaultForTest(int mode) { m_lateWriteFaultForTest = mode; }
     void setFlushFaultForTest(int side) { m_flushFaultForTest = side; }
     void setRollbackFaultForTest(int side) { m_rollbackFaultForTest = side; }
+    void setOpenRaceForTest(std::function<void(const QString&, const QString&)> hook)
+    { m_openRaceForTest = std::move(hook); }
+    void setRemoveFaultForTest(bool fail) { m_removeFaultForTest = fail; }
 private:
+    std::function<void(const QString&, const QString&)> m_openRaceForTest;
+    bool m_removeFaultForTest = false;
     int m_writeFaultForTest = 0;
     int m_lateWriteFaultForTest = 0;
     int m_flushFaultForTest = 0;
