@@ -35,6 +35,18 @@ The four loss classes are intentionally separate:
 * `retentionEvicted`: records fell out of the 64 MiB rolling window before a
   burst marker could freeze them.
 
+The export captures the issued sequence and queue-drop count together.
+A frozen window belongs to the export when its first `triggerSequence`
+is within that boundary. Later burst markers do not extend the reported
+window for that export. `queueDroppedAtOpen` is the cumulative drop count
+at the first marker and does not localize a loss to that window's prehistory.
+Compare the number of records read with `recordsWritten` for this rolling
+mode. Records outside retained windows are intentionally absent.
+
+`counterExhausted` reports that the bounded admission counters reached
+their limit. New submissions stop at that point and the summary reports
+incomplete coverage.
+
 The old schema-1 summary and `looplog-*.bin` files remain readable by the
 analyzers. Schema 2 adds fields; it does not change the 80-byte record layout.
 

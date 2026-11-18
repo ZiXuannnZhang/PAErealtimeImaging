@@ -94,5 +94,27 @@ def main():
         wrap=root/'wrap';fixture(wrap,[(65535,0,1444),(65535,1,12),(0,0,1444),(0,1,12)])
         wrapped=m.analyze(wrap,2,18001,181,32,4,[dict(round_spec,extraTrigger=65535)])['rounds'][0]['perCard'][0]
         assert wrapped['effectiveComplete']==1 and wrapped['extraComplete'] and wrapped['conservationVerified']
-    print('PASS independent analyzer fixtures: complete, short tail, reused ID, cross-session exact link, short datagram, missing summary')
+        loop = root / 'loop'
+        loop.mkdir()
+        summary = loop / 'looplog-summary.json'
+        summary.write_text(json.dumps(dict(mode='rolling-burst-windows', recordsIssued=80,
+                                           recordsWritten=2, loopLogIncomplete=False)))
+        records = [m.LOOPLOG.pack(seq, ts, 0, 0, 0, kind, 0, 0, 0, 0, 0, 0, 0, 0)
+                   for seq, ts, kind in [(20, 1000000, 1), (25, 5001000000, 6)]]
+        loop_file = loop / 'looplog-0.bin'
+        loop_file.write_bytes(b''.join(records))
+        complete = m._looplog(loop)
+        assert complete['missingRecordCount'] == 0 and not complete['loopLogIncomplete']
+        loop_file.write_bytes(records[0])
+        missing = m._looplog(loop)
+        assert missing['missingRecordCount'] == 1 and missing['loopLogIncomplete']
+        summary.write_text(json.dumps(dict(mode='rolling-burst-windows', recordsIssued=80,
+                                           recordsWritten=1.0, loopLogIncomplete=False,
+                                           windows=[dict(postWindowTruncated=True)])))
+        truncated = m._looplog(loop)
+        assert truncated['missingRecordCount'] == 0 and truncated['loopLogIncomplete']
+        summary.write_text(json.dumps(dict(recordsIssued=3, loopLogIncomplete=False)))
+        legacy = m._looplog(loop)
+        assert legacy['missingRecordCount'] == 19 and legacy['loopLogIncomplete']
+    print('PASS independent trace and LoopLog analyzer fixtures')
 if __name__=='__main__':main()

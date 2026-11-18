@@ -100,7 +100,17 @@ def _looplog(root):
                      value2=v2,value3=v3,payloadA=pa,payloadB=pb,payloadC=pc)
             by_kind[rec['kind']]=by_kind.get(rec['kind'],0)+1
             records.append(rec)
-    issued=int(summary.get('recordsIssued',0));missing=max(issued,maximum)-unique
+    rolling = summary.get('mode') == 'rolling-burst-windows'
+    expected = summary.get('recordsWritten') if rolling else max(int(summary.get('recordsIssued',0)), maximum)
+    if isinstance(expected, float) and expected.is_integer():
+        expected = int(expected)
+    missing = max(0, expected - unique) if isinstance(expected, int) and expected >= 0 else None
+    count_mismatch = missing is None or (rolling and expected != unique) or bool(missing)
+    windows = summary.get('windows')
+    window_incomplete = rolling and isinstance(windows, list) and any(
+        isinstance(window, dict) and any(window.get(key) for key in (
+            'preWindowTruncated', 'beforeListenerStart', 'postWindowTruncated', 'windowTruncated', 'budgetOmitted'))
+        for window in windows)
     loops=[r for r in records if r['kind']=='loop']
     gaps=sorted(r['spanNs'] for r in loops)
     bursts=[dict(epoch=r['value0']|(r['value1']<<32),burstNs=r['timeNs'],idleSpanNs=r['spanNs'],
@@ -120,13 +130,15 @@ def _looplog(root):
                   durationNs=r['spanNs'],enabledAfter=bool(r['flags']&1),confirmedAfter=bool(r['flags']&2))
              for r in records if r['kind']=='controlMark']
     return dict(status='not-recorded' if not summary and not records else 'ok',summary=summary,
-        records=unique,missingRecordCount=max(0,missing),malformed=bad,recordsByKind=by_kind,
+        records=unique,missingRecordCount=missing,malformed=bad,recordsByKind=by_kind,
         loopCount=len(loops),maxLoopGapNs=gaps[-1] if gaps else None,
         loopGapsOver20ms=sum(1 for g in gaps if g>20000000),
         loopGapsOver100ms=sum(1 for g in gaps if g>100000000),
         receiveBursts=bursts,burstWindows=burst_windows,stallHints=stalled,controlMarks=control,
-        loopLogIncomplete=bool(not summary or summary.get('loopLogIncomplete',True) or missing or bad),
-        note='loop records are full receive-loop coverage; 100ms stall sampling cannot observe every 20ms gap and does not prove CPU preemption')
+        loopLogIncomplete=bool(not summary or summary.get('loopLogIncomplete',True)
+                               or count_mismatch or window_incomplete or bad),
+        note=('records cover retained burst windows' if rolling else 'records cover the receive loop')
+             + '; 100ms stall sampling cannot observe every 20ms gap and does not prove CPU preemption')
 
 def _pcapng_packets(path):
     """Parse pktmon etl2pcap pcapng (Ethernet or raw-IP link types).
