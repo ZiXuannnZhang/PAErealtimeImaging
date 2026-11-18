@@ -420,8 +420,10 @@ MainWindow::MainWindow(QWidget *parent)
         const int frameIdx = int(m_roundUi.frameCount());
         updateRingImagingStatus();
         const bool frameEnd = m_roundUi.noteSnapshot(roundComplete);
-        if (frameEnd)
+        if (frameEnd) {
             m_roundUi.resetFrameCount();
+            m_lblImagingStatus->setText(QStringLiteral("软件覆盖完整 · 物理相位未验证"));
+        }
 
         AutoSaveCommit countPresentation;
         paimage::RingRoundPresentationState::SnapshotResult presentation;
@@ -450,7 +452,7 @@ MainWindow::MainWindow(QWidget *parent)
                 : action == paimage::RingRoundPresentationState::SnapshotAction::Missing
                     ? QStringLiteral("missing") : QStringLiteral("invalid");
             if (hasPresentation && countPresentation.failed)
-                queueAutoSaveFailure(countPresentation);
+                queueAutoSaveFailure(countPresentation, m_netController);
             else if (hasPresentation && presentation.shouldApply)
                 applyAutoSaveCommitToUi(countPresentation);
             recordDiagnosticAction(QStringLiteral("ring_presentation_transition"),
@@ -5425,7 +5427,7 @@ void MainWindow::updateRingImagingStatus()
     // 块刚完成、下一块首个脉冲未到：短暂显示 y/y，避免闪回“等待数据”
     const int displayPulses = (pulses > 0) ? pulses : perBlock;
     m_lblImagingStatus->setText(
-        QString("采集脉冲 %1/%2 · 输出 %3 帧")
+        QStringLiteral("采集脉冲 %1/%2 · 输出 %3 帧 · 物理相位未验证")
         .arg(displayPulses).arg(perBlock)
         .arg(roundUi.frameCount));
     m_lblImagingStatus->setStyleSheet(amberStyle);

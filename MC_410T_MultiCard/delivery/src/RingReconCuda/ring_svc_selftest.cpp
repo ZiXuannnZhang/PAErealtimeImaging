@@ -718,7 +718,9 @@ int main(int argc, char** argv) {
             mismatchObservation.value(QStringLiteral("blocks_consumed")).toInt() == nBlocks - 1 &&
             mismatchObservation.value(QStringLiteral("expected_blocks")).toInt() == nBlocks &&
             mismatchObservation.value(QStringLiteral("source_round_complete")).toBool() &&
-            !mismatchObservation.value(QStringLiteral("reconstruction_complete")).toBool();
+            !mismatchObservation.value(QStringLiteral("reconstruction_complete")).toBool() &&
+            mismatchObservation.value(QStringLiteral("physical_phase")).toString() ==
+                QStringLiteral("unverified");
         if (!fieldsOk) {
             std::fprintf(stderr,
                 "[completion-test] missing/incorrect round_block_count_mismatch: %s\n",
