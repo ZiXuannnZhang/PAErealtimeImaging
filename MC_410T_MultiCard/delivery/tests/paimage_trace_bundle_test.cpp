@@ -13,6 +13,7 @@
 #include <QJsonArray>
 #include <QTimer>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <stdexcept>
 void checked(bool b,int line){if(!b)throw std::runtime_error("fixed trace export boundary line "+std::to_string(line));}
@@ -257,19 +258,24 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             const std::filesystem::path path(stoppedRun.toStdWString());
             paimage::TraceWriter traceWriter(path);
             paimage::TimingWriter timingWriter(path);
-            paimage::LoopLog loopWriter(path,paimage::LoopLog::Budget{64});
+            std::promise<void> releaseLoopWriter;
+            auto release = releaseLoopWriter.get_future();
+            paimage::LoopLog::Budget loopBudget{64};
+            loopBudget.beforeDrain = [&] { if (release.valid()) release.get(); };
+            paimage::LoopLog loopWriter(path,loopBudget);
             traceWriter.push(expectedTrace);
             timingWriter.observe(expectedTiming,true);
             loopWriter.push(expectedLoop);
             loopWriter.push(expectedBurst);
             pending=recorder.registerTimeWindowRequest(start,end);
-            require(bool(pending.bundleExtension));
 
             // The worker has not started. These timestamps are inside the window,
             // so the sequence boundary alone must exclude the later records.
             auto postTrace=expectedTrace;postTrace.correlation=1111;traceWriter.push(postTrace);
             auto postTiming=expectedTiming;postTiming.correlation=2222;timingWriter.observe(postTiming,true);
             auto postLoop=expectedLoop;postLoop.value0=3333;loopWriter.push(postLoop);
+            releaseLoopWriter.set_value();
+            require(bool(pending.bundleExtension));
             traceWriter.stop();timingWriter.stop();loopWriter.stop();
         } // Unregister the writers, as on listener stop.
     } // Release the active-run lock before stop-triggered cleanup.
@@ -433,6 +439,66 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         require(missingSummary.value("exportWindows").toArray().first().toObject().value("status")=="missing_or_unreadable");
         require(windowManifest(missingZip).value("traceIncomplete").toBool()&&
             windowManifest(missingZip).value("skippedRuns").toArray().size()==1);
+    }
+
+    for (const auto& scenario : {QStringLiteral("truncated"), QStringLiteral("prehistory"),
+                                 QStringLiteral("budget_omitted"), QStringLiteral("write_failed")}) {
+        const bool hasPrehistory = scenario == "prehistory";
+        const auto status = hasPrehistory ? QStringLiteral("truncated") : scenario;
+        const auto cutRoot = root.filePath("cut-" + scenario);
+        const auto cutRun = cutRoot + "/listener";
+        require(QDir().mkpath(cutRun));
+        write(cutRun+"/run-config.json",QJsonDocument(QJsonObject{
+            {"runId","listener"},{"wallAnchorMs",double(wall-6000)},
+            {"monotonicAnchorNs","1000000"},{"diagnosticTraceEnabled",false},
+            {"timingEnabled",false},{"loopLogEnabled",true}}).toJson());
+        paimage::installTraceBundle(cutRoot,tools);
+        paimage::LoopLog::Budget budget{64};
+        if (status == "budget_omitted") budget.totalBytes = sizeof(paimage::LoopRecord);
+        if (status == "write_failed") require(QDir().mkpath(cutRun+"/looplog-window-1.bin"));
+        paimage::LoopLog live(std::filesystem::path(cutRun.toStdWString()),budget);
+        const auto cutStart = QDateTime::fromMSecsSinceEpoch(wall-7000);
+        if (hasPrehistory) live.push(firstLoop);
+        const auto beforeBurst = recorder.registerTimeWindowRequest(cutStart,end);
+        const auto beforeBurstThenStopped = recorder.registerTimeWindowRequest(cutStart,end);
+        if (!hasPrehistory) live.push(firstLoop);
+        live.push(burst);
+        const auto newer = recorder.registerTimeWindowRequest(cutStart,end);
+        const auto cuts = paimage::LoopLog::captureCuts();
+        for (const auto& cut : cuts)
+            if (cut.root == std::filesystem::path(cutRun.toStdWString()))
+                cut.flush();
+
+        auto verifyBeforeBurst = [&](const auto& request, const QString& path) {
+            require(DiagnosticRecorder::exportTimeWindow(request,path).success);
+            const auto zip = zipEntries(path);
+            const auto scoped = readLoopSummary(zip,"listener");
+            require(scoped.value("recordsIssued").toInt(-1)==(hasPrehistory?1:0) &&
+                scoped.value("recordsWritten").toInt(-1)==0 &&
+                scoped.value("sourceRecordsWritten").toInt(-1)==0);
+            require(scoped.value("exportWindows").toArray().isEmpty() &&
+                scoped.value("exportRetentionStatus")=="no_burst" &&
+                !scoped.value("openWindowPending").toBool(true) &&
+                !scoped.value("loopLogIncomplete").toBool(true) &&
+                !scoped.value("budgetExhausted").toBool(true) &&
+                !scoped.value("writeFailed").toBool(true));
+            const auto manifest = windowManifest(zip);
+            require(!manifest.value("traceIncomplete").toBool(true) &&
+                manifest.value("skippedRuns").toArray().isEmpty());
+        };
+        verifyBeforeBurst(beforeBurst,root.filePath(scenario+"-early-live.zip"));
+        live.stop();
+        verifyBeforeBurst(beforeBurstThenStopped,root.filePath(scenario+"-early-stopped.zip"));
+
+        const auto newerPath = root.filePath(scenario+"-newer.zip");
+        require(DiagnosticRecorder::exportTimeWindow(newer,newerPath).success);
+        const auto newerZip = zipEntries(newerPath);
+        const auto newerSummary = readLoopSummary(newerZip,"listener");
+        const auto windows = newerSummary.value("exportWindows").toArray();
+        require(windows.size()==1 && windows.first().toObject().value("status")==status &&
+            newerSummary.value("windows").toArray().first().toObject().value("triggerSequence").toInt()==2 &&
+            newerSummary.value("loopLogIncomplete").toBool() &&
+            windowManifest(newerZip).value("traceIncomplete").toBool());
     }
 
     DiagnosticRecorder::setBundleCapture({});

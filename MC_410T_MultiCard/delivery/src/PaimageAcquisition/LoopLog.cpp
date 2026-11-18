@@ -75,29 +75,37 @@ std::vector<LoopLog::Cut> LoopLog::captureCuts() {
                                                                std::memory_order_release,
                                                                std::memory_order_relaxed)) {}
         cuts.push_back({log->root_,boundary,log->dropped_.load(),log->freezeEpoch_.load(),
-            log->incomplete(),log->budgetExhausted_.load(),log->writeFailed_.load(),
             [progress,position]{
                 const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
                 while (!progress->done.load(std::memory_order_acquire)
                        && progress->flushed.load(std::memory_order_acquire)<position
                        && std::chrono::steady_clock::now()<deadline)
                     std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                return (progress->done.load(std::memory_order_acquire)
-                        || progress->flushed.load(std::memory_order_acquire)>=position)
-                    && !progress->failed.load(std::memory_order_acquire);
+                return progress->flushed.load(std::memory_order_acquire)>=position;
             },
-            [progress]{
+            [progress,boundary]{
                 std::vector<WindowMeta> windows;
-                std::uint64_t recordsWritten;
                 bool windowOpen;
                 {
                     std::lock_guard<std::mutex> lock(progress->inventoryMutex);
-                    windows=progress->windows;
-                    recordsWritten=progress->recordsWritten;
-                    windowOpen=progress->windowOpen;
+                    // A later freeze can satisfy this cut if the window
+                    // already had a burst marker at the cut's sequence.
+                    for (const auto& window : progress->windows)
+                        if (window.triggerSequence<=boundary) windows.push_back(window);
+                    windowOpen=progress->openWindowTriggerSequence!=0 &&
+                               progress->openWindowTriggerSequence<=boundary;
+                }
+                std::uint64_t recordsWritten=0,budgetOmitted=0,pending=0;
+                for (const auto& window : windows) {
+                    if (window.budgetOmitted) budgetOmitted+=window.recordCount;
+                    else if (window.file.empty()) pending+=window.recordCount;
+                    else recordsWritten+=window.recordCount;
                 }
                 std::ostringstream inventory;
                 inventory<<"{\"recordsWritten\":"<<recordsWritten
+                         <<",\"budgetOmitted\":"<<budgetOmitted<<",\"pending\":"<<pending
+                         <<",\"budgetExhausted\":"<<(budgetOmitted?"true":"false")
+                         <<",\"writeFailed\":"<<(pending?"true":"false")
                          <<",\"openWindowPending\":"<<(windowOpen?"true":"false")<<",\"windows\":";
                 writeWindowList(inventory,windows);
                 inventory<<'}';
@@ -183,6 +191,7 @@ void LoopLog::openWindow(const LoopRecord& marker) {
     ActiveWindow window;
     const auto burstTime=marker.timeNs;
     window.meta.id=nextWindowId_++;
+    window.meta.triggerSequence=marker.sequence;
     window.meta.startNs=burstTime>kPreWindowNs?burstTime-kPreWindowNs:0;
     window.meta.endNs=burstTime+kPostWindowNs;
     window.meta.queueDroppedAtOpen=dropped_.load(std::memory_order_relaxed);
@@ -203,7 +212,7 @@ void LoopLog::openWindow(const LoopRecord& marker) {
     activeWindow_=std::move(window);
     {
         std::lock_guard<std::mutex> lock(exportProgress_->inventoryMutex);
-        exportProgress_->windowOpen=true;
+        exportProgress_->openWindowTriggerSequence=marker.sequence;
     }
     appendToWindow(marker);
 }
@@ -264,8 +273,7 @@ void LoopLog::finalizeWindow(bool force) {
     {
         std::lock_guard<std::mutex> lock(exportProgress_->inventoryMutex);
         exportProgress_->windows.push_back(std::move(window.meta));
-        exportProgress_->recordsWritten=windowWriteRecords_;
-        exportProgress_->windowOpen=false;
+        exportProgress_->openWindowTriggerSequence=0;
     }
 }
 
@@ -338,7 +346,8 @@ void LoopLog::writeWindowList(std::ostream& summary,const std::vector<WindowMeta
     for (std::size_t index=0;index<windows.size();++index) {
         if (index) summary<<',';
         const auto& window=windows[index];
-        summary<<"{\"windowId\":"<<window.id<<",\"startNs\":"<<window.startNs
+        summary<<"{\"windowId\":"<<window.id<<",\"triggerSequence\":"<<window.triggerSequence
+            <<",\"startNs\":"<<window.startNs
             <<",\"endNs\":"<<window.endNs<<",\"recordCount\":"<<window.recordCount
             <<",\"bytes\":"<<window.bytes<<",\"file\":\""<<window.file
             <<"\",\"preWindowTruncated\":"<<(window.preWindowTruncated?"true":"false")
@@ -396,7 +405,6 @@ void LoopLog::run() {
         const auto requested=exportProgress_->requested.load(std::memory_order_acquire);
         if (requested>exportProgress_->flushed.load(std::memory_order_relaxed)
             && read_>=requested) {
-            exportProgress_->failed.store(failed||writeFailed_.load(),std::memory_order_release);
             exportProgress_->flushed.store(read_,std::memory_order_release);
         }
         if (stopping && !activeWindow_ && read_==write_.load(std::memory_order_acquire)) break;
@@ -406,7 +414,6 @@ void LoopLog::run() {
     if (activeWindow_) finalizeWindow(true);
     if (failed) writeFailed_.store(true,std::memory_order_release);
     writeSummary(windowWriteRecords_,writerUnwritten);
-    exportProgress_->failed.store(incomplete(),std::memory_order_release);
     exportProgress_->flushed.store(read_,std::memory_order_release);
     exportProgress_->done.store(true,std::memory_order_release);
 }

@@ -220,31 +220,65 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 };
                 const bool timingEvidence=hasCut(timingCuts)||QFileInfo::exists(QDir(path).filePath("timing-summary.json"))||
                     !QDir(path).entryList({"timing-*.bin"},QDir::Files).isEmpty();
-                const auto loopSummaryPath = QDir(path).filePath("looplog-summary.json");
-                auto loopSummary = object(loopSummaryPath);
-                const auto loopNamesUnsorted = QDir(path).entryList({"looplog-*.bin"},QDir::Files);
-                const bool hasWindowFiles = std::any_of(loopNamesUnsorted.cbegin(), loopNamesUnsorted.cend(),
-                    [](const QString &name) { return name.startsWith(QStringLiteral("looplog-window-")); });
-                const bool loopWindowMode = loopSummary.value("mode") == QStringLiteral("rolling-burst-windows") ||
-                    (loopSummary.value("mode").toString().isEmpty() && (hasCut(loopCuts) || hasWindowFiles));
-                const bool loopEvidence=hasCut(loopCuts)||QFileInfo::exists(loopSummaryPath)||
-                    !loopNamesUnsorted.isEmpty();
-                const bool timingMissing=timingEnabled.isBool()&&timingEnabled.toBool()&&!timingEvidence;
-                const bool loopMissing=loopEnabled.isBool()&&loopEnabled.toBool()&&!loopEvidence;
                 const qint64 wall=metadata.value("wallAnchorMs").toVariant().toLongLong();
                 if (wall > capturedAt) continue;
+
+                const auto loopCut = std::find_if(loopCuts.cbegin(),loopCuts.cend(),
+                    [&](const auto& cut) { return cutPath(cut.root)==path; });
+                const bool loopLive = loopCut!=loopCuts.cend();
+                const auto loopSummaryPath = QDir(path).filePath("looplog-summary.json");
+                const bool loopFlushed = !loopLive || loopCut->flush();
+                const auto storedLoopSummary = object(loopSummaryPath);
+                QJsonObject loopSummary;
+                QStringList loopNames;
+                if (loopLive) {
+                    // Through the cut we have both the queued sequence limit
+                    // and the matching window inventory, even after STOP.
+                    // The disk summary can contain later run-wide failures.
+                    loopSummary = {{"schemaVersion",2},{"mode","rolling-burst-windows"},
+                        {"recordBytes",int(sizeof(LoopRecord))},{"recordsIssued",double(loopCut->sequence)},
+                        {"queueDropped",double(loopCut->dropped)},{"burstMarkEpochs",double(loopCut->freezeEpoch)}};
+                    for (const auto* key : {"queueAllocatedBytes","segmentBudgetBytes","segmentRecordBudget",
+                         "segmentTailBytes","totalBudgetBytes","totalRecordBudget","totalTailBytes",
+                         "continuousListenerLoopLog","preWindowSeconds","postWindowSeconds",
+                         "rollingWindowMaxBytes","frozenWindowBudgetBytes","qpcFrequency","anchors"}) {
+                        if (storedLoopSummary.contains(key)) loopSummary.insert(key,storedLoopSummary.value(key));
+                    }
+                    const auto inventory = QJsonDocument::fromJson(
+                        QByteArray::fromStdString(loopCut->windowInventory())).object();
+                    for (auto entry=inventory.constBegin();entry!=inventory.constEnd();++entry)
+                        loopSummary.insert(entry.key(),entry.value());
+                    for (const auto& entry:inventory.value("windows").toArray()) {
+                        const auto name=entry.toObject().value("file").toString();
+                        if (!name.isEmpty()) loopNames.append(name);
+                    }
+                } else {
+                    loopSummary = storedLoopSummary;
+                    loopNames = QDir(path).entryList({"looplog-*.bin"},QDir::Files);
+                }
+                const bool hasWindowFiles = std::any_of(loopNames.cbegin(), loopNames.cend(),
+                    [](const QString &name) { return name.startsWith(QStringLiteral("looplog-window-")); });
+                const bool loopWindowMode = loopSummary.value("mode") == QStringLiteral("rolling-burst-windows") ||
+                    (loopSummary.value("mode").toString().isEmpty() && hasWindowFiles);
+                const bool loopEvidence = loopLive || QFileInfo::exists(loopSummaryPath) || !loopNames.isEmpty();
+                const quint64 loopBoundary = loopLive ? loopCut->sequence : quint64(loopSummary.value("recordsIssued").toDouble());
+                const bool loopBoundaryKnown = loopLive || loopSummary.contains("recordsIssued");
+                const bool loopDropped = loopSummary.value("queueDropped").toDouble()>0;
+                const bool timingMissing=timingEnabled.isBool()&&timingEnabled.toBool()&&!timingEvidence;
+                const bool loopMissing=loopEnabled.isBool()&&loopEnabled.toBool()&&!loopEvidence;
                 const qint64 mono=metadata.value("monotonicAnchorNs").toString().toLongLong();
                 bool anchorKnown=wall&&mono;
                 if(!anchorKnown && start!=std::numeric_limits<qint64>::min()){
-                    const auto binary=QDir(path).entryList({"trace-*.bin","timing-*.bin","looplog-*.bin"},QDir::Files);
+                    const auto binary=QDir(path).entryList({"trace-*.bin","timing-*.bin"},QDir::Files);
                     const auto traceInfo=object(QDir(path).filePath("trace-summary.json"));
                     const auto timingInfo=object(QDir(path).filePath("timing-summary.json"));
                     const auto hasEvidence=[](const QJsonObject& info,const char* key){
                         return info.value(key).toBool()||info.value("recordsIssued").toDouble()>0;
                     };
                     const bool loopAnchorNeeded = loopWindowMode
-                        ? loopSummary.value("loopLogIncomplete").toBool() || !loopSummary.value("windows").toArray().isEmpty()
-                        : hasEvidence(loopSummary,"loopLogIncomplete");
+                        ? !loopNames.isEmpty() || loopDropped || !loopFlushed ||
+                            loopSummary.value("loopLogIncomplete").toBool() || !loopSummary.value("windows").toArray().isEmpty()
+                        : !loopNames.isEmpty() || hasEvidence(loopSummary,"loopLogIncomplete");
                     if(!binary.isEmpty()||hasEvidence(traceInfo,"traceIncomplete")||
                        hasEvidence(timingInfo,"timingIncomplete")||loopAnchorNeeded||timingMissing||loopMissing){
                         skippedRuns.append(QJsonObject{{"runId",metadata.value("runId")},{"reason","missing_time_anchor"},
@@ -314,36 +348,6 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     }
                 }
                 const QString prefix="paimage/"+dir+"/";
-                bool loopFlushed=true,loopIncomplete=false,loopBudgetExhausted=false,loopWriteFailed=false;
-                quint64 loopBoundary=0,loopDropped=0,loopFreezeEpoch=0; bool loopLive=false;
-                QJsonObject liveInventory;
-                for(const auto& cut:loopCuts)if(cutPath(cut.root)==path){
-                    loopLive=true;loopBoundary=cut.sequence;loopDropped=cut.dropped;loopFreezeEpoch=cut.freezeEpoch;
-                    loopIncomplete=cut.incomplete;loopBudgetExhausted=cut.budgetExhausted;loopWriteFailed=cut.writeFailed;
-                    loopFlushed=cut.flush();
-                    liveInventory=QJsonDocument::fromJson(QByteArray::fromStdString(cut.windowInventory())).object();
-                    break;}
-                if (loopSummary.isEmpty() && loopLive) loopSummary = object(loopSummaryPath);
-                if (loopSummary.isEmpty() && loopLive) loopSummary=QJsonObject{{"schemaVersion",2},
-                    {"mode","rolling-burst-windows"},{"recordBytes",80},
-                    {"recordsIssued",double(loopBoundary)},{"queueDropped",double(loopDropped)},
-                    {"budgetExhausted",loopBudgetExhausted},{"writeFailed",loopWriteFailed},
-                    {"burstMarkEpochs",double(loopFreezeEpoch)}};
-                QStringList loopNames;
-                if (loopLive) {
-                    // Only read files in the same inventory generation. The
-                    // writer can freeze more windows while the ZIP is built.
-                    for (auto entry=liveInventory.begin();entry!=liveInventory.end();++entry)
-                        loopSummary.insert(entry.key(),entry.value());
-                    for (const auto& entry:liveInventory.value("windows").toArray()) {
-                        const auto name=entry.toObject().value("file").toString();
-                        if (!name.isEmpty()) loopNames.append(name);
-                    }
-                } else {
-                    loopNames=loopNamesUnsorted;
-                }
-                if(!loopLive)loopBoundary=quint64(loopSummary.value("recordsIssued").toDouble());
-                const bool loopBoundaryKnown=loopLive||loopSummary.contains("recordsIssued");
                 std::sort(loopNames.begin(),loopNames.end(),[](const QString& a,const QString& b){
                     return a.section('-',-1).section('.',0,0).toInt()<b.section('-',-1).section('.',0,0).toInt();
                 });
@@ -398,7 +402,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 if (legacyCount) coverage.covered = loopSelected + loopFiltered == loopBoundary;
                 const bool loopPresent=loopEvidence||loopMissing;
                 const bool loopStreamIncomplete=loopMissing||(loopPresent&&(loopSummary.value("loopLogIncomplete").toBool()||
-                    loopIncomplete||loopBad||!loopFlushed||coverage.incomplete||
+                    loopDropped||loopBad||!loopFlushed||coverage.incomplete||
                     (coverage.covered.isBool()&&!coverage.covered.toBool())||
                     (!anchorKnown&&(loopSelected||loopFiltered))));
                 const bool incomplete=traceIncomplete||timingIncomplete||loopStreamIncomplete;

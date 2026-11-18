@@ -71,7 +71,8 @@ public:
     struct Cut {
         std::filesystem::path root;
         std::uint64_t sequence=0,dropped=0,freezeEpoch=0;
-        bool incomplete=false,budgetExhausted=false,writeFailed=false;
+        // The queue-drain fence and the outcome of eligible windows are
+        // separate, since later windows can fail while an export is pending.
         std::function<bool()> flush;
         std::function<std::string()> windowInventory;
     };
@@ -80,7 +81,7 @@ public:
 private:
     struct alignas(64) Slot {std::atomic<std::size_t> sequence;LoopRecord record;};
     struct WindowMeta {
-        std::uint64_t id=0,startNs=0,endNs=0,recordCount=0,bytes=0;
+        std::uint64_t id=0,triggerSequence=0,startNs=0,endNs=0,recordCount=0,bytes=0;
         std::vector<std::uint64_t> burstEpochs;
         bool preWindowTruncated=false,beforeListenerStart=false;
         bool postWindowTruncated=false,windowTruncated=false,budgetOmitted=false;
@@ -90,13 +91,12 @@ private:
     struct ActiveWindow {WindowMeta meta;std::vector<LoopRecord> records;};
     struct ExportProgress {
         std::atomic<std::size_t> requested{0},flushed{0};
-        std::atomic<bool> failed{false},done{false};
+        std::atomic<bool> done{false};
         // Publish metadata after the corresponding file. Requests can outlive
         // the listener, so they retain this inventory through ExportProgress.
         std::mutex inventoryMutex;
         std::vector<WindowMeta> windows;
-        std::uint64_t recordsWritten=0;
-        bool windowOpen=false;
+        std::uint64_t openWindowTriggerSequence=0;
     };
 
     std::atomic<bool> paused_{false};
