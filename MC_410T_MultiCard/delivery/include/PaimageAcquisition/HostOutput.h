@@ -103,8 +103,10 @@ public:
         if(normalizer_)normalizer_->setDisableCountBoundary(disable);
     }
     PhysicalRoundNormalizer::Snapshot normalizerSnapshot() const;
-    std::uint64_t startSaving(const QString&,int,const QString&);
-    std::uint64_t stopSaving();
+    using SaveResultSink = std::function<void(const FileSaver::SaveResult&)>;
+    std::uint64_t startSaving(const QString&, int, const QString&,
+                              std::function<QString(std::uint64_t)> directoryFor = {});
+    std::uint64_t stopSaving(SaveResultSink done = {});
     void prepareConfigurationRestart(){configurationRestart_=true;}
     std::uint64_t resumeSaving();
     bool savingApplied(std::uint64_t g)const{return workers_.savingConfigurationApplied(g);}

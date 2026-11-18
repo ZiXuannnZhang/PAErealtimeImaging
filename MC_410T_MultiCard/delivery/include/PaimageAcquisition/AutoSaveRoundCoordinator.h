@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <mutex>
 
 namespace paimage {
@@ -87,6 +88,7 @@ public:
     };
 
     using DirectoryPreparer = std::function<bool(const QString&)>;
+    using DirectoryResolver = std::function<QString(std::uint64_t)>;
     using EventSink = std::function<void(const Event&)>;
 
     explicit AutoSaveRoundCoordinator(DirectoryPreparer preparer = {});
@@ -97,6 +99,8 @@ public:
     void configure(const QString& baseDirectory,
                    std::uint64_t lastDirectoryNumber);
     void disable();
+    void selectManualSave();
+    DirectoryResolver directoryResolver() const;
 
     // 扫描基线目录下已有的纯数字文件夹名并返回最大编号（无则 0），供
     // configure() 的 lastDirectoryNumber 使用。任意长度的纯数字名都计入：
@@ -157,10 +161,13 @@ private:
                        bool hasReserved,
                        const Event& finalEvent) const;
 
-    mutable std::mutex mutex_;
+    using DirectoryTable = QHash<std::uint64_t, QString>;
+    // The writer retains the table and its lock for the life of its request.
+    // A new request may reuse directory numbers in a different root.
+    std::shared_ptr<std::mutex> mutex_ = std::make_shared<std::mutex>();
     QString baseDirectory_;
     std::uint64_t nextDirectoryNumber_ = 0;
-    QHash<std::uint64_t, QString> directories_;
+    std::shared_ptr<DirectoryTable> directories_ = std::make_shared<DirectoryTable>();
     QHash<QString, std::uint64_t> boundaryBindings_;
     QHash<QString, std::uint64_t> roundBindings_;
     mutable QSet<QString> lookupFailureKeys_;

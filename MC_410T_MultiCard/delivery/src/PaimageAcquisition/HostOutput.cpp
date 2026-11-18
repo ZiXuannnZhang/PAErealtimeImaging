@@ -233,13 +233,35 @@ void HostOutput::consumeSync(const SyncFrame& sync){
     }
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=sync.session;r.threadId=GetCurrentThreadId();r.card=-1;r.kind=std::uint16_t(TimingKind::SyncWorker);r.value0=std::uint32_t(sync.cards.size());timing_->observe(r,end-begin>=500000);}
 }
-std::uint64_t HostOutput::startSaving(const QString& dir,int count,const QString& suffix){
-    std::lock_guard<std::mutex> lock(normalizationMutex_);cancelTailState(false);
-    return workers_.configureSaving(true,[this,dir,count,suffix]{for(auto s:savers_)s->startSaving(dir,count,suffix);});
+std::uint64_t HostOutput::startSaving(const QString& dir, int count, const QString& suffix,
+                                     std::function<QString(std::uint64_t)> directoryFor)
+{
+    std::lock_guard<std::mutex> lock(normalizationMutex_);
+    cancelTailState(false);
+    return workers_.configureSaving(true, [this, dir, count, suffix,
+                                           directoryFor = std::move(directoryFor)] {
+        for (auto saver : savers_) {
+            if (directoryFor) saver->setSessionDirResolver(directoryFor);
+            saver->startSaving(dir, count, suffix);
+        }
+    });
 }
-std::uint64_t HostOutput::stopSaving(){
-    std::lock_guard<std::mutex> lock(normalizationMutex_);cancelTailState(false);
-    return workers_.configureSaving(false,[this]{for(auto s:savers_)s->stopSaving();});
+
+std::uint64_t HostOutput::stopSaving(SaveResultSink done)
+{
+    std::lock_guard<std::mutex> lock(normalizationMutex_);
+    cancelTailState(false);
+    return workers_.configureSaving(false, [this, done = std::move(done)] {
+        for (auto saver : savers_) {
+            const auto result = saver->stopSaving();
+            // Release the old request's bindings only after its accepted prefix
+            // has been written and both lanes have settled.
+            if (done) {
+                saver->setSessionDirResolver({});
+                done(result);
+            }
+        }
+    });
 }
 std::uint64_t HostOutput::resumeSaving(){
     std::lock_guard<std::mutex> lock(normalizationMutex_);cancelTailState(false);

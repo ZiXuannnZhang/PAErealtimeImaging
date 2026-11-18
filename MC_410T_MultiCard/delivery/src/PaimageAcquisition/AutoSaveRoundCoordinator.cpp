@@ -28,13 +28,13 @@ AutoSaveRoundCoordinator::AutoSaveRoundCoordinator(DirectoryPreparer preparer)
 void AutoSaveRoundCoordinator::configure(const QString& baseDirectory,
                                          std::uint64_t lastDirectoryNumber)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(*mutex_);
     baseDirectory_ = baseDirectory.trimmed().isEmpty()
         ? QString()
         : QDir(baseDirectory).absolutePath();
     ++requestId_;
     nextDirectoryNumber_ = lastDirectoryNumber;
-    directories_.clear();
+    directories_ = std::make_shared<DirectoryTable>();
     boundaryBindings_.clear();
     roundBindings_.clear();
     lookupFailureKeys_.clear();
@@ -50,7 +50,7 @@ void AutoSaveRoundCoordinator::configure(const QString& baseDirectory,
 
 void AutoSaveRoundCoordinator::disable()
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(*mutex_);
     ++requestId_;
     configured_ = false;
     enabled_.store(false, std::memory_order_release);
@@ -62,6 +62,26 @@ void AutoSaveRoundCoordinator::disable()
     } else {
         currentGeneration_.store(0, std::memory_order_release);
     }
+}
+
+void AutoSaveRoundCoordinator::selectManualSave()
+{
+    std::lock_guard<std::mutex> lock(*mutex_);
+    ++requestId_;
+    configured_ = false;
+    enabled_.store(false, std::memory_order_release);
+    faulted_.store(false, std::memory_order_release);
+    currentGeneration_.store(0, std::memory_order_release);
+    directories_ = std::make_shared<DirectoryTable>();
+}
+
+AutoSaveRoundCoordinator::DirectoryResolver AutoSaveRoundCoordinator::directoryResolver() const
+{
+    std::lock_guard<std::mutex> lock(*mutex_);
+    return [mutex = mutex_, directories = directories_](std::uint64_t generation) {
+        std::lock_guard<std::mutex> lock(*mutex);
+        return directories->value(generation);
+    };
 }
 
 int AutoSaveRoundCoordinator::scanMaxDirectoryNumber(const QString& baseDirectory)
@@ -96,7 +116,7 @@ int AutoSaveRoundCoordinator::scanMaxDirectoryNumber(const QString& baseDirector
 
 void AutoSaveRoundCoordinator::setDirectoryPreparer(DirectoryPreparer preparer)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(*mutex_);
     directoryPreparer_ = std::move(preparer);
     if (!directoryPreparer_)
         directoryPreparer_ = [](const QString& path) { return QDir().mkpath(path); };
@@ -104,7 +124,7 @@ void AutoSaveRoundCoordinator::setDirectoryPreparer(DirectoryPreparer preparer)
 
 void AutoSaveRoundCoordinator::setEventSink(EventSink sink)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(*mutex_);
     eventSink_ = std::move(sink);
 }
 
@@ -153,7 +173,7 @@ void AutoSaveRoundCoordinator::publishEvents(const Event& reserved,
 {
     EventSink sink;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(*mutex_);
         sink = eventSink_;
     }
     if (!sink) return;
@@ -189,11 +209,11 @@ AutoSaveRoundCoordinator::CommitResult AutoSaveRoundCoordinator::bindMeasurement
 
     Event finalEvent;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(*mutex_);
         result.enabled = enabled_.load(std::memory_order_relaxed);
         result.requestId = requestId_.load(std::memory_order_relaxed);
         result.oldSessionGen = currentGeneration_.load(std::memory_order_relaxed);
-        result.oldDirectory = directories_.value(result.oldSessionGen);
+        result.oldDirectory = directories_->value(result.oldSessionGen);
 
         auto fail = [&](const QString& error) {
             result.failed = true;
@@ -260,11 +280,11 @@ AutoSaveRoundCoordinator::CommitResult AutoSaveRoundCoordinator::commitBoundary(
     Event finalEvent;
 
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(*mutex_);
         result.enabled = enabled_.load(std::memory_order_relaxed);
         result.requestId = requestId_.load(std::memory_order_relaxed);
         result.oldSessionGen = currentGeneration_.load(std::memory_order_relaxed);
-        result.oldDirectory = directories_.value(result.oldSessionGen);
+        result.oldDirectory = directories_->value(result.oldSessionGen);
 
         auto fail = [&](const QString& error) {
             result.failed = true;
@@ -300,7 +320,7 @@ AutoSaveRoundCoordinator::CommitResult AutoSaveRoundCoordinator::commitBoundary(
                         ? existingRound.value()
                     : currentGeneration_.load(std::memory_order_relaxed);
                 result.publishedSessionGen = currentGeneration_.load(std::memory_order_relaxed);
-                result.directory = directories_.value(result.newSessionGen);
+                result.directory = directories_->value(result.newSessionGen);
                 boundaryBindings_.insert(result.boundaryKey, result.newSessionGen);
                 finalEvent = eventFromResult(Event::Kind::AlreadyApplied, result);
             } else if (nextDirectoryNumber_ >=
@@ -351,7 +371,7 @@ AutoSaveRoundCoordinator::CommitResult AutoSaveRoundCoordinator::commitBoundary(
                         --nextDirectoryNumber_;
                         fail(QStringLiteral("无法创建/注册自动保存目录：%1").arg(directory));
                     } else {
-                        directories_.insert(candidate, directory);
+                        directories_->insert(candidate, directory);
                         boundaryBindings_.insert(result.boundaryKey, candidate);
                         roundBindings_.insert(roundKey, candidate);
                         lookupFailureKeys_.remove(roundKey);
@@ -392,7 +412,7 @@ AutoSaveRoundCoordinator::ResolveResult AutoSaveRoundCoordinator::resolveRound(
     EventSink sink;
     bool emitLookupFailure = false;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<std::mutex> lock(*mutex_);
         result.enabled = enabled_.load(std::memory_order_relaxed);
         const bool faulted = faulted_.load(std::memory_order_relaxed);
         if (!result.enabled && !faulted)
@@ -409,7 +429,7 @@ AutoSaveRoundCoordinator::ResolveResult AutoSaveRoundCoordinator::resolveRound(
         if (it != roundBindings_.constEnd()) {
             result.resolved = true;
             result.sessionGen = it.value();
-            result.directory = directories_.value(result.sessionGen);
+            result.directory = directories_->value(result.sessionGen);
             if (result.sessionGen == 0 || result.sessionGen == kFailedGeneration ||
                 result.directory.isEmpty()) {
                 result.resolved = false;
@@ -472,13 +492,13 @@ QString AutoSaveRoundCoordinator::directoryFor(std::uint64_t generation) const
 {
     if (generation == 0 || generation == kFailedGeneration)
         return QString();
-    std::lock_guard<std::mutex> lock(mutex_);
-    return directories_.value(generation);
+    std::lock_guard<std::mutex> lock(*mutex_);
+    return directories_->value(generation);
 }
 
 QString AutoSaveRoundCoordinator::baseDirectory() const
 {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::mutex> lock(*mutex_);
     return baseDirectory_;
 }
 

@@ -305,7 +305,6 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
     if(config.enablePublisher)m_publisher->start();
     for(int c=0;c<config.nCards;++c){
         auto display=std::make_unique<DisplayBuffer>();auto saver=std::make_unique<FileSaver>(c);
-        saver->setSessionDirResolver([this](auto gen){return sessionDir(gen);});
         // Frontend Preprocessing Stage：每卡一个异步 worker。stage 必须在任何
         // 可能提交 frontend frame 的路径之前启动（Task 3.7）。
         auto frontend=std::make_unique<FrontendPreprocessor>(c);

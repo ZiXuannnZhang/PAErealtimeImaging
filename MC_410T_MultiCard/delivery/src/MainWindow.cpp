@@ -2727,7 +2727,7 @@ void MainWindow::initAutoSaveSavers()
         int tpf = ui->edtTriggersPerFile->text().toInt();
         if (tpf <= 0) tpf = 1000;
         m_netController->startSaving(first.directory, tpf,
-                                     ui->edtFileSuffix->text().trimmed());
+                                     ui->edtFileSuffix->text().trimmed(), true);
     } else {
         queueAutoSaveFailure(first, m_netController);
     }
@@ -2745,6 +2745,8 @@ void MainWindow::onAutoSaveToggled(bool checked)
             ui->chkAutoSave->setChecked(false);
             return;
         }
+        if (m_netController && m_netController->isSaving())
+            onToggleSaveClicked();
         m_autoSaveEnabled = true;
         // 自动保存期间禁用手动保存按钮，避免两者争用同一保存器/目录
         ui->btnToggleSave->setEnabled(false);
@@ -2759,8 +2761,7 @@ void MainWindow::onAutoSaveToggled(bool checked)
         logMessage(QString("自动保存已开启：基线目录 %1").arg(base));
     } else {
         m_autoSaveEnabled = false;
-        // 关闭自动保存：先停写并清理队列，再清除活动会话代，避免异步
-        // 停写窗口把新组误标为手动模式并回落到旧目录。
+        // 先关闭本次接纳。写端继续按该请求的目录结算既有数据。
         if (m_netController) {
             m_netController->stopSaving();
             m_netController->disableAutoSave();

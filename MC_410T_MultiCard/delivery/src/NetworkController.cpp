@@ -563,14 +563,19 @@ void NetworkController::stop() {
 // ─
 void NetworkController::startSaving(const QString& directory,
                                      int triggersPerFile,
-                                     const QString& suffix) {
-    if(m_paimage){m_paimageSaveDir=directory;m_paimageSaveCount=triggersPerFile;m_paimageSaveSuffix=suffix;
+                                     const QString& suffix, bool autoSave) {
+    if(m_paimage){
+        if (m_paimageSavingRequested) stopSaving();
+        if (!autoSave) m_autoSaveCoordinator.selectManualSave();
+        m_paimageSaveDir=directory;m_paimageSaveCount=triggersPerFile;m_paimageSaveSuffix=suffix;
         m_paimageSavingRequested=true;
-        const auto generation=m_paimage->output().startSaving(directory,triggersPerFile,suffix);
+        ++m_saveRequestId;
+        const auto generation = m_paimage->output().startSaving(
+            directory, triggersPerFile, suffix, m_autoSaveCoordinator.directoryResolver());
         m_paimageSaveGeneration=generation;m_paimageSaveAppliedLogged=false;
         recordDiagnosticEvent("paimage.save","save_start_requested",DiagnosticRecorder::Severity::Info,
             {{"directory",directory},{"triggersPerFile",triggersPerFile},{"suffix",suffix},
-             {"generation",QString::number(generation)},
+             {"generation",QString::number(generation)}, {"requestId",QString::number(m_saveRequestId)},
              {"requestedMonotonicNs",QString::number(paimage::SocketReceiver::now())}});
         return;}
     for (auto& p : m_processors) p->setSaveEnabled(true);
@@ -579,10 +584,21 @@ void NetworkController::startSaving(const QString& directory,
 }
 
 void NetworkController::stopSaving() {
-    if(m_paimage){m_paimageSavingRequested=false;
-        const auto generation=m_paimage->output().stopSaving();
+    if(m_paimage){
+        if (!m_paimageSavingRequested) return;
+        m_paimageSavingRequested = false;
+        const auto request = m_saveRequestId;
+        const auto generation = m_paimage->output().stopSaving(
+            [this, request](const FileSaver::SaveResult& result) {
+                recordDiagnosticEvent("paimage.save", "save_request_settled",
+                    result.ioFault ? DiagnosticRecorder::Severity::Error : DiagnosticRecorder::Severity::Info,
+                    {{"requestId", QString::number(request)}, {"card", result.cardId},
+                     {"confirmed", QString::number(result.confirmed)},
+                     {"discarded", QString::number(result.discarded)},
+                     {"failed", QString::number(result.failed)}, {"ioFault", result.ioFault}});
+            });
         recordDiagnosticEvent("paimage.save","save_stop_requested",DiagnosticRecorder::Severity::Info,
-            {{"generation",QString::number(generation)},
+            {{"generation",QString::number(generation)}, {"requestId",QString::number(request)},
              {"requestedMonotonicNs",QString::number(paimage::SocketReceiver::now())},
              {"directory",m_paimageSaveDir}});
         return;}
@@ -746,6 +762,7 @@ void NetworkController::reconfigure(const AcqConfig& config) {
 }
 
 bool NetworkController::isSaving() const {
+    if (m_paimage) return m_paimageSavingRequested;
     return !m_savers.empty() && m_savers[0]->isSaving();
 }
 

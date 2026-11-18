@@ -988,7 +988,11 @@ int main(int argc, char** argv)
         QObject::connect(&saver, &FileSaver::errorOccurred, &app, [&](const QString&) { ++errors; }, Qt::DirectConnection);
         saver.startSaving(dir.path(),100,"large");
         auto g=makeGroup(1,1,1); g->sampleCount=10000; g->freqA.assign(10000,1); g->freqB.assign(10000,-1);
-        saver.consumeTriggerGroup(g); saver.setFlushFaultForTest(side); saver.stopSaving();
+        saver.consumeTriggerGroup(g);
+        saver.setFlushFaultForTest(side);
+        const auto result = saver.stopSaving();
+        check(result.confirmed == 0 && result.discarded == 0 && result.failed == 1 && result.ioFault,
+              "stop outcome reports an unconfirmed paired batch");
         check(errors==1 && saver.savedCount()==0 && !saver.isSaving() &&
               fileSizeOf(dir.path()+"/Card1_ChA_large_000.dat")==0 &&
               fileSizeOf(dir.path()+"/Card1_ChB_large_000.dat")==0,

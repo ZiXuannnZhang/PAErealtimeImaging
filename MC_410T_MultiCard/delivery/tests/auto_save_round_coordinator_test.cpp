@@ -171,6 +171,7 @@ int main(int argc, char** argv)
         check(unresolved.failed &&
                   unresolved.sessionGen == AutoSaveRoundCoordinator::kFailedGeneration,
               "A5 failed coordinator keeps round lookup fail-closed");
+        const auto retainedDirectories = coordinator.directoryResolver();
         const auto old = coordinator.resolveRound(1, 0);
         check(old.resolved && old.sessionGen == first.newSessionGen,
               "A5 failed directory preserves existing round binding");
@@ -192,6 +193,14 @@ int main(int argc, char** argv)
         coordinator.configure(root.path(), 1);
         check(failed.requestId != coordinator.requestId(),
               "A5 a delayed failure cannot refer to the new request");
+        QTemporaryDir next;
+        coordinator.setDirectoryPreparer([](const QString& path) { return QDir().mkpath(path); });
+        coordinator.configure(next.path(), 0);
+        const auto reopened = coordinator.beginSession(0);
+        check(reopened.newSessionGen == first.newSessionGen &&
+                  coordinator.directoryFor(reopened.newSessionGen) == reopened.directory &&
+                  retainedDirectories(reopened.newSessionGen) == first.directory,
+              "superseded writer retains its own registry even when numbers repeat");
     }
 
     // A6: a new controller/lifecycle configuration clears old bindings and
