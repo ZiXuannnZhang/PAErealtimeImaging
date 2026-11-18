@@ -290,7 +290,8 @@ bool testHistoricalRunIntegrity()
     DiagnosticRecorder::Options options;
     options.rootDirectory = temp.path();
     DiagnosticRecorder fresh(options);
-    if (!fresh.flush(3000)) return false;
+    fresh.recordEvent("history-integrity", "fresh recorder outside the historical window");
+    if (!check(fresh.flush(3000), QStringLiteral("new recorder setup failed: %1").arg(fresh.status().writeErrorText))) return false;
     auto request = fresh.captureTimeWindowRequest(now.addSecs(-100), now.addSecs(-45));
     for (const auto &source : std::as_const(request.sources))
         if (source.runId == "failed") {

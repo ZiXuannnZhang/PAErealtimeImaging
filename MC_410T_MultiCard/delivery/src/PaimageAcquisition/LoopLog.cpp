@@ -202,13 +202,21 @@ void LoopLog::appendToWindow(const LoopRecord& record) {
 bool LoopLog::writeWindow(const ActiveWindow& window) {
     if (window.records.empty()) return true;
     const auto name=std::string("looplog-window-")+std::to_string(window.meta.id)+".bin";
-    std::ofstream output(root_/name,std::ios::binary|std::ios::trunc);
+    const auto temporary=root_/(name+".part");
+    std::ofstream output(temporary,std::ios::binary|std::ios::trunc);
     if (!output) return false;
     output.write(reinterpret_cast<const char*>(window.records.data()),
                  std::streamsize(window.records.size()*kRecordBytes));
-    output.flush();
-    if (!output) return false;
-    return true;
+    output.close();
+    // The exporter must see either a frozen file or no file. A concurrent
+    // export must never mistake bytes still being written for corruption.
+    std::error_code error;
+    if (output) {
+        std::filesystem::rename(temporary,root_/name,error);
+        if (!error) return true;
+    }
+    std::filesystem::remove(temporary,error);
+    return false;
 }
 
 void LoopLog::finalizeWindow(bool force) {

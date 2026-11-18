@@ -93,7 +93,10 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
             matches = false;
         } else {
             expected.insert(name);
-            expectedRecords += count;
+            if (count > (std::numeric_limits<qint64>::max)() - expectedRecords)
+                matches = false;
+            else
+                expectedRecords += count;
             const auto file = files.value(name);
             detail.insert("exportFile", file.exportedName);
             detail.insert("exportRecords", qint64(file.selected));
@@ -214,10 +217,13 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     !QDir(path).entryList({"timing-*.bin"},QDir::Files).isEmpty();
                 const auto loopSummaryPath = QDir(path).filePath("looplog-summary.json");
                 auto loopSummary = object(loopSummaryPath);
+                const auto loopNamesUnsorted = QDir(path).entryList({"looplog-*.bin"},QDir::Files);
+                const bool hasWindowFiles = std::any_of(loopNamesUnsorted.cbegin(), loopNamesUnsorted.cend(),
+                    [](const QString &name) { return name.startsWith(QStringLiteral("looplog-window-")); });
                 const bool loopWindowMode = loopSummary.value("mode") == QStringLiteral("rolling-burst-windows") ||
-                    (loopSummary.isEmpty() && hasCut(loopCuts));
+                    (loopSummary.value("mode").toString().isEmpty() && (hasCut(loopCuts) || hasWindowFiles));
                 const bool loopEvidence=hasCut(loopCuts)||QFileInfo::exists(loopSummaryPath)||
-                    !QDir(path).entryList({"looplog-*.bin"},QDir::Files).isEmpty();
+                    !loopNamesUnsorted.isEmpty();
                 const bool timingMissing=timingEnabled.isBool()&&timingEnabled.toBool()&&!timingEvidence;
                 const bool loopMissing=loopEnabled.isBool()&&loopEnabled.toBool()&&!loopEvidence;
                 const qint64 wall=metadata.value("wallAnchorMs").toVariant().toLongLong();
@@ -311,6 +317,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     loopFlushed=cut.flush();break;}
                 // An active rolling writer has no final inventory yet. Keep
                 // coverage unknown instead of comparing its listener total.
+                if (loopSummary.isEmpty() && loopLive) loopSummary = object(loopSummaryPath);
                 if (loopSummary.isEmpty() && loopLive) loopSummary=QJsonObject{{"schemaVersion",2},
                     {"mode","rolling-burst-windows"},{"recordBytes",80},
                     {"recordsIssued",double(loopBoundary)},{"queueDropped",double(loopDropped)},
@@ -367,8 +374,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 // Schema 1 used continuous files. Only that legacy contract
                 // ties recordsIssued to the on-disk record count.
                 const bool legacyCount = !loopWindowMode && loopSummary.value("mode").toString().isEmpty() &&
-                    loopSummary.value("schemaVersion").toInt(1) == 1 && loopBoundaryKnown &&
-                    QDir(path).entryList({"looplog-window-*.bin"},QDir::Files).isEmpty();
+                    loopSummary.value("schemaVersion").toInt(1) == 1 && loopBoundaryKnown;
                 if (legacyCount) coverage.covered = loopSelected + loopFiltered == loopBoundary;
                 const bool loopPresent=loopEvidence||loopMissing;
                 const bool loopStreamIncomplete=loopMissing||(loopPresent&&(loopSummary.value("loopLogIncomplete").toBool()||

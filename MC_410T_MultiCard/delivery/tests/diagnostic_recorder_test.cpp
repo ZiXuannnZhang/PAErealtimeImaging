@@ -439,11 +439,16 @@ bool testStableRetentionAge()
     if (!activeLock.tryLock(0)) return false;
     for (int i = 0; i < 4; ++i)
         DiagnosticRecorder::enumerateRuns(temp.path());
+    DiagnosticRecorder ageOnly(options);
+    ageOnly.recordEvent("stable-retention", "age-pruned");
+    if (!check(ageOnly.flush(3000) && !QDir(expired).exists() && !QDir(expiredLegacy).exists() &&
+               QDir(older).exists() && QDir(newer).exists(),
+               "age-only pruning expires old ended and legacy runs after repeated enumeration"))
+        return false;
     options.maxRetainedRuns = 1;
     DiagnosticRecorder current(options);
     current.recordEvent("stable-retention", "admitted");
-    return check(current.flush(3000) && !QDir(expired).exists() && !QDir(expiredLegacy).exists() &&
-                 !QDir(older).exists() && QDir(newer).exists() && QDir(active).exists() &&
+    return check(current.flush(3000) && !QDir(older).exists() && QDir(newer).exists() && QDir(active).exists() &&
                  QFile::exists(sentinel.fileName()),
                  "retention uses the end time and legacy data age while preserving active and unknown contents");
 }
