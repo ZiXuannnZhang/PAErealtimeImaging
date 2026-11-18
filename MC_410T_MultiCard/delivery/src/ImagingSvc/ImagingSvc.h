@@ -11,6 +11,7 @@
 #include "ImagingParams.h"
 #include "RingShmObservability.h"
 #include "RingNativeMapping.h"
+#include "RingTerminalSnapshot.h"
 #include "RoundIdentity.h"
 #include "RingTimevarLowpassConfig.h"
 #include "RingReconRoundState.h"
@@ -113,6 +114,8 @@ private:
     ring_input::NativeMapping m_ringSharedMemory;
     ring_input::Mutex m_ringInputMutex;
     ring_input::Mutex m_ringOutputMutex{ring_input::kOutputMutexName};
+    ring_input::Mutex m_ringTerminalMutex{ring_terminal::kMutexName};
+    ring_snapshot::Layout m_ringTerminalLayout;
     uint64_t m_ringEpoch = 0;
     uint64_t m_ringExpectedSeq = 0;
     bool m_ringSequenceIncomplete = false;

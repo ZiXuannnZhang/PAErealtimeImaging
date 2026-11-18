@@ -412,13 +412,18 @@ bool ImagingDisplayWindow::saveWindowPngs(const QString &dir, const QString &suf
 
 ImagingDisplayWindow::PngWriter ImagingDisplayWindow::capturePngWriter(int seq) const
 {
-    const auto frame = m_ringFrame;
-    const auto range1 = m_range1, range2 = m_range2;
-    const auto mask = m_mask;   // 捕获时点的掩膜快照（与屏幕渲染同源）
-    const int srcN = m_lastDn;
+    return makePngWriter(m_ringFrame, m_lastDn, m_range1, m_range2, m_mask,
+                         QStringLiteral("_frame%1").arg(seq));
+}
+
+ImagingDisplayWindow::PngWriter ImagingDisplayWindow::makePngWriter(
+    std::shared_ptr<const std::vector<float>> frame, int srcN,
+    RingImageWidget::Range range1, RingImageWidget::Range range2,
+    std::shared_ptr<const DisplayMask> mask, QString tag)
+{
     if (srcN <= 0 || !frame || frame->size() < static_cast<size_t>(srcN) * srcN * 2)
         return {};
-    return [frame, range1, range2, mask, srcN, seq](const QString& dir, const QString& suffix) {
+    return [frame, range1, range2, mask, srcN, tag](const QString& dir, const QString& suffix) {
     constexpr int kOut = 1600;
 
     // 与窗口渲染一致的映射：当前手动/自适应色标范围（m_range1/2），块平均降采样到 1600²；
@@ -473,7 +478,6 @@ ImagingDisplayWindow::PngWriter ImagingDisplayWindow::capturePngWriter(int seq) 
     const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
     const QString stem = suffix.trimmed();
     const QString base = stem.isEmpty() ? ts : stem + "_" + ts;
-    const QString tag = QString("_frame%1").arg(seq);
     bool ok = true;
     ok = img1.save(QDir(dir).filePath(base + tag + "_532nm.png"), "PNG") && ok;
     ok = img2.save(QDir(dir).filePath(base + tag + "_1064nm.png"), "PNG") && ok;

@@ -373,6 +373,117 @@ MainWindow::MainWindow(QWidget *parent)
                 m_imagingController->releaseSnapshotBuffer(bufferIndex);
             return;
         }
+        const bool ringMode = m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1;
+        const auto terminalFrame = roundComplete ? m_imagingController->terminalSnapshotBuffer(bufferIndex)
+                                                 : nullptr;
+        if (roundComplete && (!terminalFrame ||
+                              (m_lastRingFinalRound.valid() && round <= m_lastRingFinalRound))) {
+            m_imagingController->releaseSnapshotBuffer(bufferIndex);
+            return;
+        }
+        if (roundComplete) m_lastRingFinalRound = round;
+        AutoSaveCommit countPresentation;
+        paimage::RingRoundPresentationState::SnapshotResult presentation;
+        bool hasPresentation = false;
+        std::size_t pendingPresentations = 0;
+        if (roundComplete) {
+            std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+            presentation = m_ringPresentation.completeSnapshot(round);
+            hasPresentation = presentation.exactMatch;
+            if (hasPresentation)
+                countPresentation = presentation.transition.commit;
+            pendingPresentations = m_ringPresentation.pendingCount();
+        }
+
+        if (roundComplete) {
+            const auto action = presentation.action;
+            const QString actionName =
+                action == paimage::RingRoundPresentationState::SnapshotAction::Applied
+                    ? QStringLiteral("applied")
+                : action == paimage::RingRoundPresentationState::SnapshotAction::AlreadyCurrent
+                    ? QStringLiteral("already_current")
+                : action == paimage::RingRoundPresentationState::SnapshotAction::Duplicate
+                    ? QStringLiteral("duplicate")
+                : action == paimage::RingRoundPresentationState::SnapshotAction::Stale
+                    ? QStringLiteral("stale")
+                : action == paimage::RingRoundPresentationState::SnapshotAction::Missing
+                    ? QStringLiteral("missing") : QStringLiteral("invalid");
+            if (hasPresentation && countPresentation.failed)
+                queueAutoSaveFailure(countPresentation);
+            else if (hasPresentation && presentation.shouldApply)
+                applyAutoSaveCommitToUi(countPresentation);
+            recordDiagnosticAction(QStringLiteral("ring_presentation_transition"),
+                {{QStringLiteral("measurementSession"), QString::number(
+                     static_cast<qulonglong>(round.measurementSession))},
+                 {QStringLiteral("roundGeneration"), QString::number(
+                     static_cast<qulonglong>(round.roundGeneration))},
+                 {QStringLiteral("action"), actionName},
+                 {QStringLiteral("exactMatch"), presentation.exactMatch},
+                 {QStringLiteral("shouldApply"), presentation.shouldApply},
+                 {QStringLiteral("pendingTransitions"), QString::number(
+                     static_cast<qulonglong>(pendingPresentations))}});
+        }
+
+        if (ringMode) {
+            if (!m_imagingDisplayWindow) {
+                m_imagingDisplayWindow = new ImagingDisplayWindow();
+                connect(m_imagingDisplayWindow, &ImagingDisplayWindow::presentationChanged, this, [this] {
+                    m_timeoutPresentation.updateWriter(
+                        m_imagingDisplayWindow->capturePngWriter(m_imagingDisplayWindow->lastSeq()));
+                });
+                // 显示层任务注入：毫米网格几何（spacing=fov/(nx−1)）与缓存的
+                // 显示掩膜参数（对话框未打开过时为默认关闭/6.57mm）。
+                pushRingDisplayGridGeometry();
+                m_imagingDisplayWindow->setDisplayMask(m_displayMaskEnabled,
+                                                       m_displayMaskRadiusMm);
+            }
+        }
+
+        // Save from the immutable terminal pixels. Preview admission and
+        // asynchronous display may have already moved on to the next round.
+        if (roundComplete && (m_autoSaveEnabled || m_reconSaveEnabled)) {
+            QString saveDir;
+            if (m_autoSaveEnabled) {
+                if (presentation.allowOldDirectory && !countPresentation.oldDirectory.isEmpty())
+                    saveDir = QDir(countPresentation.oldDirectory).filePath("recon_png");
+            } else {
+                saveDir = m_reconSaveDir;
+            }
+            const auto details = QJsonObject{
+                {QStringLiteral("measurementSession"), QString::number(measurementSession)},
+                {QStringLiteral("roundGeneration"), QString::number(roundGeneration)},
+                {QStringLiteral("submitIndex"), QString::number(submitIndex)},
+                {QStringLiteral("seq"), seq},
+                {QStringLiteral("directory"), saveDir}};
+            if (saveDir.isEmpty() || !ringMode) {
+                logMessage(QStringLiteral("[RingFinal] 未找到本轮 PNG 保存目录：session=%1 round=%2")
+                               .arg(measurementSession).arg(roundGeneration));
+                recordDiagnosticAction(QStringLiteral("ring_final_png_unavailable"), details);
+            } else {
+                pushRingDisplayGridGeometry();
+                const int nx = m_imagingController->ringDisplayNx();
+                const auto writer = ImagingDisplayWindow::makePngWriter(
+                    terminalFrame, nx, m_imagingDisplayWindow->range1(), m_imagingDisplayWindow->range2(),
+                    m_imagingDisplayWindow->displayMaskForFrame(nx),
+                    QStringLiteral("_session%1_round%2_frame%3").arg(measurementSession).arg(roundGeneration).arg(seq));
+                const QString suffix = m_reconSaveSuffix;
+                QPointer<MainWindow> owner(this);
+                QThreadPool::globalInstance()->start([writer, saveDir, suffix, details, owner] {
+                    const bool ok = writer && QDir().mkpath(saveDir) && writer(saveDir, suffix);
+                    if (!ok)
+                        qWarning().noquote() << "Ring final PNG write failed:" << QJsonDocument(details).toJson(QJsonDocument::Compact);
+                    QMetaObject::invokeMethod(qApp, [owner, details, ok] {
+                        if (!owner) return;
+                        if (!ok)
+                            owner->logMessage(QStringLiteral("[RingFinal] PNG 写入失败：%1")
+                                .arg(QString::fromUtf8(QJsonDocument(details).toJson(QJsonDocument::Compact))));
+                        owner->recordDiagnosticAction(ok ? QStringLiteral("ring_final_png_saved")
+                                                          : QStringLiteral("ring_final_png_write_failed"), details);
+                    }, Qt::QueuedConnection);
+                });
+            }
+        }
+
         const auto admission = m_roundUi.admitSnapshotDetailed(submitIndex);
         if (admission != paimage::RingRoundUiState::SnapshotAdmission::Accepted) {
             const bool duplicate = admission ==
@@ -423,69 +534,7 @@ MainWindow::MainWindow(QWidget *parent)
         if (frameEnd)
             m_roundUi.resetFrameCount();
 
-        AutoSaveCommit countPresentation;
-        paimage::RingRoundPresentationState::SnapshotResult presentation;
-        bool hasPresentation = false;
-        std::size_t pendingPresentations = 0;
-        if (frameEnd) {
-            std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
-            presentation = m_ringPresentation.completeSnapshot(round);
-            hasPresentation = presentation.exactMatch;
-            if (hasPresentation)
-                countPresentation = presentation.transition.commit;
-            pendingPresentations = m_ringPresentation.pendingCount();
-        }
-
-        if (frameEnd) {
-            const auto action = presentation.action;
-            const QString actionName =
-                action == paimage::RingRoundPresentationState::SnapshotAction::Applied
-                    ? QStringLiteral("applied")
-                : action == paimage::RingRoundPresentationState::SnapshotAction::AlreadyCurrent
-                    ? QStringLiteral("already_current")
-                : action == paimage::RingRoundPresentationState::SnapshotAction::Duplicate
-                    ? QStringLiteral("duplicate")
-                : action == paimage::RingRoundPresentationState::SnapshotAction::Stale
-                    ? QStringLiteral("stale")
-                : action == paimage::RingRoundPresentationState::SnapshotAction::Missing
-                    ? QStringLiteral("missing") : QStringLiteral("invalid");
-            if (hasPresentation && countPresentation.failed)
-                queueAutoSaveFailure(countPresentation);
-            else if (hasPresentation && presentation.shouldApply)
-                applyAutoSaveCommitToUi(countPresentation);
-            recordDiagnosticAction(QStringLiteral("ring_presentation_transition"),
-                {{QStringLiteral("measurementSession"), QString::number(
-                     static_cast<qulonglong>(round.measurementSession))},
-                 {QStringLiteral("roundGeneration"), QString::number(
-                     static_cast<qulonglong>(round.roundGeneration))},
-                 {QStringLiteral("action"), actionName},
-                 {QStringLiteral("exactMatch"), presentation.exactMatch},
-                 {QStringLiteral("shouldApply"), presentation.shouldApply},
-                 {QStringLiteral("pendingTransitions"), QString::number(
-                     static_cast<qulonglong>(pendingPresentations))}});
-        }
-
-        QString saveDir = m_reconSaveDir;
-        if (hasPresentation && presentation.allowOldDirectory &&
-            !countPresentation.oldDirectory.isEmpty()) {
-            saveDir = QDir(countPresentation.oldDirectory).filePath("recon_png");
-        }
-        const bool saveNow = frameEnd && m_reconSaveEnabled && !saveDir.isEmpty();
-        const QString saveSuffix = m_reconSaveSuffix;
-
-        if (m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1) {
-            if (!m_imagingDisplayWindow) {
-                m_imagingDisplayWindow = new ImagingDisplayWindow();
-                connect(m_imagingDisplayWindow, &ImagingDisplayWindow::presentationChanged, this, [this] {
-                    m_timeoutPresentation.updateWriter(
-                        m_imagingDisplayWindow->capturePngWriter(m_imagingDisplayWindow->lastSeq()));
-                });
-                // 显示层任务注入：毫米网格几何（spacing=fov/(nx−1)）与缓存的
-                // 显示掩膜参数（对话框未打开过时为默认关闭/6.57mm）。
-                pushRingDisplayGridGeometry();
-                m_imagingDisplayWindow->setDisplayMask(m_displayMaskEnabled,
-                                                       m_displayMaskRadiusMm);
-            }
+        if (ringMode) {
             if (!m_imagingDisplayWindow->isVisible()) {
                 m_imagingDisplayWindow->show();
                 m_imagingDisplayWindow->raise();
@@ -511,8 +560,7 @@ MainWindow::MainWindow(QWidget *parent)
                 const int idx = bufferIndex;
                 const auto presentationEpoch = m_roundUi.snapshot().epoch;
                 QPointer<MainWindow> owner(this);
-                QThreadPool::globalInstance()->start([ctrl, idx, frame, n, nx, seq, frameIdx, r1, r2, displayMask, win, owner, round, presentationEpoch,
-                                   saveNow, saveDir, saveSuffix]() {
+                QThreadPool::globalInstance()->start([ctrl, idx, frame, n, nx, seq, frameIdx, r1, r2, displayMask, win, owner, round, presentationEpoch]() {
                     const float *src = ctrl ? ctrl->snapshotBuffer(idx) : nullptr;
                     if (!src) {
                         if (ctrl) ctrl->releaseSnapshotBuffer(idx);
@@ -525,8 +573,7 @@ MainWindow::MainWindow(QWidget *parent)
                     const QImage img2 = ImagingDisplayWindow::renderFrame(
                         frame->data() + n, nx, r2.lower, r2.upper, displayMask);
                     if (!win) return;
-                    QMetaObject::invokeMethod(qApp, [win, frame, nx, frameIdx, img1, img2, owner, round, presentationEpoch,
-                                                     saveNow, saveDir, saveSuffix]() {
+                    QMetaObject::invokeMethod(qApp, [win, frame, nx, frameIdx, img1, img2, owner, round, presentationEpoch]() {
                         if (!win || !owner) return;
                         std::lock_guard<std::mutex> lock(owner->m_ringAssemblerMutex);
                         if (owner->m_ringSnapshotAdmissionBlocked.load(std::memory_order_acquire) ||
@@ -536,8 +583,6 @@ MainWindow::MainWindow(QWidget *parent)
                         win->applyRingFrame(frame, nx, frameIdx, img1, img2);
                         owner->m_timeoutPresentation.publish(round.measurementSession, round.roundGeneration,
                             win->capturePngWriter(win->lastSeq()));
-                        if (saveNow)
-                            win->saveWindowPngs(saveDir, saveSuffix, win->lastSeq());
                     }, Qt::QueuedConnection);
                 });
             } else {

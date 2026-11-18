@@ -61,6 +61,8 @@ add_test(NAME ring_fbp_controller_test COMMAND ring_fbp_controller_test)
 add_test(NAME ring_fbp_controller_burst_test COMMAND ring_fbp_controller_test --burst)
 add_test(NAME ring_fbp_controller_faults_test COMMAND ring_fbp_controller_test --faults)
 add_test(NAME ring_layout_lifecycle_test COMMAND ring_fbp_controller_test --layout)
+add_test(NAME ring_terminal_delivery_test COMMAND ring_fbp_controller_test --terminal)
+set_tests_properties(ring_terminal_delivery_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 15)
 set_tests_properties(ring_layout_lifecycle_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 30)
 set_tests_properties(ring_fbp_controller_test ring_fbp_controller_burst_test ring_fbp_controller_faults_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)
 add_custom_command(TARGET ring_fbp_service_test POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different

@@ -328,6 +328,7 @@ private:
     // TimeoutBoundary 立即清零、CountBoundary 保留帧末驱动清零。
     // 取代原 m_ringBlockCounter / m_imagingFrameCount（单一事实来源，可测试）。
     paimage::RingRoundUiState m_roundUi;
+    paimage::RoundIdentity m_lastRingFinalRound;
     paimage::TimeoutPresentation m_timeoutPresentation;
     void syncTimeoutPngSettings();
     // Count/timeout presentation transitions are retained by old physical

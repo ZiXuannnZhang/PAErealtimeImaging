@@ -1,6 +1,8 @@
 #include "ImagingController.h"
+#include "RingRoundIdentity.h"
 #include <QCoreApplication>
 #include <QTimer>
+#include <QThread>
 #include <QProcess>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -281,6 +283,58 @@ static int faultsTest(QCoreApplication &app)
 
 // Real controller -> ZMQ -> deployed ImagingSvc -> CUDA -> SHM readiness test.
 struct RingLayoutRegression {
+    static int terminal()
+    {
+        ImagingController ctrl;
+        ImagingController::RingLayout layout{3, 32, 4, 9, {}, 0};
+        if (!ring_snapshot::checkedLayout(32, 4, 9, layout.bytes)) return 1;
+        const auto name = (QStringLiteral("Local\\ring-terminal-") + QUuid::createUuid().toString()).toStdWString();
+        if (!ctrl.setupRingSharedMemory(layout, name.c_str())) return 1;
+        ctrl.m_svcResourcesActive = true;
+        ctrl.m_ringWorkerStop = false;
+        ctrl.m_ringAdmission = true;
+        ctrl.m_dispConsumed[0] = ctrl.m_dispConsumed[1] = false;
+        layout = ctrl.m_ringLayout;
+        int received = 0;
+        bool correct = true;
+        QObject::connect(&ctrl, &ImagingController::ringSnapshotReady,
+            [&](int seq, quint64 submit, bool identified, quint64 session, quint64 round,
+                bool complete, int buffer) {
+                ++received;
+                const auto *p = ctrl.snapshotBuffer(buffer);
+                correct = correct && buffer >= 2 && seq == 10 + received && submit == quint64(20 + received)
+                    && identified && session == 5 && round == quint64(received) && complete && p
+                    && std::all_of(p, p + 9, [&](float v){ return v == float(10 + received); })
+                    && std::all_of(p + 9, p + 18, [&](float v){ return v == float(20 + received); });
+                ctrl.releaseSnapshotBuffer(buffer);
+            });
+        for (int i = 1; i <= 2; ++i) {
+            std::vector<float> a(9, 10 + i), b(9, 20 + i);
+            if (!ring_terminal::publish(ctrl.m_ringMapping.data(), layout.capacity, layout.bytes,
+                {uint64_t(20 + i), {5, uint64_t(i)}, uint32_t(10 + i), 0}, a.data(), b.data())) return 1;
+        }
+        const auto duplicate = ring_round_identity::makeSnapshotReady(11, 21, {5, 1}, true);
+        ctrl.processRingMessage(duplicate);
+        ctrl.processRingMessage(duplicate);
+        auto *h = static_cast<RingImagingShmHeader *>(ctrl.m_ringMapping.data());
+        h->frame_ready = 1; h->frame_seq = 13;
+        auto *preview = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h) + layout.bytes.frameOffset);
+        std::fill_n(preview, 18, -1.f);
+        ctrl.startRingFrameWorker(13, 23, true, {5, 3}, false);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (received < 2 && std::chrono::steady_clock::now() < deadline) {
+            QCoreApplication::sendPostedEvents(&ctrl, QEvent::MetaCall);
+            QThread::msleep(5);
+        }
+        ctrl.stopSvc();
+        if (received != 2 || !correct) {
+            std::cerr << "terminal delivery: received=" << received << " correct=" << correct << '\n';
+            return 1;
+        }
+        std::cout << "PASS two terminal rounds, both wavelengths, held preview leases and duplicate notification\n";
+        return 0;
+    }
+
     static int run()
     {
         ImagingController ctrl;
@@ -400,6 +454,7 @@ struct RingLayoutRegression {
 
 int main(int argc,char**argv){
     QCoreApplication app(argc,argv);
+    if (app.arguments().contains(QStringLiteral("--terminal"))) return RingLayoutRegression::terminal();
     if (app.arguments().contains(QStringLiteral("--layout"))) return RingLayoutRegression::run();
     if (app.arguments().contains(QStringLiteral("--burst"))) return burstTest(app);
     if (app.arguments().contains(QStringLiteral("--faults"))) return faultsTest(app);
