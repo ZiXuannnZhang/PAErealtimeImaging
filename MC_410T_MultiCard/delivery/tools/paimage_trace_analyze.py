@@ -1,6 +1,6 @@
 """Read schema-1/2 binary traces independently of GUI/source cumulative counters."""
 import argparse, hashlib, heapq, json, struct, socket, tempfile, zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 RECORD=struct.Struct('<QQQQIIIHHHHHhBB4sH')
 TIMING=struct.Struct('<QQQQQIIIHhHHI')
@@ -85,45 +85,128 @@ def _timing(root):
         records=unique,missingRecordCount=missing,malformedOrDuplicate=bad,fileOrderInversions=out_of_order,
         longestIntervals=records[:1000],timingIncomplete=bool(not summary or summary.get('timingIncomplete',True) or missing or bad))
 
+def _loop_window_inventory(summary, run_name):
+    """Resolve frozen windows to local segment names, including ZIP renumbering."""
+    windows = summary.get('windows')
+    if not isinstance(windows, list):
+        return {}, False
+    exports = summary.get('exportWindows')
+    exported = isinstance(exports, list)
+    by_id = {}
+    if exported:
+        for item in exports:
+            if isinstance(item, dict) and isinstance(item.get('windowId'), int):
+                key = item['windowId']
+                by_id[key] = item if key not in by_id else None
+    sources = {}
+    incomplete = False
+    for window in windows:
+        if not isinstance(window, dict):
+            continue
+        window_id = window.get('windowId')
+        detail = by_id.get(window_id) if isinstance(window_id, int) else None
+        if detail is not None and detail.get('inRequestedWindow') is False:
+            continue
+        incomplete |= any(window.get(key) for key in (
+            'preWindowTruncated', 'beforeListenerStart', 'postWindowTruncated', 'windowTruncated', 'budgetOmitted'))
+        if not isinstance(window_id, int) or window_id <= 0:
+            continue
+        canonical = f'looplog-window-{window_id}.bin'
+        if window.get('file') != canonical:
+            continue
+        if exported:
+            if detail is None or detail.get('sourceFile') != canonical:
+                continue
+            member = detail.get('exportFile')
+            if not isinstance(member, str) or not member:
+                continue
+            path = PurePosixPath(member)
+            if path.parent != PurePosixPath('paimage', run_name):
+                continue
+            name = path.name
+            count = detail.get('exportRecords')
+        else:
+            name, count = canonical, window.get('recordCount')
+        sources[name] = (window, count) if name not in sources else None
+    return sources, incomplete
+
 def _looplog(root):
     summary_path=root/'looplog-summary.json'
     summary=json.loads(summary_path.read_text(encoding='utf-8')) if summary_path.exists() else {}
+    rolling = summary.get('mode') == 'rolling-burst-windows'
+    sources, window_incomplete = _loop_window_inventory(summary, root.name) if rolling else ({}, False)
     records=[];bad=0;unique=0;maximum=0;by_kind={}
+    file_ranges = {}
     for path in sorted(root.glob('looplog-*.bin'),key=lambda p:int(p.stem.split('-')[-1])):
+        first_record, previous_bad = len(records), bad
         data=path.read_bytes();bad+=len(data)%80!=0
         for values in LOOPLOG.iter_unpack(data[:len(data)//80*80]):
             seq,tick,span,session,tid,kind,flags,v0,v1,v2,v3,pa,pb,pc=values
-            if not seq:bad+=1;continue
+            if not seq or (rolling and kind not in LOOP_KINDS):bad+=1;continue
             maximum=max(maximum,seq);unique+=1
             rec=dict(sequence=seq,timeNs=tick,spanNs=span,session=session,threadId=tid,
                      kind=LOOP_KINDS.get(kind,str(kind)),flags=flags,value0=v0,value1=v1,
                      value2=v2,value3=v3,payloadA=pa,payloadB=pb,payloadC=pc)
             by_kind[rec['kind']]=by_kind.get(rec['kind'],0)+1
             records.append(rec)
-    rolling = summary.get('mode') == 'rolling-burst-windows'
+        file_ranges[path.name] = (first_record, len(records), bad == previous_bad)
     expected = summary.get('recordsWritten') if rolling else max(int(summary.get('recordsIssued',0)), maximum)
     if isinstance(expected, float) and expected.is_integer():
         expected = int(expected)
     missing = max(0, expected - unique) if isinstance(expected, int) and expected >= 0 else None
     count_mismatch = missing is None or (rolling and expected != unique) or bool(missing)
-    windows = summary.get('windows')
-    window_incomplete = rolling and isinstance(windows, list) and any(
-        isinstance(window, dict) and any(window.get(key) for key in (
-            'preWindowTruncated', 'beforeListenerStart', 'postWindowTruncated', 'windowTruncated', 'budgetOmitted'))
-        for window in windows)
     loops=[r for r in records if r['kind']=='loop']
     gaps=sorted(r['spanNs'] for r in loops)
-    bursts=[dict(epoch=r['value0']|(r['value1']<<32),burstNs=r['timeNs'],idleSpanNs=r['spanNs'],
-                  previousSampleNs=r['payloadA']) for r in records if r['kind']=='burstMark']
-    first_ns=min((r['timeNs'] for r in records),default=None)
-    last_ns=max((r['timeNs'] for r in records),default=None)
-    burst_windows=[]
-    for burst in bursts:
-        start=burst['burstNs']-5_000_000_000;end=burst['burstNs']+5_000_000_000
-        burst_windows.append(dict(epoch=burst['epoch'],startNs=start,endNs=end,
-            records=sum(start<=r['timeNs']<=end for r in records),
-            prior5sCovered=first_ns is not None and first_ns<=start,
-            following5sCovered=last_ns is not None and last_ns>=end))
+    bursts, burst_windows = [], []
+    if not rolling:
+        first_ns = min((r['timeNs'] for r in records), default=None)
+        last_ns = max((r['timeNs'] for r in records), default=None)
+    for name, (first, last, valid) in file_ranges.items():
+        file_records = records[first:last]
+        markers = [r for r in file_records if r['kind'] == 'burstMark']
+        source = sources.get(name)
+        window = source[0] if source and valid and source[1] == len(file_records) else None
+        if source and source[1] != len(file_records):
+            window_incomplete = True
+        if not markers:
+            continue
+        local = file_records if rolling else records
+        if rolling:
+            first_ns = min(r['timeNs'] for r in local)
+            last_ns = max(r['timeNs'] for r in local)
+        if window is not None:
+            nominal_start, nominal_end = window.get('startNs'), window.get('endNs')
+            if not (isinstance(nominal_start, int) and isinstance(nominal_end, int)
+                    and nominal_start <= first_ns <= last_ns <= nominal_end):
+                window = None
+                window_incomplete = True
+        for record in markers:
+            epoch = record['value0'] | (record['value1'] << 32)
+            tick = record['timeNs']
+            bursts.append(dict(epoch=epoch, burstNs=tick, idleSpanNs=record['spanNs'],
+                               previousSampleNs=record['payloadA']))
+            start, end = tick-5_000_000_000, tick+5_000_000_000
+            detail = dict(epoch=epoch, startNs=start, endNs=end, records=None,
+                          prior5sCovered=None, following5sCovered=None)
+            epochs = window.get('burstEpochs') if window is not None else None
+            if not rolling or (isinstance(epochs, list) and epoch in epochs):
+                detail.update(records=sum(start <= r['timeNs'] <= end for r in local),
+                              prior5sCovered=first_ns <= start, following5sCovered=last_ns >= end)
+                if rolling:
+                    detail['windowId'] = window['windowId']
+                    if start <= nominal_start and (window.get('preWindowTruncated') or window.get('beforeListenerStart')):
+                        detail['prior5sCovered'] = False
+                    coverage_end = window.get('coverageEndNs')
+                    if ((isinstance(coverage_end, int) and coverage_end < end)
+                            or (window.get('postWindowTruncated') and end >= nominal_end)):
+                        detail['following5sCovered'] = False
+                    if window.get('windowTruncated'):
+                        for side in ('prior5sCovered', 'following5sCovered'):
+                            if detail[side]:
+                                detail[side] = None
+            burst_windows.append(detail)
+    if any(source and source[1] and name not in file_ranges for name, source in sources.items()):
+        window_incomplete = True
     stalled=[dict(detectedNs=r['timeNs'],stalledNs=r['spanNs'],lastLoopNs=r['payloadA'])
              for r in records if r['kind']=='stalled']
     control=[dict(phase=r['value0'],success=r['value1'],session=r['session'],enterNs=r['timeNs'],

@@ -116,5 +116,40 @@ def main():
         summary.write_text(json.dumps(dict(recordsIssued=3, loopLogIncomplete=False)))
         legacy = m._looplog(loop)
         assert legacy['missingRecordCount'] == 19 and legacy['loopLogIncomplete']
+
+        loop_file.unlink()
+        ns = 1_000_000_000
+        windows, exports = [], []
+        for index, (epoch, start, burst, last) in enumerate([(1, 5, 10, 15), (2, 25, 30, 31), (3, 33, 38, 43)]):
+            file = f'looplog-{index}.bin'
+            source = f'looplog-window-{epoch}.bin'
+            windows.append(dict(windowId=epoch, startNs=start*ns, endNs=(burst+5)*ns,
+                                file=source, recordCount=3, burstEpochs=[epoch],
+                                preWindowTruncated=epoch == 1, postWindowTruncated=epoch == 2))
+            exports.append(dict(windowId=epoch, sourceFile=source, exportFile=f'paimage/loop/{file}',
+                                exportRecords=3, inRequestedWindow=True))
+            (loop/file).write_bytes(b''.join(m.LOOPLOG.pack(epoch*10+i, ts*ns, 0, 0, 0, kind, 0,
+                                                          epoch, 0, 0, 0, 0, 0, 0)
+                                             for i, (ts, kind) in enumerate([(start, 1), (burst, 6), (last, 1)])))
+        saved = dict(mode='rolling-burst-windows', recordsWritten=9, loopLogIncomplete=True,
+                     windows=windows, exportWindows=exports)
+        summary.write_text(json.dumps(saved))
+        scoped = m._looplog(loop)
+        assert next(w for w in scoped['burstWindows'] if w['epoch'] == 2)['following5sCovered'] is False
+        assert next(w for w in scoped['burstWindows'] if w['epoch'] == 3)['following5sCovered'] is True
+        exports[1]['exportFile'] = 'paimage/another/looplog-1.bin'
+        summary.write_text(json.dumps(saved))
+        unknown = next(w for w in m._looplog(loop)['burstWindows'] if w['epoch'] == 2)
+        assert unknown['prior5sCovered'] is None and unknown['following5sCovered'] is None
+        for i in (0, 1):
+            (loop/f'looplog-{i}.bin').unlink()
+            exports[i].update(inRequestedWindow=False, exportFile='', exportRecords=0)
+        summary.write_text(json.dumps(dict(saved, recordsWritten=3, loopLogIncomplete=False)))
+        assert not m._looplog(loop)['loopLogIncomplete']
+        (loop/'looplog-2.bin').rename(loop/'looplog-window-3.bin')
+        saved.pop('exportWindows')
+        summary.write_text(json.dumps(dict(saved, windows=windows[2:], recordsWritten=3, loopLogIncomplete=False)))
+        raw = m._looplog(loop)
+        assert raw['burstWindows'][0]['windowId'] == 3 and raw['burstWindows'][0]['following5sCovered'] is True
     print('PASS independent trace and LoopLog analyzer fixtures')
 if __name__=='__main__':main()

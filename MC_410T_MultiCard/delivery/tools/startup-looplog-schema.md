@@ -11,6 +11,10 @@ and five seconds after the marker. Overlapping markers are merged and their
 IDs/epochs are listed in `looplog-summary.json`. A burst before listener-start
 is retained as `beforeListenerStart`; a window that reaches the rolling-memory
 or post-window boundary records explicit truncation fields.
+When detailed diagnostics pause, the writer drains reservations accepted before
+the pause and freezes any open window. `coverageEndNs` records the end of
+collection in the same monotonic clock as the records. A pause at or after the
+planned end leaves that window's tail complete.
 
 There is no continuous receive-loop file when no burst occurs. The summary is
 still written and contains low-rate lifecycle/control/aggregate diagnostics.
@@ -42,6 +46,19 @@ window for that export. `queueDroppedAtOpen` is the cumulative drop count
 at the first marker and does not localize a loss to that window's prehistory.
 Compare the number of records read with `recordsWritten` for this rolling
 mode. Records outside retained windows are intentionally absent.
+
+In ZIPs, `exportWindows` maps each frozen window's ID and `sourceFile` to
+its `exportFile`, when any records were included. `inRequestedWindow=false`
+identifies a source window entirely outside the requested time range. Its
+status is retained in the inventory. The export applies truncation and file
+failures to intersecting windows and still reports unlocalized loss such as
+queue drops. Time and sequence clipping are reported separately from source
+window truncation.
+
+The analyzer derives each burst's time bounds from its own frozen file or
+the mapped ZIP member. The reported five-second coverage describes observed
+time bounds. Coverage is `null` when the analyzer cannot establish file
+ownership or when truncation leaves coverage uncertain.
 
 `counterExhausted` reports that the bounded admission counters reached
 their limit. New submissions stop at that point and the summary reports
