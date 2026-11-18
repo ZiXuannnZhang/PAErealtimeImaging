@@ -468,6 +468,16 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     const auto overlappingCorrupt=exportScoped(11,"scoped-overlapping-corrupt.zip");
     require(readLoopSummary(overlappingCorrupt,"listener").value("exportFormatError").toBool()&&
         windowManifest(overlappingCorrupt).value("traceIncomplete").toBool());
+    auto contradicting=keep;
+    contradicting.sequence=1;
+    contradicting.timeNs=51001000000ull;
+    write(oldFile,recordBytes(contradicting)+readFile(oldFile).mid(sizeof(keep),2*sizeof(keep)));
+    const auto inconsistentZip=exportScoped(50,"scoped-inconsistent.zip");
+    const auto inconsistent=readLoopSummary(inconsistentZip,"listener");
+    require(inconsistent.value("recordsWritten").toInt()==3&&
+        !inconsistent.value("exportCountCovered").toBool(true)&&
+        inconsistent.value("exportRetentionStatus")=="window_data_incomplete"&&
+        windowManifest(inconsistentZip).value("traceIncomplete").toBool());
 
     const auto liveRoot=root.filePath("live-burst");
     const auto liveRun=liveRoot+"/listener";

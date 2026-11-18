@@ -65,7 +65,7 @@ struct LoopExportRange {
 };
 
 LoopWindowCoverage checkLoopWindows(const QJsonObject &summary, const LoopExportRange &range,
-                                   const QHash<QString, LoopFileExport> &files)
+                                   const QHash<QString, LoopFileExport> &files, bool formatError)
 {
     LoopWindowCoverage result;
     if (!summary.value("windows").isArray()) {
@@ -77,7 +77,7 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary, const LoopExport
         return result;
     }
     const auto windows = summary.value("windows").toArray();
-    bool matches = summary.value("recordBytes").toInt() == sizeof(LoopRecord);
+    bool matches = !formatError && summary.value("recordBytes").toInt() == sizeof(LoopRecord);
     bool budget = false, writeFailure = false;
     bool hasBudgetWindow = false, hasWriteFailureWindow = false;
     bool truncated = false;
@@ -442,8 +442,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 const bool timingPresent=timingEvidence||timingMissing;
                 const bool timingIncomplete=timingMissing||(timingPresent&&(timingSummary.value("timingIncomplete").toBool()||
                     !timingFlushed||timingBad||!anchorKnown||!timingCountCovered));
-                auto coverage = loopWindowMode ? checkLoopWindows(loopSummary, loopRange, loopFiles) : LoopWindowCoverage{};
-                if (loopWindowMode && loopBad) coverage.covered = false;
+                auto coverage = loopWindowMode ? checkLoopWindows(loopSummary, loopRange, loopFiles, loopBad) : LoopWindowCoverage{};
                 // Schema 1 used continuous files. Only that legacy contract
                 // ties recordsIssued to the on-disk record count.
                 const bool legacyCount = !loopWindowMode && loopSummary.value("mode").toString().isEmpty() &&
