@@ -653,6 +653,42 @@ void appendDropReasons(const DiagnosticRecorder::DropCounters &drops, QStringLis
     if (drops.writeFallbackDropped) reasons->append(QStringLiteral("写入回退内存超限丢弃：%1").arg(drops.writeFallbackDropped));
 }
 
+QJsonObject dropCountersObject(const DiagnosticRecorder::DropCounters &drops)
+{
+    return {{QStringLiteral("queueDropped"), static_cast<double>(drops.queueDropped)},
+            {QStringLiteral("criticalQueueDropped"), static_cast<double>(drops.criticalQueueDropped)},
+            {QStringLiteral("noiseDropped"), static_cast<double>(drops.noiseDropped)},
+            {QStringLiteral("writeFallbackDropped"), static_cast<double>(drops.writeFallbackDropped)}};
+}
+
+// Merge only persisted run facts; a time window may deliberately scan past
+// the old manifest's last checkpoint after an abnormal exit.
+void mergeRunManifest(DiagnosticRecorder::ExportRequest &source, const QJsonObject &manifest,
+                      bool adoptBoundary, QStringList &reasons)
+{
+    if (source.runId.isEmpty()) source.runId = manifest.value(QStringLiteral("runId")).toString();
+    if (source.startIsoTime.isEmpty()) source.startIsoTime = manifest.value(QStringLiteral("startTime")).toString();
+    if (source.endIsoTime.isEmpty()) source.endIsoTime = manifest.value(QStringLiteral("endTime")).toString();
+    if (adoptBoundary && !source.boundarySequence)
+        source.boundarySequence = qMax<qint64>(0, manifest.value(QStringLiteral("boundarySequence")).toInteger());
+    if (manifest.value(QStringLiteral("active")).toBool() && !source.sourceWasActive)
+        reasons.append(QStringLiteral("该运行未正常结束，仅恢复已落盘记录，末尾日志可能缺失"));
+    source.writeError |= manifest.value(QStringLiteral("writeError")).toBool();
+    if (source.writeErrorText.isEmpty())
+        source.writeErrorText = manifest.value(QStringLiteral("writeErrorText")).toString();
+    const auto counters = manifest.value(QStringLiteral("dropCounters")).toObject();
+    const auto merge = [&](quint64 &value, const QString &name) {
+        value = qMax(value, static_cast<quint64>(qMax<qint64>(0, counters.value(name).toInteger())));
+    };
+    merge(source.drops.queueDropped, QStringLiteral("queueDropped"));
+    merge(source.drops.criticalQueueDropped, QStringLiteral("criticalQueueDropped"));
+    merge(source.drops.noiseDropped, QStringLiteral("noiseDropped"));
+    merge(source.drops.writeFallbackDropped, QStringLiteral("writeFallbackDropped"));
+    for (const auto &value : manifest.value(QStringLiteral("truncationReasons")).toArray()) {
+        if (value.isString() && !value.toString().isEmpty()) reasons.append(value.toString());
+    }
+}
+
 struct FilteredEvents { QByteArray runtime; QByteArray events; quint64 count = 0; };
 
 FilteredEvents readFilteredEvents(const QString &directory, quint64 boundary, const QVector<DiagnosticRecorder::Event> &fallback,
@@ -893,8 +929,7 @@ QJsonObject manifestObject(const QString &runId, const QString &startIso, const 
     manifest.insert(QStringLiteral("active"), active); manifest.insert(QStringLiteral("boundarySequence"), static_cast<double>(boundary)); manifest.insert(QStringLiteral("writeError"), writeError);
     if (writeError) manifest.insert(QStringLiteral("writeErrorText"), writeErrorText);
     manifest.insert(QStringLiteral("note"), note);
-    QJsonObject dropObject; dropObject.insert(QStringLiteral("queueDropped"), static_cast<double>(drops.queueDropped)); dropObject.insert(QStringLiteral("criticalQueueDropped"), static_cast<double>(drops.criticalQueueDropped)); dropObject.insert(QStringLiteral("noiseDropped"), static_cast<double>(drops.noiseDropped)); dropObject.insert(QStringLiteral("writeFallbackDropped"), static_cast<double>(drops.writeFallbackDropped));
-    manifest.insert(QStringLiteral("dropCounters"), dropObject);
+    manifest.insert(QStringLiteral("dropCounters"), dropCountersObject(drops));
     QJsonArray missingArray; for (const QString &value : missing) missingArray.append(value); manifest.insert(QStringLiteral("missingFiles"), missingArray);
     QJsonArray truncationArray; for (const QString &value : truncationReasons) truncationArray.append(value); manifest.insert(QStringLiteral("truncationReasons"), truncationArray);
     manifest.insert(QStringLiteral("truncated"), !truncationReasons.isEmpty() || !missing.isEmpty());
@@ -1977,22 +2012,8 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportRequest(const ExportR
     QByteArray manifestBytes;
     if (!request.capturedLive && !request.sourceDirectory.isEmpty()
         && capturedBytes(QDir(request.sourceDirectory).filePath(QStringLiteral("manifest.json")), request.historySnapshot.get(), &manifestBytes)) {
-        const QJsonObject sourceManifest = parseObject(manifestBytes);
-        if (effective.runId.isEmpty()) effective.runId = sourceManifest.value(QStringLiteral("runId")).toString();
-        if (effective.startIsoTime.isEmpty()) effective.startIsoTime = sourceManifest.value(QStringLiteral("startTime")).toString();
-        if (effective.endIsoTime.isEmpty()) effective.endIsoTime = sourceManifest.value(QStringLiteral("endTime")).toString();
-        if (effective.boundarySequence == 0)
-            effective.boundarySequence = static_cast<quint64>(sourceManifest.value(QStringLiteral("boundarySequence")).toDouble(0));
         if (!effective.historySnapshot) effective.sourceWasActive = runIsActive(effective.sourceDirectory);
-        if (sourceManifest.value(QStringLiteral("active")).toBool(false) && !effective.sourceWasActive)
-            sourceWarnings.append(QStringLiteral("该运行未正常结束，仅恢复已落盘记录，末尾日志可能缺失"));
-        effective.writeError = effective.writeError || sourceManifest.value(QStringLiteral("writeError")).toBool(false);
-        if (effective.writeErrorText.isEmpty()) effective.writeErrorText = sourceManifest.value(QStringLiteral("writeErrorText")).toString();
-        const QJsonObject sourceDrops = sourceManifest.value(QStringLiteral("dropCounters")).toObject();
-        effective.drops.queueDropped = qMax(effective.drops.queueDropped, static_cast<quint64>(sourceDrops.value(QStringLiteral("queueDropped")).toDouble(0)));
-        effective.drops.criticalQueueDropped = qMax(effective.drops.criticalQueueDropped, static_cast<quint64>(sourceDrops.value(QStringLiteral("criticalQueueDropped")).toDouble(0)));
-        effective.drops.noiseDropped = qMax(effective.drops.noiseDropped, static_cast<quint64>(sourceDrops.value(QStringLiteral("noiseDropped")).toDouble(0)));
-        effective.drops.writeFallbackDropped = qMax(effective.drops.writeFallbackDropped, static_cast<quint64>(sourceDrops.value(QStringLiteral("writeFallbackDropped")).toDouble(0)));
+        mergeRunManifest(effective, parseObject(manifestBytes), true, sourceWarnings);
     }
     if (!effective.capturedLive && !effective.historySnapshot && runIsActive(effective.sourceDirectory)) {
         ExportResult failed; failed.targetPath=targetZipPath; failed.error=QStringLiteral("活动运行需要先捕获快照，请重试导出"); return failed;
@@ -2074,9 +2095,10 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportTimeWindow(
     QSet<QString> sourceIds;
     QJsonArray activeSources;
     QJsonArray incompleteSources;
+    QJsonArray sourceRunIntegrity;
     DiagnosticRecorder::DropCounters drops;
     bool anyWriteError = false;
-    QString writeErrorText;
+    QStringList writeErrors;
     int formalEvents = 0;
     int formalRuntime = 0;
     int formalNetwork = 0;
@@ -2108,13 +2130,14 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportTimeWindow(
         ExportRequest source = originalSource;
         if (!source.captureError.isEmpty()) {
             if (source.capturedLive) { result.error=source.captureError; return result; }
+            if (sourceIds.contains(source.runId)) continue;
             sourceIds.insert(source.runId);
             incompleteSources.append(source.runId);
             if (source.sourceWasActive) activeSources.append(source.runId);
             truncationReasons.append(source.captureError);
             continue;
         }
-        if (source.runId.isEmpty() || source.sourceDirectory.isEmpty()) continue;
+        if (source.runId.isEmpty() || source.sourceDirectory.isEmpty() || sourceIds.contains(source.runId)) continue;
         if (!source.historySnapshot && (!safeDirectory(QFileInfo(source.sourceDirectory).absolutePath())
             || !safeDirectory(source.sourceDirectory)
             || !safeLockFile(source.sourceDirectory, QStringLiteral(".active.lock"))
@@ -2141,12 +2164,34 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportTimeWindow(
             truncationReasons.append(QStringLiteral("运行 %1 使用调用方提供的序号边界及活动文件固定前缀；跨进程文件间一致性无法验证").arg(source.runId));
         }
         sourceIds.insert(source.runId);
+        QStringList runReasons;
+        bool persistedIncomplete = false;
+        if (!source.capturedLive && !mutableSource && !source.sourceWasActive) {
+            QByteArray bytes;
+            if (capturedBytes(QDir(source.sourceDirectory).filePath(QStringLiteral("manifest.json")),
+                              source.historySnapshot.get(), &bytes)) {
+                const auto manifest = parseObject(bytes);
+                mergeRunManifest(source, manifest, false, runReasons);
+                persistedIncomplete = manifest.value(QStringLiteral("complete")).isBool() &&
+                                      !manifest.value(QStringLiteral("complete")).toBool();
+            }
+        }
+        appendDropReasons(source.drops, &runReasons);
+        if (source.writeError)
+            runReasons.append(QStringLiteral("该运行曾发生日志写入错误：%1").arg(source.writeErrorText));
+        runReasons.removeDuplicates();
+        for (const auto &reason : runReasons)
+            truncationReasons.append(QStringLiteral("运行 %1（整次运行，窗口内精确损失数量未知）：%2").arg(source.runId, reason));
+        sourceRunIntegrity.append(QJsonObject{
+            {QStringLiteral("runId"), source.runId},
+            {QStringLiteral("dropCounters"), dropCountersObject(source.drops)},
+            {QStringLiteral("writeError"), source.writeError},
+            {QStringLiteral("writeErrorText"), source.writeErrorText},
+            {QStringLiteral("truncationReasons"), QJsonArray::fromStringList(runReasons)}});
         appendRetentionReason(source.sourceDirectory,&truncationReasons,startMs,source.historySnapshot.get());
         if (source.sourceWasActive)
             activeSources.append(source.runId);
-        else if (!source.endIsoTime.isEmpty())
-            ;
-        else
+        if ((!source.sourceWasActive && source.endIsoTime.isEmpty()) || persistedIncomplete || !runReasons.isEmpty())
             incompleteSources.append(source.runId);
 
         if (source.pendingAtCapture)
@@ -2155,7 +2200,8 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportTimeWindow(
             truncationReasons.append(QStringLiteral("运行 %1 导出前刷新未完成或发生写入错误").arg(source.runId));
         mergeDrops(source.drops);
         anyWriteError = anyWriteError || source.writeError;
-        if (writeErrorText.isEmpty()) writeErrorText = source.writeErrorText;
+        if (!source.writeErrorText.isEmpty())
+            writeErrors.append(QStringLiteral("%1: %2").arg(source.runId, source.writeErrorText));
 
         if (source.capturedLive && source.boundarySequence == 0) continue;
 
@@ -2277,16 +2323,13 @@ DiagnosticRecorder::ExportResult DiagnosticRecorder::exportTimeWindow(
                     isoFromMillis(includedLatest));
     manifest.insert(QStringLiteral("activeSourceRunIds"), activeSources);
     manifest.insert(QStringLiteral("incompleteSourceRunIds"), incompleteSources);
+    manifest.insert(QStringLiteral("sourceRunIntegrity"), sourceRunIntegrity);
+    manifest.insert(QStringLiteral("recorderDropCountersScope"), QStringLiteral("source-runs; exact window loss unknown"));
     manifest.insert(QStringLiteral("missingFiles"), QJsonArray::fromStringList(missing));
     manifest.insert(QStringLiteral("truncationReasons"), QJsonArray::fromStringList(truncationReasons));
     manifest.insert(QStringLiteral("recorderWriteError"), anyWriteError);
-    if (!writeErrorText.isEmpty()) manifest.insert(QStringLiteral("recorderWriteErrorText"), writeErrorText);
-    QJsonObject dropObject;
-    dropObject.insert(QStringLiteral("queueDropped"), static_cast<double>(drops.queueDropped));
-    dropObject.insert(QStringLiteral("criticalQueueDropped"), static_cast<double>(drops.criticalQueueDropped));
-    dropObject.insert(QStringLiteral("noiseDropped"), static_cast<double>(drops.noiseDropped));
-    dropObject.insert(QStringLiteral("writeFallbackDropped"), static_cast<double>(drops.writeFallbackDropped));
-    manifest.insert(QStringLiteral("recorderDropCounters"), dropObject);
+    if (!writeErrors.isEmpty()) manifest.insert(QStringLiteral("recorderWriteErrorText"), writeErrors.join(QStringLiteral("; ")));
+    manifest.insert(QStringLiteral("recorderDropCounters"), dropCountersObject(drops));
     manifest.insert(QStringLiteral("note"), request.note);
 
     QHash<QString, QByteArray> contents;

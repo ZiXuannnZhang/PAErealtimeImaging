@@ -124,7 +124,8 @@ void createRun(const QString &root,
                const QString &first,
                const QString &last,
                bool active,
-               const QVector<QPair<quint64, QString>> &events)
+               const QVector<QPair<quint64, QString>> &events,
+               const QJsonObject &integrity = {})
 {
     const QString directory = QDir(root).filePath(QStringLiteral("run-") + runId);
     QDir().mkpath(directory);
@@ -167,13 +168,15 @@ void createRun(const QString &root,
     writeBytes(QDir(directory).filePath(QStringLiteral("network.json")), QByteArray("{}\n"));
     writeBytes(QDir(directory).filePath(QStringLiteral("settings.json")), QByteArray("{}\n"));
     writeBytes(QDir(directory).filePath(QStringLiteral("summary.txt")), QByteArray("synthetic\n"));
-    const QJsonObject manifest{{QStringLiteral("formatVersion"), 1},
+    QJsonObject manifest{{QStringLiteral("formatVersion"), 1},
                                {QStringLiteral("runId"), runId},
                                {QStringLiteral("startTime"), iso(first)},
                                {QStringLiteral("endTime"), active ? QString() : iso(last)},
                                {QStringLiteral("boundarySequence"), static_cast<double>(events.isEmpty() ? 0 : events.constLast().first)},
                                {QStringLiteral("active"), active},
                                {QStringLiteral("complete"), !active}};
+    for (auto it = integrity.begin(); it != integrity.end(); ++it)
+        manifest.insert(it.key(), it.value());
     writeBytes(QDir(directory).filePath(QStringLiteral("manifest.json")),
                QJsonDocument(manifest).toJson(QJsonDocument::Compact) + '\n');
 }
@@ -270,6 +273,56 @@ bool testTimeWindowAcrossRuns()
     if (!check(error.isEmpty() && QString::fromUtf8(emptyFiles.value(QStringLiteral("summary.txt"))).contains(QStringLiteral("该时间段没有日志")),
                QStringLiteral("empty window summary text missing"))) return false;
     return true;
+}
+
+bool testHistoricalRunIntegrity()
+{
+    QTemporaryDir temp;
+    if (!temp.isValid()) return false;
+    const auto now = QDateTime::currentDateTime();
+    const auto first = now.addSecs(-90).toString("yyyy-MM-dd HH:mm:ss");
+    const auto last = now.addSecs(-60).toString("yyyy-MM-dd HH:mm:ss");
+    createRun(temp.path(), "failed", first, last, false, {{101, first}},
+              {{"dropCounters", QJsonObject{{"queueDropped", 7}, {"writeFallbackDropped", 2}}},
+               {"complete", false}, {"writeError", true}, {"writeErrorText", "disk fault"},
+               {"truncationReasons", QJsonArray{"historical records truncated"}}});
+    createRun(temp.path(), "healthy", first, last, false, {{202, first}});
+    DiagnosticRecorder::Options options;
+    options.rootDirectory = temp.path();
+    DiagnosticRecorder fresh(options);
+    if (!fresh.flush(3000)) return false;
+    auto request = fresh.captureTimeWindowRequest(now.addSecs(-100), now.addSecs(-45));
+    for (const auto &source : std::as_const(request.sources))
+        if (source.runId == "failed") {
+            const auto duplicate = source;
+            request.sources.append(duplicate);
+            break;
+        }
+    const auto zipPath = temp.filePath("historical-integrity.zip");
+    const auto result = DiagnosticRecorder::exportTimeWindow(request, zipPath);
+    if (!check(result.success, result.error)) return false;
+    QString error;
+    const auto zip = readZip(zipPath, &error);
+    const auto manifest = QJsonDocument::fromJson(zip.value("manifest.json")).object();
+    const auto runs = manifest.value("sourceRunIntegrity").toArray();
+    QJsonObject failed, healthy;
+    for (const auto &entry : runs) {
+        const auto info = entry.toObject();
+        if (info.value("runId") == "failed") failed = info;
+        if (info.value("runId") == "healthy") healthy = info;
+    }
+    const auto aggregate = manifest.value("recorderDropCounters").toObject();
+    return check(error.isEmpty() && result.sourceRunCount == 2 && runs.size() == 2 &&
+        manifest.value("recorderWriteError").toBool() &&
+        aggregate.value("queueDropped").toInt() == 7 && aggregate.value("writeFallbackDropped").toInt() == 2 &&
+        !manifest.value("recorderDropCountersScope").toString().isEmpty() &&
+        failed.value("writeErrorText").toString() == "disk fault" &&
+        failed.value("truncationReasons").toArray().contains(QJsonValue("historical records truncated")) &&
+        healthy.value("writeError").isBool() && !healthy.value("writeError").toBool() &&
+        healthy.value("dropCounters").toObject().value("queueDropped").toInt(-1) == 0 &&
+        zip.value("events.jsonl").count("event-101") == 1 &&
+        zip.value("summary.txt").contains("historical records truncated"),
+        "historical integrity must follow the failing run and aggregate once");
 }
 
 bool testActiveImmutableBoundary()
@@ -554,6 +607,7 @@ int main(int argc, char **argv)
         return diagnostic_storage::tryPrune(args.at(2)) ? 0 : 1;
 #endif
     bool ok = testTimeWindowAcrossRuns();
+    ok = testHistoricalRunIntegrity() && ok;
 #ifdef Q_OS_WIN
     ok = testCrossProcessIntent() && ok;
 #endif
