@@ -55,7 +55,7 @@ public:
     LoopLog(std::filesystem::path,Budget);
     ~LoopLog();
     std::uint64_t push(LoopRecord) noexcept;
-    void pause() noexcept { paused_.store(true, std::memory_order_relaxed); }
+    void pause() noexcept;
     void stop(); // callers must stop producers first
 
     // Called from the receive thread for every acquisition sample datagram.
@@ -89,7 +89,7 @@ private:
     struct WindowMeta {
         std::uint64_t id=0,triggerSequence=0,startNs=0,endNs=0,recordCount=0,bytes=0;
         std::vector<BurstMarker> markers;
-        std::optional<std::uint64_t> stopCoverageNs;
+        std::optional<std::uint64_t> coverageEndNs;
         std::uint64_t firstOmittedSequence=0;
         bool preWindowTruncated=false,beforeListenerStart=false;
         bool budgetOmitted=false;
@@ -107,12 +107,11 @@ private:
         std::uint64_t openWindowTriggerSequence=0;
     };
 
-    std::atomic<bool> paused_{false};
     void run();
     void consumeRecord(const LoopRecord&, std::size_t queuePosition);
     void openWindow(const LoopRecord&, std::size_t queuePosition);
     void appendToWindow(const LoopRecord&);
-    void finalizeWindow(bool force);
+    void finalizeWindow(std::optional<std::uint64_t> coverageEndNs = std::nullopt);
     bool writeWindow(const ActiveWindow&);
     std::size_t windowRecordLimit() const;
     void trimRolling(std::uint64_t referenceNs);
@@ -122,9 +121,10 @@ private:
     std::filesystem::path root_;
     Budget budget_;
     std::unique_ptr<Slot[]> slots_;
-    // Admission updates both counters in one lock-free operation. The high
-    // 32 bits count drops and the low 32 count accepted queue positions.
+    // The top bit seals admission. The remaining bits count drops (high)
+    // and accepted queue positions (low).
     std::atomic<std::uint64_t> admission_{0};
+    std::atomic<std::uint64_t> pausedAtNs_{0};
     std::size_t read_=0;
     std::atomic<std::uint64_t> peak_{0},consumed_{0};
     std::atomic<bool> stopping_{false},writeFailed_{false},budgetExhausted_{false};

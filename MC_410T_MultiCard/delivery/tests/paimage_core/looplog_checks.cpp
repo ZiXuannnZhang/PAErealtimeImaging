@@ -48,6 +48,56 @@ int main(){try{
     check(std::filesystem::exists(root/"burst"/"looplog-summary.json"),"loop summary written");
     check(containsKind(root/"burst",LoopKind::BurstMark),"burst mark persisted");
 
+    for (const bool expired : {false, true}) {
+        const auto path=root/(expired?"pause-after-deadline":"pause-before-deadline");
+        std::promise<void> reserved, releaseProducer;
+        auto firstReserved=reserved.get_future();
+        auto release=releaseProducer.get_future();
+        LoopLog::Budget budget;
+        budget.beforePublish=[&](std::uint64_t sequence) {
+            if (sequence==3) {
+                reserved.set_value();
+                release.wait();
+            }
+        };
+        LoopLog log(path,budget);
+        const auto now=std::chrono::steady_clock::now();
+        const auto timeNs=[](auto time) {
+            return std::chrono::duration_cast<std::chrono::nanoseconds>(time.time_since_epoch()).count();
+        };
+        const auto endNs=timeNs(now)+(expired?-1000000000ll:750000000ll);
+        LoopRecord record;
+        record.kind=std::uint16_t(LoopKind::Loop);
+        record.timeNs=endNs-10000000000ull;
+        log.push(record);
+        auto marker=record;
+        marker.kind=std::uint16_t(LoopKind::BurstMark);
+        marker.timeNs=endNs-5000000000ull;
+        log.push(marker);
+        record.timeNs=endNs-1500000000ull;
+        std::thread producer([&]{log.push(record);});
+        firstReserved.wait();
+        log.pause();
+        const auto rejected=log.push(record);
+        const auto cut=LoopLog::captureCuts().front();
+        releaseProducer.set_value();
+        producer.join();
+        check(rejected==0&&cut.sequence==3&&cut.flush(),"pause preserves reservations and rejects new records");
+        auto inventory=cut.windowInventory();
+        const auto waitUntil=now+std::chrono::seconds(3);
+        while (inventory.find("\"recordsWritten\":3")==std::string::npos&&
+               std::chrono::steady_clock::now()<waitUntil) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            inventory=cut.windowInventory();
+        }
+        check(inventory.find("\"recordsWritten\":3")!=std::string::npos,
+              "pause freezes a window only after draining accepted tail records");
+        check(inventory.find("\"coverageEndNs\":")!=std::string::npos,
+              "a window frozen after pausing records the capture endpoint");
+        check(inventory.find(expired?"\"postWindowTruncated\":false":"\"postWindowTruncated\":true")
+              !=std::string::npos,"pause truncates the tail only before the window deadline");
+    }
+
     {
         std::promise<void> reserved, releaseProducer;
         auto firstReserved=reserved.get_future();

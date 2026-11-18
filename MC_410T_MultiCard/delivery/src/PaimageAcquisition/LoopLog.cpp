@@ -14,13 +14,14 @@ std::mutex registryMutex;
 std::vector<LoopLog*> registry;
 
 constexpr std::uint64_t kDropIncrement = std::uint64_t{1} << 32;
+constexpr std::uint64_t kAdmissionPaused = std::uint64_t{1} << 63;
 constexpr std::uint64_t accepted(std::uint64_t state) { return std::uint32_t(state); }
-constexpr std::uint64_t droppedCount(std::uint64_t state) { return state >> 32; }
+constexpr std::uint64_t droppedCount(std::uint64_t state) { return (state & ~kAdmissionPaused) >> 32; }
 constexpr std::uint64_t issued(std::uint64_t state) { return accepted(state) + droppedCount(state); }
 constexpr bool exhausted(std::uint64_t state) {
     // Keep headroom for concurrent producers already committing a drop.
     return accepted(state) == (std::numeric_limits<std::uint32_t>::max)() ||
-           droppedCount(state) >= (std::uint64_t{1} << 31);
+           droppedCount(state) >= (std::uint64_t{1} << 30);
 }
 static_assert(std::atomic<std::uint64_t>::is_always_lock_free, "LoopLog admission must not block");
 
@@ -136,6 +137,12 @@ void LoopLog::stop() {
     if (worker_.joinable()) worker_.join();
 }
 
+void LoopLog::pause() noexcept {
+    auto unset=std::uint64_t{0};
+    pausedAtNs_.compare_exchange_strong(unset,steadyNs(),std::memory_order_acq_rel);
+    admission_.fetch_or(kAdmissionPaused,std::memory_order_release);
+}
+
 std::uint64_t LoopLog::dropped() const { return droppedCount(admission_.load(std::memory_order_relaxed)); }
 std::uint64_t LoopLog::recordsIssued() const { return issued(admission_.load(std::memory_order_relaxed)); }
 bool LoopLog::incomplete() const {
@@ -144,10 +151,9 @@ bool LoopLog::incomplete() const {
 }
 
 std::uint64_t LoopLog::push(LoopRecord record) noexcept {
-    if(paused_.load(std::memory_order_relaxed)) return 0;
     auto state=admission_.load(std::memory_order_relaxed);
     for (int attempt=0;attempt<8;++attempt) {
-        if (exhausted(state)) return 0;
+        if ((state & kAdmissionPaused) || exhausted(state)) return 0;
         const auto position=accepted(state);
         auto& slot=slots_[position&(budget_.records-1)];
         const auto slotSequence=slot.sequence.load(std::memory_order_acquire);
@@ -173,6 +179,8 @@ std::uint64_t LoopLog::push(LoopRecord record) noexcept {
             state=admission_.load(std::memory_order_relaxed);
         }
     }
+    // A drop already determined while admission was open can finish after
+    // pause. It cannot reserve a slot or move the sealed queue position.
     if (exhausted(admission_.load(std::memory_order_relaxed))) return 0;
     return issued(admission_.fetch_add(kDropIncrement,std::memory_order_relaxed))+1;
 }
@@ -183,7 +191,7 @@ void LoopLog::noteThreadStart(std::uint64_t nowNs) noexcept {
 }
 
 void LoopLog::noteSampleData(std::uint64_t nowNs) noexcept {
-    if(paused_.load(std::memory_order_relaxed)) return;
+    if (admission_.load(std::memory_order_relaxed) & kAdmissionPaused) return;
     const auto previous=lastSampleNs_.exchange(nowNs,std::memory_order_acq_rel);
     if (!previous || nowNs<previous || nowNs-previous<2ull*1000000000ull) return;
     const auto epoch=freezeEpoch_.fetch_add(1,std::memory_order_acq_rel)+1;
@@ -287,11 +295,11 @@ bool LoopLog::writeWindow(const ActiveWindow& window) {
     return false;
 }
 
-void LoopLog::finalizeWindow(bool force) {
+void LoopLog::finalizeWindow(std::optional<std::uint64_t> coverageEndNs) {
     if (!activeWindow_) return;
     auto window=std::move(*activeWindow_);
     activeWindow_.reset();
-    if (force) window.meta.stopCoverageNs=lastConsumedNs_;
+    window.meta.coverageEndNs=coverageEndNs;
     window.meta.recordCount=window.records.size();
     window.meta.bytes=window.records.size()*kRecordBytes;
     const auto frozenLimit=std::min<std::uint64_t>(kFrozenBytes,budget_.totalBytes);
@@ -323,7 +331,7 @@ void LoopLog::consumeRecord(const LoopRecord& record, std::size_t queuePosition)
 
     const auto isBurst=record.kind==std::uint16_t(LoopKind::BurstMark);
     if (isBurst) {
-        if (activeWindow_ && record.timeNs>activeWindow_->meta.endNs) finalizeWindow(false);
+        if (activeWindow_ && record.timeNs>activeWindow_->meta.endNs) finalizeWindow();
         if (activeWindow_) {
             activeWindow_->meta.endNs=std::max(activeWindow_->meta.endNs,record.timeNs+kPostWindowNs);
             activeWindow_->meta.markers.push_back({record.sequence,burstEpoch(record),activeWindow_->meta.endNs});
@@ -392,7 +400,9 @@ void LoopLog::writeWindowList(std::ostream& summary,const std::vector<WindowMeta
             <<"\",\"preWindowTruncated\":"<<(window.preWindowTruncated?"true":"false")
             <<",\"beforeListenerStart\":"<<(window.beforeListenerStart?"true":"false")
             <<",\"postWindowTruncated\":"
-            <<((window.stopCoverageNs && *window.stopCoverageNs<window.endNs)?"true":"false")
+            <<((window.coverageEndNs && *window.coverageEndNs<window.endNs)?"true":"false");
+        if (window.coverageEndNs) summary<<",\"coverageEndNs\":"<<*window.coverageEndNs;
+        summary
             <<",\"windowTruncated\":"<<(window.firstOmittedSequence?"true":"false")
             <<",\"budgetOmitted\":"<<(window.budgetOmitted?"true":"false")
             <<",\"queueDroppedAtOpen\":"<<window.queueDroppedAtOpen
@@ -432,15 +442,25 @@ void LoopLog::run() {
         for (std::size_t i=0;i<batch.size();++i)
             consumeRecord(batch[i],read_-batch.size()+i);
         const bool stopping=stopping_.load(std::memory_order_acquire);
-        if (activeWindow_ && steadyNs()>=activeWindow_->meta.endNs) {
-            // At the deadline the queue may still contain records for this
-            // window. Drain to the producer position observed at expiry,
-            // independently of export clicks and subsequent ordinary traffic.
-            if (fencedWindowEnd!=activeWindow_->meta.endNs) {
-                fencedWindowEnd=activeWindow_->meta.endNs;
-                windowEndPosition=accepted(admission_.load(std::memory_order_acquire));
+        if (activeWindow_) {
+            const auto now=steadyNs();
+            const auto admission=admission_.load(std::memory_order_acquire);
+            const auto pausedAt=pausedAtNs_.load(std::memory_order_acquire);
+            if (admission & kAdmissionPaused) {
+                // Reservations made before pause can still be publishing.
+                if (read_==accepted(admission)) finalizeWindow(pausedAt);
+            } else if (!pausedAt && now>=activeWindow_->meta.endNs) {
+                // Drain to the producer position observed at expiry,
+                // independently of export clicks and later ordinary traffic.
+                if (fencedWindowEnd!=activeWindow_->meta.endNs) {
+                    fencedWindowEnd=activeWindow_->meta.endNs;
+                    windowEndPosition=accepted(admission);
+                }
+                if (read_>=windowEndPosition) {
+                    if (stopping) finalizeWindow(lastConsumedNs_);
+                    else finalizeWindow();
+                }
             }
-            if (read_>=windowEndPosition) finalizeWindow(stopping);
         }
 
         const auto requested=exportProgress_->requested.load(std::memory_order_acquire);
@@ -452,7 +472,6 @@ void LoopLog::run() {
         if (batch.empty())
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
-    if (activeWindow_) finalizeWindow(true);
     if (failed) writeFailed_.store(true,std::memory_order_release);
     writeSummary(windowWriteRecords_,writerUnwritten);
     exportProgress_->flushed.store(read_,std::memory_order_release);
