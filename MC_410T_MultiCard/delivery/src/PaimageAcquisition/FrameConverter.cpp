@@ -80,6 +80,10 @@ TriggerGroupPtr FrameConverter::convert(Frame frame,std::optional<Entry::SaveOve
         group->sessionGen=saveSession;
         group->measurementSession=frame->measurementSession;
         group->isComplete=frame->complete;group->sourceIPv4=frame->sourceIPv4;
+        group->firstPacketSeq = frame->basePacket;
+        group->expectedPacketSlots = frame->expected;
+        group->receivedPacketSlots = frame->unique;
+        if (!frame->complete) group->receivedSlotMask = frame->seen;
         group->sourceTimedOut=frame->reason==Decision::Timeout;
         if(normalization){
             const auto& n=*normalization;

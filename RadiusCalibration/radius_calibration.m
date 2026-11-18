@@ -33,6 +33,8 @@ cfg.triggersPerFile = 1000;             % 单文件触发数（FileSaver 默认 
 cfg.sampleCount = 5000;                 % 单触发采样点数
 cfg.fullAlinesPerChannel = 8000;        % 每通道每圈总 A-line 数量（含双波长，全孔径标定）
 cfg.useAllRounds = false;               % true=多圈全部参与重建（时间×圈数）
+cfg.confirmPhysicalPhase = false;       % 设备证据确认起始角和逻辑首触发为 532 nm 后设为 true
+cfg.allowUnverifiedLegacy = false;      % 显式使用没有旁车的历史文件并沿用原波长假设
 
 % ---- 采集 / 几何参数 ----
 cfg.fs = 250e6;                         % 监听程序实际采样率 [Hz]
@@ -94,6 +96,16 @@ cfg.previewChannel = 4;
 
 %% ================= 读取原始数据 =================
 bscanRaw = read_ring_bscan(cfg);
+captureEvidence = bscanRaw.captureEvidence;
+if strcmp(captureEvidence.source, 'legacy')
+    if ~cfg.allowUnverifiedLegacy
+        error('radius_calibration:LegacyEvidence', '历史文件缺少旁车。复核数据后可显式启用历史读法。');
+    end
+elseif ~cfg.confirmPhysicalPhase
+    error('radius_calibration:PhysicalPhase', '已核对软件轮次，需要设备证据确认起始角和波长相位。');
+else
+    captureEvidence.physicalPhase = 'operator-confirmed';
+end
 
 selectedCh = sort(unique(cfg.channelSel(:)'));
 if isempty(selectedCh) || any(selectedCh < 1 | selectedCh > 8)
@@ -435,7 +447,7 @@ if cfg.saveResults
     stamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
     matPath = fullfile(cfg.outDir, sprintf('radius_calib_%s.mat', stamp));
     save(matPath, 'radiusMm', 'radiusBest', 'corrPeak', 'curves', ...
-         'angleShift', 'angleOffsetDeg', 'cfg', 'selectedCh', ...
+         'angleShift', 'angleOffsetDeg', 'cfg', 'selectedCh', 'captureEvidence', ...
          'imgRefWl', 'imgNomWl', 'xVal', 'yVal');
 
     txtPath = fullfile(cfg.outDir, 'radiusPerChannel_mm.txt');

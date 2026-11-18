@@ -1,6 +1,7 @@
 #pragma once
 #include <QThread>
 #include <QFile>
+#include <QByteArray>
 #include <atomic>
 #include <functional>
 #include <optional>
@@ -85,6 +86,10 @@ public:
     void serviceCloseRequest();
     void suspendForSourceRestart();
     void resumeAfterSourceRestart();
+    void setRawAcquisitionEvidence(int sourceBits, double sampleIntervalNs) {
+        m_sourceBits = sourceBits;
+        m_sampleIntervalNs = sampleIntervalNs;
+    }
 
     // 自动保存会话代目录解析：按触发组携带的 sessionGen 查询保存目录。
     // gen=0（手动/无会话代）返回空串=保持当前目录不变。
@@ -204,6 +209,13 @@ private:
     // 的记录边界永久错位，宁可丢整段也不留半条。本函数只返回 bool 不 emit：
     // 它也被 closeFiles() / ~FileSaver() 调用，析构里不得发信号。
     bool flushWriteBuffers();
+    void recordRawColumn(const TriggerGroup& group);
+    void writeRawMetadata(const QByteArray& bytes);
+    void abandonRawMetadata(const QString& reason);
+    int m_sourceBits = 0; // Zero for callers without source assembly evidence.
+    double m_sampleIntervalNs = 0.0;
+    std::unique_ptr<QFile> m_rawMetadata;
+    QByteArray m_rawMetadataBatch;
     // 首次写盘故障只告警一次（磁盘满通常是持续性的，不要每段刷一条）。
     // startSaving() 开新会话时复位。
     bool m_writeFaulted = false;

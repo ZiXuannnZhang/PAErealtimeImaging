@@ -36,6 +36,12 @@ struct TriggerGroup {
     uint64_t measurementSession = 0;  // 采集会话令牌；成像旁路用来拒绝旧会话帧
     bool saveForceLate = false;       // save-only quarantine decision
     bool saveTailCandidate = false;   // require the old file still open
+    // Slots are relative to the first arrival. An empty mask with every
+    // expected slot received denotes full software coverage of that anchor.
+    uint16_t firstPacketSeq = 0;
+    uint32_t expectedPacketSlots = 0;
+    uint32_t receivedPacketSlots = 0;
+    std::vector<uint32_t> receivedSlotMask;
 
     // PAimage physical-round normalization metadata.  The source frame is
     // immutable, so FrameConverter copies this decision onto the host group
@@ -131,6 +137,10 @@ struct TriggerGroup {
         cardId = -1; triggerSeq = 0; sampleCount = 0;
         timestamp_ms = 0; isComplete = true; sourceIPv4 = 0;
         sessionGen = 0;
+        firstPacketSeq = 0;
+        expectedPacketSlots = 0;
+        receivedPacketSlots = 0;
+        receivedSlotMask.clear();
         measurementSession = 0;
         normalizationApplied = false;
         physicalDecision = paimage::PhysicalTriggerDecision::LogicalScan;

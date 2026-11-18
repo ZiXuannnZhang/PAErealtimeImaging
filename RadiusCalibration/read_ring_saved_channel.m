@@ -1,4 +1,4 @@
-function data = read_ring_saved_channel(dataDir, channelId, fileSuffix, fileCount, triggersPerFile, sampleCount)
+function [data, evidence] = read_ring_saved_channel(dataDir, channelId, fileSuffix, fileCount, triggersPerFile, sampleCount)
 %READ_RING_SAVED_CHANNEL 读取监听程序保存的单通道连续数据文件
 %
 % 输入:
@@ -11,7 +11,8 @@ function data = read_ring_saved_channel(dataDir, channelId, fileSuffix, fileCoun
 %
 % 输出:
 %   data : [sampleCount x fileCount*triggersPerFile] single 矩阵，
-%          列顺序 = 文件序号顺序、文件内触发顺序（与采集顺序一致）
+%          列顺序 = 文件序号顺序、文件内触发顺序。
+%   evidence : 旁车覆盖、逐列身份和采样间隔。没有旁车的旧文件按原定长规则读取。
 %
 % 命名规则（对应 FileSaver::generateFileName）:
 %   Card{N}_Ch{A|B}_{z}_{seq:03d}.dat
@@ -26,22 +27,49 @@ if channelId < 1 || channelId > 8
     error('read_ring_saved_channel:Channel', '通道代号必须为 1..8，当前为 %d。', channelId);
 end
 
+validateattributes(fileCount, {'numeric'}, {'scalar', 'integer', 'positive'});
+validateattributes(triggersPerFile, {'numeric'}, {'scalar', 'integer', 'positive'});
+validateattributes(sampleCount, {'numeric'}, {'scalar', 'integer', 'positive'});
 cardId = ceil(channelId / 2);
-chLetter = 'A';
-if mod(channelId, 2) == 0
-    chLetter = 'B';
+isLaneB = mod(channelId, 2) == 0;
+suffix = char(fileSuffix);
+if ~isempty(suffix)
+    suffix = ['_' suffix];
 end
 
-expectedPerFile = double(triggersPerFile) * double(sampleCount);
 data = zeros(sampleCount, fileCount * triggersPerFile, 'single');
+columns = cell(fileCount, 1);
+hasSidecar = false(1, fileCount);
+sampleInterval = NaN(1, fileCount);
+offset = 0;
 
 for k = 0:(fileCount - 1)
-    fileName = sprintf('Card%d_Ch%s_%s_%03d.dat', ...
-        cardId, chLetter, fileSuffix, k);
+    fileA = sprintf('Card%d_ChA%s_%03d.dat', cardId, suffix, k);
+    fileB = sprintf('Card%d_ChB%s_%03d.dat', cardId, suffix, k);
+    names = {fileA, fileB};
+    fileName = names{1 + isLaneB};
     filePath = fullfile(dataDir, fileName);
-    if ~exist(filePath, 'file')
-        error('read_ring_saved_channel:FileNotFound', ...
-            '找不到文件：%s', filePath);
+    if isempty(suffix) && ~isfile(filePath)
+        % Older callers also used two underscores for an empty suffix.
+        fileA = sprintf('Card%d_ChA__%03d.dat', cardId, k);
+        fileB = sprintf('Card%d_ChB__%03d.dat', cardId, k);
+        names = {fileA, fileB};
+        fileName = names{1 + isLaneB};
+        filePath = fullfile(dataDir, fileName);
+    end
+    if ~isfile(filePath)
+        error('read_ring_saved_channel:FileNotFound', '找不到文件：%s', filePath);
+    end
+    sidecar = fullfile(dataDir, [fileA '.jsonl']);
+    nColumns = triggersPerFile;
+    if isfile(sidecar)
+        [columns{k+1}, sampleInterval(k+1)] = readSidecar( ...
+            sidecar, dataDir, fileA, fileB, cardId, sampleCount);
+        nColumns = height(columns{k+1});
+        if nColumns > triggersPerFile
+            error('read_ring_saved_channel:Size', '旁车列数超过每文件触发上限：%s', sidecar);
+        end
+        hasSidecar(k+1) = true;
     end
 
     fid = fopen(filePath, 'r', 'ieee-le');
@@ -51,18 +79,76 @@ for k = 0:(fileCount - 1)
     u = fread(fid, Inf, 'uint16=>uint16');
     fclose(fid);
 
+    expectedPerFile = double(nColumns) * double(sampleCount);
     if numel(u) ~= expectedPerFile
         error('read_ring_saved_channel:Size', ...
             '文件 %s 元素数 %d 与预期 %d 不一致（triggersPerFile=%d, sampleCount=%d）。', ...
-            fileName, numel(u), expectedPerFile, triggersPerFile, sampleCount);
+            fileName, numel(u), expectedPerFile, nColumns, sampleCount);
     end
 
     % float16 -> single，再按列主序恢复为 [sampleCount x triggersPerFile]
     block = half_to_single(u);
-    block = reshape(block, [sampleCount, triggersPerFile]);
+    block = reshape(block, [sampleCount, nColumns]);
+    data(:, offset + (1:nColumns)) = block;
+    offset = offset + nColumns;
+end
+data(:, offset+1:end) = [];
 
-    % 严格按文件序号顺序写入预分配缓冲区，不改变采集顺序
-    cols = (k * triggersPerFile + 1) : ((k + 1) * triggersPerFile);
-    data(:, cols) = block;
+if any(hasSidecar) && ~all(hasSidecar)
+    error('read_ring_saved_channel:UnverifiedMetadata', '文件中混有缺少旁车的数据。');
+end
+evidence = struct('hasSidecar', all(hasSidecar), 'columns', table(), 'sampleIntervalNs', NaN);
+if all(hasSidecar)
+    if any(sampleInterval ~= sampleInterval(1))
+        error('read_ring_saved_channel:UnverifiedMetadata', '所选文件的采样间隔不一致。');
+    end
+    evidence.columns = vertcat(columns{:});
+    evidence.sampleIntervalNs = sampleInterval(1);
+end
+end
+
+function [columns, sampleInterval] = readSidecar(path, dataDir, fileA, fileB, card, sampleCount)
+try
+    lines = splitlines(string(fileread(path)));
+    lines(strlength(strtrim(lines)) == 0) = [];
+    layout = jsondecode(char(lines(1)));
+    ending = jsondecode(char(lines(end)));
+    count = numel(lines) - 2;
+    if count < 1 || ~strcmp(layout.type, 'pae-raw-pair') || layout.version ~= 1 || ...
+            layout.card ~= card || layout.sampleCount ~= sampleCount || ...
+            ~strcmp(layout.fileA, fileA) || ~strcmp(layout.fileB, fileB) || ...
+            ~strcmp(layout.packetAnchor, 'first-arrival') || ...
+            ~strcmp(layout.physicalPhase, 'unverified') || ...
+            ~strcmp(ending.type, 'end') || ending.confirmedColumns ~= count
+        error('旁车布局、文件名或封尾列数不匹配。');
+    end
+    sampleInterval = layout.sampleIntervalNs;
+    if ~isscalar(sampleInterval) || ~isfinite(sampleInterval) || sampleInterval <= 0
+        error('缺少有效采样间隔。');
+    end
+    for name = {fileA, fileB}
+        lane = dir(fullfile(dataDir, name{1}));
+        if ~isscalar(lane) || lane.isdir || lane.bytes ~= 2 * sampleCount * count
+            error('双通道文件长度与确认列数不匹配。');
+        end
+    end
+    decoded = arrayfun(@(line) jsondecode(char(line)), lines(2:end-1), 'UniformOutput', false);
+    rows = vertcat(decoded{:});
+    if any(~strcmp({rows.type}, 'column')) || ~isequal([rows.column], 1:count)
+        error('旁车列记录不连续。');
+    end
+    if any(cellfun(@isempty, regexp({rows.session}, '^[0-9]+$', 'once'))) || ...
+            any(cellfun(@isempty, regexp({rows.round}, '^[0-9]+$', 'once'))) || ...
+            any([rows.triggerSeq] < 0 | [rows.triggerSeq] > 65535 | mod([rows.triggerSeq], 1) ~= 0)
+        error('旁车触发身份无效。');
+    end
+    complete = [rows.complete] & [rows.expectedSlots] > 0 & ...
+        [rows.receivedSlots] == [rows.expectedSlots] & ~[rows.late] & ~[rows.tail];
+    columns = table(string({rows.session}).', string({rows.round}).', ...
+        [rows.logicalIndex].', [rows.triggerSeq].', complete.', ...
+        'VariableNames', {'session', 'round', 'index', 'trigger', 'complete'});
+catch exception
+    error('read_ring_saved_channel:UnverifiedMetadata', ...
+        '无法验证原始波形旁车 %s：%s', path, exception.message);
 end
 end

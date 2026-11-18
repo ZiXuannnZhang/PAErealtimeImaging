@@ -34,8 +34,9 @@ end
 
 savedData = cell(1, 8);
 trigCount = zeros(1, 8);
+provenance = cell(1, 8);
 for ch = selectedCh
-    savedData{ch} = read_ring_saved_channel(cfg.dataDir, ch, ...
+    [savedData{ch}, provenance{ch}] = read_ring_saved_channel(cfg.dataDir, ch, ...
         cfg.fileSuffix, cfg.filesPerChannel, ...
         cfg.triggersPerFile, cfg.sampleCount);
     trigCount(ch) = size(savedData{ch}, 2);
@@ -49,7 +50,7 @@ totalTrig = trigCount(selectedCh(1));
 
 % 全孔径标定：每个通道独立扫描完整一圈
 triggersPerCircle = cfg.fullAlinesPerChannel;
-if rem(triggersPerCircle, 2)
+if triggersPerCircle < 2 || rem(triggersPerCircle, 2)
     error('read_ring_bscan:FullAlines', ...
         'cfg.fullAlinesPerChannel 必须为偶数（双波长），当前为 %d。', ...
         triggersPerCircle);
@@ -59,11 +60,35 @@ useTrig = totalTrig;
 if ~cfg.useAllRounds
     useTrig = min(totalTrig, triggersPerCircle);
 end
-if totalTrig < triggersPerCircle
-    warning('read_ring_bscan:TriggerShortage', ...
-        '每通道触发数 %d 少于一圈所需 %d，将使用全部触发。', ...
-        totalTrig, triggersPerCircle);
+reference = provenance{selectedCh(1)};
+hasSidecar = cellfun(@(info) info.hasSidecar, provenance(selectedCh));
+if any(hasSidecar) && ~all(hasSidecar)
+    error('read_ring_bscan:UnverifiedMetadata', '所选卡的旁车覆盖不一致。');
 end
+if reference.hasSidecar
+    if isfield(cfg, 'fs') && abs(reference.sampleIntervalNs * cfg.fs / 1e9 - 1) > 1e-9
+        error('read_ring_bscan:SamplingRate', 'cfg.fs 与采集旁车中的采样间隔不一致。');
+    end
+    rows = reference.columns(1:useTrig, :);
+    for ch = selectedCh
+        other = provenance{ch};
+        if other.sampleIntervalNs ~= reference.sampleIntervalNs || ...
+                ~isequal(other.columns(1:useTrig, :), rows)
+            error('read_ring_bscan:UnverifiedCoverage', '所选卡的触发身份或接收覆盖不一致。');
+        end
+    end
+    verifySoftwareRounds(rows, triggersPerCircle);
+    evidence = struct('source', 'paired-sidecar', 'softwareRounds', useTrig / triggersPerCircle);
+else
+    if totalTrig < triggersPerCircle
+        warning('read_ring_bscan:TriggerShortage', ...
+            '每通道触发数 %d 少于一圈所需 %d，将使用全部历史触发。', ...
+            totalTrig, triggersPerCircle);
+    end
+    warning('read_ring_bscan:LegacyPhase', '历史文件缺少旁车，波长按原列顺序推定。');
+    evidence = struct('source', 'legacy', 'softwareRounds', NaN);
+end
+evidence.physicalPhase = 'unverified';
 if rem(useTrig, 2)
     error('read_ring_bscan:TriggerParity', ...
         '参与重建的触发数必须为偶数（双波长交替），当前为 %d。', useTrig);
@@ -74,7 +99,7 @@ wl2 = cell(1, 8);
 for ch = selectedCh
     mat = savedData{ch}(:, 1:useTrig);
 
-    % 触发奇偶即波长：第1、3、5...列=532nm，第2、4、6...列=1064nm
+    % 已验证覆盖时列从逻辑索引 0 开始。物理波长和相位仍需设备证据。
     wl1{ch} = mat(:, 1:2:end);
     wl2{ch} = mat(:, 2:2:end);
 end
@@ -82,4 +107,25 @@ clear savedData mat;
 
 bscan.wl1 = wl1;
 bscan.wl2 = wl2;
+bscan.captureEvidence = evidence;
+end
+
+function verifySoftwareRounds(rows, triggersPerCircle)
+count = height(rows);
+if count < triggersPerCircle || mod(count, triggersPerCircle) ~= 0 || any(~rows.complete)
+    error('read_ring_bscan:UnverifiedCoverage', '标定要求所选范围由完整的软件轮次组成。');
+end
+for first = 1:triggersPerCircle:count
+    range = first:(first + triggersPerCircle - 1);
+    block = rows(range, :);
+    sameRound = block.session == block.session(1) & block.round == block.round(1);
+    repeatedRound = first > 1 && block.session(1) == rows.session(first-1) && ...
+        block.round(1) == rows.round(first-1);
+    if block.session(1) == "0" || repeatedRound || ~all(sameRound) || ...
+            ~isequal(block.index, (0:triggersPerCircle-1).') || ...
+            any(mod(diff(block.trigger), 65536) ~= 1)
+        error('read_ring_bscan:UnverifiedCoverage', ...
+            '轮内逻辑起点、触发连续性或轮次归属无法验证。');
+    end
+end
 end

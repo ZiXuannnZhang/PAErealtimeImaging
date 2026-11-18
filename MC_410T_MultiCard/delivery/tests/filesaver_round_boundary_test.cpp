@@ -25,6 +25,8 @@
 #include <QTemporaryDir>
 #include <QDir>
 #include <QFile>
+#include <QJsonObject>
+#include <QJsonDocument>
 #include <QElapsedTimer>
 #include <cstring>
 #include <iostream>
@@ -985,6 +987,7 @@ int main(int argc, char** argv)
     for (int side=1; side<=2; ++side) {
         QTemporaryDir dir(QDir::currentPath()+"/r3-large-XXXXXX");
         FileSaver saver(0); int errors=0;
+        saver.setRawAcquisitionEvidence(32, 4.0);
         QObject::connect(&saver, &FileSaver::errorOccurred, &app, [&](const QString&) { ++errors; }, Qt::DirectConnection);
         saver.startSaving(dir.path(),100,"large");
         auto g=makeGroup(1,1,1); g->sampleCount=10000; g->freqA.assign(10000,1); g->freqB.assign(10000,-1);
@@ -997,6 +1000,37 @@ int main(int argc, char** argv)
               fileSizeOf(dir.path()+"/Card1_ChA_large_000.dat")==0 &&
               fileSizeOf(dir.path()+"/Card1_ChB_large_000.dat")==0,
               "R3 large direct write and flush failure rolled back both sides");
+        QFile metadata(dir.path() + "/Card1_ChA_large_000.dat.jsonl");
+        check(metadata.open(QIODevice::ReadOnly) && metadata.readLine().contains("pae-raw-pair") &&
+              metadata.atEnd(), "raw rollback has no confirmed metadata columns or end marker");
+    }
+    {
+        QTemporaryDir dir;
+        FileSaver saver(0);
+        saver.setRawAcquisitionEvidence(32, 4.0);
+        saver.startSaving(dir.path(), 100, "columns");
+        auto group = makeGroup(1, 1, 301);
+        group->measurementSession = 600;
+        group->logicalTriggerIndex = 13;
+        group->firstPacketSeq = 23;
+        group->expectedPacketSlots = 2;
+        group->receivedPacketSlots = 1;
+        group->receivedSlotMask = {1};
+        group->isComplete = false;
+        check(saver.consumeTriggerGroup(group), "partial raw group preserved");
+        check(saver.stopSaving().confirmed == 1, "partial raw column paired write confirmed");
+        QFile metadata(dir.path() + "/Card1_ChA_columns_000.dat.jsonl");
+        check(metadata.open(QIODevice::ReadOnly), "raw pair sidecar exists");
+        const auto layout = QJsonDocument::fromJson(metadata.readLine()).object();
+        const auto column = QJsonDocument::fromJson(metadata.readLine()).object();
+        const auto end = QJsonDocument::fromJson(metadata.readLine()).object();
+        check(layout.value("fileB").toString() == "Card1_ChB_columns_000.dat" &&
+              layout.value("sampleIntervalNs").toDouble() == 4.0 &&
+              column.value("column").toInt() == 1 && column.value("logicalIndex").toInt() == 13 &&
+              column.value("receivedSlots").toInt() == 1 &&
+              column.value("firstPacketSeq").toInt() == 23 && !column.value("complete").toBool() &&
+              end.value("confirmedColumns").toInt() == 1 && metadata.atEnd(),
+              "raw sidecar records exact column, relative slots and paired confirmation");
     }
     {
         QTemporaryDir dir(QDir::currentPath()+"/r3-late-XXXXXX");
