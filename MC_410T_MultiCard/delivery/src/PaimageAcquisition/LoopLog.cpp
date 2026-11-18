@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 
@@ -11,6 +12,17 @@ namespace paimage {
 namespace {
 std::mutex registryMutex;
 std::vector<LoopLog*> registry;
+
+constexpr std::uint64_t kDropIncrement = std::uint64_t{1} << 32;
+constexpr std::uint64_t accepted(std::uint64_t state) { return std::uint32_t(state); }
+constexpr std::uint64_t droppedCount(std::uint64_t state) { return state >> 32; }
+constexpr std::uint64_t issued(std::uint64_t state) { return accepted(state) + droppedCount(state); }
+constexpr bool exhausted(std::uint64_t state) {
+    // Keep headroom for concurrent producers already committing a drop.
+    return accepted(state) == (std::numeric_limits<std::uint32_t>::max)() ||
+           droppedCount(state) >= (std::uint64_t{1} << 31);
+}
+static_assert(std::atomic<std::uint64_t>::is_always_lock_free, "LoopLog admission must not block");
 
 std::int64_t qpc() {
     LARGE_INTEGER value{};
@@ -67,14 +79,15 @@ std::vector<LoopLog::Cut> LoopLog::captureCuts() {
     cuts.reserve(registry.size());
     for (LoopLog* log:registry) {
         const auto progress=log->exportProgress_;
-        const auto boundary=log->sequence_.load(std::memory_order_acquire);
-        const auto position=log->write_.load(std::memory_order_acquire);
+        const auto admission=log->admission_.load(std::memory_order_acquire);
+        const auto boundary=issued(admission);
+        const auto position=std::size_t(accepted(admission));
         auto requested=progress->requested.load(std::memory_order_relaxed);
         while (requested<position
                && !progress->requested.compare_exchange_weak(requested,position,
                                                                std::memory_order_release,
                                                                std::memory_order_relaxed)) {}
-        cuts.push_back({log->root_,boundary,log->dropped_.load(),log->freezeEpoch_.load(),
+        cuts.push_back({log->root_,boundary,droppedCount(admission),exhausted(admission),
             [progress,position]{
                 const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
                 while (!progress->done.load(std::memory_order_acquire)
@@ -96,7 +109,10 @@ std::vector<LoopLog::Cut> LoopLog::captureCuts() {
                                progress->openWindowTriggerSequence<=boundary;
                 }
                 std::uint64_t recordsWritten=0,budgetOmitted=0,pending=0;
-                for (const auto& window : windows) {
+                for (auto& window : windows) {
+                    while (window.markers.back().sequence>boundary) window.markers.pop_back();
+                    window.endNs=window.markers.back().endNs;
+                    if (window.firstOmittedSequence>boundary) window.firstOmittedSequence=0;
                     if (window.budgetOmitted) budgetOmitted+=window.recordCount;
                     else if (window.file.empty()) pending+=window.recordCount;
                     else recordsWritten+=window.recordCount;
@@ -120,33 +136,45 @@ void LoopLog::stop() {
     if (worker_.joinable()) worker_.join();
 }
 
+std::uint64_t LoopLog::dropped() const { return droppedCount(admission_.load(std::memory_order_relaxed)); }
+std::uint64_t LoopLog::recordsIssued() const { return issued(admission_.load(std::memory_order_relaxed)); }
+bool LoopLog::incomplete() const {
+    const auto state=admission_.load(std::memory_order_relaxed);
+    return droppedCount(state)!=0||exhausted(state)||writeFailed_.load()||budgetExhausted_.load();
+}
+
 std::uint64_t LoopLog::push(LoopRecord record) noexcept {
     if(paused_.load(std::memory_order_relaxed)) return 0;
-    record.sequence=sequence_.fetch_add(1,std::memory_order_relaxed)+1;
-    auto position=write_.load(std::memory_order_relaxed);
+    auto state=admission_.load(std::memory_order_relaxed);
     for (int attempt=0;attempt<8;++attempt) {
+        if (exhausted(state)) return 0;
+        const auto position=accepted(state);
         auto& slot=slots_[position&(budget_.records-1)];
         const auto slotSequence=slot.sequence.load(std::memory_order_acquire);
         const auto delta=std::intptr_t(slotSequence)-std::intptr_t(position);
         if (delta<0) break;
-        if (delta==0 && write_.compare_exchange_weak(position,position+1,
-                                                      std::memory_order_relaxed,
-                                                      std::memory_order_relaxed)) {
-            slot.record=record;
-            slot.sequence.store(position+1,std::memory_order_release);
-            const auto used=position+1-consumed_.load(std::memory_order_relaxed);
-            auto peak=peak_.load(std::memory_order_relaxed);
-            if (used>peak) peak_.compare_exchange_strong(peak,used,
-                                                          std::memory_order_relaxed,
-                                                          std::memory_order_relaxed);
-            if (record.kind==std::uint16_t(LoopKind::Loop))
-                lastProgress_.store(record.timeNs,std::memory_order_relaxed);
-            return record.sequence;
+        if (delta==0) {
+            if (admission_.compare_exchange_weak(state,state+1,std::memory_order_relaxed)) {
+                record.sequence=issued(state)+1;
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+                if (budget_.beforePublish) budget_.beforePublish(record.sequence);
+#endif
+                slot.record=record;
+                // Calculate backlog before releasing the slot to the writer.
+                const auto used=position+1-consumed_.load(std::memory_order_relaxed);
+                slot.sequence.store(position+1,std::memory_order_release);
+                auto peak=peak_.load(std::memory_order_relaxed);
+                if (used>peak) peak_.compare_exchange_strong(peak,used,std::memory_order_relaxed);
+                if (record.kind==std::uint16_t(LoopKind::Loop))
+                    lastProgress_.store(record.timeNs,std::memory_order_relaxed);
+                return record.sequence;
+            }
+        } else {
+            state=admission_.load(std::memory_order_relaxed);
         }
-        position=write_.load(std::memory_order_relaxed);
     }
-    dropped_.fetch_add(1,std::memory_order_relaxed);
-    return record.sequence;
+    if (exhausted(admission_.load(std::memory_order_relaxed))) return 0;
+    return issued(admission_.fetch_add(kDropIncrement,std::memory_order_relaxed))+1;
 }
 
 void LoopLog::noteThreadStart(std::uint64_t nowNs) noexcept {
@@ -187,27 +215,36 @@ void LoopLog::trimRolling(std::uint64_t referenceNs) {
     }
 }
 
-void LoopLog::openWindow(const LoopRecord& marker) {
+std::size_t LoopLog::windowRecordLimit() const {
+    constexpr auto maxRecords=std::size_t(kWindowBytes/kRecordBytes);
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+    if (budget_.windowRecordLimit) return std::min(maxRecords,budget_.windowRecordLimit);
+#endif
+    return maxRecords;
+}
+
+void LoopLog::openWindow(const LoopRecord& marker, std::size_t queuePosition) {
     ActiveWindow window;
     const auto burstTime=marker.timeNs;
     window.meta.id=nextWindowId_++;
     window.meta.triggerSequence=marker.sequence;
     window.meta.startNs=burstTime>kPreWindowNs?burstTime-kPreWindowNs:0;
     window.meta.endNs=burstTime+kPostWindowNs;
-    window.meta.queueDroppedAtOpen=dropped_.load(std::memory_order_relaxed);
+    window.meta.queueDroppedAtOpen=marker.sequence-(queuePosition+1);
     window.meta.retentionEvictedAtOpen=retentionEvicted_;
     const auto listenerStart=listenerStartNs_.load(std::memory_order_acquire);
     window.meta.beforeListenerStart=listenerStart!=0 && window.meta.startNs<listenerStart;
     window.meta.preWindowTruncated=window.meta.beforeListenerStart
         || rolling_.empty()
-        || (rolling_.front().timeNs && rolling_.front().timeNs>window.meta.startNs)
-        || window.meta.queueDroppedAtOpen!=0;
-    window.meta.burstEpochs.push_back(burstEpoch(marker));
-    const auto maxRecords=std::size_t(kWindowBytes/kRecordBytes);
+        || (rolling_.front().timeNs && rolling_.front().timeNs>window.meta.startNs);
+    // The run's cumulative drops do not establish when a pre-window
+    // record was lost. Report transport loss separately from coverage.
+    window.meta.markers.push_back({marker.sequence,burstEpoch(marker),window.meta.endNs});
+    const auto maxRecords=windowRecordLimit();
     for (const auto& record:rolling_) {
         if (record.timeNs<window.meta.startNs || record.timeNs>burstTime) continue;
         if (window.records.size()<maxRecords) window.records.push_back(record);
-        else window.meta.windowTruncated=true;
+        else if (!window.meta.firstOmittedSequence) window.meta.firstOmittedSequence=record.sequence;
     }
     activeWindow_=std::move(window);
     {
@@ -221,12 +258,12 @@ void LoopLog::appendToWindow(const LoopRecord& record) {
     if (!activeWindow_) return;
     auto& window=*activeWindow_;
     if (record.timeNs<window.meta.startNs || record.timeNs>window.meta.endNs) return;
-    const auto maxRecords=std::size_t(kWindowBytes/kRecordBytes);
+    if (!window.records.empty() && window.records.back().sequence==record.sequence) return;
+    const auto maxRecords=windowRecordLimit();
     if (window.records.size()>=maxRecords) {
-        window.meta.windowTruncated=true;
+        if (!window.meta.firstOmittedSequence) window.meta.firstOmittedSequence=record.sequence;
         return;
     }
-    if (!window.records.empty() && window.records.back().sequence==record.sequence) return;
     window.records.push_back(record);
 }
 
@@ -254,7 +291,7 @@ void LoopLog::finalizeWindow(bool force) {
     if (!activeWindow_) return;
     auto window=std::move(*activeWindow_);
     activeWindow_.reset();
-    if (force && lastConsumedNs_<window.meta.endNs) window.meta.postWindowTruncated=true;
+    if (force) window.meta.stopCoverageNs=lastConsumedNs_;
     window.meta.recordCount=window.records.size();
     window.meta.bytes=window.records.size()*kRecordBytes;
     const auto frozenLimit=std::min<std::uint64_t>(kFrozenBytes,budget_.totalBytes);
@@ -277,7 +314,7 @@ void LoopLog::finalizeWindow(bool force) {
     }
 }
 
-void LoopLog::consumeRecord(const LoopRecord& record) {
+void LoopLog::consumeRecord(const LoopRecord& record, std::size_t queuePosition) {
     if (record.timeNs>lastConsumedNs_) lastConsumedNs_=record.timeNs;
     trimRolling(record.timeNs);
     rolling_.push_back(record);
@@ -289,10 +326,10 @@ void LoopLog::consumeRecord(const LoopRecord& record) {
         if (activeWindow_ && record.timeNs>activeWindow_->meta.endNs) finalizeWindow(false);
         if (activeWindow_) {
             activeWindow_->meta.endNs=std::max(activeWindow_->meta.endNs,record.timeNs+kPostWindowNs);
-            activeWindow_->meta.burstEpochs.push_back(burstEpoch(record));
+            activeWindow_->meta.markers.push_back({record.sequence,burstEpoch(record),activeWindow_->meta.endNs});
             appendToWindow(record);
         } else {
-            openWindow(record);
+            openWindow(record,queuePosition);
         }
     } else if (activeWindow_) {
         appendToWindow(record);
@@ -307,10 +344,12 @@ void LoopLog::writeSummary(std::uint64_t recordsWritten,std::uint64_t writerUnwr
     }
     const auto segmentRecords=budget_.segmentBytes/kRecordBytes;
     const auto totalRecords=budget_.totalBytes/kRecordBytes;
+    const auto admission=admission_.load(std::memory_order_relaxed);
     summary<<"{\"schemaVersion\":2,\"mode\":\"rolling-burst-windows\","
-        <<"\"recordBytes\":80,\"recordsIssued\":"<<sequence_.load()
+        <<"\"recordBytes\":80,\"recordsIssued\":"<<issued(admission)
         <<",\"recordsWritten\":"<<recordsWritten
-        <<",\"queueDropped\":"<<dropped_.load()
+        <<",\"queueDropped\":"<<droppedCount(admission)
+        <<",\"counterExhausted\":"<<(exhausted(admission)?"true":"false")
         <<",\"writerUnwritten\":"<<writerUnwritten
         <<",\"budgetOmitted\":"<<budgetOmittedRecords_
         <<",\"pending\":"<<pendingRecords_
@@ -352,15 +391,16 @@ void LoopLog::writeWindowList(std::ostream& summary,const std::vector<WindowMeta
             <<",\"bytes\":"<<window.bytes<<",\"file\":\""<<window.file
             <<"\",\"preWindowTruncated\":"<<(window.preWindowTruncated?"true":"false")
             <<",\"beforeListenerStart\":"<<(window.beforeListenerStart?"true":"false")
-            <<",\"postWindowTruncated\":"<<(window.postWindowTruncated?"true":"false")
-            <<",\"windowTruncated\":"<<(window.windowTruncated?"true":"false")
+            <<",\"postWindowTruncated\":"
+            <<((window.stopCoverageNs && *window.stopCoverageNs<window.endNs)?"true":"false")
+            <<",\"windowTruncated\":"<<(window.firstOmittedSequence?"true":"false")
             <<",\"budgetOmitted\":"<<(window.budgetOmitted?"true":"false")
             <<",\"queueDroppedAtOpen\":"<<window.queueDroppedAtOpen
             <<",\"retentionEvictedAtOpen\":"<<window.retentionEvictedAtOpen
             <<",\"burstEpochs\":[";
-        for (std::size_t epoch=0;epoch<window.burstEpochs.size();++epoch) {
+        for (std::size_t epoch=0;epoch<window.markers.size();++epoch) {
             if (epoch) summary<<',';
-            summary<<window.burstEpochs[epoch];
+            summary<<window.markers[epoch].epoch;
         }
         summary<<"]}";
     }
@@ -389,7 +429,8 @@ void LoopLog::run() {
             ++read_;
         }
         consumed_.store(read_,std::memory_order_release);
-        for (const auto& record:batch) consumeRecord(record);
+        for (std::size_t i=0;i<batch.size();++i)
+            consumeRecord(batch[i],read_-batch.size()+i);
         const bool stopping=stopping_.load(std::memory_order_acquire);
         if (activeWindow_ && steadyNs()>=activeWindow_->meta.endNs) {
             // At the deadline the queue may still contain records for this
@@ -397,7 +438,7 @@ void LoopLog::run() {
             // independently of export clicks and subsequent ordinary traffic.
             if (fencedWindowEnd!=activeWindow_->meta.endNs) {
                 fencedWindowEnd=activeWindow_->meta.endNs;
-                windowEndPosition=write_.load(std::memory_order_acquire);
+                windowEndPosition=accepted(admission_.load(std::memory_order_acquire));
             }
             if (read_>=windowEndPosition) finalizeWindow(stopping);
         }
@@ -407,7 +448,7 @@ void LoopLog::run() {
             && read_>=requested) {
             exportProgress_->flushed.store(read_,std::memory_order_release);
         }
-        if (stopping && !activeWindow_ && read_==write_.load(std::memory_order_acquire)) break;
+        if (stopping && !activeWindow_ && read_==accepted(admission_.load(std::memory_order_acquire))) break;
         if (batch.empty())
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }

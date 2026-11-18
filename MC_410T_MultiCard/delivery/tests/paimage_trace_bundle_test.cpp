@@ -501,6 +501,106 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
             windowManifest(newerZip).value("traceIncomplete").toBool());
     }
 
+    const auto lossRoot = root.filePath("cut-loss");
+    const auto lossRun = lossRoot + "/listener";
+    require(QDir().mkpath(lossRun));
+    write(lossRun+"/run-config.json",QJsonDocument(QJsonObject{
+        {"runId","listener"},{"wallAnchorMs",double(wall-6000)},
+        {"monotonicAnchorNs","1000000"},{"diagnosticTraceEnabled",false},
+        {"timingEnabled",false},{"loopLogEnabled",true}}).toJson());
+    paimage::installTraceBundle(lossRoot,tools);
+    {
+        std::promise<void> releaseWriter;
+        auto release = releaseWriter.get_future();
+        paimage::LoopLog::Budget budget{64};
+        budget.beforeDrain = [&]{ if (release.valid()) release.get(); };
+        paimage::LoopLog live(std::filesystem::path(lossRun.toStdWString()),budget);
+        live.push(firstLoop);
+        auto marker = burst;
+        marker.timeNs = firstLoop.timeNs + 5000000000ull;
+        live.push(marker);
+        const auto lossStart = QDateTime::fromMSecsSinceEpoch(wall-7000);
+        const auto beforeLoss = recorder.registerTimeWindowRequest(lossStart,end);
+        auto outside = firstLoop;
+        outside.timeNs = marker.timeNs + 5000000001ull;
+        for (int i=0;i<80;++i) live.push(outside);
+        const auto afterLoss = recorder.registerTimeWindowRequest(lossStart,end);
+        releaseWriter.set_value();
+        live.stop();
+        require(live.dropped()==18);
+
+        const auto beforePath = root.filePath("before-loss.zip");
+        require(DiagnosticRecorder::exportTimeWindow(beforeLoss,beforePath).success);
+        const auto before = zipEntries(beforePath);
+        const auto summary = readLoopSummary(before,"listener");
+        const auto metadata = summary.value("windows").toArray().first().toObject();
+        require(summary.value("recordsWritten").toInt()==2 &&
+            summary.value("queueDropped").toInt(-1)==0 &&
+            metadata.value("queueDroppedAtOpen").toInt(-1)==0 &&
+            !metadata.value("preWindowTruncated").toBool(true) &&
+            summary.value("exportRetentionStatus")=="windows_retained" &&
+            !windowManifest(before).value("traceIncomplete").toBool(true));
+        const auto afterPath = root.filePath("after-loss.zip");
+        require(DiagnosticRecorder::exportTimeWindow(afterLoss,afterPath).success);
+        const auto after = zipEntries(afterPath);
+        require(readLoopSummary(after,"listener").value("queueDropped").toInt()==18 &&
+            windowManifest(after).value("traceIncomplete").toBool());
+    }
+
+    const auto mergedRoot = root.filePath("cut-merged");
+    const auto mergedRun = mergedRoot + "/listener";
+    require(QDir().mkpath(mergedRun));
+    const auto clockNs = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    const auto clockWall = QDateTime::currentDateTime();
+    write(mergedRun+"/run-config.json",QJsonDocument(QJsonObject{
+        {"runId","listener"},{"wallAnchorMs",double(clockWall.toMSecsSinceEpoch())},
+        {"monotonicAnchorNs",QString::number(clockNs)},{"diagnosticTraceEnabled",false},
+        {"timingEnabled",false},{"loopLogEnabled",true}}).toJson());
+    paimage::installTraceBundle(mergedRoot,tools);
+    {
+        std::promise<void> releaseWriter;
+        auto release = releaseWriter.get_future();
+        paimage::LoopLog::Budget budget{64};
+        budget.beforeDrain = [&]{ if (release.valid()) release.get(); };
+        budget.windowRecordLimit = 3;
+        paimage::LoopLog live(std::filesystem::path(mergedRun.toStdWString()),budget);
+        auto history = firstLoop;
+        history.timeNs = clockNs - 10000000000ull;
+        live.push(history);
+        auto marker = burst;
+        marker.timeNs = history.timeNs + 5000000000ull;
+        marker.value0 = 1;
+        live.push(marker);
+        const auto beforeMerge = recorder.registerTimeWindowRequest(clockWall.addSecs(-11),clockWall.addSecs(2));
+        marker.timeNs += 2000000000ull;
+        marker.value0 = 2;
+        live.push(marker);
+        auto tail = history;
+        tail.timeNs = clockNs;
+        live.push(tail);
+        const auto afterMerge = recorder.registerTimeWindowRequest(clockWall.addSecs(-11),clockWall.addSecs(2));
+        releaseWriter.set_value();
+        // The source reaches the original window end but stops before the
+        // post-click marker's extended end.
+        live.stop();
+        const auto verifyMerge = [&](const auto& cut, const QString& filename, bool extended) {
+            const auto path = root.filePath(filename);
+            require(DiagnosticRecorder::exportTimeWindow(cut,path).success);
+            const auto zip = zipEntries(path);
+            const auto summary = readLoopSummary(zip,"listener");
+            const auto window = summary.value("windows").toArray().first().toObject();
+            require(window.value("endNs").toInteger()==clockNs+(extended?2000000000ll:0) &&
+                window.value("burstEpochs").toArray().size()==(extended?2:1) &&
+                window.value("postWindowTruncated").toBool()==extended &&
+                window.value("windowTruncated").toBool()==extended &&
+                summary.value("recordsWritten").toInt()==(extended?3:2) &&
+                windowManifest(zip).value("traceIncomplete").toBool()==extended);
+        };
+        verifyMerge(beforeMerge,"before-merge.zip",false);
+        verifyMerge(afterMerge,"after-merge.zip",true);
+    }
+
     DiagnosticRecorder::setBundleCapture({});
     std::cout<<"PASS trace boundaries, stop/prune handoff and LoopLog burst window integrity"<<std::endl;
 }

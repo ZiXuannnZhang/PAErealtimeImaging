@@ -126,6 +126,7 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
     else if (budget) result.status = "budget_omitted";
     else if (!matches || truncated) result.status = "window_data_incomplete";
     else if (summary.value("openWindowPending").toBool()) result.status = "open_window_pending";
+    else if (windows.isEmpty() && summary.value("queueDropped").toDouble()>0) result.status = "queue_dropped";
     else if (windows.isEmpty() && summary.value("burstMarkEpochs").toInteger() == 0) result.status = "no_burst";
     else if (files.isEmpty()) result.status = "not_retained_by_policy";
     else result.status = "windows_retained";
@@ -237,7 +238,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     // The disk summary can contain later run-wide failures.
                     loopSummary = {{"schemaVersion",2},{"mode","rolling-burst-windows"},
                         {"recordBytes",int(sizeof(LoopRecord))},{"recordsIssued",double(loopCut->sequence)},
-                        {"queueDropped",double(loopCut->dropped)},{"burstMarkEpochs",double(loopCut->freezeEpoch)}};
+                        {"queueDropped",double(loopCut->dropped)},{"counterExhausted",loopCut->counterExhausted}};
                     for (const auto* key : {"queueAllocatedBytes","segmentBudgetBytes","segmentRecordBudget",
                          "segmentTailBytes","totalBudgetBytes","totalRecordBudget","totalTailBytes",
                          "continuousListenerLoopLog","preWindowSeconds","postWindowSeconds",
@@ -263,7 +264,8 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 const bool loopEvidence = loopLive || QFileInfo::exists(loopSummaryPath) || !loopNames.isEmpty();
                 const quint64 loopBoundary = loopLive ? loopCut->sequence : quint64(loopSummary.value("recordsIssued").toDouble());
                 const bool loopBoundaryKnown = loopLive || loopSummary.contains("recordsIssued");
-                const bool loopDropped = loopSummary.value("queueDropped").toDouble()>0;
+                const bool loopDropped = loopSummary.value("queueDropped").toDouble()>0 ||
+                    loopSummary.value("counterExhausted").toBool();
                 const bool timingMissing=timingEnabled.isBool()&&timingEnabled.toBool()&&!timingEvidence;
                 const bool loopMissing=loopEnabled.isBool()&&loopEnabled.toBool()&&!loopEvidence;
                 const qint64 mono=metadata.value("monotonicAnchorNs").toString().toLongLong();
@@ -367,12 +369,12 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     QByteArray chosen;
                     constexpr qsizetype recordBytes = sizeof(LoopRecord);
                     for(qsizetype at=0;at+recordBytes<=bytes.size();at+=recordBytes){LoopRecord r;std::memcpy(&r,bytes.constData()+at,recordBytes);
+                        if(loopBoundaryKnown&&r.sequence>loopBoundary){++file.afterCut;continue;}
                         if (loopWindowMode && (!r.sequence || r.kind < uint16_t(LoopKind::Loop) ||
                                               r.kind > uint16_t(LoopKind::ControlMark))) {
                             file.formatError = true;
                             continue;
                         }
-                        if(loopBoundaryKnown&&r.sequence>loopBoundary){++file.afterCut;continue;}
                         const qint64 time=anchorKnown?wall+(qint64(r.timeNs)-mono)/1000000:0;
                         if(anchorKnown&&(time<start||time>end)){++file.filtered;continue;}
                         chosen.append(bytes.constData()+at,recordBytes);++file.selected;}

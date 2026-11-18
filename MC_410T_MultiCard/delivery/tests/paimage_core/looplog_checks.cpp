@@ -49,6 +49,41 @@ int main(){try{
     check(containsKind(root/"burst",LoopKind::BurstMark),"burst mark persisted");
 
     {
+        std::promise<void> reserved, releaseProducer;
+        auto firstReserved=reserved.get_future();
+        auto release=releaseProducer.get_future();
+        LoopLog::Budget budget;
+        budget.records=2;
+        budget.beforePublish=[&](std::uint64_t sequence) {
+            if (sequence==1) {
+                reserved.set_value();
+                release.wait();
+            }
+        };
+        LoopLog log(root/"out-of-order-publication",budget);
+        LoopRecord history;
+        history.kind=std::uint16_t(LoopKind::Loop);
+        history.timeNs=1000000;
+        std::thread producer([&]{log.push(history);});
+        firstReserved.wait();
+        auto marker=history;
+        marker.kind=std::uint16_t(LoopKind::BurstMark);
+        marker.timeNs+=5000000000ull;
+        const auto markerSequence=log.push(marker);
+        const auto dropSequence=log.push(history);
+        auto cut=LoopLog::captureCuts().front();
+        releaseProducer.set_value();
+        producer.join();
+        log.stop();
+        check(markerSequence==2&&dropSequence==3&&cut.sequence==3&&cut.dropped==1&&cut.flush(),
+              "click captures one prefix of reservations and drops before slots publish in order");
+        const auto inventory=cut.windowInventory();
+        check(inventory.find("\"recordsWritten\":2")!=std::string::npos&&
+              inventory.find("\"queueDroppedAtOpen\":0")!=std::string::npos,
+              "drop after trigger does not change the trigger's cumulative loss evidence");
+    }
+
+    {
         std::promise<void> drainEntered, releaseDrain;
         auto entered=drainEntered.get_future();
         auto release=releaseDrain.get_future();

@@ -47,6 +47,8 @@ public:
         std::uint64_t totalBytes=256ull*1024*1024;
 #ifdef PAIMAGE_SOCKET_TEST_SEAM
         std::function<void()> beforeDrain;
+        std::function<void(std::uint64_t)> beforePublish;
+        std::size_t windowRecordLimit=0;
 #endif
     };
     explicit LoopLog(std::filesystem::path);
@@ -62,15 +64,16 @@ public:
     void noteSampleData(std::uint64_t nowNs) noexcept;
     void noteThreadStart(std::uint64_t nowNs) noexcept;
 
-    bool incomplete()const{return dropped_.load()!=0||writeFailed_.load()||budgetExhausted_.load();}
-    std::uint64_t dropped()const{return dropped_.load();}
+    bool incomplete() const;
+    std::uint64_t dropped() const;
     std::uint64_t freezeEpoch()const{return freezeEpoch_.load();}
     std::uint64_t lastProgressNs()const{return lastProgress_.load();}
-    std::uint64_t recordsIssued()const{return sequence_.load();}
+    std::uint64_t recordsIssued() const;
 
     struct Cut {
         std::filesystem::path root;
-        std::uint64_t sequence=0,dropped=0,freezeEpoch=0;
+        std::uint64_t sequence=0,dropped=0;
+        bool counterExhausted=false;
         // The queue-drain fence and the outcome of eligible windows are
         // separate, since later windows can fail while an export is pending.
         std::function<bool()> flush;
@@ -80,11 +83,16 @@ public:
 
 private:
     struct alignas(64) Slot {std::atomic<std::size_t> sequence;LoopRecord record;};
+    struct BurstMarker {
+        std::uint64_t sequence,epoch,endNs;
+    };
     struct WindowMeta {
         std::uint64_t id=0,triggerSequence=0,startNs=0,endNs=0,recordCount=0,bytes=0;
-        std::vector<std::uint64_t> burstEpochs;
+        std::vector<BurstMarker> markers;
+        std::optional<std::uint64_t> stopCoverageNs;
+        std::uint64_t firstOmittedSequence=0;
         bool preWindowTruncated=false,beforeListenerStart=false;
-        bool postWindowTruncated=false,windowTruncated=false,budgetOmitted=false;
+        bool budgetOmitted=false;
         std::uint64_t queueDroppedAtOpen=0,retentionEvictedAtOpen=0;
         std::string file;
     };
@@ -101,11 +109,12 @@ private:
 
     std::atomic<bool> paused_{false};
     void run();
-    void consumeRecord(const LoopRecord&);
-    void openWindow(const LoopRecord&);
+    void consumeRecord(const LoopRecord&, std::size_t queuePosition);
+    void openWindow(const LoopRecord&, std::size_t queuePosition);
     void appendToWindow(const LoopRecord&);
     void finalizeWindow(bool force);
     bool writeWindow(const ActiveWindow&);
+    std::size_t windowRecordLimit() const;
     void trimRolling(std::uint64_t referenceNs);
     void writeSummary(std::uint64_t recordsWritten,std::uint64_t writerUnwritten);
     static void writeWindowList(std::ostream&, const std::vector<WindowMeta>&);
@@ -113,9 +122,11 @@ private:
     std::filesystem::path root_;
     Budget budget_;
     std::unique_ptr<Slot[]> slots_;
-    std::atomic<std::size_t> write_{0};
+    // Admission updates both counters in one lock-free operation. The high
+    // 32 bits count drops and the low 32 count accepted queue positions.
+    std::atomic<std::uint64_t> admission_{0};
     std::size_t read_=0;
-    std::atomic<std::uint64_t> sequence_{0},dropped_{0},peak_{0},consumed_{0};
+    std::atomic<std::uint64_t> peak_{0},consumed_{0};
     std::atomic<bool> stopping_{false},writeFailed_{false},budgetExhausted_{false};
     std::thread worker_;
     std::atomic<std::uint64_t> lastSampleNs_{0},listenerStartNs_{0};
