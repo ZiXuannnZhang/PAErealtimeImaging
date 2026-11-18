@@ -57,6 +57,17 @@ struct DiagnosticRecorder::RetentionPin {
     }
 };
 
+struct DiagnosticRecorder::ExportIntentHandoff {
+    std::mutex mutex;
+    std::shared_ptr<diagnostic_storage::ExportIntent> pending;
+
+    std::shared_ptr<diagnostic_storage::ExportIntent> take()
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return std::move(pending);
+    }
+};
+
 namespace {
 std::mutex g_snapshotBudgetMutex;
 qint64 g_snapshotBytes = 0;
@@ -1860,6 +1871,13 @@ void materializeTimeWindow(DiagnosticRecorder::TimeWindowRequest &result)
 {
     if (!result.discoverSources || !result.validationError.isEmpty()) return;
     result.discoverSources = false;
+    // The token is moved out of the shared handoff, not out of a request
+    // copy. Keep it alive until the root lease protects historical reads.
+    auto pending = result.exportIntent ? result.exportIntent->take() : nullptr;
+    if (result.exportIntent && !pending) {
+        result.validationError = QStringLiteral("该日志导出请求已使用，请重新发起导出");
+        return;
+    }
     const qint64 startMs = isoMillisLocal(result.requestedStartTime);
     const qint64 endMs = isoMillisLocal(result.requestedEndTime);
     const qint64 capturedMs = isoMillisLocal(result.exportCapturedAt);
@@ -1874,9 +1892,8 @@ void materializeTimeWindow(DiagnosticRecorder::TimeWindowRequest &result)
         result.retentionPin=std::make_shared<DiagnosticRecorder::RetentionPin>();
         result.retentionPin->lease=diagnostic_storage::awaitExportLease(result.rootDirectory);
         if(!result.retentionPin->lease){result.validationError=QStringLiteral("日志目录正在清理，请重试导出");return;}
-        // This copy can drop its intent once its filesystem lease protects the reads.
-        result.exportIntent.reset();
     }
+    pending.reset();
     if (result.pendingHistory) {
         result.pendingHistory->materialize(result.sources.first());
         result.pendingHistory.reset();
@@ -1962,8 +1979,9 @@ DiagnosticRecorder::TimeWindowRequest DiagnosticRecorder::registerTimeWindowRequ
     }
 
     if (!result.rootDirectory.isEmpty()) {
-        result.exportIntent = diagnostic_storage::registerExportIntent(result.rootDirectory);
-        if (!result.exportIntent) {
+        result.exportIntent = std::make_shared<ExportIntentHandoff>();
+        result.exportIntent->pending = diagnostic_storage::registerExportIntent(result.rootDirectory);
+        if (!result.exportIntent->pending) {
             result.validationError = QStringLiteral("无法保护待导出的历史日志，目录可能正在清理，请重试导出");
             return result;
         }

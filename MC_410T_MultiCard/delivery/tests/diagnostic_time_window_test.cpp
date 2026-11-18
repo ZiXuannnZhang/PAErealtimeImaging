@@ -429,12 +429,18 @@ bool testPendingWindowProtectsEndedRuns()
 
     auto pending = recorder.registerTimeWindowRequest(start, end);
     auto request = pending;
-    pending = {}; // The queued copy still owns the registration.
     if (!check(request.validationError.isEmpty() && request.discoverSources && !request.retentionPin,
                "registration should defer historical discovery and filesystem locking")) return false;
 
-    std::promise<void> releaseExport;
+    std::promise<void> releaseExport, zipEntered, finishZip;
     const auto released = releaseExport.get_future();
+    auto zipStarted = zipEntered.get_future();
+    const auto zipRelease = finishZip.get_future().share();
+    request.bundleExtension = [&](const DiagnosticRecorder::BundleSink &, QString *) {
+        zipEntered.set_value();
+        zipRelease.wait();
+        return true;
+    };
     const QString target = temp.filePath("retained-window.zip");
     auto worker = std::async(std::launch::async, [&] {
         released.wait();
@@ -450,16 +456,24 @@ bool testPendingWindowProtectsEndedRuns()
     cleaner.reset(); // Drops the active lease and runs the production quota cleaner synchronously.
     const bool survived = QFile::exists(runA) && QFile::exists(runB);
     releaseExport.set_value();
+    const bool zipPaused = zipStarted.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    bool prunedDuringZip = false, wroteDuringZip = false, duplicateRejected = false;
+    if (zipPaused) {
+        const auto duplicate = DiagnosticRecorder::exportTimeWindow(pending, temp.filePath("duplicate.zip"));
+        duplicateRejected = !duplicate.success && !QFileInfo::exists(temp.filePath("duplicate.zip"));
+        DiagnosticRecorder cleanup(options);
+        cleanup.recordEvent("retention-handoff", "writer resumed during ZIP");
+        wroteDuringZip = cleanup.flush(3000) && !cleanup.status().writeError;
+        prunedDuringZip = !QFile::exists(runA) || !QFile::exists(runB);
+    }
+    finishZip.set_value();
     const auto result = worker.get();
-    request = {};
 
     QString error;
     const auto files = readZip(target, &error);
     const auto events = files.value("events.jsonl");
     const auto ids = QJsonDocument::fromJson(files.value("manifest.json")).object()
                          .value("sourceRunIds").toArray();
-    // With the request gone, the same quota now forces delete of at least one fixture.
-    { DiagnosticRecorder cleanup(options); }
     return check(eventLoopAdvanced, "pending registration took a root file lock or blocked Qt events")
         && check(survived, "quota cleaner deleted a historical source before background discovery")
         && check(result.success && error.isEmpty()
@@ -467,7 +481,8 @@ bool testPendingWindowProtectsEndedRuns()
                      && ids.contains(QJsonValue(QStringLiteral("protected-B")))
                      && events.count("event-101") == 1 && events.count("event-202") == 1,
                  QStringLiteral("historical source missing from ZIP: %1 %2").arg(result.error, error))
-        && check(!QFile::exists(runA) || !QFile::exists(runB), "quota cleaner did not resume after export");
+        && check(zipPaused && prunedDuringZip && wroteDuringZip && duplicateRejected,
+                 "slow ZIP must allow quota cleanup and writing while copied requests still exist");
 }
 
 bool testWindowIntentCancellationAndPruneConflict()

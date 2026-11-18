@@ -144,6 +144,7 @@ public:
     };
 
     struct RetentionPin;
+    struct ExportIntentHandoff;
     struct PendingHistoryCut;
     struct TimeWindowRequest {
         BundleExtension bundleExtension;
@@ -157,7 +158,7 @@ public:
         QString validationError;
         QVector<ExportRequest> sources;
         std::shared_ptr<PendingHistoryCut> pendingHistory;
-        std::shared_ptr<diagnostic_storage::ExportIntent> exportIntent;
+        std::shared_ptr<ExportIntentHandoff> exportIntent;
         bool discoverSources = false;
     };
 
