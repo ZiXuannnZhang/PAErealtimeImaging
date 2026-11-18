@@ -125,6 +125,7 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary,
     if (writeFailure) result.status = "write_failed";
     else if (budget) result.status = "budget_omitted";
     else if (!matches || truncated) result.status = "window_data_incomplete";
+    else if (summary.value("openWindowPending").toBool()) result.status = "open_window_pending";
     else if (windows.isEmpty() && summary.value("burstMarkEpochs").toInteger() == 0) result.status = "no_burst";
     else if (files.isEmpty()) result.status = "not_retained_by_policy";
     else result.status = "windows_retained";
@@ -315,21 +316,34 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 const QString prefix="paimage/"+dir+"/";
                 bool loopFlushed=true,loopIncomplete=false,loopBudgetExhausted=false,loopWriteFailed=false;
                 quint64 loopBoundary=0,loopDropped=0,loopFreezeEpoch=0; bool loopLive=false;
+                QJsonObject liveInventory;
                 for(const auto& cut:loopCuts)if(cutPath(cut.root)==path){
                     loopLive=true;loopBoundary=cut.sequence;loopDropped=cut.dropped;loopFreezeEpoch=cut.freezeEpoch;
                     loopIncomplete=cut.incomplete;loopBudgetExhausted=cut.budgetExhausted;loopWriteFailed=cut.writeFailed;
-                    loopFlushed=cut.flush();break;}
-                // An active rolling writer has no final inventory yet. Keep
-                // coverage unknown instead of comparing its listener total.
+                    loopFlushed=cut.flush();
+                    liveInventory=QJsonDocument::fromJson(QByteArray::fromStdString(cut.windowInventory())).object();
+                    break;}
                 if (loopSummary.isEmpty() && loopLive) loopSummary = object(loopSummaryPath);
                 if (loopSummary.isEmpty() && loopLive) loopSummary=QJsonObject{{"schemaVersion",2},
                     {"mode","rolling-burst-windows"},{"recordBytes",80},
                     {"recordsIssued",double(loopBoundary)},{"queueDropped",double(loopDropped)},
                     {"budgetExhausted",loopBudgetExhausted},{"writeFailed",loopWriteFailed},
                     {"burstMarkEpochs",double(loopFreezeEpoch)}};
+                QStringList loopNames;
+                if (loopLive) {
+                    // Only read files in the same inventory generation. The
+                    // writer can freeze more windows while the ZIP is built.
+                    for (auto entry=liveInventory.begin();entry!=liveInventory.end();++entry)
+                        loopSummary.insert(entry.key(),entry.value());
+                    for (const auto& entry:liveInventory.value("windows").toArray()) {
+                        const auto name=entry.toObject().value("file").toString();
+                        if (!name.isEmpty()) loopNames.append(name);
+                    }
+                } else {
+                    loopNames=loopNamesUnsorted;
+                }
                 if(!loopLive)loopBoundary=quint64(loopSummary.value("recordsIssued").toDouble());
                 const bool loopBoundaryKnown=loopLive||loopSummary.contains("recordsIssued");
-                auto loopNames=QDir(path).entryList({"looplog-*.bin"},QDir::Files,QDir::Name);
                 std::sort(loopNames.begin(),loopNames.end(),[](const QString& a,const QString& b){
                     return a.section('-',-1).section('.',0,0).toInt()<b.section('-',-1).section('.',0,0).toInt();
                 });
@@ -339,7 +353,9 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     auto &file = loopFiles[name];
                     const QFileInfo info(QDir(path).filePath(name));
                     QFile input(info.filePath());
-                    if (info.isSymLink() || !input.open(QIODevice::ReadOnly)) { loopBad = true; continue; }
+                    if (!info.exists() && !info.isSymLink() && !info.isJunction()) continue;
+                    if (!info.isFile() || info.isSymLink() || info.isJunction() ||
+                        !input.open(QIODevice::ReadOnly)) { loopBad = true; continue; }
                     const auto bytes = input.readAll();
                     if (input.error() != QFileDevice::NoError) { loopBad = true; continue; }
                     file.bytes = bytes.size();

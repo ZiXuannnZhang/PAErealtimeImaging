@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 
 namespace paimage {
@@ -84,6 +85,23 @@ std::vector<LoopLog::Cut> LoopLog::captureCuts() {
                 return (progress->done.load(std::memory_order_acquire)
                         || progress->flushed.load(std::memory_order_acquire)>=position)
                     && !progress->failed.load(std::memory_order_acquire);
+            },
+            [progress]{
+                std::vector<WindowMeta> windows;
+                std::uint64_t recordsWritten;
+                bool windowOpen;
+                {
+                    std::lock_guard<std::mutex> lock(progress->inventoryMutex);
+                    windows=progress->windows;
+                    recordsWritten=progress->recordsWritten;
+                    windowOpen=progress->windowOpen;
+                }
+                std::ostringstream inventory;
+                inventory<<"{\"recordsWritten\":"<<recordsWritten
+                         <<",\"openWindowPending\":"<<(windowOpen?"true":"false")<<",\"windows\":";
+                writeWindowList(inventory,windows);
+                inventory<<'}';
+                return inventory.str();
             }});
     }
     return cuts;
@@ -183,6 +201,10 @@ void LoopLog::openWindow(const LoopRecord& marker) {
         else window.meta.windowTruncated=true;
     }
     activeWindow_=std::move(window);
+    {
+        std::lock_guard<std::mutex> lock(exportProgress_->inventoryMutex);
+        exportProgress_->windowOpen=true;
+    }
     appendToWindow(marker);
 }
 
@@ -239,7 +261,12 @@ void LoopLog::finalizeWindow(bool force) {
         frozenBytes_+=window.meta.bytes;
         windowWriteRecords_+=window.meta.recordCount;
     }
-    completedWindows_.push_back(std::move(window.meta));
+    {
+        std::lock_guard<std::mutex> lock(exportProgress_->inventoryMutex);
+        exportProgress_->windows.push_back(std::move(window.meta));
+        exportProgress_->recordsWritten=windowWriteRecords_;
+        exportProgress_->windowOpen=false;
+    }
 }
 
 void LoopLog::consumeRecord(const LoopRecord& record) {
@@ -250,8 +277,8 @@ void LoopLog::consumeRecord(const LoopRecord& record) {
     trimRolling(record.timeNs);
 
     const auto isBurst=record.kind==std::uint16_t(LoopKind::BurstMark);
-    if (activeWindow_ && record.timeNs>activeWindow_->meta.endNs) finalizeWindow(false);
     if (isBurst) {
+        if (activeWindow_ && record.timeNs>activeWindow_->meta.endNs) finalizeWindow(false);
         if (activeWindow_) {
             activeWindow_->meta.endNs=std::max(activeWindow_->meta.endNs,record.timeNs+kPostWindowNs);
             activeWindow_->meta.burstEpochs.push_back(burstEpoch(record));
@@ -299,10 +326,18 @@ void LoopLog::writeSummary(std::uint64_t recordsWritten,std::uint64_t writerUnwr
         <<",\"qpcFrequency\":"<<qpcFrequency_
         <<",\"anchors\":[{\"qpc\":"<<qpcStart_<<",\"utcFileTime100ns\":"<<utcStart100ns_
         <<"},{\"qpc\":"<<qpc()<<",\"utcFileTime100ns\":"<<utc100ns()<<"}]"
-        <<",\"windows\":[";
-    for (std::size_t index=0;index<completedWindows_.size();++index) {
+        <<",\"windows\":";
+    writeWindowList(summary,exportProgress_->windows);
+    summary<<"}\n";
+    summary.flush();
+    if (!summary) writeFailed_.store(true,std::memory_order_release);
+}
+
+void LoopLog::writeWindowList(std::ostream& summary,const std::vector<WindowMeta>& windows) {
+    summary<<'[';
+    for (std::size_t index=0;index<windows.size();++index) {
         if (index) summary<<',';
-        const auto& window=completedWindows_[index];
+        const auto& window=windows[index];
         summary<<"{\"windowId\":"<<window.id<<",\"startNs\":"<<window.startNs
             <<",\"endNs\":"<<window.endNs<<",\"recordCount\":"<<window.recordCount
             <<",\"bytes\":"<<window.bytes<<",\"file\":\""<<window.file
@@ -320,9 +355,7 @@ void LoopLog::writeSummary(std::uint64_t recordsWritten,std::uint64_t writerUnwr
         }
         summary<<"]}";
     }
-    summary<<"]}\n";
-    summary.flush();
-    if (!summary) writeFailed_.store(true,std::memory_order_release);
+    summary<<']';
 }
 
 void LoopLog::run() {
@@ -332,14 +365,12 @@ void LoopLog::run() {
     std::uint64_t writerUnwritten=0;
     std::vector<LoopRecord> batch;
     batch.reserve(4096);
+    std::uint64_t fencedWindowEnd=0;
+    std::size_t windowEndPosition=0;
     while (true) {
-        const auto requested=exportProgress_->requested.load(std::memory_order_acquire);
-        if (requested>exportProgress_->flushed.load(std::memory_order_relaxed)
-            && read_>=requested) {
-            if (activeWindow_ && steadyNs()>=activeWindow_->meta.endNs) finalizeWindow(false);
-            exportProgress_->failed.store(failed||writeFailed_.load(),std::memory_order_release);
-            exportProgress_->flushed.store(read_,std::memory_order_release);
-        }
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+        if (budget_.beforeDrain) budget_.beforeDrain();
+#endif
         batch.clear();
         while (batch.size()<4096) {
             auto& slot=slots_[read_&(budget_.records-1)];
@@ -350,24 +381,27 @@ void LoopLog::run() {
         }
         consumed_.store(read_,std::memory_order_release);
         for (const auto& record:batch) consumeRecord(record);
-        if (activeWindow_ && lastConsumedNs_>=activeWindow_->meta.endNs) finalizeWindow(false);
-
-        if (batch.empty()) {
-            if (activeWindow_ && steadyNs()>=activeWindow_->meta.endNs) finalizeWindow(false);
-            if (stopping_.load(std::memory_order_acquire) && read_==write_.load(std::memory_order_acquire)) {
-                if (activeWindow_) {
-                    if (steadyNs()<activeWindow_->meta.endNs) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                        continue;
-                    }
-                    finalizeWindow(true);
-                }
-                pendingRecords_=write_.load(std::memory_order_acquire)-read_;
-                break;
+        const bool stopping=stopping_.load(std::memory_order_acquire);
+        if (activeWindow_ && steadyNs()>=activeWindow_->meta.endNs) {
+            // At the deadline the queue may still contain records for this
+            // window. Drain to the producer position observed at expiry,
+            // independently of export clicks and subsequent ordinary traffic.
+            if (fencedWindowEnd!=activeWindow_->meta.endNs) {
+                fencedWindowEnd=activeWindow_->meta.endNs;
+                windowEndPosition=write_.load(std::memory_order_acquire);
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(2));
-            continue;
+            if (read_>=windowEndPosition) finalizeWindow(stopping);
         }
+
+        const auto requested=exportProgress_->requested.load(std::memory_order_acquire);
+        if (requested>exportProgress_->flushed.load(std::memory_order_relaxed)
+            && read_>=requested) {
+            exportProgress_->failed.store(failed||writeFailed_.load(),std::memory_order_release);
+            exportProgress_->flushed.store(read_,std::memory_order_release);
+        }
+        if (stopping && !activeWindow_ && read_==write_.load(std::memory_order_acquire)) break;
+        if (batch.empty())
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
     if (activeWindow_) finalizeWindow(true);
     if (failed) writeFailed_.store(true,std::memory_order_release);

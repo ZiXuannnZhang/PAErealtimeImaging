@@ -213,20 +213,22 @@ inline std::optional<qint64> pruneTraces(const QString &path, qint64 reserve = 0
     qint64 total = 0;
     static const QRegularExpression known(QStringLiteral(
         "^(run-config\\.json|(?:trace|timing|looplog)-summary\\.json|"
-        "(?:trace|timing|looplog|looplog-window)-[0-9]+\\.bin|\\.active\\.lock)$"));
+        "(?:trace|timing|looplog|looplog-window)-[0-9]+\\.bin|"
+        "looplog-window-[0-9]+\\.bin\\.part|\\.active\\.lock)$"));
     for (const auto &dir : root.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
         if (dir.isSymLink() || dir.isJunction() || QUuid(dir.fileName()).isNull()) continue;
         const QString runPath = dir.absoluteFilePath();
         const auto children = QDir(runPath).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot);
         qint64 bytes = 0;
-        auto updated = dir.lastModified();
+        QDateTime updated;
         bool owned = true;
         for (const auto &child : children) {
             if (!child.isFile() || child.isSymLink() || child.isJunction() || !known.match(child.fileName()).hasMatch()) {
                 owned = false; break;
             }
             bytes += child.size();
-            updated = qMax(updated, child.lastModified());
+            if (child.fileName() != QStringLiteral(".active.lock"))
+                updated = qMax(updated, child.lastModified());
         }
         if (!owned) continue;
         QFile config(QDir(runPath).filePath(QStringLiteral("run-config.json")));

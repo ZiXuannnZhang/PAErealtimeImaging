@@ -105,7 +105,8 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     require(record.sequence==1&&record.correlation==101);
     require(entries.value("paimage/run1/looplog-0.bin").size()==160);
     auto loopSummary=QJsonDocument::fromJson(entries.value("paimage/run1/looplog-summary.json")).object();
-    require(loopSummary.value("recordsWritten").toInt()==2&&!loopSummary.value("loopLogIncomplete").toBool(true));
+    require(loopSummary.value("recordsWritten").toInt()==2&&loopSummary.value("exportCountCovered").toBool());
+    require(loopSummary.value("exportWindows").toArray().first().toObject().value("status")=="truncated");
     auto manifest=QJsonDocument::fromJson(entries.value("paimage/manifest.json")).object();
     require(manifest.value("traceIncomplete").toBool()&&manifest.value("runs").toArray().size()==9);
     const auto skipped=manifest.value("skippedRuns").toArray();require(skipped.size()==5);
@@ -207,15 +208,32 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         write(path+"/trace-0.bin",QByteArray(4096,'x'));return path;
     };
     const auto activePath=makeRun(),oldPath=makeRun(),unknownPath=makeRun();
+    require(QFile::rename(oldPath+"/trace-0.bin",oldPath+"/looplog-window-1.bin.part"));
+    require(QFile::rename(activePath+"/trace-0.bin",activePath+"/looplog-window-1.bin.part"));
     write(unknownPath+"/user.txt","keep");
+    write(unknownPath+"/looplog-window-2.bin.part","retained with unknown file");
     QLockFile active(activePath+"/.active.lock");require(active.tryLock(0));
+    const auto accounted=diagnostic_storage::pruneTraces(managed);
+    require(accounted && *accounted >= 8192);
     {
         const auto reader=diagnostic_storage::exportLease(managed);require(bool(reader));
         diagnostic_storage::pruneTraces(managed,0,1);
         require(QDir(oldPath).exists());
     }
     diagnostic_storage::pruneTraces(managed,0,1);
-    require(!QDir(oldPath).exists()&&QDir(activePath).exists()&&QDir(unknownPath).exists());
+    require(!QDir(oldPath).exists()&&QFileInfo::exists(activePath+"/looplog-window-1.bin.part")&&
+        QFileInfo::exists(unknownPath+"/looplog-window-2.bin.part"));
+
+    const auto expiredPart=makeRun(),freshPart=makeRun();
+    require(QFile::rename(expiredPart+"/trace-0.bin",expiredPart+"/looplog-window-1.bin.part"));
+    require(QFile::rename(freshPart+"/trace-0.bin",freshPart+"/looplog-window-1.bin.part"));
+    for(const auto& name:{"/run-config.json","/looplog-window-1.bin.part"}){
+        QFile file(expiredPart+name);
+        require(file.open(QIODevice::ReadWrite));
+        require(file.setFileTime(QDateTime::currentDateTimeUtc().addDays(-8),QFileDevice::FileModificationTime));
+    }
+    diagnostic_storage::pruneTraces(managed);
+    require(!QDir(expiredPart).exists()&&QDir(freshPart).exists()&&QDir(activePath).exists()&&QDir(unknownPath).exists());
 
     const QString stoppedRoot=root.path()+"/stop-prune";
     const QString id=QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -377,6 +395,45 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     require(windowStatus("budget") == "budget_omitted");
     require(windowManifest(faultyZip).value("traceIncomplete").toBool() &&
         windowManifest(faultyZip).value("skippedRuns").toArray().size() == 2);
+
+    const auto liveRoot=root.filePath("live-burst");
+    const auto liveRun=liveRoot+"/listener";
+    require(QDir().mkpath(liveRun));
+    write(liveRun+"/run-config.json",QJsonDocument(QJsonObject{
+        {"runId","listener"},{"wallAnchorMs",double(wall-6000)},
+        {"monotonicAnchorNs","1000000"},{"diagnosticTraceEnabled",false},
+        {"timingEnabled",false},{"loopLogEnabled",true}}).toJson());
+    paimage::installTraceBundle(liveRoot,tools);
+    {
+        QLockFile listening(liveRun+"/.active.lock");
+        require(listening.tryLock(0));
+        paimage::LoopLog live(std::filesystem::path(liveRun.toStdWString()),paimage::LoopLog::Budget{64});
+        live.push(firstLoop);
+        auto liveBurst=burst;
+        liveBurst.timeNs=firstLoop.timeNs+5000000000ull;
+        live.push(liveBurst);
+        const auto liveStart=QDateTime::fromMSecsSinceEpoch(wall-7000);
+        auto exportLive=[&](const QString& path){
+            require(DiagnosticRecorder::exportTimeWindow(recorder.registerTimeWindowRequest(liveStart,end),path).success);
+            require(!QFileInfo::exists(liveRun+"/looplog-summary.json"));
+            return zipEntries(path);
+        };
+        const auto liveZip=exportLive(root.filePath("live.zip"));
+        const auto liveSummary=readLoopSummary(liveZip,"listener");
+        require(liveSummary.value("exportCountCovered").toBool()&&
+            !liveSummary.value("loopLogIncomplete").toBool(true)&&
+            liveSummary.value("sourceRecordsWritten").toInt()==2);
+        require(liveSummary.value("exportWindows").toArray().first().toObject().value("status")=="verified");
+        require(!windowManifest(liveZip).value("traceIncomplete").toBool(true));
+        require(QFile::remove(liveRun+"/looplog-window-1.bin"));
+        const auto missingZip=exportLive(root.filePath("live-missing.zip"));
+        const auto missingSummary=readLoopSummary(missingZip,"listener");
+        require(missingSummary.value("loopLogIncomplete").toBool()&&
+            !missingSummary.value("exportCountCovered").toBool(true));
+        require(missingSummary.value("exportWindows").toArray().first().toObject().value("status")=="missing_or_unreadable");
+        require(windowManifest(missingZip).value("traceIncomplete").toBool()&&
+            windowManifest(missingZip).value("skippedRuns").toArray().size()==1);
+    }
 
     DiagnosticRecorder::setBundleCapture({});
     std::cout<<"PASS trace boundaries, stop/prune handoff and LoopLog burst window integrity"<<std::endl;

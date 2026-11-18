@@ -1,6 +1,7 @@
 #include "PaimageAcquisition/LoopLog.h"
 #include "StartupPolicy.h"
 #include <filesystem>
+#include <future>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -46,6 +47,55 @@ int main(){try{
     }
     check(std::filesystem::exists(root/"burst"/"looplog-summary.json"),"loop summary written");
     check(containsKind(root/"burst",LoopKind::BurstMark),"burst mark persisted");
+
+    {
+        std::promise<void> drainEntered, releaseDrain;
+        auto entered=drainEntered.get_future();
+        auto release=releaseDrain.get_future();
+        LoopLog::Budget budget;
+        budget.records=8192;
+        budget.beforeDrain=[&]{
+            if (release.valid()) {
+                drainEntered.set_value();
+                release.get();
+            }
+        };
+        const auto backlog=root/"export-backlog";
+        LoopLog log(backlog,budget);
+        entered.wait();
+        LoopRecord record;
+        record.kind=std::uint16_t(LoopKind::Loop);
+        record.timeNs=1000000;
+        log.push(record);
+        const auto windowStart=record.timeNs+5000000000ull;
+        auto burst=record;
+        burst.timeNs=windowStart;
+        burst.kind=std::uint16_t(LoopKind::BurstMark);
+        log.push(burst);
+        record.timeNs=windowStart+1000000;
+        for (int i=2;i<4096;++i) log.push(record);
+        const auto cut=LoopLog::captureCuts().front();
+        auto outside=record;
+        outside.timeNs=windowStart+5000000001ull;
+        log.push(outside);
+        record.value0=0x12345678;
+        const auto tailSequence=log.push(record);
+        releaseDrain.set_value();
+        check(cut.sequence==4096&&tailSequence==4098&&cut.flush(),"export acknowledges exactly the queued click cut");
+        const auto frozen=backlog/"looplog-window-1.bin";
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+        while (!std::filesystem::exists(frozen)&&std::chrono::steady_clock::now()<deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        log.stop();
+        check(std::filesystem::file_size(frozen)==4097*sizeof(LoopRecord),
+              "expired window retains queued in-window record beyond the export cut");
+        std::ifstream input(frozen,std::ios::binary);
+        input.seekg(4096*sizeof(LoopRecord));
+        input.read(reinterpret_cast<char*>(&record),sizeof(record));
+        check(input&&record.sequence==tailSequence&&record.value0==0x12345678,"frozen file preserves the queued tail");
+        check(cut.windowInventory().find("\"postWindowTruncated\":false")!=std::string::npos,
+              "drained window does not report a truncated tail");
+    }
 
     {
         LoopLog::Budget budget;budget.records=64;budget.segmentBytes=320;budget.totalBytes=640;

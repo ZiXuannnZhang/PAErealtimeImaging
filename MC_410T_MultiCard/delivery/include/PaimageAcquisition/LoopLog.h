@@ -4,6 +4,7 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
+#include <iosfwd>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -44,6 +45,9 @@ public:
         std::size_t records=1<<19;
         std::uint64_t segmentBytes=16*1024*1024;
         std::uint64_t totalBytes=256ull*1024*1024;
+#ifdef PAIMAGE_SOCKET_TEST_SEAM
+        std::function<void()> beforeDrain;
+#endif
     };
     explicit LoopLog(std::filesystem::path);
     LoopLog(std::filesystem::path,Budget);
@@ -69,14 +73,11 @@ public:
         std::uint64_t sequence=0,dropped=0,freezeEpoch=0;
         bool incomplete=false,budgetExhausted=false,writeFailed=false;
         std::function<bool()> flush;
+        std::function<std::string()> windowInventory;
     };
     static std::vector<Cut> captureCuts();
 
 private:
-    struct ExportProgress {
-        std::atomic<std::size_t> requested{0},flushed{0};
-        std::atomic<bool> failed{false},done{false};
-    };
     struct alignas(64) Slot {std::atomic<std::size_t> sequence;LoopRecord record;};
     struct WindowMeta {
         std::uint64_t id=0,startNs=0,endNs=0,recordCount=0,bytes=0;
@@ -87,6 +88,16 @@ private:
         std::string file;
     };
     struct ActiveWindow {WindowMeta meta;std::vector<LoopRecord> records;};
+    struct ExportProgress {
+        std::atomic<std::size_t> requested{0},flushed{0};
+        std::atomic<bool> failed{false},done{false};
+        // Publish metadata after the corresponding file. Requests can outlive
+        // the listener, so they retain this inventory through ExportProgress.
+        std::mutex inventoryMutex;
+        std::vector<WindowMeta> windows;
+        std::uint64_t recordsWritten=0;
+        bool windowOpen=false;
+    };
 
     std::atomic<bool> paused_{false};
     void run();
@@ -97,6 +108,7 @@ private:
     bool writeWindow(const ActiveWindow&);
     void trimRolling(std::uint64_t referenceNs);
     void writeSummary(std::uint64_t recordsWritten,std::uint64_t writerUnwritten);
+    static void writeWindowList(std::ostream&, const std::vector<WindowMeta>&);
 
     std::filesystem::path root_;
     Budget budget_;
@@ -118,7 +130,6 @@ private:
     static constexpr std::size_t kRecordBytes=sizeof(LoopRecord);
     std::deque<LoopRecord> rolling_;
     std::optional<ActiveWindow> activeWindow_;
-    std::vector<WindowMeta> completedWindows_;
     std::uint64_t rollingBytes_=0,frozenBytes_=0,retentionEvicted_=0;
     std::uint64_t budgetOmittedRecords_=0,pendingRecords_=0,windowWriteRecords_=0;
     std::uint64_t nextWindowId_=1;
