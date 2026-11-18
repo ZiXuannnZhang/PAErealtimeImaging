@@ -1884,7 +1884,10 @@ bool NetworkController::doSendStopMeasure(int* outSuccess, int* outFail)
 
 QString NetworkController::newMeasurementSessionId()
 {
-    m_measurementSessionToken = m_nextMeasurementSessionId++;
+    // The Ring controller and service can outlive a listener. Their round
+    // identities must remain ordered when the NetworkController is replaced.
+    static std::atomic<quint64> nextMeasurementSessionId{1};
+    m_measurementSessionToken = nextMeasurementSessionId.fetch_add(1, std::memory_order_relaxed);
     return QStringLiteral("measurement-%1").arg(m_measurementSessionToken);
 }
 
@@ -1961,7 +1964,7 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
     const QString sessionId = requestedSessionId.isEmpty()
         ? newMeasurementSessionId() : requestedSessionId;
     if (m_measurementSessionToken == 0)
-        m_measurementSessionToken = m_nextMeasurementSessionId++;
+        newMeasurementSessionId();
     const quint64 sessionToken = m_measurementSessionToken;
     m_measurementSessionId = sessionId;
     m_pendingMeasurementSessionId.clear();

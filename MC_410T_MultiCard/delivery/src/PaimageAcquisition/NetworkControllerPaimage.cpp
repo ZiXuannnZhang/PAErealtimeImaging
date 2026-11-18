@@ -571,7 +571,7 @@ bool NetworkController::startPaimageMeasurement(){
     if(m_paimage->configuring()){m_paimageStartPending=true;m_pendingMeasurementSessionId=newMeasurementSessionId();return true;}
     const QString id=m_pendingMeasurementSessionId.isEmpty()?newMeasurementSessionId():m_pendingMeasurementSessionId;
     m_pendingMeasurementSessionId.clear();
-    bool ok=m_paimage->startMeasurement(++m_measurementSessionToken);
+    bool ok=m_paimage->startMeasurement(m_measurementSessionToken);
     recordDiagnosticEvent("paimage.measure",ok?"measurement_started":"measurement_start_failed",DiagnosticRecorder::Severity::Info,
         {{"measurementSessionId",id},{"traceSession",QString::number(m_measurementSessionToken)},{"configId",m_currentConfigId},{"backendId","paimage-derived"}});
     if(ok){m_measurementSessionId=id;m_measurementRunning=true;m_measurementState=MeasurementState::Running;emit measurementStarted(id);}

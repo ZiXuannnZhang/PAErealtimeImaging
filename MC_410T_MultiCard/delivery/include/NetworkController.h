@@ -377,7 +377,6 @@ private:
     quint64 m_nextConfigId = 1;
     QString m_currentConfigId;
     QString m_currentConfigTrigger = QStringLiteral("api");
-    quint64 m_nextMeasurementSessionId = 1;
     quint64 m_measurementSessionToken = 0;
     QString m_measurementSessionId;
     QString m_pendingMeasurementSessionId;

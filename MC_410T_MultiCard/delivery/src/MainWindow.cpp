@@ -373,6 +373,11 @@ MainWindow::MainWindow(QWidget *parent)
                 m_imagingController->releaseSnapshotBuffer(bufferIndex);
             return;
         }
+        if (m_isListening && (!m_firstRingMeasurementSession ||
+                              measurementSession < m_firstRingMeasurementSession)) {
+            m_imagingController->releaseSnapshotBuffer(bufferIndex);
+            return;
+        }
         const bool ringMode = m_cmbImagingMode && m_cmbImagingMode->currentIndex() == 1;
         const auto terminalFrame = roundComplete ? m_imagingController->terminalSnapshotBuffer(bufferIndex)
                                                  : nullptr;
@@ -2339,6 +2344,8 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
         const auto round = m_netController
             ? m_netController->physicalRoundSnapshot()
             : paimage::PhysicalRoundNormalizer::Snapshot{};
+        if (!m_firstRingMeasurementSession)
+            m_firstRingMeasurementSession = round.measurementSession;
         if (m_imagingBypass)
             m_imagingBypass->beginSession(round.measurementSession);
         {
@@ -2449,6 +2456,7 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
     }
 
     // start() 已完全返回，所有线程已启动，直接设置状态
+    m_firstRingMeasurementSession = 0;
     m_isListening = true;
     setBtnText(ui->btnStartListen, "停止监听");
     ui->btnStartListen->setProperty("state", "stopping");

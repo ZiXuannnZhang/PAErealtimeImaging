@@ -1,8 +1,12 @@
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <QAction>
 #include <QTextDocument>
 #include <QTextEdit>
 #include "MainWindow.h"
+#include "NetworkController.h"
 #include "ImagingController.h"
+#include "ImagingDisplayWindow.h"
 #include "ImagingBypass.h"
 #include "RingConfigDialog.h"
 #include "RingBlockAssembler.h"
@@ -11,6 +15,7 @@
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include "PaimageAcquisition/SettingsPath.h"
+#include "PaimageAcquisition/SourceCore.h"
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QFile>
@@ -25,6 +30,9 @@
 #include <QJsonDocument>
 #include <QSpinBox>
 #include <QThread>
+#include <QTemporaryDir>
+#include <cmath>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 
@@ -57,6 +65,160 @@ static void pump(int milliseconds) {
 
 class MainWindowStartIntegrationTest {
 public:
+    static void listenerRestartPng() {
+        check(QCoreApplication::applicationDirPath().endsWith("startup-isolated"), "isolated settings");
+        QFile::remove(paimageSettingsPath());
+        {
+            QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
+            settings.setValue("RingConfigDialog/Defaults/block", 4);
+            settings.setValue("RingConfigDialog/Defaults/totalAlines", 8);
+            settings.setValue("RingConfigDialog/Defaults/fovMm", 4.0);
+            settings.setValue("RingConfigDialog/Defaults/gridMm", 0.1);
+            for (int ch = 0; ch < 8; ++ch)
+                settings.setValue(QString("RingConfigDialog/Defaults/ch%1").arg(ch), ch == 0);
+        }
+        QTemporaryDir save(QDir::currentPath()+"/restart-save-XXXXXX");
+        check(save.isValid(), "temporary save root");
+        WSADATA winsock{};
+        check(WSAStartup(MAKEWORD(2,2), &winsock) == 0, "winsock startup");
+        struct CardSocket {
+            SOCKET socket;
+            ~CardSocket() { closesocket(socket); WSACleanup(); }
+        } card{socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)};
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        address.sin_port = htons(8080);
+        inet_pton(AF_INET, "127.0.0.2", &address.sin_addr);
+        check(bind(card.socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0, "bind loopback card");
+        DWORD timeout = 2500;
+        setsockopt(card.socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<char*>(&timeout), sizeof(timeout));
+        inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+        auto expectCommand = [&](const paimage::Command& expected) {
+            paimage::Command actual{};
+            check(recv(card.socket, reinterpret_cast<char*>(actual.data()), actual.size(), 0) ==
+                  static_cast<int>(actual.size()) && actual == expected, "card control command");
+        };
+        auto send = [&](int port, const std::vector<unsigned char>& bytes) {
+            address.sin_port = htons(port);
+            check(sendto(card.socket, reinterpret_cast<const char*>(bytes.data()), bytes.size(), 0,
+                         reinterpret_cast<sockaddr*>(&address), sizeof(address)) ==
+                  static_cast<int>(bytes.size()), "loopback card packet");
+        };
+        {
+            MainWindow window;
+            auto& controller = *window.m_imagingController;
+            window.m_localBindIP = "127.0.0.1";
+            window.m_bitsPerChannel = 32;
+            window.m_sampleIntervalNs = 4;
+            window.m_cmbImagingMode->setCurrentIndex(1);
+            constexpr int durationNs = 6000;
+            widget<QLineEdit>(window, "edtDataTime")->setText(QString::number(durationNs));
+            window.m_chkRealtimeImaging->setChecked(true);
+            waitFor([&]{ return window.m_imagingServiceReady.load(); }, "Ring service ready");
+            const auto cfg = controller.ringConfig();
+            const int triggers = cfg.alinesPerFrame / cfg.enabledChannelCount;
+            check(triggers > 0 && cfg.sampDepth == durationNs/4, "one-round fixture geometry");
+            widget<QLineEdit>(window, "edtSaveDir")->setText(save.filePath("next"));
+            widget<QLineEdit>(window, "edtTriggersPerFile")->setText("100");
+            widget<QLineEdit>(window, "edtFileSuffix")->setText("restart");
+            widget<QCheckBox>(window, "chkAutoSave")->setChecked(true);
+
+            std::vector<paimage::RoundIdentity> completed;
+            const std::array<int, 5> samplePoints{0, 400, 800, 1200, 1599};
+            std::array<std::vector<int>, 2> expectedGray;
+            QObject::connect(&controller, &ImagingController::ringSnapshotReady, &window,
+                [&](int, quint64, bool, quint64 session, quint64 generation, bool complete, int buffer) {
+                    if (!complete) return;
+                    completed.push_back({session,generation});
+                    const auto frame = controller.terminalSnapshotBuffer(buffer);
+                    const int nx = controller.ringDisplayNx();
+                    if (!window.m_imagingDisplayWindow || !frame || nx <= 0 || nx >= 1600) return;
+                    const auto ranges = std::array{window.m_imagingDisplayWindow->range1(),
+                                                   window.m_imagingDisplayWindow->range2()};
+                    for (int wl = 0; wl < 2; ++wl) {
+                        expectedGray[wl].clear();
+                        for (int y : samplePoints) for (int x : samplePoints) {
+                            const float value = (*frame)[std::size_t(wl)*nx*nx + (x*nx/1600)*nx + y*nx/1600];
+                            const auto range = ranges[wl];
+                            const double scaled = std::isfinite(value)
+                                ? (value-range.lower)/(range.upper-range.lower) : 0.0;
+                            expectedGray[wl].push_back(int(qBound(0.0, scaled, 1.0)*255+0.5));
+                        }
+                    }
+                });
+            QString previousDirectory;
+            for (int pass = 0; pass < 2; ++pass) {
+                window.startListeningWithIPs({"127.0.0.2"}, QStringLiteral("explicit_target_ips"));
+                check(window.m_isListening && window.m_netController, "start listener on the same window");
+                auto& network = *window.m_netController;
+                network.setStartupFilterTriggerCount(0);
+                waitFor([&]{ return network.isSaving(); }, "auto-save armed");
+                const QDir pngDir(window.m_reconSaveDir);
+                check(pngDir.absolutePath() != previousDirectory, "new listener has a new save directory");
+                previousDirectory = pngDir.absolutePath();
+                check(network.sendConfigCommand(durationNs,1000,1000) && network.sendStartMeasure(), "queue CONFIG and START");
+                expectCommand(paimage::configCommand(durationNs,1000,1000));
+                send(8000,std::vector<unsigned char>(60));
+                waitFor([&]{ return window.m_isMeasuring; }, "card START accepted");
+                expectCommand(paimage::startCommand());
+
+                for (int trigger = 0; trigger < triggers; ++trigger) {
+                    for (int offset = 0; offset < durationNs*2; offset += 1440) {
+                        const int size = std::min(1440,durationNs*2-offset);
+                        std::vector<unsigned char> bytes(size+4);
+                        bytes[0] = offset/1440;
+                        bytes[2] = trigger;
+                        for (int i = 0; i < size; i += 8) {
+                            const int sample = (offset+i)/8;
+                            const std::int32_t a = (((sample/19)+trigger*3)%31-15)*(pass+1)*30;
+                            const std::int32_t b = -a;
+                            std::memcpy(bytes.data()+4+i,&b,sizeof(b));
+                            std::memcpy(bytes.data()+8+i,&a,sizeof(a));
+                        }
+                        send(8001,bytes);
+                    }
+                    pump(8);
+                }
+                waitFor([&]{ return completed.size() == std::size_t(pass+1); }, "first complete round after listening");
+                check(completed.back().roundGeneration == 0, "first round generation");
+                if (pass) check(completed[0] < completed[1], "round identity advances across listeners");
+                const std::array<const char*, 2> wavelengths{"532","1064"};
+                for (int wl = 0; wl < 2; ++wl) {
+                    const QString filter = QStringLiteral("*_session%1_round0_frame*_%2nm.png")
+                        .arg(completed.back().measurementSession).arg(QString::fromLatin1(wavelengths[wl]));
+                    QImage png;
+                    waitFor([&]{
+                        const auto files = pngDir.entryList({filter},QDir::Files);
+                        if (files.size() != 1) return false;
+                        png = QImage(pngDir.filePath(files.front()));
+                        return png.size() == QSize(1600,1600);
+                    }, "decode saved wavelength PNG in the round directory");
+                    check(expectedGray[wl].size() == samplePoints.size()*samplePoints.size(),
+                          "observe terminal pixels for this wavelength");
+                    std::size_t pixel = 0;
+                    for (int y : samplePoints) for (int x : samplePoints)
+                        check(qRed(png.pixel(x,y)) == expectedGray[wl][pixel++], "PNG belongs to terminal wavelength pixels");
+                }
+                check(pngDir.entryList({"*.png"},QDir::Files).size() == 2, "exactly one PNG pair per round");
+                window.onStartListenClicked();
+                expectCommand(paimage::stopCommand());
+                waitFor([&]{ return !window.m_isListening && !window.m_netController; }, "listener stopped");
+                check(controller.isRunning(), "same Ring process stays resident between listeners");
+                QDir roundDir(pngDir.absolutePath());
+                check(roundDir.cdUp(), "resolve raw data directory");
+                for (const auto* channel : {"A","B"}) {
+                    const auto files = roundDir.entryList({QStringLiteral("Card1_Ch%1_*.dat")
+                        .arg(QString::fromLatin1(channel))}, QDir::Files);
+                    check(files.size() == 1 &&
+                          QFileInfo(roundDir.filePath(files.front())).size() == qint64(triggers)*cfg.sampDepth*2,
+                          "raw file trigger count in the same round directory");
+                }
+            }
+        }
+        QFile::remove(paimageSettingsPath());
+        std::cout << "PASS same MainWindow and Ring service, two listeners, one PNG pair and raw round per listener\n";
+    }
+
     static void run() {
         check(QCoreApplication::applicationDirPath().endsWith("startup-isolated"),
               "test must use isolated INI directory");
@@ -412,6 +574,12 @@ public:
 int main(int argc, char** argv) {
     QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc, argv);
-    try { MainWindowStartIntegrationTest::run(); return 0; }
+    try {
+        if (app.arguments().contains("--listener-restart-png"))
+            MainWindowStartIntegrationTest::listenerRestartPng();
+        else
+            MainWindowStartIntegrationTest::run();
+        return 0;
+    }
     catch (const std::exception& e) { std::cerr << "FAIL " << e.what() << '\n'; return 1; }
 }

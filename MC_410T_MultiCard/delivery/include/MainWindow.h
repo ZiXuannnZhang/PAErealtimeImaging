@@ -329,6 +329,7 @@ private:
     // 取代原 m_ringBlockCounter / m_imagingFrameCount（单一事实来源，可测试）。
     paimage::RingRoundUiState m_roundUi;
     paimage::RoundIdentity m_lastRingFinalRound;
+    quint64 m_firstRingMeasurementSession = 0;
     paimage::TimeoutPresentation m_timeoutPresentation;
     void syncTimeoutPngSettings();
     // Count/timeout presentation transitions are retained by old physical
