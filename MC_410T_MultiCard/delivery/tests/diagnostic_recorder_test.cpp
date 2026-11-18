@@ -404,6 +404,50 @@ bool testAbnormalHistory()
         "abnormal history evidence/completeness incorrect");
 }
 
+bool testStableRetentionAge()
+{
+    QTemporaryDir temp;
+    if (!temp.isValid()) return false;
+    auto options = optionsFor(temp.path());
+    const auto now = QDateTime::currentDateTime();
+    const auto create = [&](const QString &id, int days, bool legacy) {
+        const auto path = temp.filePath("run-" + id);
+        if (!QDir().mkpath(path)) return QString{};
+        QFile manifest(QDir(path).filePath("manifest.json"));
+        if (!manifest.open(QIODevice::WriteOnly)) return QString{};
+        const QJsonObject meta{{"formatVersion", 1}, {"runId", id}, {"active", legacy},
+            {"endTime", legacy ? QString() : now.addDays(-days).toString(Qt::ISODateWithMs)}};
+        manifest.write(QJsonDocument(meta).toJson());
+        manifest.close();
+        QFile events(QDir(path).filePath("events.jsonl"));
+        if (!events.open(QIODevice::ReadWrite) || events.write("event") != 5 || !events.flush() ||
+            (legacy && !events.setFileTime(now.addDays(-days), QFileDevice::FileModificationTime))) return QString{};
+        return path;
+    };
+    const auto expired = create("expired", 9, false);
+    const auto expiredLegacy = create("expired-legacy", 8, true);
+    const auto older = create("older", 5, true);
+    const auto newer = create("newer", 2, false);
+    const auto active = create("active", 10, false);
+    const auto unknown = create("unknown", 10, false);
+    if (expired.isEmpty() || expiredLegacy.isEmpty() || older.isEmpty() || newer.isEmpty() ||
+        active.isEmpty() || unknown.isEmpty()) return false;
+    QFile sentinel(QDir(unknown).filePath("user-file"));
+    if (!sentinel.open(QIODevice::WriteOnly)) return false;
+    sentinel.close();
+    QLockFile activeLock(QDir(active).filePath(".active.lock"));
+    if (!activeLock.tryLock(0)) return false;
+    for (int i = 0; i < 4; ++i)
+        DiagnosticRecorder::enumerateRuns(temp.path());
+    options.maxRetainedRuns = 1;
+    DiagnosticRecorder current(options);
+    current.recordEvent("stable-retention", "admitted");
+    return check(current.flush(3000) && !QDir(expired).exists() && !QDir(expiredLegacy).exists() &&
+                 !QDir(older).exists() && QDir(newer).exists() && QDir(active).exists() &&
+                 QFile::exists(sentinel.fileName()),
+                 "retention uses the end time and legacy data age while preserving active and unknown contents");
+}
+
 bool testRetentionAdmissionRecovery()
 {
     QTemporaryDir temp;
@@ -620,6 +664,7 @@ int main(int argc, char **argv)
     ok = testUnavailableDirectoryAndExistingExport() && ok;
     ok = testAbnormalHistory() && ok;
     ok = testRetentionAdmissionRecovery() && ok;
+    ok = testStableRetentionAge() && ok;
     ok = testSerializedSnapshotQuota() && ok;
     ok = testLiveHistoryRotation() && ok;
     ok = testExportDoesNotBlockRotation() && ok;

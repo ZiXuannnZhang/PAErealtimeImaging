@@ -997,13 +997,13 @@ void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &
     const auto retentionLock = locked ? std::shared_ptr<QLockFile>() : diagnostic_storage::lease(rootDirectory);
     if (!locked && !retentionLock) return;
     const QString rootCanonical = root.canonicalPath();
-    struct Run { QString path; qint64 bytes = 0; QDateTime modified; bool active = false; };
+    struct Run { QString path; qint64 bytes = 0; QDateTime endedAt; bool active = false; };
     QVector<Run> runs;
     static const QRegularExpression known(QStringLiteral(
         "^(\\.active\\.lock|\\.history\\.lock|\\.active|\\.reservation|manifest\\.json|summary\\.txt|network\\.json|settings\\.json|"
         "history-retention\\.json|(?:runtime\\.log|events\\.jsonl|(?:network|settings|card)_history\\.jsonl)"
         "(?:\\.previous(?:\\.retired-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?)?)$"));
-    const QFileInfoList entries = root.entryInfoList({QStringLiteral("run-*")}, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Time);
+    const QFileInfoList entries = root.entryInfoList({QStringLiteral("run-*")}, QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
     for (const QFileInfo &info : entries) {
         QByteArray manifestBytes;
         const QString canonical = info.canonicalFilePath();
@@ -1015,19 +1015,39 @@ void pruneRuns(const QString &rootDirectory, const DiagnosticRecorder::Options &
             || !info.fileName().endsWith(QLatin1Char('-') + id)) continue;
         // Do not prune historical captures or unexpected user files.
         bool unexpected = false;
-        for (const auto &child : QDir(info.absoluteFilePath()).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot))
+        QDateTime lastDataWrite;
+        for (const auto &child : QDir(info.absoluteFilePath()).entryInfoList(QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot)) {
             if (!child.isFile() || child.isSymLink() || child.isJunction() || !known.match(child.fileName()).hasMatch()) { unexpected = true; break; }
+            const QString baseName = child.fileName().section(QStringLiteral(".previous"), 0, 0);
+            if (baseName == QStringLiteral("runtime.log") || baseName.endsWith(QStringLiteral(".jsonl"))) {
+                const auto written = child.lastModified();
+                if (written.isValid() && (!lastDataWrite.isValid() || written > lastDataWrite))
+                    lastDataWrite = written;
+            }
+        }
         if (unexpected) continue;
-        runs.append({info.absoluteFilePath(), directoryBytes(info.absoluteFilePath()), info.lastModified(), runIsActive(info.absoluteFilePath())});
+        auto endedAt = QDateTime::fromString(manifest.value(QStringLiteral("endTime")).toString(), Qt::ISODateWithMs);
+        if (!endedAt.isValid() || manifest.value(QStringLiteral("active")).toBool()) {
+            // Older/crashed runs may only have data files. Lock probes
+            // mutate directory timestamps, so never use those for ordering.
+            endedAt = lastDataWrite;
+            if (!endedAt.isValid())
+                endedAt = QFileInfo(QDir(canonical).filePath(QStringLiteral("manifest.json"))).lastModified();
+        }
+        runs.append({info.absoluteFilePath(), directoryBytes(info.absoluteFilePath()), endedAt, runIsActive(info.absoluteFilePath())});
     }
-    std::sort(runs.begin(), runs.end(), [](const Run &a, const Run &b) { return a.modified < b.modified; });
+    std::sort(runs.begin(), runs.end(), [](const Run &a, const Run &b) {
+        if (a.endedAt != b.endedAt) return a.endedAt < b.endedAt;
+        return a.path < b.path;
+    });
+    const auto oldestRetained = QDateTime::currentDateTimeUtc().addDays(-diagnostic_storage::RetainDays);
     qint64 total = 0;
     int ended = 0;
     for (const Run &run : runs) { total += run.bytes; if (!run.active) ++ended; }
     for (const Run &run : runs) {
         if (run.active) continue;
         if (ended <= options.maxRetainedRuns && total <= qMax<qint64>(0,options.maxRetainedBytes-reserve) &&
-            run.modified >= QDateTime::currentDateTimeUtc().addDays(-diagnostic_storage::RetainDays)) break;
+            run.endedAt >= oldestRetained) break;
         QLockFile runLock(QDir(run.path).filePath(QStringLiteral(".active.lock")));
         runLock.setStaleLockTime(0);
         if (!runLock.tryLock(0)) continue;
