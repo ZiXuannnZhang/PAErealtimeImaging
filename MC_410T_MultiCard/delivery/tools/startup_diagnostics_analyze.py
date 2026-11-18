@@ -24,9 +24,8 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from paimage_trace_analyze import (  # noqa: E402
-    LOOPLOG,
     RECORD,
-    _looplog,
+    _parse_looplog,
     _pcapng_packets,
     _resolve_trace,
     analyze as analyze_trace,
@@ -96,7 +95,7 @@ def decision_name(reason: int) -> str:
     return DECISION_NAMES.get(int(reason), f"Decision{int(reason)}")
 
 
-def parse_application(root: Path) -> dict[str, Any]:
+def parse_application(root: Path, parsed_loop=None) -> dict[str, Any]:
     metadata = read_json(root / "run-config.json", {}) or {}
     summary = read_json(root / "trace-summary.json", {}) or {}
     ingress: list[dict[str, Any]] = []
@@ -276,26 +275,19 @@ def parse_application(root: Path) -> dict[str, Any]:
         })
         row["sourceRejectCount"] += int(item.get("count", 0) or 0)
 
-    loop = _looplog(root)
-    loop_records = []
-    for path in sorted(root.glob("looplog-*.bin")):
-        data = path.read_bytes()
-        for values in LOOPLOG.iter_unpack(data[:len(data) // LOOPLOG.size * LOOPLOG.size]):
-            seq, tick, span, session, thread_id, kind, flags, v0, v1, v2, v3, pa, pb, pc = values
-            loop_records.append({"sequence": seq, "timeNs": tick, "spanNs": span,
-                                 "kind": kind, "session": session, "threadId": thread_id,
-                                 "value0": v0, "value1": v1, "payloadA": pa})
-            if earliest is not None:
-                bucket = max(0, int((tick - earliest) // 1_000_000_000))
-                row = per_second.setdefault(bucket, {
-                    "secondFromFirstIngress": bucket, "ingressPackets": 0,
-                    "shortIngressPackets": 0, "sourceRejectCount": 0,
-                    "diagnosticWriteDropped": None, "diagnosticQueueDropped": None,
-                    "loopGapCount": 0, "maxLoopGapNs": None,
-                })
-                if kind == 1:
-                    row["loopGapCount"] += 1
-                    row["maxLoopGapNs"] = max(row["maxLoopGapNs"] or 0, int(span))
+    loop, loop_records = parsed_loop if parsed_loop is not None else _parse_looplog(root, include_events=True)
+    if earliest is not None:
+        for record in loop_records:
+            bucket = max(0, (record["timeNs"] - earliest) // 1_000_000_000)
+            row = per_second.setdefault(bucket, {
+                "secondFromFirstIngress": bucket, "ingressPackets": 0,
+                "shortIngressPackets": 0, "sourceRejectCount": 0,
+                "diagnosticWriteDropped": None, "diagnosticQueueDropped": None,
+                "loopGapCount": 0, "maxLoopGapNs": None,
+            })
+            if record["kind"] == 1:
+                row["loopGapCount"] += 1
+                row["maxLoopGapNs"] = max(row["maxLoopGapNs"] or 0, record["spanNs"])
 
     trace_queue_dropped = summary.get("queueDropped")
     trace_write_failed = summary.get("writeFailed")
@@ -657,12 +649,14 @@ def run(application_path: Path, system_path: Path | None, rounds_path: Path | No
         rounds = rounds_data
     else:
         rounds = []
+    parsed_loop = _parse_looplog(trace_root, include_events=True)
     try:
         legacy = analyze_trace(trace_root, expected, int(metadata.get("dataPort", 18001)),
-                               samples, bits, int(metadata.get("cards", 4) or 4), rounds, system_path)
+                               samples, bits, int(metadata.get("cards", 4) or 4), rounds, system_path,
+                               looplog=parsed_loop[0])
     except Exception as exc:  # keep the startup evidence report inspectable
         legacy = {"error": f"reused parser failed: {exc}"}
-    application = parse_application(trace_root)
+    application = parse_application(trace_root, parsed_loop)
     start = start_admission_evidence(application)
     system = system_evidence(system_path)
     clocks = clock_evidence(application, system)

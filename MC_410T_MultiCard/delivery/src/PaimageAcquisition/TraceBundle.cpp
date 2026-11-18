@@ -34,6 +34,30 @@ struct TraceExportIntent {
     }
 };
 
+bool writeAttachmentManifest(const DiagnosticRecorder::BundleSink& sink, QString* error,
+                             qint64 start, qint64 end, const QString& status, bool incomplete,
+                             const QJsonArray& issues, const QJsonArray& runs = {},
+                             const QJsonArray& skipped = {}, const QJsonArray& files = {})
+{
+    const QJsonObject manifest{{"schemaVersion",2},{"backendId","paimage-derived"},
+        {"requestedStartMs",start},{"fixedEndMs",end},{"attachmentStatus",status},
+        {"traceIncomplete",incomplete},{"attachmentIssues",issues},{"runs",runs},
+        {"skippedRuns",skipped},{"files",files},
+        {"coverageNote","Window clipping is explicit; missing pre-window object anchors remain unknown. Callback returns do not prove disk durability or completed reconstruction."}};
+    if (sink("paimage/manifest.json",QJsonDocument(manifest).toJson())) return true;
+    if (error && error->isEmpty()) *error = QStringLiteral("PAimage manifest ZIP write failed");
+    return false;
+}
+
+void describeQueueDropScope(QJsonObject& summary, bool capturedAtCut = false)
+{
+    const auto count=summary.value("queueDropped").toInteger(-1);
+    if (count<0) return;
+    summary.insert("queueDropScope",capturedAtCut?"run_through_cut":"source_run");
+    summary.insert("queueDroppedInRequestedWindow",
+        count==0 && !summary.value("counterExhausted").toBool()?QJsonValue(0):QJsonValue());
+}
+
 struct LoopFileExport {
     qint64 bytes = -1;
     quint64 selected = 0, filtered = 0, afterCut = 0;
@@ -49,34 +73,49 @@ struct LoopWindowCoverage {
     bool sourceWindowFailure = false;
 };
 
+struct LoopWindowBounds {
+    qint64 first = -1, last = -1;
+    bool invalid = false;
+
+    bool known() const { return !invalid && first >= 0 && last >= 0; }
+    bool contains(quint64 timeNs) const {
+        return !known() || (quint64(first) <= timeNs && timeNs <= quint64(last));
+    }
+};
+
+LoopWindowBounds loopWindowBounds(const QJsonObject &window)
+{
+    const auto first = window.value("startNs").toInteger(-1);
+    const auto last = window.value("endNs").toInteger(-1);
+    return {first,last,(window.contains("startNs") && first < 0) ||
+        (window.contains("endNs") && last < 0) || (first >= 0 && last >= 0 && first > last)};
+}
+
 struct LoopExportRange {
     qint64 wall, mono, start, end;
     bool anchorKnown;
 
     qint64 wallTime(qint64 timeNs) const { return wall + (timeNs - mono) / 1000000; }
 
-    bool intersects(const QJsonObject &window) const {
-        const auto first = window.value("startNs").toInteger(-1);
-        const auto last = window.value("endNs").toInteger(-1);
-        // Older or invalid bounds cannot establish that a failure is out of scope.
-        return !anchorKnown || first < 0 || last < first ||
-            (wallTime(first) <= end && wallTime(last) >= start);
+    QJsonValue intersects(const LoopWindowBounds &bounds) const {
+        if (!anchorKnown || !bounds.known()) return QJsonValue::Null;
+        return wallTime(bounds.first) <= end && wallTime(bounds.last) >= start;
     }
 };
 
 LoopWindowCoverage checkLoopWindows(const QJsonObject &summary, const LoopExportRange &range,
+                                   const QJsonArray &windows, const QList<LoopWindowBounds> &bounds,
                                    const QHash<QString, LoopFileExport> &files, bool formatError)
 {
     LoopWindowCoverage result;
     if (!summary.value("windows").isArray()) {
         const bool writeFailed = summary.value("writeFailed").toBool();
         const bool budgetExhausted = summary.value("budgetExhausted").toBool();
-        result.incomplete = writeFailed || budgetExhausted;
+        result.incomplete = true;
         result.status = writeFailed ? "write_failed" :
             budgetExhausted ? "budget_omitted" : "window_inventory_unavailable";
         return result;
     }
-    const auto windows = summary.value("windows").toArray();
     bool matches = !formatError && summary.value("recordBytes").toInt() == sizeof(LoopRecord);
     bool budget = false, writeFailure = false;
     bool hasBudgetWindow = false, hasWriteFailureWindow = false;
@@ -85,8 +124,9 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary, const LoopExport
     qint64 expectedRecords = 0;
     QSet<QString> expected;
     QSet<qint64> ids;
-    for (const auto &entry : windows) {
-        const auto window = entry.toObject();
+    for (qsizetype i = 0; i < windows.size(); ++i) {
+        const auto window = windows[i].toObject();
+        const auto &interval = bounds[i];
         const auto id = window.value("windowId").toInteger(-1);
         const auto count = window.value("recordCount").toInteger(-1);
         const auto bytes = window.value("bytes").toInteger(-1);
@@ -95,15 +135,17 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary, const LoopExport
         const bool isTruncated = window.value("preWindowTruncated").toBool() ||
             window.value("beforeListenerStart").toBool() || window.value("postWindowTruncated").toBool() ||
             window.value("windowTruncated").toBool();
-        const bool intersects = range.intersects(window);
+        const auto requested = range.intersects(interval);
+        const bool intersects = requested.toBool(true);
         hasRequestedWindow |= intersects;
         truncated |= intersects && isTruncated;
         QJsonObject detail{{"windowId", id}, {"sourceFile", name}, {"truncated", isTruncated},
-                           {"inRequestedWindow", intersects}};
+                           {"inRequestedWindow", requested},
+                           {"timeBoundsStatus",interval.invalid?"invalid":interval.known()?"known":"unknown"}};
         QString status;
         if (id <= 0 || ids.contains(id) || count < 0 || bytes < 0 ||
             bytes % sizeof(LoopRecord) || bytes / qint64(sizeof(LoopRecord)) != count ||
-            (!name.isEmpty() && name != canonical)) {
+            (!name.isEmpty() && name != canonical) || interval.invalid) {
             status = "invalid_manifest";
             matches = false;
         } else if (window.value("budgetOmitted").toBool()) {
@@ -165,23 +207,23 @@ LoopWindowCoverage checkLoopWindows(const QJsonObject &summary, const LoopExport
 void installTraceBundle(const QString& root,const QString& toolsDirectory){
     const auto traceRoot=QDir::cleanPath(QDir(root).absolutePath());
     DiagnosticRecorder::setBundleCapture([root=traceRoot,toolsDirectory](qint64 start,qint64 end){
+        const auto capturedAt=QDateTime::currentMSecsSinceEpoch();
+        const auto fixedEnd=qMin(end,capturedAt);
         // Register before observing the live writers: a writer can stop as soon
         // as its fence is captured, making its run eligible for pruning.
         auto intent=std::make_shared<TraceExportIntent>();
         intent->pending=diagnostic_storage::registerExportIntent(root);
         if(!intent->pending){
-            return DiagnosticRecorder::BundleExtension([](const DiagnosticRecorder::BundleSink&,QString* error){
-                if(error)*error=QStringLiteral("无法保护 PAimage 诊断目录，请重试导出");
-                return false;
+            return DiagnosticRecorder::BundleExtension([start,fixedEnd](const DiagnosticRecorder::BundleSink& sink,QString* error){
+                return writeAttachmentManifest(sink,error,start,fixedEnd,"unavailable",true,
+                    {QJsonObject{{"code","export_intent_unavailable"},{"message",QStringLiteral("无法保护 PAimage 诊断目录")}}});
             });
         }
-        const auto capturedAt=QDateTime::currentMSecsSinceEpoch();
-        const auto fixedEnd=qMin(end,capturedAt);
         // File reads, writer flush waits, filtering and hashing run in the exporter.
         auto cuts=TraceWriter::captureCuts();
         auto timingCuts=TimingWriter::captureCuts();
         auto loopCuts=LoopLog::captureCuts();
-        return DiagnosticRecorder::BundleExtension([root,toolsDirectory,start,end=fixedEnd,capturedAt,intent=std::move(intent),cuts=std::move(cuts),timingCuts=std::move(timingCuts),loopCuts=std::move(loopCuts)]
+        return DiagnosticRecorder::BundleExtension([root,toolsDirectory,start,end=fixedEnd,intent=std::move(intent),cuts=std::move(cuts),timingCuts=std::move(timingCuts),loopCuts=std::move(loopCuts)]
             (const DiagnosticRecorder::BundleSink& sink,QString* error){
             auto pending=intent->take();
             if(!pending){
@@ -189,12 +231,12 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 return false;
             }
             const QFileInfo rootInfo(root);
-            const bool rootExists=rootInfo.exists();
-            const auto lease=rootInfo.isDir()&&!rootInfo.isSymLink()&&!rootInfo.isJunction()
+            const bool rootExists=rootInfo.exists()||rootInfo.isSymLink()||rootInfo.isJunction();
+            const auto lease=rootInfo.isDir()&&rootInfo.isReadable()&&!rootInfo.isSymLink()&&!rootInfo.isJunction()
                 ? diagnostic_storage::awaitExportLease(root) : nullptr;
             if(rootExists&&!lease){
-                if(error)*error=QStringLiteral("无法锁定 PAimage 诊断目录，请重试导出");
-                return false;
+                return writeAttachmentManifest(sink,error,start,end,"unavailable",true,
+                    {QJsonObject{{"code","source_lease_unavailable"},{"message",QStringLiteral("无法锁定或读取 PAimage 诊断目录")}}});
             }
             pending.reset();
 
@@ -210,22 +252,34 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
             rememberRuns(cuts);
             rememberRuns(timingCuts);
             rememberRuns(loopCuts);
+            if (!rootExists && !knownRuns.isEmpty()) {
+                return writeAttachmentManifest(sink,error,start,end,"unavailable",true,
+                    {QJsonObject{{"code","source_root_missing"},{"message",QStringLiteral("已登记的 PAimage 诊断目录已丢失")}}});
+            }
             const QDir traceDir(root);
             const auto dirs=lease?traceDir.entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name):QStringList{};
+            QJsonArray runs,files,skippedRuns,attachmentIssues;
+            bool bundleIncomplete=false;
             QHash<QString,QJsonObject> knownMetadata;
-            for(const auto& dir:knownRuns){
+            auto knownNames=knownRuns.values();
+            knownNames.sort();
+            for(const auto& dir:knownNames){
                 const QString path=traceDir.filePath(dir);
                 const QFileInfo runInfo(path),configInfo(QDir(path).filePath("run-config.json"));
-                auto metadata=dirs.contains(dir)&&!runInfo.isSymLink()&&!runInfo.isJunction()&&
+                const bool runReadable=dirs.contains(dir)&&runInfo.isReadable()&&!runInfo.isSymLink()&&!runInfo.isJunction();
+                auto metadata=runReadable&&
                     configInfo.isFile()&&!configInfo.isSymLink()&&!configInfo.isJunction()
                     ? object(configInfo.filePath()) : QJsonObject{};
                 if(metadata.value("runId").toString()!=dir){
-                    if(error)*error=QStringLiteral("无法读取已登记的 PAimage 诊断运行：%1").arg(dir);
-                    return false;
+                    const auto code=runReadable?"run_config_unreadable":"run_directory_unavailable";
+                    skippedRuns.append(QJsonObject{{"runId",dir},{"reason",code}});
+                    attachmentIssues.append(QJsonObject{{"code",code},{"runId",dir},
+                        {"message",QStringLiteral("无法读取已登记的 PAimage 诊断运行：%1").arg(dir)}});
+                    bundleIncomplete=true;
+                    continue;
                 }
                 knownMetadata.insert(dir,std::move(metadata));
             }
-            QJsonArray runs,files,skippedRuns;bool bundleIncomplete=false;
             auto write=[&](const QString& name,const QByteArray& bytes){
                 if(!sink(name,bytes)){if(error&&error->isEmpty())*error="PAimage trace ZIP write failed";return false;}
                 files.append(QJsonObject{{"path",name},{"bytes",double(bytes.size())},
@@ -236,8 +290,22 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 if(runInfo.isSymLink()||runInfo.isJunction())continue;
                 const QString path=traceDir.filePath(dir);
                 const auto saved=knownMetadata.constFind(dir);
+                if (knownRuns.contains(dir) && saved==knownMetadata.cend()) continue;
                 auto metadata=saved==knownMetadata.cend()?object(QDir(path).filePath("run-config.json")):saved.value();
                 if(metadata.isEmpty())continue;
+                const qint64 wall=metadata.value("wallAnchorMs").toInteger(0);
+                bool monoValid=false;
+                const auto monoValue=metadata.value("monotonicAnchorNs");
+                const qint64 mono=monoValue.isString()
+                    ? monoValue.toString().toLongLong(&monoValid) : monoValue.toInteger(0);
+                const bool anchorKnown=wall>0 && wall<=(std::numeric_limits<qint64>::max)()-
+                    (std::numeric_limits<qint64>::max)()/1000000 &&
+                    mono>0 && (!monoValue.isString() || monoValid);
+                // This producer writes the anchors before constructing the receive backend.
+                const bool trustedStart=anchorKnown && metadata.value("schemaVersion").toInt()==3 &&
+                    metadata.value("backendId")=="paimage-receiver-diagnostics" && metadata.value("runId")==dir;
+                if (trustedStart && wall>end) continue;
+                const auto rangeStatus=trustedStart?"known_start":"unknown";
                 const auto enabledState=[&](const char* key){
                     const auto value=metadata.value(key);
                     return value.isBool()?value:QJsonValue(QJsonValue::Null);
@@ -250,9 +318,6 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 };
                 const bool timingEvidence=hasCut(timingCuts)||QFileInfo::exists(QDir(path).filePath("timing-summary.json"))||
                     !QDir(path).entryList({"timing-*.bin"},QDir::Files).isEmpty();
-                const qint64 wall=metadata.value("wallAnchorMs").toVariant().toLongLong();
-                if (wall > capturedAt) continue;
-
                 const auto loopCut = std::find_if(loopCuts.cbegin(),loopCuts.cend(),
                     [&](const auto& cut) { return cutPath(cut.root)==path; });
                 const bool loopLive = loopCut!=loopCuts.cend();
@@ -297,8 +362,6 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     loopSummary.value("counterExhausted").toBool();
                 const bool timingMissing=timingEnabled.isBool()&&timingEnabled.toBool()&&!timingEvidence;
                 const bool loopMissing=loopEnabled.isBool()&&loopEnabled.toBool()&&!loopEvidence;
-                const qint64 mono=metadata.value("monotonicAnchorNs").toString().toLongLong();
-                bool anchorKnown=wall&&mono;
                 if(!anchorKnown && start!=std::numeric_limits<qint64>::min()){
                     const auto binary=QDir(path).entryList({"trace-*.bin","timing-*.bin"},QDir::Files);
                     const auto traceInfo=object(QDir(path).filePath("trace-summary.json"));
@@ -313,6 +376,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     if(!binary.isEmpty()||hasEvidence(traceInfo,"traceIncomplete")||
                        hasEvidence(timingInfo,"timingIncomplete")||loopAnchorNeeded||timingMissing||loopMissing){
                         skippedRuns.append(QJsonObject{{"runId",metadata.value("runId")},{"reason","missing_time_anchor"},
+                            {"runTimeRangeStatus",rangeStatus},
                             {"timingEnabled",timingEnabled},{"loopLogEnabled",loopEnabled},
                             {"timingMissing",timingMissing},{"loopLogMissing",loopMissing},
                             {"timingIncomplete",timingMissing||hasEvidence(timingInfo,"timingIncomplete")},
@@ -385,19 +449,24 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 int loopPart=0; quint64 loopSelected=0,loopFiltered=0,loopAfterCut=0; bool loopBad=false;
                 QHash<QString, LoopFileExport> loopFiles;
                 const LoopExportRange loopRange{wall,mono,start,end,anchorKnown};
-                QSet<QString> outsideLoopFiles, requestedLoopFiles;
+                const auto windowEntries=loopSummary.value("windows").toArray();
+                QList<LoopWindowBounds> windowBounds;
+                QHash<QString, LoopWindowBounds> fileBounds;
                 if (loopWindowMode) {
-                    for (const auto& entry : loopSummary.value("windows").toArray()) {
+                    for (const auto& entry : windowEntries) {
                         const auto window = entry.toObject();
                         const auto name = window.value("file").toString();
-                        if (loopRange.intersects(window)) requestedLoopFiles.insert(name);
-                        else outsideLoopFiles.insert(name);
+                        const auto bounds=loopWindowBounds(window);
+                        windowBounds.append(bounds);
+                        if (name.isEmpty()) continue;
+                        if (fileBounds.contains(name)) fileBounds[name]={-1,-1,true};
+                        else fileBounds.insert(name,bounds);
                     }
-                    outsideLoopFiles.subtract(requestedLoopFiles);
                 }
                 for(const auto& name:loopNames){
                     auto &file = loopFiles[name];
-                    const bool inRange = !outsideLoopFiles.contains(name);
+                    const auto bounds=fileBounds.value(name);
+                    const bool inRange=loopRange.intersects(bounds).toBool(true);
                     const QFileInfo info(QDir(path).filePath(name));
                     QFile input(info.filePath());
                     if (!info.exists() && !info.isSymLink() && !info.isJunction()) continue;
@@ -411,18 +480,19 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     constexpr qsizetype recordBytes = sizeof(LoopRecord);
                     for(qsizetype at=0;at+recordBytes<=bytes.size();at+=recordBytes){LoopRecord r;std::memcpy(&r,bytes.constData()+at,recordBytes);
                         if(loopBoundaryKnown&&r.sequence>loopBoundary){++file.afterCut;continue;}
-                        if (loopWindowMode && (!r.sequence || r.kind < uint16_t(LoopKind::Loop) ||
+                        if (loopWindowMode && (!r.sequence || r.timeNs > quint64((std::numeric_limits<qint64>::max)()) ||
+                                              r.kind < uint16_t(LoopKind::Loop) ||
                                               r.kind > uint16_t(LoopKind::ControlMark))) {
                             file.formatError = true;
                             continue;
                         }
                         const qint64 time=anchorKnown?loopRange.wallTime(qint64(r.timeNs)):0;
-                        if(anchorKnown&&(time<start||time>end)){++file.filtered;continue;}
-                        if (!inRange) {
-                            // A record in the request contradicts this file's declared bounds.
-                            file.formatError = loopBad = true;
+                        if (!bounds.contains(r.timeNs)) {
+                            file.formatError = true;
+                            if (inRange || (time>=start && time<=end)) loopBad = true;
                             continue;
                         }
+                        if(anchorKnown&&(time<start||time>end)){++file.filtered;continue;}
                         chosen.append(bytes.constData()+at,recordBytes);++file.selected;}
                     loopSelected += file.selected; loopFiltered += file.filtered;
                     loopAfterCut += file.afterCut; loopBad |= inRange && file.formatError;
@@ -442,7 +512,8 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 const bool timingPresent=timingEvidence||timingMissing;
                 const bool timingIncomplete=timingMissing||(timingPresent&&(timingSummary.value("timingIncomplete").toBool()||
                     !timingFlushed||timingBad||!anchorKnown||!timingCountCovered));
-                auto coverage = loopWindowMode ? checkLoopWindows(loopSummary, loopRange, loopFiles, loopBad) : LoopWindowCoverage{};
+                auto coverage = loopWindowMode ? checkLoopWindows(loopSummary,loopRange,windowEntries,windowBounds,loopFiles,loopBad)
+                                               : LoopWindowCoverage{};
                 // Schema 1 used continuous files. Only that legacy contract
                 // ties recordsIssued to the on-disk record count.
                 const bool legacyCount = !loopWindowMode && loopSummary.value("mode").toString().isEmpty() &&
@@ -462,6 +533,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 if(noRecords){
                     if(skipped){
                         skippedRuns.append(QJsonObject{{"runId",metadata.value("runId")},{"reason","no_complete_records"},
+                            {"runTimeRangeStatus",rangeStatus},
                             {"traceFormatError",traceBad},{"timingFormatError",timingBad},{"loopLogFormatError",loopBad},
                             {"traceIncomplete",traceFailure},{"timingIncomplete",timingIncomplete},{"loopLogIncomplete",loopStreamIncomplete},
                             {"timingEnabled",timingEnabled},{"loopLogEnabled",loopEnabled},{"timingMissing",timingMissing},{"loopLogMissing",loopMissing},
@@ -481,6 +553,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     exported.insert("exportFlushCompleted",flushed);
                     exported.insert("exportFormatError",traceBad);
                     exported.insert("exportCountCovered",boundaryKnown?QJsonValue(traceCountCovered):QJsonValue());
+                    describeQueueDropScope(exported);
                     if(!write(prefix+"trace-summary.json",QJsonDocument(exported).toJson()))return false;
                 }
                 if(timingPresent){
@@ -492,6 +565,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     timingSummary.insert("exportCountCovered",timingBoundaryKnown?QJsonValue(timingCountCovered):QJsonValue());
                     timingSummary.insert("timingIncomplete",timingIncomplete);
                     timingSummary.insert("exportMissing",timingMissing);
+                    describeQueueDropScope(timingSummary);
                     if(!write(prefix+"timing-summary.json",QJsonDocument(timingSummary).toJson()))return false;
                 }
                 if(loopPresent){loopSummary.insert("exportFlushCompleted",loopFlushed);
@@ -505,9 +579,11 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                     loopSummary.insert("exportFormatError",loopBad);
                     loopSummary.insert("exportCountCovered", coverage.covered);
                     if (loopWindowMode) {
+                        loopSummary.insert("mode","rolling-burst-windows");
                         loopSummary.insert("exportRetentionStatus", coverage.status);
                         loopSummary.insert("exportWindows", coverage.windows);
                     }
+                    describeQueueDropScope(loopSummary,loopLive);
                     loopSummary.insert("loopLogIncomplete",loopStreamIncomplete);loopSummary.insert("exportMissing",loopMissing);
                     if(!write(prefix+"looplog-summary.json",QJsonDocument(loopSummary).toJson()))return false;}
                 bundleIncomplete|=incomplete;
@@ -515,6 +591,7 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
                 runs.append(QJsonObject{{"runId",metadata.value("runId")},{"recordBoundary",double(boundary)},
                     {"recordsIncluded",double(selected)},{"recordsOutsideWindow",double(filtered)},
                     {"traceIncomplete",incomplete},{"traceEnabled",traceExpected},{"timingEnabled",timingEnabled},{"loopLogEnabled",loopEnabled},
+                    {"runTimeRangeStatus",rangeStatus},
                     {"timingIncomplete",timingIncomplete},{"loopLogIncomplete",loopStreamIncomplete},{"timingMissing",timingMissing},{"loopLogMissing",loopMissing},{"timingRecordsIncluded",double(timingSelected)},{"anchorKnown",anchorKnown},{"files",runFiles},
                     {"loopLogRetentionStatus",coverage.status},{"loopLogRecordsIncluded",qint64(loopSelected)},
                     {"loopLogClipped",loopFiltered>0||loopAfterCut>0},
@@ -524,12 +601,14 @@ void installTraceBundle(const QString& root,const QString& toolsDirectory){
             for(const auto& name:{QString("paimage_trace_analyze.py"),QString("paimage-trace-schema.md"),
                                    QString("startup-looplog-schema.md"),QString("startup_diagnostics_analyze.py")}){
                 auto bytes=read(QDir(toolsDirectory).filePath(name));
-                if(bytes.isEmpty())bundleIncomplete=true;else if(!write("paimage/tools/"+name,bytes))return false;
+                if(bytes.isEmpty()){
+                    bundleIncomplete=true;
+                    attachmentIssues.append(QJsonObject{{"code","tool_unreadable"},
+                        {"message",QStringLiteral("无法读取 PAimage 分析工具或文档：%1").arg(name)}});
+                }else if(!write("paimage/tools/"+name,bytes))return false;
             }
-            QJsonObject manifest{{"schemaVersion",2},{"backendId","paimage-derived"},
-                {"requestedStartMs",double(start)},{"fixedEndMs",double(end)},{"traceIncomplete",bundleIncomplete},
-                {"runs",runs},{"skippedRuns",skippedRuns},{"files",files},{"coverageNote","Window clipping is explicit; missing pre-window object anchors remain unknown. Callback returns do not prove disk durability or completed reconstruction."}};
-            return sink("paimage/manifest.json",QJsonDocument(manifest).toJson());
+            return writeAttachmentManifest(sink,error,start,end,attachmentIssues.isEmpty()?"available":"partial",
+                bundleIncomplete,attachmentIssues,runs,skippedRuns,files);
         });
     });
 }

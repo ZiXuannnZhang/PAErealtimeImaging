@@ -473,7 +473,12 @@ if(WIN32)
         ../src/PaimageAcquisition/TraceBundle.cpp ../src/DiagnosticRecorder.cpp)
     target_include_directories(paimage_trace_bundle_test PRIVATE ../include)
     target_link_libraries(paimage_trace_bundle_test PRIVATE paimage_socket Qt6::Core)
-    add_test(NAME paimage_trace_bundle_test COMMAND paimage_trace_bundle_test)
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME paimage_trace_bundle_test COMMAND paimage_trace_bundle_test
+            "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/../tools")
+    else()
+        add_test(NAME paimage_trace_bundle_test COMMAND paimage_trace_bundle_test)
+    endif()
 endif()
 
 if(Python3_Interpreter_FOUND)

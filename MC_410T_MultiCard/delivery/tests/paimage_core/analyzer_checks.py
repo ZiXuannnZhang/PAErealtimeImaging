@@ -151,5 +151,29 @@ def main():
         summary.write_text(json.dumps(dict(saved, windows=windows[2:], recordsWritten=3, loopLogIncomplete=False)))
         raw = m._looplog(loop)
         assert raw['burstWindows'][0]['windowId'] == 3 and raw['burstWindows'][0]['following5sCovered'] is True
+
+        overlap = root / 'overlap'
+        overlap.mkdir()
+        def gap(span):
+            return m.LOOPLOG.pack(42, 9*ns, span, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0)
+        overlap_windows = []
+        for window_id, span in [(1, 50_000_000), (2, 50_000_000), (3, 60_000_000)]:
+            name = f'looplog-window-{window_id}.bin'
+            (overlap/name).write_bytes(gap(span))
+            overlap_windows.append(dict(windowId=window_id, file=name, recordCount=1, bytes=80,
+                                        startNs=8*ns, endNs=10*ns))
+        (overlap/'looplog-summary.json').write_text(json.dumps(dict(
+            mode='rolling-burst-windows', recordsWritten=3, windows=overlap_windows, loopLogIncomplete=False)))
+        conflict, events = m._parse_looplog(overlap, include_events=True)
+        assert conflict['sequenceConflicts'] == [dict(sequence=42, files=[w['file'] for w in overlap_windows])]
+        assert conflict['records'] == 3 and conflict['logicalRecords'] == 0 and not events
+        assert conflict['loopLogIncomplete'] and all(f['status'] == 'verified' for f in conflict['files'])
+
+        clipped_legacy = root/'clipped-legacy'
+        clipped_legacy.mkdir()
+        (clipped_legacy/'looplog-0.bin').write_bytes(gap(50_000_000))
+        (clipped_legacy/'looplog-summary.json').write_text(json.dumps(dict(
+            recordsIssued=42, recordsWritten=1, exportFlushCompleted=True, loopLogIncomplete=False)))
+        assert not m._looplog(clipped_legacy)['loopLogIncomplete']
     print('PASS independent trace and LoopLog analyzer fixtures')
 if __name__=='__main__':main()

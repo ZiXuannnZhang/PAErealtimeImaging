@@ -107,6 +107,9 @@ def _loop_window_inventory(summary, run_name):
         detail = by_id.get(window_id) if isinstance(window_id, int) else None
         if detail is not None and detail.get('inRequestedWindow') is False:
             continue
+        if detail is not None and detail.get('status') in (
+                'invalid_manifest', 'missing_or_unreadable', 'corrupt', 'write_failed', 'budget_omitted'):
+            incomplete = True
         incomplete |= any(window.get(key) for key in (
             'preWindowTruncated', 'beforeListenerStart', 'postWindowTruncated', 'windowTruncated', 'budgetOmitted'))
         if not isinstance(window_id, int) or window_id <= 0:
@@ -127,101 +130,216 @@ def _loop_window_inventory(summary, run_name):
             count = detail.get('exportRecords')
         else:
             name, count = canonical, window.get('recordCount')
-        sources[name] = (window, count) if name not in sources else None
+        if count != 0:
+            sources[name] = (window, count) if name not in sources else None
     return sources, incomplete
 
-def _looplog(root):
-    summary_path=root/'looplog-summary.json'
-    summary=json.loads(summary_path.read_text(encoding='utf-8')) if summary_path.exists() else {}
-    rolling = summary.get('mode') == 'rolling-burst-windows'
+def _json_object(path):
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+def _loop_zip_scope(root):
+    """Recover manifest membership and the export's wall-to-monotonic mapping."""
+    manifest = _json_object(root.parent/'manifest.json') if root.parent.name == 'paimage' else {}
+    listed = manifest.get('files')
+    members = None
+    if isinstance(listed, list):
+        members = {}
+        for item in listed:
+            if not isinstance(item, dict) or not isinstance(item.get('path'), str):
+                continue
+            path = PurePosixPath(item['path'])
+            if path.parent == PurePosixPath('paimage', root.name) and path.match('looplog-*.bin'):
+                members[path.name] = item
+    config = _json_object(root/'run-config.json') if manifest else {}
+    start, end = manifest.get('requestedStartMs'), manifest.get('fixedEndMs')
+    wall, mono = config.get('wallAnchorMs'), config.get('monotonicAnchorNs')
+    try:
+        mono = int(mono)
+    except (ValueError, TypeError, OverflowError):
+        mono = 0
+    if all(isinstance(v, (int, float)) for v in (start, end, wall)) and wall > 0 and mono > 0:
+        return members, (start, end, wall, mono)
+    return members, None
+
+def _burst_coverage(records, window=None, interval=None, rolling=True):
+    markers = [r for r in records if r[5] == 6]
+    if not markers:
+        return []
+    first, last = min(r[1] for r in records), max(r[1] for r in records)
+    result = []
+    for record in markers:
+        epoch = record[7] | (record[8] << 32)
+        start, end = record[1]-5_000_000_000, record[1]+5_000_000_000
+        detail = dict(epoch=epoch, startNs=start, endNs=end, records=None,
+                      prior5sCovered=None, following5sCovered=None)
+        epochs = window.get('burstEpochs') if window is not None else None
+        if not rolling or (interval and isinstance(epochs, list) and epoch in epochs):
+            detail.update(records=sum(start <= r[1] <= end for r in records),
+                          prior5sCovered=first <= start, following5sCovered=last >= end)
+            if rolling:
+                detail['windowId'] = window['windowId']
+                if start <= interval[0] and (window.get('preWindowTruncated') or window.get('beforeListenerStart')):
+                    detail['prior5sCovered'] = False
+                coverage_end = window.get('coverageEndNs')
+                if ((isinstance(coverage_end, int) and coverage_end < end)
+                        or (window.get('postWindowTruncated') and end >= interval[1])):
+                    detail['following5sCovered'] = False
+                if window.get('windowTruncated'):
+                    for side in ('prior5sCovered', 'following5sCovered'):
+                        if detail[side]:
+                            detail[side] = None
+        result.append(detail)
+    return result
+
+def _parse_looplog(root, include_events=False):
+    summary = _json_object(root/'looplog-summary.json')
+    paths = {path.name: path for path in root.glob('looplog-*.bin')}
+    rolling = summary.get('mode') == 'rolling-burst-windows' or any(
+        name.startswith('looplog-window-') for name in paths)
     sources, window_incomplete = _loop_window_inventory(summary, root.name) if rolling else ({}, False)
-    records=[];bad=0;unique=0;maximum=0;by_kind={}
-    file_ranges = {}
-    for path in sorted(root.glob('looplog-*.bin'),key=lambda p:int(p.stem.split('-')[-1])):
-        first_record, previous_bad = len(records), bad
-        data=path.read_bytes();bad+=len(data)%80!=0
-        for values in LOOPLOG.iter_unpack(data[:len(data)//80*80]):
-            seq,tick,span,session,tid,kind,flags,v0,v1,v2,v3,pa,pb,pc=values
-            if not seq or (rolling and kind not in LOOP_KINDS):bad+=1;continue
-            maximum=max(maximum,seq);unique+=1
-            rec=dict(sequence=seq,timeNs=tick,spanNs=span,session=session,threadId=tid,
-                     kind=LOOP_KINDS.get(kind,str(kind)),flags=flags,value0=v0,value1=v1,
-                     value2=v2,value3=v3,payloadA=pa,payloadB=pb,payloadC=pc)
-            by_kind[rec['kind']]=by_kind.get(rec['kind'],0)+1
-            records.append(rec)
-        file_ranges[path.name] = (first_record, len(records), bad == previous_bad)
-    expected = summary.get('recordsWritten') if rolling else max(int(summary.get('recordsIssued',0)), maximum)
+    members, export_range = _loop_zip_scope(root)
+    exported = members is not None or 'exportFlushCompleted' in summary
+    boundary = summary.get('recordsIssued') if exported else None
+    physical = physical_read = bad = 0
+    evidence_failed = False
+    records, conflicts = {}, set()
+    files, burst_windows = [], []
+    names = sorted(paths.keys() | sources.keys() | (members or {}).keys())
+    for index, name in enumerate(names):
+        location = 1 << index
+        source, member = sources.get(name), (members or {}).get(name)
+        window, expected_count = source if source else (None, None)
+        detail = dict(name=name, windowId=window.get('windowId') if window else None,
+                      expectedRecords=expected_count, records=0, validRecords=0, bytes=None)
+        files.append(detail)
+        if name not in paths:
+            detail['status'] = 'missing'
+            evidence_failed = True
+            continue
+        try:
+            data = paths[name].read_bytes()
+        except OSError:
+            detail['status'] = 'unreadable'
+            evidence_failed = True
+            continue
+        count, tail = divmod(len(data), LOOPLOG.size)
+        physical_read += count
+        detail.update(bytes=len(data), records=count, trailingBytes=tail)
+        problems = []
+        if tail:
+            bad += 1
+            problems.append('partial_record')
+        if source and expected_count is not None and expected_count != count:
+            problems.append('record_count_mismatch')
+        if member is not None:
+            if member.get('bytes') != len(data) or (
+                    member.get('sha256') and hashlib.sha256(data).hexdigest() != member['sha256']):
+                problems.append('archive_manifest_mismatch')
+        elif members is not None:
+            problems.append('unlisted_archive_member')
+        interval = None
+        bounds_status = 'unknown'
+        if window is not None:
+            start, end = window.get('startNs'), window.get('endNs')
+            if type(start) is int and type(end) is int and 0 <= start <= end:
+                interval = start, end
+                bounds_status = 'known'
+            elif ('startNs' in window and (type(start) is not int or start < 0)
+                  or 'endNs' in window and (type(end) is not int or end < 0)
+                  or type(start) is int and type(end) is int and start > end):
+                problems.append('invalid_window_bounds')
+                bounds_status = 'invalid'
+            if not isinstance(summary.get('exportWindows'), list) and 'bytes' in window and window['bytes'] != len(data):
+                problems.append('source_byte_count_mismatch')
+        local = []
+        rejected = 0
+        for record in LOOPLOG.iter_unpack(memoryview(data)[:count*LOOPLOG.size]):
+            seq, tick, _, _, _, kind, *_ = record
+            outside_request = False
+            if export_range:
+                start, end, wall, mono = export_range
+                offset = tick-mono
+                time = wall + (offset//1_000_000 if offset >= 0 else -((-offset)//1_000_000))
+                outside_request = not start <= time <= end
+            if (not seq or (rolling and kind not in LOOP_KINDS) or
+                    (interval and not interval[0] <= tick <= interval[1]) or
+                    (isinstance(boundary, (int, float)) and seq > boundary) or outside_request):
+                rejected += 1
+                continue
+            local.append(record)
+            previous = records.get(seq)
+            if previous is None:
+                records[seq] = record, location
+            else:
+                previous_record, locations = previous
+                if locations & location and 'duplicate_sequence_in_file' not in problems:
+                    problems.append('duplicate_sequence_in_file')
+                if record != previous_record:
+                    conflicts.add(seq)
+                records[seq] = previous_record, locations | location
+        physical += len(local)
+        bad += rejected
+        if rejected:
+            problems.append('invalid_or_out_of_scope_records')
+        detail.update(validRecords=len(local), timeBoundsStatus=bounds_status,
+                      status='corrupt' if problems else 'verified', issues=problems)
+        evidence_failed |= bool(problems)
+        if rolling:
+            verified_window = source and expected_count == count and not problems
+            burst_windows.extend(_burst_coverage(local, window, interval if verified_window else None))
+    logical = (record for seq, (record, _) in records.items() if seq not in conflicts)
+    if not rolling:
+        logical = list(logical)
+        burst_windows = _burst_coverage(logical, rolling=False)
+    maximum = max(records, default=0)
+    uses_physical_count = rolling or (exported and 'recordsWritten' in summary)
+    issued = summary.get('recordsIssued', 0)
+    expected = summary.get('recordsWritten') if uses_physical_count else max(
+        issued if isinstance(issued, (int, float)) else 0, maximum)
     if isinstance(expected, float) and expected.is_integer():
         expected = int(expected)
-    missing = max(0, expected - unique) if isinstance(expected, int) and expected >= 0 else None
-    count_mismatch = missing is None or (rolling and expected != unique) or bool(missing)
-    loops=[r for r in records if r['kind']=='loop']
-    gaps=sorted(r['spanNs'] for r in loops)
-    bursts, burst_windows = [], []
-    if not rolling:
-        first_ns = min((r['timeNs'] for r in records), default=None)
-        last_ns = max((r['timeNs'] for r in records), default=None)
-    for name, (first, last, valid) in file_ranges.items():
-        file_records = records[first:last]
-        markers = [r for r in file_records if r['kind'] == 'burstMark']
-        source = sources.get(name)
-        window = source[0] if source and valid and source[1] == len(file_records) else None
-        if source and source[1] != len(file_records):
-            window_incomplete = True
-        if not markers:
-            continue
-        local = file_records if rolling else records
-        if rolling:
-            first_ns = min(r['timeNs'] for r in local)
-            last_ns = max(r['timeNs'] for r in local)
-        if window is not None:
-            nominal_start, nominal_end = window.get('startNs'), window.get('endNs')
-            if not (isinstance(nominal_start, int) and isinstance(nominal_end, int)
-                    and nominal_start <= first_ns <= last_ns <= nominal_end):
-                window = None
-                window_incomplete = True
-        for record in markers:
-            epoch = record['value0'] | (record['value1'] << 32)
-            tick = record['timeNs']
-            bursts.append(dict(epoch=epoch, burstNs=tick, idleSpanNs=record['spanNs'],
-                               previousSampleNs=record['payloadA']))
-            start, end = tick-5_000_000_000, tick+5_000_000_000
-            detail = dict(epoch=epoch, startNs=start, endNs=end, records=None,
-                          prior5sCovered=None, following5sCovered=None)
-            epochs = window.get('burstEpochs') if window is not None else None
-            if not rolling or (isinstance(epochs, list) and epoch in epochs):
-                detail.update(records=sum(start <= r['timeNs'] <= end for r in local),
-                              prior5sCovered=first_ns <= start, following5sCovered=last_ns >= end)
-                if rolling:
-                    detail['windowId'] = window['windowId']
-                    if start <= nominal_start and (window.get('preWindowTruncated') or window.get('beforeListenerStart')):
-                        detail['prior5sCovered'] = False
-                    coverage_end = window.get('coverageEndNs')
-                    if ((isinstance(coverage_end, int) and coverage_end < end)
-                            or (window.get('postWindowTruncated') and end >= nominal_end)):
-                        detail['following5sCovered'] = False
-                    if window.get('windowTruncated'):
-                        for side in ('prior5sCovered', 'following5sCovered'):
-                            if detail[side]:
-                                detail[side] = None
-            burst_windows.append(detail)
-    if any(source and source[1] and name not in file_ranges for name, source in sources.items()):
-        window_incomplete = True
-    stalled=[dict(detectedNs=r['timeNs'],stalledNs=r['spanNs'],lastLoopNs=r['payloadA'])
-             for r in records if r['kind']=='stalled']
-    control=[dict(phase=r['value0'],success=r['value1'],session=r['session'],enterNs=r['timeNs'],
-                  durationNs=r['spanNs'],enabledAfter=bool(r['flags']&1),confirmedAfter=bool(r['flags']&2))
-             for r in records if r['kind']=='controlMark']
-    return dict(status='not-recorded' if not summary and not records else 'ok',summary=summary,
-        records=unique,missingRecordCount=missing,malformed=bad,recordsByKind=by_kind,
-        loopCount=len(loops),maxLoopGapNs=gaps[-1] if gaps else None,
-        loopGapsOver20ms=sum(1 for g in gaps if g>20000000),
-        loopGapsOver100ms=sum(1 for g in gaps if g>100000000),
+    observed = physical if uses_physical_count else len(records)
+    missing = max(0, expected-observed) if isinstance(expected, int) and expected >= 0 else None
+    mismatch = missing is None or (uses_physical_count and expected != physical) or bool(missing)
+    by_kind, gaps, bursts, stalled, control, events = {}, [], [], [], [], []
+    for seq,tick,span,session,tid,kind,flags,v0,v1,v2,v3,pa,pb,pc in logical:
+        label = LOOP_KINDS.get(kind,str(kind))
+        by_kind[label] = by_kind.get(label,0)+1
+        if kind == 1:
+            gaps.append(span)
+        elif kind == 6:
+            bursts.append(dict(epoch=v0|(v1<<32),burstNs=tick,idleSpanNs=span,previousSampleNs=pa))
+        elif kind == 7:
+            stalled.append(dict(detectedNs=tick,stalledNs=span,lastLoopNs=pa))
+        elif kind == 8:
+            control.append(dict(phase=v0,success=v1,session=session,enterNs=tick,durationNs=span,
+                                enabledAfter=bool(flags&1),confirmedAfter=bool(flags&2)))
+        if include_events:
+            events.append(dict(sequence=seq,timeNs=tick,spanNs=span,kind=kind,session=session,
+                               threadId=tid,value0=v0,value1=v1,payloadA=pa))
+    duplicates = sum(mask.bit_count()-1 for seq, (_, mask) in records.items() if seq not in conflicts)
+    result = dict(status='not-recorded' if not summary and not files else 'ok',summary=summary,
+        records=physical,physicalRecordsRead=physical_read,logicalRecords=len(records)-len(conflicts),
+        duplicateRecordCopies=duplicates,sequenceConflicts=[
+            dict(sequence=seq, files=[name for i, name in enumerate(names) if records[seq][1] & (1 << i)])
+            for seq in sorted(conflicts)],
+        missingRecordCount=missing,malformed=bad,recordsByKind=by_kind,files=files,
+        loopCount=len(gaps),maxLoopGapNs=max(gaps,default=None),
+        loopGapsOver20ms=sum(gap>20_000_000 for gap in gaps),
+        loopGapsOver100ms=sum(gap>100_000_000 for gap in gaps),
         receiveBursts=bursts,burstWindows=burst_windows,stallHints=stalled,controlMarks=control,
-        loopLogIncomplete=bool(not summary or summary.get('loopLogIncomplete',True)
-                               or count_mismatch or window_incomplete or bad),
+        loopLogIncomplete=bool(not summary or summary.get('loopLogIncomplete',True) or mismatch
+                               or window_incomplete or evidence_failed or conflicts or (not rolling and duplicates)),
         note=('records cover retained burst windows' if rolling else 'records cover the receive loop')
              + '; 100ms stall sampling cannot observe every 20ms gap and does not prove CPU preemption')
+    return result, events
+
+def _looplog(root):
+    return _parse_looplog(root)[0]
 
 def _pcapng_packets(path):
     """Parse pktmon etl2pcap pcapng (Ethernet or raw-IP link types).
@@ -400,7 +518,7 @@ def _system_capture(capture_dir,groups,rounds,base_port,cards,wall_anchor_ms,mon
         'unknown below the earliest observable layer, or unverifiable window')
     return result
 
-def analyze(root,expected,base_port,samples=None,bits=32,cards=4,rounds=None,system_capture_dir=None):
+def analyze(root,expected,base_port,samples=None,bits=32,cards=4,rounds=None,system_capture_dir=None,*,looplog=None):
     metadata_path=root/'run-config.json'
     metadata=json.loads(metadata_path.read_text(encoding='utf-8')) if metadata_path.exists() else {}
     if metadata:
@@ -547,7 +665,8 @@ def analyze(root,expected,base_port,samples=None,bits=32,cards=4,rounds=None,sys
             delivery_gap=True
         if g['missingRelativeSlots'] or g['missingValidSlots'] or g['outsideAnchor'] or g['duplicates'] or g['shortNonTailPayloads'] or g['shortTailPayloads'] or g['startupFiltered'] or g['associationAmbiguous'] or g['sourceRejects'] or g['terminationEvents'] or delivery_gap:anomalies.append(g)
     timing=_timing(root)
-    looplog=_looplog(root)
+    if looplog is None:
+        looplog=_looplog(root)
     round_summaries=_round_summaries(groups,rounds,expected,cards,not incomplete)
     system=None
     if system_capture_dir is not None:

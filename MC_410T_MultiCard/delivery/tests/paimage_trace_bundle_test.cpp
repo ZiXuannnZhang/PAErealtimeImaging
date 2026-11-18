@@ -11,6 +11,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
+#include <QProcess>
 #include <QTimer>
 #include <cstring>
 #include <future>
@@ -33,6 +34,122 @@ QHash<QString,QByteArray> zipEntries(const QString& path){
 }
 template<typename Record>
 QByteArray recordBytes(const Record& record){return QByteArray(reinterpret_cast<const char*>(&record),sizeof(record));}
+QJsonObject zipObject(const QHash<QString,QByteArray>& zip,const QString& name) {
+    return QJsonDocument::fromJson(zip.value(name)).object();
+}
+void testBundledAnalyzers(const QTemporaryDir& root,DiagnosticRecorder& recorder,const QStringList& args) {
+    const auto e2eRoot=root.filePath("closeout-e2e");
+    const auto e2eRun=e2eRoot+"/listener";
+    const auto e2eWall=QDateTime::currentDateTime().addSecs(-30);
+    constexpr qint64 second=1000000000ll;
+    const auto tick=[](qint64 seconds){return 1000000+seconds*second;};
+    require(QDir().mkpath(e2eRun));
+    write(e2eRun+"/run-config.json",QJsonDocument(QJsonObject{
+        {"runId","listener"},{"wallAnchorMs",e2eWall.toMSecsSinceEpoch()},{"monotonicAnchorNs","1000000"},
+        {"diagnosticTraceEnabled",true},{"timingEnabled",false},{"loopLogEnabled",true},
+        {"dataPort",8001},{"cards",1},{"samples",180},{"bits",32}}).toJson());
+    paimage::TraceRecord ingress;
+    ingress.sequence=1;
+    ingress.stage=1;
+    ingress.localPort=8001;
+    ingress.length=1444;
+    ingress.monotonicNs=tick(8);
+    write(e2eRun+"/trace-0.bin",recordBytes(ingress));
+    write(e2eRun+"/trace-summary.json",QJsonDocument(QJsonObject{
+        {"recordsIssued",1},{"recordsWritten",1},{"traceIncomplete",false}}).toJson());
+    paimage::LoopRecord firstMarker;
+    firstMarker.kind=uint16_t(paimage::LoopKind::BurstMark);
+    firstMarker.sequence=1; firstMarker.timeNs=tick(6); firstMarker.value0=1;
+    paimage::LoopRecord gap;
+    gap.kind=uint16_t(paimage::LoopKind::Loop);
+    gap.sequence=2; gap.timeNs=tick(9); gap.spanNs=50000000;
+    auto stall=gap;
+    stall.sequence=3; stall.timeNs=tick(10); stall.kind=uint16_t(paimage::LoopKind::Stalled);
+    auto secondMarker=firstMarker;
+    secondMarker.sequence=4; secondMarker.timeNs=tick(13); secondMarker.value0=2;
+    auto outside=gap;
+    outside.sequence=5; outside.timeNs=tick(19);
+    const auto firstBody=recordBytes(firstMarker)+recordBytes(gap)+recordBytes(stall);
+    const auto secondBody=recordBytes(gap)+recordBytes(stall)+recordBytes(secondMarker);
+    write(e2eRun+"/looplog-window-1.bin",firstBody);
+    paimage::installTraceBundle(e2eRoot,args[2]);
+    const auto makeArchive=[&](bool conflict,const QString& path) {
+        const auto count=conflict?4:3;
+        write(e2eRun+"/looplog-window-2.bin",secondBody+(conflict?recordBytes(outside):QByteArray{}));
+        const QJsonArray windowMeta{
+            QJsonObject{{"windowId",1},{"file","looplog-window-1.bin"},{"startNs",tick(1)},{"endNs",tick(11)},
+                {"recordCount",3},{"bytes",firstBody.size()},{"burstEpochs",QJsonArray{1}}},
+            QJsonObject{{"windowId",2},{"file","looplog-window-2.bin"},{"startNs",tick(8)},{"endNs",tick(18)},
+                {"recordCount",count},{"bytes",count*int(sizeof(gap))},{"burstEpochs",QJsonArray{2}}}};
+        write(e2eRun+"/looplog-summary.json",QJsonDocument(QJsonObject{
+            {"mode","rolling-burst-windows"},{"recordBytes",int(sizeof(gap))},{"recordsIssued",conflict?5:4},
+            {"recordsWritten",3+count},{"queueDropped",0},{"loopLogIncomplete",false},{"windows",windowMeta}}).toJson());
+        const auto request=recorder.registerTimeWindowRequest(e2eWall,e2eWall.addSecs(18));
+        require(DiagnosticRecorder::exportTimeWindow(request,path).success);
+        return zipEntries(path);
+    };
+    const auto healthy=makeArchive(false,root.filePath("e2e-healthy.zip"));
+    require(!zipObject(healthy,"paimage/manifest.json").value("traceIncomplete").toBool(true));
+    const auto e2eZip=root.filePath("e2e-bounds.zip");
+    const auto real=makeArchive(true,e2eZip);
+    const auto e2eSummary=zipObject(real,"paimage/listener/looplog-summary.json");
+    const auto exports=e2eSummary.value("exportWindows").toArray();
+    require(zipObject(real,"paimage/manifest.json").value("traceIncomplete").toBool() && e2eSummary.value("loopLogIncomplete").toBool() &&
+        e2eSummary.value("exportFormatError").toBool() && e2eSummary.value("exportFilteredRecords").toInt(-1)==0 &&
+        exports[0].toObject().value("status")=="verified" && exports[1].toObject().value("status")=="corrupt" &&
+        exports[0].toObject().value("exportRecords").toInt()==3 && exports[1].toObject().value("exportRecords").toInt()==3);
+    const auto scriptDir=root.filePath("zip-tools");
+    require(QDir().mkpath(scriptDir));
+    for (const auto& name : {"paimage_trace_analyze.py","startup_diagnostics_analyze.py"}) {
+        const auto script=real.value(QString("paimage/tools/")+name);
+        require(script==readFile(QDir(args[2]).filePath(name)));
+        write(QDir(scriptDir).filePath(name),script);
+    }
+    const auto analyzeZip=[&](const QString& tool,const QStringList& inputs,const QString& outputName) {
+        QProcess python;
+        python.setProgram(args[1]);
+        const auto output=root.filePath(outputName);
+        python.setArguments(QStringList{"-B",QDir(scriptDir).filePath(tool)}+inputs+QStringList{"--output",output});
+        python.start();
+        require(python.waitForFinished(20000));
+        if (python.exitCode()!=0) std::cerr<<python.readAllStandardError().constData();
+        require(python.exitStatus()==QProcess::NormalExit && python.exitCode()==0);
+        return QJsonDocument::fromJson(readFile(output)).object();
+    };
+    const auto generic=analyzeZip("paimage_trace_analyze.py",{e2eZip,"--packets","1","--data-port","8001"},"generic.json");
+    const auto startup=analyzeZip("startup_diagnostics_analyze.py",{"--application-zip",e2eZip},"startup.json");
+    const auto genericLoop=generic.value("loopLog").toObject();
+    const auto application=startup.value("application").toObject();
+    require(genericLoop==application.value("loop").toObject() &&
+        genericLoop==startup.value("reusedTraceAnalyzer").toObject().value("loopLog").toObject());
+    require(genericLoop.value("records").toInt()==6 && genericLoop.value("logicalRecords").toInt()==4 &&
+        genericLoop.value("duplicateRecordCopies").toInt()==2 && genericLoop.value("loopLogIncomplete").toBool() &&
+        genericLoop.value("loopGapsOver20ms").toInt()==1 && genericLoop.value("stallHints").toArray().size()==1);
+    const auto physical=genericLoop.value("files").toArray();
+    require(physical.size()==2 && physical[0].toObject().value("records").toInt()==3 &&
+        physical[1].toObject().value("records").toInt()==3);
+    int gapCount=0;
+    for (const auto& row : application.value("diagnostics").toObject().value("perSecond").toArray())
+        gapCount+=row.toObject().value("loopGapCount").toInt();
+    require(application.value("ingressPackets").toArray().size()==1 && gapCount==1);
+    std::cout<<"e2e_zip traceIncomplete=true exportFormatError=true physicalRecords=3+3 logicalRecords=4 "
+             <<"loopGapsOver20ms=1 stallHints=1 startupLoopGapCount=1\n";
+
+    const auto extracted=root.filePath("extracted");
+    const auto extractedRun=extracted+"/paimage/listener";
+    require(QDir().mkpath(extractedRun));
+    for (const auto& name : {"paimage/manifest.json","paimage/listener/run-config.json",
+            "paimage/listener/trace-summary.json","paimage/listener/trace-0.bin",
+            "paimage/listener/looplog-summary.json","paimage/listener/looplog-0.bin"}) {
+        require(real.contains(name));
+        write(extracted+"/"+name,real.value(name));
+    }
+    const auto missing=analyzeZip("paimage_trace_analyze.py",
+        {extractedRun,"--packets","1","--data-port","8001"},"missing.json").value("loopLog").toObject();
+    require(missing.value("missingRecordCount").toInt()==3 && missing.value("loopLogIncomplete").toBool() &&
+        missing.value("files").toArray()[1].toObject().value("status")=="missing");
+}
+
 int main(int argc,char** argv){QCoreApplication app(argc,argv);
     QTemporaryDir root(QDir::currentPath()+"/trace-export-XXXXXX");require(root.isValid());
     const QString traces=root.path()+"/traces",run=traces+"/run1",tools=root.path()+"/tools";
@@ -131,6 +248,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         skippedById.value("anchor-missing").value("timingMissing").toBool()&&
         !skippedById.value("anchor-missing").value("loopLogMissing").toBool());
     require(skippedById.value("no-anchor").value("reason").toString()=="missing_time_anchor");
+    require(skippedById.value("no-anchor").value("runTimeRangeStatus")=="unknown");
     require(skippedById.value("zero").value("loopLogFormatError").toBool()&&
         skippedById.value("zero").value("loopLogIncomplete").toBool());
     require(skippedById.value("missing").value("timingIncomplete").toBool()&&
@@ -199,6 +317,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     writer.stop();loopLog.stop();timer.stop();
     auto stoppedCut=recorder.captureTimeWindowRequest(QDateTime::fromMSecsSinceEpoch(wall-1000),QDateTime::fromMSecsSinceEpoch(wall+1000));
     require(DiagnosticRecorder::exportTimeWindow(stoppedCut,root.path()+"/stopped.zip").success);
+
     DiagnosticRecorder::setBundleCapture({});
     // Quota cleanup cannot remove an active or exporting run or an unknown directory.
     const QString managed=root.path()+"/managed";QDir().mkpath(managed);
@@ -318,25 +437,101 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     const auto reuseZip=root.path()+"/reused.zip";
     require(!DiagnosticRecorder::exportTimeWindow(pending,reuseZip).success&&!QFileInfo::exists(reuseZip));
 
-    // Simulate loss outside managed cleanup. A timing-only registered identity
-    // must still be found missing, and the failed archive must not be published.
+    const QString formalMessage="formal-event-survives-attachment-failure";
+    const auto failureStart=QDateTime::currentDateTime().addSecs(-5);
+    const auto failureEnd=failureStart.addSecs(30);
+    recorder.recordEvent("export-test",formalMessage);
+    require(recorder.flush(5000));
+    const auto readManifest=[](const auto& zip) {
+        return QJsonDocument::fromJson(zip.value("paimage/manifest.json")).object();
+    };
+    {
+        const auto locked=diagnostic_storage::lease(stoppedRoot);
+        require(bool(locked));
+        const auto path=root.filePath("lease-unavailable.zip");
+        require(DiagnosticRecorder::exportTimeWindow(recorder.registerTimeWindowRequest(failureStart,failureEnd),path).success);
+        const auto zip=zipEntries(path);
+        const auto manifest=readManifest(zip);
+        require(zip.value("events.jsonl").contains(formalMessage.toUtf8()) &&
+            manifest.value("attachmentStatus")=="unavailable" && manifest.value("traceIncomplete").toBool() &&
+            manifest.value("files").toArray().isEmpty() &&
+            manifest.value("attachmentIssues").toArray().first().toObject().value("code")=="source_lease_unavailable");
+        std::cout<<"lease_failure formalEvent=true attachmentStatus=unavailable code=source_lease_unavailable\n";
+    }
+    {
+        std::promise<bool> ready;
+        std::promise<void> release;
+        auto held=ready.get_future();
+        auto done=release.get_future();
+        std::thread pruner([&]{
+            const auto permit=diagnostic_storage::tryPrune(stoppedRoot);
+            ready.set_value(bool(permit));
+            done.wait();
+        });
+        const auto locked=held.get();
+        const auto request=recorder.captureExportRequest();
+        release.set_value();
+        pruner.join();
+        require(locked);
+        const auto path=root.filePath("registration-unavailable.zip");
+        require(DiagnosticRecorder::exportRequest(request,path).success);
+        const auto zip=zipEntries(path);
+        const auto manifest=readManifest(zip);
+        require(zip.value("events.jsonl").contains(formalMessage.toUtf8()) &&
+            manifest.value("attachmentStatus")=="unavailable" &&
+            manifest.value("attachmentIssues").toArray().first().toObject().value("code")=="export_intent_unavailable");
+    }
+
+    // Loss outside managed cleanup must leave the formal log and other runs available.
     require(QDir().mkpath(stoppedRun));
     write(stoppedRun+"/run-config.json",config);
     DiagnosticRecorder::TimeWindowRequest lost;
     {
         paimage::TimingWriter lostWriter(std::filesystem::path(stoppedRun.toStdWString()));
         lostWriter.observe(expectedTiming,true);
-        lost=recorder.registerTimeWindowRequest(start,end);
+        lost=recorder.registerTimeWindowRequest(failureStart,failureEnd);
         lostWriter.stop();
     }
     require(QDir(stoppedRun).removeRecursively());
+    const auto available=stoppedRoot+"/available";
+    require(QDir().mkpath(available));
+    write(available+"/run-config.json",QJsonDocument(QJsonObject{
+        {"runId","available"},{"wallAnchorMs",failureStart.toMSecsSinceEpoch()},
+        {"monotonicAnchorNs","1000000"},{"diagnosticTraceEnabled",true}}).toJson());
+    write(available+"/trace-0.bin",recordBytes(expectedTrace));
+    write(available+"/trace-summary.json",QJsonDocument(QJsonObject{{"recordsIssued",1}}).toJson());
     const auto lostZip=root.path()+"/lost.zip";
     const auto lostResult=DiagnosticRecorder::exportTimeWindow(lost,lostZip);
-    require(!lostResult.success&&lostResult.error.contains(id)&&!QFileInfo::exists(lostZip));
+    require(lostResult.success);
+    const auto lostEntries=zipEntries(lostZip);
+    const auto lostManifest=readManifest(lostEntries);
+    const auto lostRun=lostManifest.value("skippedRuns").toArray().first().toObject();
+    require(lostEntries.value("events.jsonl").contains(formalMessage.toUtf8()) &&
+        lostEntries.value("paimage/available/trace-0.bin")==recordBytes(expectedTrace) &&
+        lostManifest.value("attachmentStatus")=="partial" && lostManifest.value("traceIncomplete").toBool() &&
+        lostRun.value("runId")==id && lostRun.value("reason")=="run_directory_unavailable");
+    std::cout<<"lost_run formalEvent=true healthyRunPreserved=true attachmentStatus=partial code=run_directory_unavailable\n";
+
+    auto failedWrite=recorder.registerTimeWindowRequest(failureStart,failureEnd);
+    auto attachment=std::move(failedWrite.bundleExtension);
+    bool memberRejected=false;
+    failedWrite.bundleExtension=[&](const auto& sink,QString* error) {
+        return attachment([&](const QString& name,const QByteArray& bytes) {
+            if (name=="paimage/available/trace-0.bin") {
+                memberRejected=true;
+                return false;
+            }
+            return sink(name,bytes);
+        },error);
+    };
+    const auto memberPath=root.filePath("failed-member.zip");
+    const auto memberFailure=DiagnosticRecorder::exportTimeWindow(failedWrite,memberPath);
+    require(memberRejected && !memberFailure.success && !memberFailure.error.isEmpty() && !QFileInfo::exists(memberPath) &&
+        QDir(root.path()).entryList({"failed-member.zip.part-*"},QDir::Files).isEmpty());
     require(QDir().mkpath(stoppedRun));
     write(stoppedRun+"/run-config.json",config);
     diagnostic_storage::pruneTraces(stoppedRoot,0,1);
-    require(!QDir(stoppedRun).exists()); // Failure released the pending intent too.
+    require(!QDir(stoppedRun).exists()); // The degraded export released the pending intent too.
 
     const auto windowRoot = root.filePath("burst-windows");
     paimage::installTraceBundle(windowRoot, tools);
@@ -432,6 +627,15 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
     };
     addScopedWindow(1,1,true);
     addScopedWindow(2,51,false);
+    const auto afterRange=scopedRoot+"/after-range";
+    require(QDir().mkpath(afterRange));
+    write(afterRange+"/run-config.json",QJsonDocument(QJsonObject{
+        {"runId","after-range"},{"schemaVersion",3},{"backendId","paimage-receiver-diagnostics"},
+        {"wallAnchorMs",scopedWall.addSecs(63).toMSecsSinceEpoch()},{"monotonicAnchorNs","1000000"},
+        {"diagnosticTraceEnabled",false},{"loopLogEnabled",true}}).toJson());
+    write(afterRange+"/looplog-summary.json",QJsonDocument(QJsonObject{
+        {"mode","rolling-burst-windows"},{"recordBytes",int(sizeof(keep))},{"recordsIssued",9},
+        {"recordsWritten",0},{"queueDropped",9},{"loopLogIncomplete",true},{"windows",QJsonArray{}}}).toJson());
     write(scopedRun+"/looplog-summary.json",QJsonDocument(QJsonObject{
         {"mode","rolling-burst-windows"},{"recordBytes",int(sizeof(keep))},
         {"recordsIssued",6},{"recordsWritten",6},{"loopLogIncomplete",false},{"windows",scopedWindows}}).toJson());
@@ -449,6 +653,8 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         onlyHealthySummary.value("exportCountCovered").toBool()&&
         onlyHealthySummary.value("recordsWritten").toInt()==3&&
         !windowManifest(onlyHealthy).value("traceIncomplete").toBool(true));
+    require(!onlyHealthy.contains("paimage/after-range/looplog-summary.json")&&
+        windowManifest(onlyHealthy).value("runs").toArray().size()==1);
     const auto partial=exportScoped(10,"scoped-partial.zip");
     const auto partialSummary=readLoopSummary(partial,"listener");
     require(partialSummary.value("recordsWritten").toInt()==4&&
@@ -478,6 +684,30 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         !inconsistent.value("exportCountCovered").toBool(true)&&
         inconsistent.value("exportRetentionStatus")=="window_data_incomplete"&&
         windowManifest(inconsistentZip).value("traceIncomplete").toBool());
+    auto reversed=scopedWindows;
+    auto badBounds=reversed[0].toObject();
+    badBounds.insert("startNs",badBounds.value("endNs").toInteger()+1);
+    reversed[0]=badBounds;
+    write(scopedRun+"/looplog-summary.json",QJsonDocument(QJsonObject{
+        {"mode","rolling-burst-windows"},{"recordBytes",int(sizeof(keep))},{"recordsIssued",6},
+        {"recordsWritten",6},{"windows",reversed}}).toJson());
+    const auto reversedZip=exportScoped(50,"scoped-reversed.zip");
+    const auto reversedSummary=readLoopSummary(reversedZip,"listener");
+    const auto reversedWindow=reversedSummary.value("exportWindows").toArray().first().toObject();
+    require(reversedWindow.value("status")=="invalid_manifest" &&
+        reversedWindow.value("inRequestedWindow").isNull() &&
+        windowManifest(reversedZip).value("traceIncomplete").toBool());
+    // The same wall anchor from an older producer cannot prove a run started
+    // there. Retain its cumulative loss and leave the in-window count unknown.
+    write(afterRange+"/run-config.json",QJsonDocument(QJsonObject{
+        {"runId","after-range"},{"wallAnchorMs",scopedWall.addSecs(63).toMSecsSinceEpoch()},
+        {"monotonicAnchorNs","1000000"},{"diagnosticTraceEnabled",false},{"loopLogEnabled",true}}).toJson());
+    const auto unknownRange=exportScoped(50,"unknown-legacy-range.zip");
+    const auto unknownSummary=readLoopSummary(unknownRange,"after-range");
+    require(unknownSummary.value("queueDropped").toInt()==9 &&
+        unknownSummary.value("queueDropScope")=="source_run" &&
+        unknownSummary.value("queueDroppedInRequestedWindow").isNull() &&
+        unknownSummary.value("loopLogIncomplete").toBool());
 
     const auto liveRoot=root.filePath("live-burst");
     const auto liveRun=liveRoot+"/listener";
@@ -516,6 +746,56 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         require(missingSummary.value("exportWindows").toArray().first().toObject().value("status")=="missing_or_unreadable");
         require(windowManifest(missingZip).value("traceIncomplete").toBool()&&
             windowManifest(missingZip).value("skippedRuns").toArray().size()==1);
+    }
+
+    const auto pendingRoot=root.filePath("open-window");
+    const auto pendingRun=pendingRoot+"/listener";
+    require(QDir().mkpath(pendingRun));
+    const auto pendingWall=QDateTime::currentDateTime();
+    const auto pendingClock=std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    write(pendingRun+"/run-config.json",QJsonDocument(QJsonObject{
+        {"runId","listener"},{"wallAnchorMs",pendingWall.toMSecsSinceEpoch()},
+        {"monotonicAnchorNs",QString::number(pendingClock)},{"diagnosticTraceEnabled",false},
+        {"timingEnabled",false},{"loopLogEnabled",true}}).toJson());
+    paimage::installTraceBundle(pendingRoot,tools);
+    {
+        paimage::LoopLog live(std::filesystem::path(pendingRun.toStdWString()),paimage::LoopLog::Budget{64});
+        auto history=keep;
+        history.timeNs=pendingClock-6000000000ull;
+        live.push(history);
+        auto trigger=burst;
+        trigger.timeNs=history.timeNs+5000000000ull;
+        live.push(trigger);
+        const auto registerPending=[&]{
+            return recorder.registerTimeWindowRequest(pendingWall.addSecs(-7),pendingWall.addSecs(10));
+        };
+        const auto before=registerPending(), after=registerPending();
+        history.timeNs=trigger.timeNs+1;
+        live.push(history);
+        const auto beforePath=root.filePath("open-window.zip");
+        require(DiagnosticRecorder::exportTimeWindow(before,beforePath).success);
+        const auto open=readLoopSummary(zipEntries(beforePath),"listener");
+        require(open.value("openWindowPending").toBool() &&
+            open.value("exportRetentionStatus")=="open_window_pending" && open.value("recordsWritten").toInt(-1)==0);
+        const auto frozenFile=pendingRun+"/looplog-window-1.bin";
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(6);
+        while(!QFileInfo::exists(frozenFile) && std::chrono::steady_clock::now()<deadline)
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        // Inventory publication follows the atomic file rename. Wait for the
+        // inventory explicitly so this test does not race those two steps.
+        const auto cuts=paimage::LoopLog::captureCuts();
+        for (const auto& cut : cuts)
+            if (cut.root==std::filesystem::path(pendingRun.toStdWString()))
+                while (cut.windowInventory().find("\"openWindowPending\":true")!=std::string::npos &&
+                       std::chrono::steady_clock::now()<deadline)
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        const auto afterPath=root.filePath("frozen-window.zip");
+        require(DiagnosticRecorder::exportTimeWindow(after,afterPath).success);
+        const auto frozen=readLoopSummary(zipEntries(afterPath),"listener");
+        require(!frozen.value("openWindowPending").toBool(true) &&
+            frozen.value("exportRetentionStatus")=="windows_retained" &&
+            frozen.value("recordsWritten").toInt()==2 && frozen.value("exportAfterCutRecords").toInt()==1);
     }
 
     for (const auto& scenario : {QStringLiteral("truncated"), QStringLiteral("prehistory"),
@@ -678,6 +958,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);
         verifyMerge(afterMerge,"after-merge.zip",true);
     }
 
+    if (app.arguments().size()==3) testBundledAnalyzers(root,recorder,app.arguments());
     DiagnosticRecorder::setBundleCapture({});
     std::cout<<"PASS trace boundaries, stop/prune handoff and LoopLog burst window integrity"<<std::endl;
 }

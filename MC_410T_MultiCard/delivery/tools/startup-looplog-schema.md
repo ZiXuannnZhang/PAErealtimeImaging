@@ -50,15 +50,42 @@ mode. Records outside retained windows are intentionally absent.
 In ZIPs, `exportWindows` maps each frozen window's ID and `sourceFile` to
 its `exportFile`, when any records were included. `inRequestedWindow=false`
 identifies a source window entirely outside the requested time range. Its
-status is retained in the inventory. The export applies truncation and file
-failures to intersecting windows and still reports unlocalized loss such as
-queue drops. Time and sequence clipping are reported separately from source
-window truncation.
+status is retained in the inventory. A null value means the time relationship
+could not be established. `timeBoundsStatus` distinguishes known, missing
+(`unknown`) and invalid bounds. Records inside the click sequence are checked
+against known source bounds before time clipping. A contradictory in-scope
+record makes the export incomplete. `open_window_pending` indicates the writer
+had not published a triggered window when the exporter read the inventory.
+Time clipping, click-sequence clipping and source window truncation have
+separate fields.
+
+A production run whose configured start is after `fixedEndMs` is outside the
+request. The run has `runTimeRangeStatus=unknown` when the configuration does
+not establish a trusted bound. `queueDropScope` describes the source count as
+`run_through_cut` or `source_run`. `queueDroppedInRequestedWindow=null`
+means the source count cannot locate drops within the requested wall interval.
+
+`paimage/manifest.json` describes the optional attachment with
+`attachmentStatus=available`, `partial` or `unavailable`. If registration or
+the root lease fails, the formal ZIP includes the unavailable manifest.
+Unreadable registered runs are listed in `skippedRuns` and readable runs
+remain in the archive. `attachmentIssues` carries the source error code and
+message. `files` lists only members successfully written. A ZIP writing or
+publication failure still fails the export.
 
 The analyzer derives each burst's time bounds from its own frozen file or
 the mapped ZIP member. The reported five-second coverage describes observed
 time bounds. Coverage is `null` when the analyzer cannot establish file
 ownership or when truncation leaves coverage uncertain.
+
+ZIP members are checked against the exported count, available file sizes
+and digests, and the request and source bounds where known. Both offline
+tools use the same LoopLog parser. `records` and `files[].records` report
+physical copies, with `physicalRecordsRead` including rejected fixed-size
+slots. Run-level event statistics use `logicalRecords` and count identical
+copies of the same sequence once per run. `sequenceConflicts` identifies
+the files that disagree about a sequence. The parser retains each file's
+verification result and excludes that sequence from run-level statistics.
 
 `counterExhausted` reports that the bounded admission counters reached
 their limit. New submissions stop at that point and the summary reports
