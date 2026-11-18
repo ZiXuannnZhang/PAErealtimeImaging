@@ -283,6 +283,55 @@ static int faultsTest(QCoreApplication &app)
 
 // Real controller -> ZMQ -> deployed ImagingSvc -> CUDA -> SHM readiness test.
 struct RingLayoutRegression {
+    static int lateAck()
+    {
+        for (int mode = 0; mode < 3; ++mode) {
+            ImagingController ctrl;
+            ImagingController::RingLayout layout{3, 32, 4, 9, {}, 0};
+            if (!ring_snapshot::checkedLayout(32, 4, 9, layout.bytes)) return 1;
+            const auto name = (QStringLiteral("Local\\ring-late-ack-") + QUuid::createUuid().toString()).toStdWString();
+            if (!ctrl.setupRingSharedMemory(layout, name.c_str())) return 1;
+            ctrl.m_svcResourcesActive = true;
+            ctrl.m_ringAdmission = true;
+            ctrl.m_ringResetPending = false;
+            int errors = 0, acks = 0;
+            QObject::connect(&ctrl, &ImagingController::ringInputFailed, [&]{ ++errors; });
+            QObject::connect(&ctrl, &ImagingController::svcStatus, [&](const QString &s, float) {
+                if (s == QStringLiteral("[RingInput] acknowledged id=1")) ++acks;
+            });
+            ImagingController::RingBlock block;
+            block.raw.fill(3.f, 32); block.angles.fill(0.f, 4); block.channels.fill(0, 4);
+            block.index = 1; block.round = {5, 0};
+            ctrl.m_ringQueue.push_back(block);
+            block.index = 2;
+            ctrl.m_ringQueue.push_back(block);
+            ctrl.m_ringPendingCount = 2;
+            ctrl.m_ringPendingBytes = 2 * (32 * sizeof(float) + 4 * (sizeof(float) + 1));
+            ctrl.pumpRingInput();
+            if (!ctrl.m_ringPublished || ctrl.m_ringInFlight.index != 1) return 1;
+            const auto epoch = ctrl.m_ringActiveEpoch;
+            float raw[32], angles[4]; uint8_t channels[4]; ring_input::Identity copied{};
+            if (mode != 1 && ring_input::copyAndAcknowledge(ctrl.m_ringInputMutex,
+                ctrl.m_ringMapping.data(), ctrl.m_ringMapping.capacity(), epoch, 1,
+                raw, angles, channels, copied, 5) != ring_input::Result::Ok) return 1;
+            if (mode == 2) {
+                // Same publication number in the retired epoch is not our ACK.
+                ctrl.m_ringActiveEpoch = ctrl.m_ringRequestedEpoch = epoch + 1;
+            }
+            ctrl.m_ringDeadline = std::chrono::steady_clock::now() - std::chrono::milliseconds(100);
+            ctrl.pumpRingInput();
+            if (mode == 0) {
+                if (errors || acks != 1 || ctrl.m_ringPendingCount != 1 || ctrl.m_ringHasInFlight) return 1;
+                ctrl.pumpRingInput();
+                if (!ctrl.m_ringPublished || ctrl.m_ringInFlight.index != 2) return 1;
+            } else if (errors != 1 || acks || !ctrl.m_ringInputFailed || !ctrl.m_ringQueue.empty()) {
+                return 1;
+            }
+        }
+        std::cout << "PASS late exact acknowledgement advances, absent and old epoch acknowledgements fail\n";
+        return 0;
+    }
+
     static int terminal()
     {
         ImagingController ctrl;
@@ -454,6 +503,7 @@ struct RingLayoutRegression {
 
 int main(int argc,char**argv){
     QCoreApplication app(argc,argv);
+    if (app.arguments().contains(QStringLiteral("--late-ack"))) return RingLayoutRegression::lateAck();
     if (app.arguments().contains(QStringLiteral("--terminal"))) return RingLayoutRegression::terminal();
     if (app.arguments().contains(QStringLiteral("--layout"))) return RingLayoutRegression::run();
     if (app.arguments().contains(QStringLiteral("--burst"))) return burstTest(app);

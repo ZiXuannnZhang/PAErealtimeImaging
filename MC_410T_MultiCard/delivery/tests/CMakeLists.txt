@@ -62,6 +62,8 @@ add_test(NAME ring_fbp_controller_burst_test COMMAND ring_fbp_controller_test --
 add_test(NAME ring_fbp_controller_faults_test COMMAND ring_fbp_controller_test --faults)
 add_test(NAME ring_layout_lifecycle_test COMMAND ring_fbp_controller_test --layout)
 add_test(NAME ring_terminal_delivery_test COMMAND ring_fbp_controller_test --terminal)
+add_test(NAME ring_late_ack_test COMMAND ring_fbp_controller_test --late-ack)
+set_tests_properties(ring_late_ack_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 15)
 set_tests_properties(ring_terminal_delivery_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 15)
 set_tests_properties(ring_layout_lifecycle_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 30)
 set_tests_properties(ring_fbp_controller_test ring_fbp_controller_burst_test ring_fbp_controller_faults_test PROPERTIES RUN_SERIAL TRUE TIMEOUT 60)

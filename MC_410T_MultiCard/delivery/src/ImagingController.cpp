@@ -682,8 +682,8 @@ void ImagingController::pumpRingInput()
         m_ringNextNotify = now;
         m_ringDeadline = now + std::chrono::seconds(2);
     }
-    if (now >= m_ringDeadline) { fail(QStringLiteral("块发布或消费确认超时")); return; }
     if (!m_ringPublished) {
+        if (now >= m_ringDeadline) { fail(QStringLiteral("块发布超时")); return; }
         const auto &b = m_ringInFlight;
         ring_input::Identity id{m_ringActiveEpoch, b.index, b.round.measurementSession,
             b.round.roundGeneration, b.wallUs, uint32_t(b.seq), b.direction, b.complete, b.roundBlockIndex};
@@ -699,10 +699,17 @@ void ImagingController::pumpRingInput()
                                + QString::fromUtf8(doc.toJson(QJsonDocument::Compact)), 0);
         }
     }
+    // A delayed owner-thread tick may arrive after the deadline even though
+    // the service already copied this exact publication. Give a published
+    // block one final bounded acknowledgement check before failing.
     bool copied = false;
     const auto ack = ring_input::acknowledged(m_ringInputMutex, m_ringMapping.data(), m_ringMapping.capacity(),
                                               m_ringActiveEpoch, m_ringInFlight.index, copied, 5);
-    if (ack == ring_input::Result::Timeout) return;
+    const auto expired = std::chrono::steady_clock::now() >= m_ringDeadline;
+    if (ack == ring_input::Result::Timeout) {
+        if (expired) fail(QStringLiteral("块消费确认超时"));
+        return;
+    }
     if (ack != ring_input::Result::Ok) { fail(QStringLiteral("消费确认失败 %1").arg(int(ack))); return; }
     if (copied) {
         { std::lock_guard<std::mutex> lock(m_ringQueueMutex);
@@ -714,6 +721,7 @@ void ImagingController::pumpRingInput()
         emit svcStatus(QStringLiteral("[RingInput] acknowledged id=%1").arg(m_ringInFlight.index), 0);
         m_ringInFlight = RingBlock{}; m_ringHasInFlight = false; m_ringPublished = false; return;
     }
+    if (expired) { fail(QStringLiteral("块消费确认超时")); return; }
     if (now < m_ringNextNotify) return;
     m_ringNextNotify = now + std::chrono::milliseconds(100);
     QJsonObject ready{{"cmd", "ring_block_ready"}, {"input_epoch", QString::number(m_ringActiveEpoch)},
