@@ -210,6 +210,8 @@ signals:
     void configAcked(int cardIdx);          // 单卡收到 60 字节配置反馈
     void configConfirmed();                 // 所有卡均收到 60 字节配置反馈
     void configAckFailed(int cardIdx);      // 单卡配置确认失败（重发超限）
+    // Synchronous on the control thread, before START can release source data.
+    void measurementPreparing(quint64 measurementSession);
     void measurementStarted(const QString& measurementSessionId);
     void measurementStartFailed(const QString& measurementSessionId,
                                 const QString& reason);

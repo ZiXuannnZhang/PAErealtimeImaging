@@ -1,6 +1,8 @@
 #include <QAction>
 #include <QTextDocument>
 #include <QTextEdit>
+#include <QTemporaryDir>
+#include <QDir>
 #include "MainWindow.h"
 #include "ImagingController.h"
 #include "ImagingBypass.h"
@@ -113,8 +115,14 @@ public:
             auto start = [&] {
                 // Actual UI signal -> production MainWindow::onRealtimeImagingToggled.
                 checkbox->setChecked(true);
-                waitFor([&] { return controller.isRunning() && window.m_imagingEnabled
-                    && window.m_imagingServiceReady.load() && checkbox->isEnabled(); }, "valid startup did not become ready");
+                try {
+                    waitFor([&] { return controller.isRunning() && window.m_imagingEnabled
+                        && window.m_imagingServiceReady.load() && checkbox->isEnabled(); },
+                        "valid startup did not become ready");
+                } catch (...) {
+                    std::cerr << logView->toPlainText().toStdString() << '\n';
+                    throw;
+                }
                 check(checkbox->isChecked() && !depth->isEnabled(), "running UI not locked");
             };
             auto stop = [&] {
@@ -399,6 +407,43 @@ public:
                 .save(QCoreApplication::applicationDirPath()+"/motor-file-picker.png");
             dialog.reject();
             std::cout << "PASS parameter file browser selection/cancel/persistence/active-round latch\n";
+
+            widget<QCheckBox>(dialog, "timevarEnabled")->setChecked(false);
+            widget<QComboBox>(dialog, "ringReconAlgorithm")->setCurrentIndex(0);
+            start();
+            QTemporaryDir oldRequest(QCoreApplication::applicationDirPath() + "/png-old-XXXXXX");
+            QTemporaryDir newRequest(QCoreApplication::applicationDirPath() + "/png-new-XXXXXX");
+            check(oldRequest.isValid() && newRequest.isValid(), "create isolated PNG roots");
+            const paimage::RoundIdentity round{9001, 0};
+            window.prepareRingMeasurement(round.measurementSession);
+            window.m_timeoutPresentation.configure(true, oldRequest.path(), "old");
+            window.m_terminalPngTargets.emplace(round,
+                window.m_timeoutPresentation.captureTarget(false, QString()));
+            window.m_timeoutPresentation.configure(false, {}, {});
+            window.m_timeoutPresentation.configure(true, newRequest.path(), "new");
+
+            const auto& ring = controller.ringConfig();
+            const int alines = ring.alinesPerChannelPerBlock * ring.enabledChannelCount;
+            QVector<float> raw(ring.sampDepth * alines, 1.0f);
+            QVector<float> angles(alines, 180.0f);
+            QVector<quint8> channels(alines, 0);
+            const int blockCount = controller.ringBlocksPerFrame();
+            const auto higherSubmit = controller.ringLastSubmitIndex() + blockCount + 1;
+            window.m_lastPresentedRingSubmit = higherSubmit;
+            for (int i = 0; i < blockCount; ++i) {
+                check(controller.submitRingBlock(raw, angles, channels, round, i, nullptr,
+                                                i == blockCount - 1, ring.sectorCcw),
+                      "submit production terminal test block");
+            }
+            waitFor([&] {
+                return QDir(oldRequest.path()).entryList({"old*.png"}, QDir::Files).size() == 2;
+            }, "original request did not receive both terminal PNGs");
+            check(QDir(newRequest.path()).entryList({"*.png"}, QDir::Files).isEmpty(),
+                  "old round PNG was redirected into new request");
+            check(window.m_lastPresentedRingSubmit == higherSubmit,
+                  "late render replaced a newer preview");
+            stop();
+            std::cout << "PASS terminal PNG ownership and stale render isolation\n";
         }
         { MainWindow restarted;
           check(restarted.m_motorScanMonitor->paramsFile() == selectedMotorFile,

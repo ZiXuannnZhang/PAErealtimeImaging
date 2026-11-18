@@ -93,7 +93,7 @@ bool ImagingController::startSvc()
     if (m_ringMode) {
         const auto layout = m_pendingRingLayout;
         emit svcStatus(QString("环形共享内存 %1 MB, blockSize=%2 frameSize=%3")
-                           .arg(layout.bytes.mappingBytes / 1048576.0, 0, 'f', 1)
+                           .arg(ring_terminal::mappingSize(layout.bytes) / 1048576.0, 0, 'f', 1)
                            .arg(layout.blockSize).arg(layout.frameSize), 0);
         if (!setupRingSharedMemory(layout)) {
             finishStopSvc(); return false;
@@ -522,7 +522,8 @@ void ImagingController::closeRingAdmission()
 
 bool ImagingController::setupRingSharedMemory(RingLayout layout, const wchar_t *name)
 {
-    const size_t total = layout.bytes.mappingBytes;
+    const size_t total = ring_terminal::mappingSize(layout.bytes);
+    if (!total) return false;
     const auto created = m_ringMapping.create(total, name);
     if (created != ring_input::Result::Ok || m_ringMapping.capacity() < total) {
         emit svcError(QStringLiteral("环形 v3 映射创建失败（可能存在旧进程），result=%1").arg(int(created)));
@@ -537,6 +538,7 @@ bool ImagingController::setupRingSharedMemory(RingLayout layout, const wchar_t *
     h->display_nx = h->nx; h->display_ny = h->ny;
     h->display_frame_size = h->frame_size;
     h->snapshot_step = 1;
+    h->flags |= ring_terminal::kFlag;
     const auto epoch = newRingEpoch();
     const auto result = ring_input::initialize(m_ringInputMutex, m_ringMapping.data(), layout.capacity, epoch, 5);
     if (result != ring_input::Result::Ok) {
@@ -745,8 +747,13 @@ void ImagingController::processRingMessage(const QJsonObject &msg)
                                  submitValue.toVariant().toULongLong() != 0;
     const std::uint64_t submitIndex = hasSubmitIndex
         ? submitValue.toVariant().toULongLong() : 0;
+    if (msg.value(QStringLiteral("round_complete")).toBool(false)) {
+        // Polling the terminal slots also covers missed notifications.
+        m_ringReqCv.notify_one();
+        return;
+    }
     startRingFrameWorker(msg["seq"].toInt(), submitIndex, hasSubmitIndex,
-                         identity.identity, msg.value(QStringLiteral("round_complete")).toBool(false));
+                         identity.identity, false);
 }
 
 void ImagingController::startRingFrameWorker(int seq,
@@ -804,6 +811,7 @@ void ImagingController::ringWorkerLoop(quint64 lifecycle, const RingLayout &layo
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
 #endif
     while (true) {
+        processRingTerminal(lifecycle, layout);
         int seq = -1;
         std::uint64_t submitIndex = 0;
         bool hasSubmitIndex = false;
@@ -811,9 +819,8 @@ void ImagingController::ringWorkerLoop(quint64 lifecycle, const RingLayout &layo
         bool roundComplete = false;
         {
             std::unique_lock<std::mutex> lk(m_ringReqMutex);
-            m_ringReqCv.wait_for(lk, std::chrono::milliseconds(200), [this]() {
-                return m_ringWorkerStop || m_ringReqPending;
-            });
+            if (!m_ringWorkerStop && !m_ringReqPending)
+                m_ringReqCv.wait_for(lk, std::chrono::milliseconds(20));
             if (m_ringWorkerStop) break;
             if (!m_ringReqPending) continue;
             seq = m_ringReqSeq;
@@ -825,6 +832,44 @@ void ImagingController::ringWorkerLoop(quint64 lifecycle, const RingLayout &layo
         }
         if (seq >= 0)
             processRingFrame(seq, submitIndex, hasSubmitIndex, round, roundComplete, lifecycle, layout);
+    }
+}
+
+void ImagingController::processRingTerminal(quint64 lifecycle, const RingLayout &layout)
+{
+    if (!m_ringAdmission.load()) return;
+    for (int i = 0; i < ring_terminal::kSlots; ++i) {
+        if (!m_terminalConsumed[i].load(std::memory_order_acquire) ||
+            (m_terminalBuffers[i] && m_terminalBuffers[i].use_count() != 1))
+            continue;
+        ring_terminal::Header meta{};
+        {
+            const auto locked = m_ringTerminalMutex.lock(5);
+            if (locked == ring_input::Result::Abandoned) m_ringTerminalMutex.unlock();
+            if (locked != ring_input::Result::Ok) return;
+            ring_input::Unlock unlock{m_ringTerminalMutex};
+            auto *slot = ring_terminal::oldest(m_ringMapping.data(), layout.capacity, layout.bytes);
+            if (!slot) return;
+            auto &frame = m_terminalBuffers[i];
+            if (!frame) frame = std::make_shared<std::vector<float>>();
+            frame->resize(layout.bytes.frameBytes / sizeof(float));
+            std::memcpy(frame->data(), slot + 1, layout.bytes.frameBytes);
+            meta = *slot;
+            slot->submitIndex = 0;
+            m_terminalConsumed[i].store(false, std::memory_order_release);
+        }
+        const int index = i + 2;
+        QMetaObject::invokeMethod(this, [this, meta, index, lifecycle] {
+            if (lifecycle != m_svcLifecycleToken || !m_ringAdmission.load()) {
+                emit svcStatus(QStringLiteral("[RingFinal] 未交付：session=%1 round=%2 submit=%3 seq=%4")
+                    .arg(meta.round.measurementSession).arg(meta.round.roundGeneration)
+                    .arg(meta.submitIndex).arg(meta.seq), 0);
+                releaseSnapshotBuffer(index);
+                return;
+            }
+            emit ringSnapshotReady(int(meta.seq), meta.submitIndex, true,
+                meta.round.measurementSession, meta.round.roundGeneration, true, index);
+        }, Qt::QueuedConnection);
     }
 }
 
@@ -996,7 +1041,11 @@ int ImagingController::frameHeight() const { return m_frameHeight; }
 
 const float *ImagingController::snapshotBuffer(int index) const
 {
-    if (index < 0 || index > 1) return nullptr;
+    if (index >= 2) {
+        const auto frame = terminalSnapshotBuffer(index);
+        return frame ? frame->data() : nullptr;
+    }
+    if (index < 0) return nullptr;
     if (m_dispBuf[index].empty()) return nullptr;
     if (m_dispSeq[index].load(std::memory_order_acquire) < 0) return nullptr;
     return m_dispBuf[index].data();
@@ -1004,8 +1053,18 @@ const float *ImagingController::snapshotBuffer(int index) const
 
 void ImagingController::releaseSnapshotBuffer(int index)
 {
+    if (index >= 2 && index < 2 + ring_terminal::kSlots) {
+        m_terminalConsumed[index - 2].store(true, std::memory_order_release);
+        return;
+    }
     if (index < 0 || index > 1) return;
     m_dispConsumed[index].store(true, std::memory_order_release);
+}
+
+std::shared_ptr<std::vector<float>> ImagingController::terminalSnapshotBuffer(int index) const
+{
+    if (index < 2 || index >= 2 + ring_terminal::kSlots) return {};
+    return m_terminalBuffers[index - 2];
 }
 
 int ImagingController::ringBlocksPerFrame() const
@@ -1099,6 +1158,7 @@ void ImagingController::processMessage(const QJsonObject &msg)
             if(!sendCommand({{"cmd","start"}})){emit svcError("FBP 启动命令发送失败");stopSvc();return;}
             m_fbpPreparing=false;
             m_ringAdmission.store(true);
+            ensureRingWorkerStarted();
             emit svcStatus(QStringLiteral("FBP 走时表和精确核准备完成"),0);
             emit svcReady();
         });
@@ -1255,6 +1315,7 @@ void ImagingController::sendConfigureAndStart()
             emit svcError(QStringLiteral("环形成像启动命令发送失败")); stopSvc(); return;
         }
         m_ringAdmission.store(true);
+        ensureRingWorkerStarted();
         emit svcReady();
         return;
     }

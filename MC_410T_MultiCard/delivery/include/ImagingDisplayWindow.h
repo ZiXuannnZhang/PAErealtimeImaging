@@ -68,6 +68,9 @@ public:
     // ranges and can render/save on a worker after Ring/CUDA reset.
     using PngWriter = std::function<bool(const QString&, const QString&)>;
     PngWriter capturePngWriter(int seq) const;
+    static PngWriter capturePngWriter(std::shared_ptr<const std::vector<float>> frame, int nx, int seq,
+                                      RingImageWidget::Range range1, RingImageWidget::Range range2,
+                                      std::shared_ptr<const DisplayMask> mask);
 signals:
     void presentationChanged();
 public:

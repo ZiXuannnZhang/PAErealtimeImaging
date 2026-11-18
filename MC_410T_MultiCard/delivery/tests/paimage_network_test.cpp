@@ -47,6 +47,9 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
             ringTriggers[c].push_back(frame->triggerSeq);
             ringIndices[c].push_back(frame->logicalTriggerIndex);}
         ++rings;return ImagingSubmitResult::Accepted;});
+    quint64 preparing = 0;
+    QObject::connect(&controller, &NetworkController::measurementPreparing,
+                     [&](quint64 session) { preparing = session; });
     QObject::connect(&controller,&NetworkController::measurementStarted,[&]{++started;});
     QObject::connect(&controller,&NetworkController::stopped,[&]{stopped=true;});
     // 前端高/低通零相位滤波默认启用，并且只改写 frontend clone。下面的
@@ -61,13 +64,28 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     require(controller.start(config),"production listen");
     require(!controller.sendStartMeasure(),"unconfigured START must fail and remain recoverable");
     QTemporaryDir dir(QDir::currentPath()+"/network-save-XXXXXX");require(dir.isValid(),"save directory");
-    if(!stress){controller.startSaving(dir.path(),1000,"switch");require(until([&]{return controller.isSaving();}),"saving applied");}
+    if(!stress){controller.startSaving(dir.path(),1000,"switch");require(controller.isSaving(),"saving requested");}
     int phase=0;
+    std::uint64_t stagedRoundLength = 0;
     for(int ns:durations){
         require(controller.sendConfigCommand(ns,1000,1000),"configure accepted");
         require(controller.sendStartMeasure(),"start queued behind CONFIG");readCommands(paimage::configCommand(ns,1000,1000));
         for(int c=0;c<4;++c)send(c,8000,std::vector<unsigned char>(60));
         require(until([&]{return started==phase+1;}),"ACK starts measurement");readCommands(paimage::startCommand());
+        const auto active = controller.physicalRoundSnapshot();
+        require(preparing && preparing == active.measurementSession, "START used the prepared identity");
+        if (!stress && phase == 0) {
+            stagedRoundLength = active.configuredLogicalTriggersPerRound + 2;
+            controller.setLogicalTriggersPerRound(stagedRoundLength);
+            controller.setDisableCountBoundary(true);
+            const auto stillActive = controller.physicalRoundSnapshot();
+            require(stillActive.configuredLogicalTriggersPerRound == active.configuredLogicalTriggersPerRound &&
+                    stillActive.disableCountBoundary == active.disableCountBoundary,
+                    "active receiver retained the original round configuration");
+        } else if (!stress) {
+            require(active.configuredLogicalTriggersPerRound == stagedRoundLength &&
+                    active.disableCountBoundary, "next START activates the staged round configuration");
+        }
         auto schedule=std::chrono::steady_clock::now();
         for(int trigger=0;trigger<triggers;++trigger){
             auto deadline=schedule+std::chrono::microseconds(trigger*(1000000ll/hz));std::this_thread::sleep_until(deadline);

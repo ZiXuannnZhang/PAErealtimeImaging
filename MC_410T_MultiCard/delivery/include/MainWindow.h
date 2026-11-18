@@ -16,6 +16,7 @@
 #include <QShowEvent>
 #include <QResizeEvent>
 #include <deque>
+#include <map>
 #include <atomic>
 #include <mutex>
 #include <condition_variable>
@@ -88,7 +89,7 @@ protected:
 private slots:
     void onStartListenClicked();
     void onStartMeasureClicked();
-    void onConfigParamsClicked(bool fromStartMeasure = false);
+    bool onConfigParamsClicked(bool fromStartMeasure = false);
     void onExportDiagnosticClicked();
     void onSelectDirClicked();
     void onToggleSaveClicked();
@@ -330,6 +331,11 @@ private:
     paimage::RingRoundUiState m_roundUi;
     paimage::TimeoutPresentation m_timeoutPresentation;
     void syncTimeoutPngSettings();
+    void prepareRingMeasurement(quint64 session);
+    quint64 m_ringPresentationSession = 0;
+    quint64 m_lastPresentedRingSubmit = 0;
+    // Registered at source round-end and consumed by the exact terminal snapshot.
+    std::map<paimage::RoundIdentity, paimage::TimeoutPresentation::Target> m_terminalPngTargets;
     // Count/timeout presentation transitions are retained by old physical
     // round identity until the matching final snapshot arrives.
     paimage::RingRoundPresentationState m_ringPresentation;
@@ -346,6 +352,7 @@ private:
     ImagingSubmitResult ringFeedSink(const TriggerGroupConstPtr& frame);
     void freezeMeasurementConfig(bool frozen);
     bool m_measurementConfigFrozen = false;
+    bool m_measurementRingImagingAvailable = true;
     void configureRingAssembler();     // 按控制器环形配置初始化组包器
     void ensureRingConfigDialog();     // 惰性创建环形参数窗口并接通物理轮次策略转发
     // 显示窗口几何/掩膜注入（显示层任务）：窗口创建时与每次 applyConfig 后，

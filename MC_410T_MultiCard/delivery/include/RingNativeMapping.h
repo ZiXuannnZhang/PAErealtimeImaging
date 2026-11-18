@@ -2,7 +2,7 @@
 #include "RingInputTransport.h"
 
 namespace ring_input {
-constexpr wchar_t kNativeMappingName[] = L"Local\\MC_410T_RingShm_v3";
+constexpr wchar_t kNativeMappingName[] = L"Local\\MC_410T_RingShm_v3_terminal";
 constexpr wchar_t kOutputMutexName[] = L"Local\\MC_410T_RingShm_Output_v3";
 
 // Windows page-file mapping; never attach implicitly when creation collides.

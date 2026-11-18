@@ -23,7 +23,7 @@
 #include "RingTimevarLowpassConfig.h"
 #include "RingFbpSettings.h"
 #include "RingShmObservability.h"
-#include "RingSnapshotCopy.h"
+#include "RingTerminalSnapshot.h"
 #include "RoundIdentity.h"
 #include "ring_recon_cuda.h"
 
@@ -107,6 +107,8 @@ public:
     // snapshotBuffer 返回已发布缓冲的只读指针，使用完必须 releaseSnapshotBuffer，
     // 否则工作线程将丢弃后续快照（latest-wins）。
     const float *snapshotBuffer(int index) const;
+    std::shared_ptr<std::vector<float>> terminalSnapshotBuffer(int index) const;
+    quint64 serviceLifecycleToken() const noexcept { return m_svcLifecycleToken; }
     void releaseSnapshotBuffer(int index);
 
 signals:
@@ -154,6 +156,7 @@ private:
     void ensureRingWorkerStarted();
     void stopRingWorker();
     void ringWorkerLoop(quint64 lifecycle, const RingLayout &layout);
+    void processRingTerminal(quint64 lifecycle, const RingLayout &layout);
     void processRingFrame(int seq,
                           std::uint64_t submitIndex,
                           bool hasSubmitIndex,
@@ -203,6 +206,7 @@ private:
     std::function<void()> m_testBeforeRingCopy;
 #endif
     ring_input::Mutex m_ringOutputMutex{ring_input::kOutputMutexName};
+    ring_input::Mutex m_ringTerminalMutex{ring_terminal::kMutexName};
     struct RingBlock {
         QVector<float> raw, angles;
         QVector<quint8> channels;
@@ -249,6 +253,8 @@ private:
 
     // 方案A：固定显示双缓冲（各 nx²*2 float，运行期零分配）
     std::vector<float> m_dispBuf[2];
+    std::shared_ptr<std::vector<float>> m_terminalBuffers[ring_terminal::kSlots];
+    std::atomic<bool> m_terminalConsumed[ring_terminal::kSlots]{{true}, {true}};
     std::atomic<int>   m_dispActive{-1};        // 最后发布缓冲（-1=无）
     std::atomic<int>   m_dispSeq[2] = {{-1}, {-1}};  // 各缓冲的帧序号
     std::atomic<bool>  m_dispConsumed[2] = {{true}, {true}};  // UI 读完置 true，worker 写入前取反

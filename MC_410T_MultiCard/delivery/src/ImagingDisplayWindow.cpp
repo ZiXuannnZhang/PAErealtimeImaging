@@ -412,10 +412,14 @@ bool ImagingDisplayWindow::saveWindowPngs(const QString &dir, const QString &suf
 
 ImagingDisplayWindow::PngWriter ImagingDisplayWindow::capturePngWriter(int seq) const
 {
-    const auto frame = m_ringFrame;
-    const auto range1 = m_range1, range2 = m_range2;
-    const auto mask = m_mask;   // 捕获时点的掩膜快照（与屏幕渲染同源）
-    const int srcN = m_lastDn;
+    return capturePngWriter(m_ringFrame, m_lastDn, seq, m_range1, m_range2, m_mask);
+}
+
+ImagingDisplayWindow::PngWriter ImagingDisplayWindow::capturePngWriter(
+        std::shared_ptr<const std::vector<float>> frame, int srcN, int seq,
+        RingImageWidget::Range range1, RingImageWidget::Range range2,
+        std::shared_ptr<const DisplayMask> mask)
+{
     if (srcN <= 0 || !frame || frame->size() < static_cast<size_t>(srcN) * srcN * 2)
         return {};
     return [frame, range1, range2, mask, srcN, seq](const QString& dir, const QString& suffix) {

@@ -661,7 +661,16 @@ void ImagingSvc::processRingConfigure(const QJsonObject &ring)
     ring_input::View view;
     const bool layoutOk = ring_input::layout(m_ringSharedMemory.data(), m_ringSharedMemory.capacity(), true, view);
     const auto *hdr = layoutOk ? view.header : nullptr;
-    const bool shmOk = hdr && hdr->block_size == uint32_t(m_ringBlockSize)
+    m_ringTerminalLayout = {};
+    m_ringSnapshotSeq = 0;
+    bool terminalLayoutOk = true;
+    if (hdr && (hdr->flags & ring_terminal::kFlag)) {
+        terminalLayoutOk = ring_snapshot::checkedLayout(
+            m_ringBlockSize, m_ringAlineCount, m_ringDisplayFrameSize, m_ringTerminalLayout);
+        const auto bytes = ring_terminal::mappingSize(m_ringTerminalLayout);
+        terminalLayoutOk = terminalLayoutOk && bytes && bytes <= m_ringSharedMemory.capacity();
+    }
+    const bool shmOk = terminalLayoutOk && hdr && hdr->block_size == uint32_t(m_ringBlockSize)
         && hdr->alines == uint32_t(m_ringAlineCount)
         && hdr->frame_size == uint32_t(m_ringFrameSize)
         && hdr->nx == uint16_t(nx) && hdr->ny == uint16_t(nx)
@@ -920,22 +929,50 @@ void ImagingSvc::processRingPulse(uint64_t epoch, uint64_t publicationId)
         completion.reconstructionComplete = false; completion.blockCountMismatch = true;
     }
 
-    const auto outputLock = m_ringOutputMutex.lock(20);
-    if (outputLock != ring_input::Result::Ok && outputLock != ring_input::Result::Abandoned) {
-        if (sourceRoundComplete) { m_ringRound.close(); resetRingRecon(); }
-        sendError("环形输出锁失败", 2011); return;
+    const bool terminal = completion.reconstructionComplete && m_ringTerminalLayout.mappingBytes;
+    const uint32_t snapshotSeq = ++m_ringSnapshotSeq;
+    if (!terminal) {
+        const auto outputLock = m_ringOutputMutex.lock(20);
+        if (outputLock != ring_input::Result::Ok && outputLock != ring_input::Result::Abandoned) {
+            if (sourceRoundComplete) { m_ringRound.close(); resetRingRecon(); }
+            sendError(QStringLiteral("环形输出锁失败 session=%1 round=%2 submit=%3")
+                          .arg(round.measurementSession).arg(round.roundGeneration).arg(submitIndex), 2011);
+            return;
+        }
+        auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory.data());
+        h->frame_ready = 0;
+        float *fb = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) + ringFramesOffset(blockSize, alines));
+        std::memcpy(fb, m_ringDisplay0.data(), static_cast<size_t>(m_ringFrameSize) * sizeof(float));
+        std::memcpy(fb + m_ringFrameSize, m_ringDisplay1.data(), static_cast<size_t>(m_ringFrameSize) * sizeof(float));
+        h->frame_seq = snapshotSeq;
+        h->frame_ready = 1;
+        m_ringOutputMutex.unlock();
     }
-    auto *h = static_cast<RingImagingShmHeader *>(m_ringSharedMemory.data());
-    h->frame_ready = 0;
-    float *fb = reinterpret_cast<float *>(reinterpret_cast<uint8_t *>(h + 1) + ringFramesOffset(blockSize, alines));
-    std::memcpy(fb, m_ringDisplay0.data(), static_cast<size_t>(m_ringFrameSize) * sizeof(float));
-    std::memcpy(fb + m_ringFrameSize, m_ringDisplay1.data(), static_cast<size_t>(m_ringFrameSize) * sizeof(float));
-    const uint32_t snapshotSeq = ++h->frame_seq;
-    h->frame_ready = 1;
-    m_ringOutputMutex.unlock();
 
-    sendRingSnapshotToHost(snapshotSeq, submitIndex, round, completion.reconstructionComplete,
-                           ring_shm_obs::steadyNowUs() - processStartUs);
+    bool published = true;
+    if (terminal) {
+        const auto locked = m_ringTerminalMutex.lock(250);
+        published = false;
+        if (locked == ring_input::Result::Ok) {
+            ring_input::Unlock unlock{m_ringTerminalMutex};
+            published = ring_terminal::publish(m_ringSharedMemory.data(), m_ringSharedMemory.capacity(),
+                m_ringTerminalLayout, {submitIndex, round, snapshotSeq, 0},
+                m_ringDisplay0.data(), m_ringDisplay1.data());
+        } else if (locked == ring_input::Result::Abandoned) {
+            m_ringTerminalMutex.unlock();
+        }
+        if (!published) {
+            auto failure = roundDiagnostic;
+            failure["submit_index"] = QString::number(submitIndex);
+            failure["seq"] = static_cast<qint64>(snapshotSeq);
+            failure["reason"] = locked == ring_input::Result::Ok ? "terminal_slots_full" : "terminal_lock_failed";
+            qWarning().noquote() << "Ring terminal delivery failed:" << QJsonDocument(failure).toJson(QJsonDocument::Compact);
+            sendRingObservation("terminal_delivery_failed", m_ringObs.snapshot(), failure);
+        }
+    }
+    if (published)
+        sendRingSnapshotToHost(snapshotSeq, submitIndex, round, completion.reconstructionComplete,
+                               ring_shm_obs::steadyNowUs() - processStartUs);
 
     m_ringObs.recordProcessDuration(ring_shm_obs::steadyNowUs() - processStartUs);
     if (observation.periodicDue)

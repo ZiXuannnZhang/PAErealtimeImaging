@@ -1,4 +1,5 @@
 #include "RingNativeMapping.h"
+#include "RingTerminalSnapshot.h"
 #include <cstdio>
 #include <cstdlib>
 #define CHECK(expr) do { if (!(expr)) { std::fprintf(stderr, "CHECK failed at %s:%d: %s\n", __FILE__, __LINE__, #expr); std::abort(); } } while (false)
@@ -16,6 +17,28 @@ int main()
     CHECK(owner.capacity() >= 4096 && peer.capacity() >= 4096);
     static_cast<unsigned char *>(owner.data())[99] = 0x5a;
     CHECK(static_cast<unsigned char *>(peer.data())[99] == 0x5a);
+    ring_snapshot::Layout terminalLayout;
+    CHECK(ring_snapshot::checkedLayout(4, 2, 1, terminalLayout));
+    const auto terminalBytes = ring_terminal::mappingSize(terminalLayout);
+    std::vector<uint64_t> terminalStorage(terminalBytes / sizeof(uint64_t));
+    const float final1 = 17.0f, final2 = 23.0f;
+    CHECK(ring_terminal::publish(terminalStorage.data(), terminalBytes, terminalLayout,
+                                 {3, {1, 0}, 5, 0}, &final1, &final2));
+    CHECK(ring_terminal::publish(terminalStorage.data(), terminalBytes, terminalLayout,
+                                 {6, {1, 1}, 8, 0}, &final2, &final1));
+    // New preview traffic uses the original output region. Full terminal slots
+    // have a distinct outcome and preserve the two accepted round identities.
+    auto *preview = reinterpret_cast<float*>(reinterpret_cast<unsigned char*>(terminalStorage.data()) +
+                                            terminalLayout.frameOffset);
+    preview[0] = -1.0f;
+    CHECK(!ring_terminal::publish(terminalStorage.data(), terminalBytes, terminalLayout,
+                                  {9, {1, 2}, 12, 0}, &final2, &final2));
+    auto* oldest = ring_terminal::oldest(terminalStorage.data(), terminalBytes, terminalLayout);
+    CHECK(oldest && oldest->submitIndex == 3 && oldest->round.roundGeneration == 0);
+    CHECK(reinterpret_cast<const float*>(oldest + 1)[0] == final1);
+    oldest->submitIndex = 0;
+    CHECK(ring_terminal::oldest(terminalStorage.data(), terminalBytes, terminalLayout)->submitIndex == 6);
+
     const size_t bytes = ringImagingShmTotalSizeV3(4, 1, 2, 1);
     std::vector<uint64_t> storage((bytes + 4095) / 8);
     auto *h = reinterpret_cast<RingImagingShmHeader *>(storage.data());

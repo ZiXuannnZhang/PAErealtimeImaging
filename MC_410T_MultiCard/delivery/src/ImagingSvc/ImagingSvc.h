@@ -11,6 +11,7 @@
 #include "ImagingParams.h"
 #include "RingShmObservability.h"
 #include "RingNativeMapping.h"
+#include "RingTerminalSnapshot.h"
 #include "RoundIdentity.h"
 #include "RingTimevarLowpassConfig.h"
 #include "RingReconRoundState.h"
@@ -117,6 +118,9 @@ private:
     uint64_t m_ringExpectedSeq = 0;
     bool m_ringSequenceIncomplete = false;
     int                 m_ringBlockSize = 0;
+    ring_input::Mutex m_ringTerminalMutex{ring_terminal::kMutexName};
+    ring_snapshot::Layout m_ringTerminalLayout;
+    uint32_t m_ringSnapshotSeq = 0;
     int                 m_ringFrameSize = 0;
     int                 m_ringBlockIndex = 0;
     paimage::RingReconRoundState m_ringRound;

@@ -2113,6 +2113,7 @@ bool NetworkController::executeStartTransaction(const QString& requestedSessionI
         emit measurementStartFailed(sessionId, QStringLiteral("start_transaction_failed"));
     };
 
+    emit measurementPreparing(sessionToken);
     const MeasurementSessionTransaction::Result result =
         MeasurementSessionTransaction::start(
             static_cast<int>(m_processors.size()),

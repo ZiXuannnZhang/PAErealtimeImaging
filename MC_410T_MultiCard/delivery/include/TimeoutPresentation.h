@@ -13,6 +13,15 @@ class TimeoutPresentation {
 public:
     using Writer = std::function<bool(const QString&, const QString&)>;
     using Job = std::function<bool()>;
+    struct Target {
+        QString directory;
+        QString suffix;
+        explicit operator bool() const { return !directory.isEmpty(); }
+    };
+    Target captureTarget(bool autoSave, const QString& oldDirectory) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return targetLocked(autoSave, oldDirectory);
+    }
     void configure(bool enabled, const QString& directory, const QString& suffix) {
         std::lock_guard<std::mutex> lock(mutex_);
         enabled_ = enabled; directory_ = directory; suffix_ = suffix;
@@ -36,14 +45,11 @@ public:
         Job job;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            const QString target = autoSave
-                ? (oldDirectory.isEmpty() ? QString() : QDir(oldDirectory).filePath("recon_png"))
-                : directory_;
-            if (enabled_ && writer_ && !target.isEmpty() &&
-                session_ == session && nextGeneration > 0 && generation_ == nextGeneration - 1) {
+            const auto target = targetLocked(autoSave, oldDirectory);
+            if (target && writer_ && session_ == session && nextGeneration > 0 &&
+                generation_ == nextGeneration - 1) {
                 const auto writer = writer_;
-                const auto suffix = suffix_;
-                job = [writer, target, suffix] { return writer(target, suffix); };
+                job = [writer, target] { return writer(target.directory, target.suffix); };
             }
             writer_ = {};
             closed_ = true; closedSession_ = session; closedGeneration_ = nextGeneration - 1;
@@ -62,6 +68,14 @@ public:
         std::lock_guard<std::mutex> lock(mutex_); writer_ = {}; closed_ = false;
     }
 private:
+    Target targetLocked(bool autoSave, const QString& oldDirectory) const {
+        if (!enabled_) return {};
+        const QString target = autoSave
+            ? (oldDirectory.isEmpty() ? QString() : QDir(oldDirectory).filePath("recon_png"))
+            : directory_;
+        return {target, suffix_};
+    }
+
     mutable std::mutex mutex_;
     Writer writer_;
     QString directory_, suffix_;

@@ -14,6 +14,8 @@
 #include <QSysInfo>
 
 namespace {
+std::atomic<quint64> nextPaimageMeasurementToken{0};
+
 QJsonObject processorTopology(){
     DWORD bytes=0;GetLogicalProcessorInformationEx(RelationProcessorCore,nullptr,&bytes);
     std::vector<unsigned char> storage(bytes);
@@ -567,7 +569,7 @@ void NetworkController::pollPaimage(){
     if(m_paimageStartPending&&m_paimage->configured()){m_paimageStartPending=false;startPaimageMeasurement();}
 }
 bool NetworkController::startPaimageMeasurement(){
-    if(!m_running||m_measurementRunning)return false;
+    if(!m_running||m_measurementRunning||m_paimageStartPending)return false;
     if(m_paimage->configuring()){m_paimageStartPending=true;m_pendingMeasurementSessionId=newMeasurementSessionId();return true;}
     const QString id=m_pendingMeasurementSessionId.isEmpty()?newMeasurementSessionId():m_pendingMeasurementSessionId;
     m_pendingMeasurementSessionId.clear();
@@ -576,7 +578,9 @@ bool NetworkController::startPaimageMeasurement(){
     output.setPhysicalRoundTimeout(m_physicalRoundTimeoutSec);
     output.setStartupFilterTriggerCount(m_startupFilterTriggerCount);
     output.setDisableCountBoundary(m_disableCountBoundary);
-    bool ok=m_paimage->startMeasurement(++m_measurementSessionToken);
+    m_measurementSessionToken = ++nextPaimageMeasurementToken;
+    emit measurementPreparing(m_measurementSessionToken);
+    const bool ok = m_paimage->startMeasurement(m_measurementSessionToken);
     recordDiagnosticEvent("paimage.measure",ok?"measurement_started":"measurement_start_failed",DiagnosticRecorder::Severity::Info,
         {{"measurementSessionId",id},{"traceSession",QString::number(m_measurementSessionToken)},{"configId",m_currentConfigId},{"backendId","paimage-derived"}});
     if(ok){m_measurementSessionId=id;m_measurementRunning=true;m_measurementState=MeasurementState::Running;emit measurementStarted(id);}
