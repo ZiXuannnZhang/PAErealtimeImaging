@@ -173,6 +173,7 @@ private:
     friend class MainWindowStartIntegrationTest;
     int m_testSvcStarts = 0;
     int m_testSvcStops = 0;
+    QString m_testLastRingAlgorithm;
 #endif
     QSharedMemory *m_sharedMemory;
 

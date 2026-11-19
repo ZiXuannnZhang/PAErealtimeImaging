@@ -46,7 +46,9 @@ bool SocketReceiver::start(std::string& error){
         setup.kind=std::uint16_t(LoopKind::SocketSetup);setup.value0=e.port;
         if(feedback)setup.flags|=1u;
         int firstError=0;
-        SOCKET s=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);
+        // ImagingSvc can start while the listener owns these fixed ports.
+        SOCKET s=WSASocketW(AF_INET,SOCK_DGRAM,IPPROTO_UDP,nullptr,0,
+                            WSA_FLAG_OVERLAPPED | WSA_FLAG_NO_HANDLE_INHERIT);
         if(s==INVALID_SOCKET){firstError=WSAGetLastError();setup.flags|=2u;setup.value3=std::uint32_t(firstError);
             if(loopLog_)loopLog_->push(setup);
             return s;}

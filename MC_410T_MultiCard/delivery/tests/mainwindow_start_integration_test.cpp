@@ -13,6 +13,7 @@
 #include "RingBlockAssembler.h"
 #include "RingTimevarLowpassSettings.h"
 #include "RingFbpSettings.h"
+#include "RoundPolicySettings.h"
 #include <QComboBox>
 #include <QDoubleSpinBox>
 #include "PaimageAcquisition/SettingsPath.h"
@@ -661,6 +662,7 @@ public:
             settings.setValue("RingConfigDialog/Defaults/totalAlines", 8);
             settings.setValue("RingConfigDialog/Defaults/fovMm", 4.0);
             settings.setValue("RingConfigDialog/Defaults/gridMm", 0.1);
+            RoundPolicySettings::save(settings, {0, false});
             for (int ch = 0; ch < 8; ++ch)
                 settings.setValue(QString("RingConfigDialog/Defaults/ch%1").arg(ch), ch == 0);
         }
@@ -836,63 +838,6 @@ public:
                 releasePreview.reset();
             }
 
-            // Stage a valid reconstruction-only calibration while the service
-            // is resident, then remove the file before the real Start button.
-            const auto calibrationFile = save.filePath("fbp-calibration.json");
-            auto calibration = ring_fbp_settings::toJson(RingFbpSettings{});
-            calibration.insert("formatVersion", 1);
-            calibration.insert("geometry", "concentric-ring");
-            calibration.insert("daqHz", 250e6);
-            {
-                QFile file(calibrationFile);
-                check(file.open(QIODevice::WriteOnly), "create temporary FBP calibration");
-                const auto json = QJsonDocument(calibration).toJson();
-                check(file.write(json) == json.size(), "write temporary FBP calibration");
-            }
-            auto& dialog = *window.m_ringConfigDialog;
-            dialog.setAcquisitionParams(4, durationNs);
-            dialog.setMeasurementConfigFrozen(true);
-            widget<QComboBox>(dialog, "ringReconAlgorithm")->setCurrentIndex(1);
-            widget<QLineEdit>(dialog, "ringFbpCalibrationFile")->setText(calibrationFile);
-            QString calibrationError;
-            check(dialog.applyConfig(&calibrationError), "stage a valid FBP calibration");
-            dialog.setMeasurementConfigFrozen(false);
-            check(QFile::remove(calibrationFile), "invalidate staged calibration before START");
-
-            window.startListeningWithIPs({"127.0.0.2"}, QStringLiteral("explicit_target_ips"));
-            check(window.m_isListening && window.m_chkRealtimeImaging->isChecked(),
-                  "raw start test still requests imaging");
-            waitFor([&]{ return window.m_netController && window.m_netController->isSaving(); }, "raw save armed");
-            const auto rawDirectory = QDir(window.m_reconSaveDir).absoluteFilePath("..");
-            const auto delayA = widget<QLineEdit>(window, "edtADelay")->text().toInt();
-            const auto delayB = widget<QLineEdit>(window, "edtBDelay")->text().toInt();
-            window.onStartMeasureClicked();
-            card.expectCommand(paimage::configCommand(durationNs, delayA, delayB));
-            card.send(8000, std::vector<unsigned char>(60));
-            waitFor([&]{ return window.m_isMeasuring; }, "missing FBP file must still start acquisition");
-            card.expectCommand(paimage::startCommand());
-            check(!window.m_measurementRingImagingAvailable.load(), "missing FBP file is reported independently");
-            for (int trigger = 0; trigger < 4; ++trigger) {
-                for (int offset = 0; offset < durationNs * 2; offset += 1440) {
-                    const auto size = std::min(1440, durationNs * 2 - offset);
-                    std::vector<unsigned char> bytes(size + 4);
-                    bytes[0] = offset / 1440;
-                    bytes[2] = trigger;
-                    card.send(8001, bytes);
-                }
-                pump(8);
-            }
-            waitFor([&] { return window.m_netController->physicalRoundSnapshot().logicalDistinctAccepted > 0; },
-                    "acquisition accepted data without FBP");
-            window.onStartListenClicked();
-            card.expectCommand(paimage::stopCommand());
-            waitFor([&]{ return !window.m_netController; }, "close raw acquisition listener");
-            const QDir rawFiles(QDir::cleanPath(rawDirectory));
-            for (const auto* pattern : {"Card1_ChA_*.dat", "Card1_ChB_*.dat"}) {
-                const auto files = rawFiles.entryList({QString::fromLatin1(pattern)}, QDir::Files);
-                check(files.size() == 1 && QFileInfo(rawFiles.filePath(files.front())).size() > 0,
-                      "raw writer saved both waveform channels without FBP");
-            }
             check(onWriter(*window.m_timeoutPngWriter, [](auto& channel) { return channel.testBlocked(); }) &&
                   QDir(timeoutWhileSaving.path()).entryList({"*.png"}, QDir::Files).isEmpty(),
                   "terminal delivery, preview and raw saving advanced with Timeout writer still blocked");
@@ -900,9 +845,201 @@ public:
             waitFor([&] { return !timeoutPngBusy(window); }, "original Timeout pair settled after gate release");
             check(QDir(timeoutWhileSaving.path()).entryList({"*.png"}, QDir::Files).size() == 2,
                   "Timeout pair kept its original target through listener changes");
+
+            auto& dialog = *window.m_ringConfigDialog;
+            auto* calibrationInput = widget<QLineEdit>(dialog, "ringFbpCalibrationFile");
+            widget<QComboBox>(dialog, "ringReconAlgorithm")->setCurrentIndex(1);
+            const auto calibrationFile = save.filePath("fbp-calibration.json");
+            RingFbpSettings fileOffsets;
+            fileOffsets.angleOffset[0] = 1.5;
+            fileOffsets.delayOffset[0][1] = .25;
+            auto calibration = ring_fbp_settings::toJson(fileOffsets);
+            calibration.insert("formatVersion", 1);
+            calibration.insert("geometry", "concentric-ring");
+            calibration.insert("daqHz", 250e6);
+            writeMarker(QDir(save.path()), "fbp-calibration.json", calibration);
+
+            QStringList fallback, configurationErrors;
+            QObject::connect(&controller, &ImagingController::svcStatus, &window,
+                [&](const QString& message, float) {
+                    if (message.contains(calibrationFile)) fallback.push_back(message);
+                });
+            QObject::connect(&controller, &ImagingController::svcError, &window,
+                [&](const QString& message) { configurationErrors.push_back(message); });
+            const auto stage = [&](const QString& requestedPath) {
+                dialog.setAcquisitionParams(4, durationNs);
+                dialog.setMeasurementConfigFrozen(true);
+                calibrationInput->setText(requestedPath);
+                QString error;
+                check(dialog.applyConfig(&error), "stage the requested FBP settings");
+                dialog.setMeasurementConfigFrozen(false);
+            };
+            const auto start = [&](int acquisitionNs) {
+                widget<QLineEdit>(window, "edtDataTime")->setText(QString::number(acquisitionNs));
+                window.startListeningWithIPs({"127.0.0.2"}, QStringLiteral("explicit_target_ips"));
+                if (!window.m_isListening || !window.m_netController || !window.m_chkRealtimeImaging->isChecked()) {
+                    std::cerr << "Listener setup at " << acquisitionNs << " ns, running=" << window.m_isListening
+                              << ", imaging checked=" << window.m_chkRealtimeImaging->isChecked() << '\n'
+                              << widget<QTextEdit>(window, "txtLog")->toPlainText().right(6500).toStdString() << '\n';
+                    throw std::runtime_error("loopback listener starts with an FBP request");
+                }
+                window.m_netController->setStartupFilterTriggerCount(0);
+                waitFor([&] { return window.m_netController->isSaving(); }, "raw writer armed");
+                const QDir pngDirectory(window.m_reconSaveDir);
+                const auto delayA = widget<QLineEdit>(window, "edtADelay")->text().toInt();
+                const auto delayB = widget<QLineEdit>(window, "edtBDelay")->text().toInt();
+                window.onStartMeasureClicked();
+                card.expectCommand(paimage::configCommand(acquisitionNs, delayA, delayB));
+                card.send(8000, std::vector<unsigned char>(60));
+                waitFor([&] { return window.m_isMeasuring; }, "measurement really started");
+                card.expectCommand(paimage::startCommand());
+                return pngDirectory;
+            };
+            const auto deliver = [&](int acquisitionNs, int columns) {
+                for (int trigger = 0; trigger < columns; ++trigger) {
+                    for (int offset = 0; offset < acquisitionNs * 2; offset += 1440) {
+                        const auto size = std::min(1440, acquisitionNs * 2 - offset);
+                        std::vector<unsigned char> bytes(size + 4);
+                        bytes[0] = offset / 1440;
+                        bytes[2] = trigger;
+                        for (int i = 0; i < size; i += 8) {
+                            const int sample = (offset + i) / 8;
+                            const std::int32_t a = ((sample / 19 + trigger * 3) % 31 - 15) * 30;
+                            const std::int32_t b = -a;
+                            std::memcpy(bytes.data() + 4 + i, &b, sizeof(b));
+                            std::memcpy(bytes.data() + 8 + i, &a, sizeof(a));
+                        }
+                        card.send(8001, bytes);
+                    }
+                    pump(8);
+                }
+            };
+            const auto stopAndCheckRaw = [&](QDir directory, int acquisitionNs, int columns,
+                                             paimage::RoundIdentity expectedRound = {}) {
+                window.onStartListenClicked();
+                card.expectCommand(paimage::stopCommand());
+                waitFor([&] { return !window.m_netController; }, "real listener and raw writer stopped");
+                check(directory.cdUp(), "resolve raw round for FBP fixture");
+                for (const auto* pattern : {"Card1_ChA_*.dat", "Card1_ChB_*.dat"}) {
+                    const auto files = directory.entryList({QString::fromLatin1(pattern)}, QDir::Files);
+                    check(files.size() == 1 && QFileInfo(directory.filePath(files.front())).size() ==
+                          qint64(columns) * (acquisitionNs / 4) * 2, "raw A/B sizes match FBP capture");
+                }
+                const auto sidecars = directory.entryList({"Card1_ChA_*.jsonl"}, QDir::Files);
+                check(sidecars.size() == 1, "one raw paired sidecar for the FBP capture");
+                QFile evidence(directory.filePath(sidecars.front()));
+                check(evidence.open(QIODevice::ReadOnly), "open raw paired sidecar");
+                const auto rows = evidence.readAll().trimmed().split('\n');
+                check(rows.size() == columns + 2, "raw sidecar has each column plus layout and seal");
+                const auto header = QJsonDocument::fromJson(rows.front()).object();
+                check(!header.value("captureId").toString().isEmpty(), "raw capture ID present");
+                if (expectedRound.valid()) {
+                    for (int i = 0; i < columns; ++i) {
+                        const auto row = QJsonDocument::fromJson(rows[i+1]).object();
+                        check(row.value("session").toString() == QString::number(expectedRound.measurementSession) &&
+                              row.value("round").toString() == QString::number(expectedRound.roundGeneration) &&
+                              row.value("logicalIndex").toInt(-1) == i, "raw column belongs to the actual FBP round");
+                    }
+                }
+                const auto seal = QJsonDocument::fromJson(rows.back()).object();
+                check(seal.value("type").toString() == "end" &&
+                      seal.value("confirmedColumns").toInt() == columns, "raw A/B sidecar sealed");
+            };
+
+            // Empty, valid and then deleted calibration on real START entries.
+            for (int pass = 0; pass < 3; ++pass) {
+                const auto requestedPath = pass ? calibrationFile : QString();
+                stage(requestedPath);
+                if (pass == 2) {
+                    check(QFile::remove(calibrationFile) && controller.m_fbpSettings.angleOffset[0] == 1.5,
+                          "resident service keeps the loaded snapshot until applying again");
+                    const auto buttons = dialog.findChildren<QPushButton*>();
+                    const auto saveDefault = std::find_if(buttons.cbegin(), buttons.cend(), [](const auto* button) {
+                        return button->text() == QStringLiteral("设为默认");
+                    });
+                    check(saveDefault != buttons.cend(), "find the save defaults button");
+                    (*saveDefault)->click();
+                    const QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
+                    check(settings.value("RingConfigDialog/Defaults/exactFbpCalibration").toString() == calibrationFile,
+                          "defaults preserve the operator's unavailable calibration path");
+                }
+                const int starts = controller.m_testSvcStarts;
+                const auto oldRounds = completed.size();
+                const auto pngDirectory = start(durationNs);
+                check(window.m_measurementRingImagingAvailable.load(), "optional calibration leaves FBP available");
+                waitFor([&] { return controller.m_testSvcStarts > starts && window.m_imagingServiceReady.load(); },
+                        "reconfigured FBP service becomes ready before the next round");
+                const auto& effective = controller.m_fbpSettings;
+                check(effective.enabled && effective.angleOffset[0] == (pass == 1 ? 1.5 : 0.) &&
+                      effective.delayOffset[0][1] == (pass == 1 ? .25 : 0.) && effective.artifact.isEmpty(),
+                      "the effective FBP snapshot uses only offsets from the accepted configuration");
+                check(calibrationInput->text() == requestedPath &&
+                      fallback.size() == (pass == 2 ? 1 : 0) && configurationErrors.isEmpty(),
+                      "requested path stays visible and optional fallback is reported once");
+                const auto renderGate = std::make_shared<QSemaphore>();
+                auto releaseOnFailure = std::shared_ptr<void>(nullptr, [renderGate](void*) { renderGate->release(2); });
+                if (pass == 2) {
+                    // Hold both terminal render threads until the actual Count
+                    // terminal snapshot has reached MainWindow admission.
+                    for (int i = 0; i < 2; ++i)
+                        window.m_terminalRenderPool.start([renderGate] { renderGate->acquire(); });
+                }
+                controller.m_testLastRingAlgorithm.clear();
+                deliver(durationNs, triggers);
+                try {
+                    waitFor([&] { return completed.size() == oldRounds + 1 &&
+                                          controller.m_testLastRingAlgorithm == "exact_fbp"; },
+                            "actual service returned an exact_fbp terminal for the new round");
+                } catch (...) {
+                    std::cerr << "FBP fixture pass " << pass << ", completed " << completed.size() - oldRounds
+                              << ", algorithm " << controller.m_testLastRingAlgorithm.toStdString() << '\n'
+                              << widget<QTextEdit>(window, "txtLog")->toPlainText().right(6500).toStdString() << '\n';
+                    throw;
+                }
+                if (pass == 2) {
+                    {
+                        const std::lock_guard<std::mutex> lock(window.m_pngMutex);
+                        check(window.m_terminalPngJobs == 1, "real fallback terminal was accepted before pausing GUI");
+                    }
+                    check(finishPngsWhileGuiPaused(window, *renderGate, 2, pngDirectory, {"*.png"}, 2),
+                          "real fallback FBP terminal writes and settles while GUI is paused");
+                } else {
+                    waitFor([&] { return pngDirectory.entryList({"*.png"}, QDir::Files).size() == 2; },
+                            "exact FBP delivered a terminal PNG pair");
+                }
+                const auto round = completed.back();
+                for (const auto* wavelength : {"532", "1064"}) {
+                    const auto pattern = QStringLiteral("*_session%1_round%2_frame*_%3nm.png")
+                        .arg(round.measurementSession).arg(round.roundGeneration).arg(QString::fromLatin1(wavelength));
+                    const auto png = pngDirectory.entryList({pattern}, QDir::Files);
+                    check(png.size() == 1 && QImage(pngDirectory.filePath(png.front())).size() ==
+                          QSize(ring_png::kEdge, ring_png::kEdge), "one decodable terminal PNG per wavelength in this FBP round");
+                }
+                stopAndCheckRaw(pngDirectory, durationNs, triggers, round);
+                constexpr const char* scenarios[]{"empty", "valid with offsets", "removed before START"};
+                std::cout << "PASS " << scenarios[pass] << ": exact_fbp, raw A/B, sealed sidecar and PNG pair\n";
+            }
+
+            // Keep a known-good draft, then shorten the acquisition at START so
+            // its base FBP sample window becomes invalid before any file lookup.
+            stage(calibrationFile);
+            const auto oldRounds = completed.size();
+            // 400 acquired samples permit raw saving and DelayCut, but
+            // the retained FBP window is too short for either wavelength.
+            constexpr int shortAcquisition = 1600;
+            const auto rawOnly = start(shortAcquisition);
+            check(!window.m_measurementRingImagingAvailable.load() && fallback.size() == 1 &&
+                  configurationErrors.size() == 1 &&
+                  configurationErrors.front().contains("FBP effective samples"),
+                  "invalid base is reported and does not claim fallback success");
+            deliver(shortAcquisition, 1);
+            waitFor([&] { return window.m_netController->physicalRoundSnapshot().logicalDistinctAccepted == 1; },
+                    "raw acquisition continues on invalid base FBP");
+            stopAndCheckRaw(rawOnly, shortAcquisition, 1);
+            check(completed.size() == oldRounds, "invalid base never produced a formal FBP terminal");
         }
         QFile::remove(paimageSettingsPath());
-        std::cout << "PASS same MainWindow, terminal PNG after listener restart, slow imaging and unavailable FBP\n";
+        std::cout << "PASS listener restart, exact FBP with optional calibration and raw/PNG delivery during GUI pause\n";
     }
 
     static void run() {

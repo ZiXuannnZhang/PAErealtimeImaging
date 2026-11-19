@@ -58,6 +58,7 @@ add_custom_command(TARGET ring_fbp_controller_test POST_BUILD COMMAND ${CMAKE_CO
     "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/zeromq/bin/libzmq-v141-mt-4_3_5.dll"
     "$<TARGET_FILE_DIR:ring_fbp_controller_test>")
 add_test(NAME ring_fbp_controller_test COMMAND ring_fbp_controller_test)
+add_test(NAME ring_fbp_optional_calibration_test COMMAND ring_fbp_controller_test --calibration)
 add_test(NAME ring_fbp_controller_burst_test COMMAND ring_fbp_controller_test --burst)
 add_test(NAME ring_fbp_controller_faults_test COMMAND ring_fbp_controller_test --faults)
 add_test(NAME ring_layout_lifecycle_test COMMAND ring_fbp_controller_test --layout)

@@ -4,6 +4,8 @@
 #include <QTimer>
 #include <QThread>
 #include <QProcess>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QUuid>
@@ -283,6 +285,92 @@ static int faultsTest(QCoreApplication &app)
 
 // Real controller -> ZMQ -> deployed ImagingSvc -> CUDA -> SHM readiness test.
 struct RingLayoutRegression {
+    static int optionalCalibration() {
+        QTemporaryDir files;
+        if (!files.isValid()) return 1;
+        const auto fail = [](const char* text) { std::cerr << text << '\n'; return 1; };
+        ImagingController controller;
+        RingReconCudaConfig cfg;
+        ring_recon_cuda_set_defaults(&cfg);
+        cfg.sampDepth = 512;
+        cfg.daqHz = 10e6;
+        cfg.fov = .02;
+        cfg.gridSize = .001;
+        cfg.delayCut = 0;
+        cfg.soundSpeedRadiiCount = 0;
+        cfg.soundSpeedsCount = 1;
+        cfg.soundSpeeds[0] = 1500;
+        cfg.alinesPerChannelPerBlock = 4;
+        cfg.alinesPerChannelPerFrame = 4;
+        cfg.alinesPerFrame = 8;
+        cfg.enabledChannelCount = 1;
+        for (int ch = 0; ch < 8; ++ch) cfg.enabledChannels[ch] = ch == 0;
+        cfg.radiusPerChannel[0] = .004;
+        RingTimevarLowpassConfig timevar;
+        timevar.fcMaxMhz = 4;
+        RingFbpSettings base;
+        base.enabled = true;
+        base.angleOffset[1] = .5;  // An inline value belongs to this caller's base request.
+        const auto baseJson = ring_fbp_settings::toJson(base);
+        const auto path = files.filePath("optional.json");
+        QStringList warnings, errors;
+        QObject::connect(&controller, &ImagingController::svcStatus, &controller,
+            [&](const QString& text, float) { if (text.contains(path)) warnings.push_back(text); });
+        QObject::connect(&controller, &ImagingController::svcError, &controller,
+            [&](const QString& text) { errors.push_back(text); });
+        const auto write = [&](const QByteArray& bytes) {
+            QFile file(path);
+            return file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.write(bytes) == bytes.size();
+        };
+        if (!controller.configureRing(cfg, timevar, nullptr, base) ||
+            ring_fbp_settings::toJson(controller.m_fbpSettings) != baseJson || !warnings.isEmpty())
+            return fail("Empty calibration path must use the original base without a warning");
+        auto request = base;
+        request.calibrationFile = path;
+        auto offsets = base;
+        offsets.angleOffset[0] = 7.5;
+        offsets.delayOffset[0][1] = .25;
+        auto file = ring_fbp_settings::toJson(offsets);
+        file["formatVersion"] = 1;
+        file["geometry"] = "concentric-ring";
+        file["daqHz"] = cfg.daqHz;
+        if (!write(QJsonDocument(file).toJson()) ||
+            !controller.configureRing(cfg, timevar, nullptr, request) ||
+            controller.m_fbpSettings.angleOffset[0] != 7.5 || controller.m_fbpSettings.delayOffset[0][1] != .25 ||
+            !warnings.isEmpty())
+            return fail("Valid calibration offsets must become the effective snapshot");
+        const auto fallback = [&](const QString& cause) {
+            const auto previous = warnings.size();
+            return controller.configureRing(cfg, timevar, nullptr, request) && errors.isEmpty() &&
+                   ring_fbp_settings::toJson(controller.m_fbpSettings) == baseJson &&
+                   warnings.size() == previous + 1 && warnings.back().contains(cause);
+        };
+        if (!QFile::remove(path) || controller.m_fbpSettings.angleOffset[0] != 7.5 ||
+            !fallback("Cannot open FBP calibration"))
+            return fail("A missing replacement must fall back, dropping the previous file offsets");
+        if (!write("{") || !fallback("matching daqHz"))
+            return fail("Malformed calibration JSON must return the same effective base");
+        file["daqHz"] = 20e6;
+        if (!write(QJsonDocument(file).toJson()) || !fallback("matching daqHz"))
+            return fail("Mismatched calibration sample rate must return the same effective base");
+        file["daqHz"] = cfg.daqHz;
+        QJsonArray templateSamples, templates;
+        for (int i = 0; i < 32; ++i) templateSamples.append(1);
+        for (int ch = 0; ch < 8; ++ch) templates.append(QJsonArray{templateSamples, templateSamples});
+        file["artifact"] = QJsonObject{{"startSample", 510}, {"prefixPerWavelength", 8}, {"templates", templates}};
+        if (!write(QJsonDocument(file).toJson()) || !fallback("outside acquired samples"))
+            return fail("An out-of-window calibration template must not leave any file offsets behind");
+
+        const auto warningCount = warnings.size();
+        request.densities[0] = -1;
+        if (controller.configureRing(cfg, timevar, nullptr, request) || errors.size() != 1 ||
+            !errors.back().contains("density") || warnings.size() != warningCount ||
+            ring_fbp_settings::toJson(controller.m_fbpSettings) != baseJson)
+            return fail("Invalid base must be rejected before attempting optional calibration fallback");
+        std::cout << "PASS optional calibration snapshots, base fallback and strict base validation\n";
+        return 0;
+    }
+
     static int lateAck()
     {
         for (int mode = 0; mode < 3; ++mode) {
@@ -503,6 +591,7 @@ struct RingLayoutRegression {
 
 int main(int argc,char**argv){
     QCoreApplication app(argc,argv);
+    if (app.arguments().contains(QStringLiteral("--calibration"))) return RingLayoutRegression::optionalCalibration();
     if (app.arguments().contains(QStringLiteral("--late-ack"))) return RingLayoutRegression::lateAck();
     if (app.arguments().contains(QStringLiteral("--terminal"))) return RingLayoutRegression::terminal();
     if (app.arguments().contains(QStringLiteral("--layout"))) return RingLayoutRegression::run();

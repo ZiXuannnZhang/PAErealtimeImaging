@@ -336,10 +336,21 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
     if(!ring_sample_window::validate(ringCfg.sampDepth,ringCfg.delayCut!=0,delays,ringCfg.enabledChannels,&timevarError)) {
         emit svcError(QString::fromStdString(timevarError));return false;
     }
-    auto preparedFbp=fbp;QString fbpError;
-    if(!ring_fbp_settings::loadCalibration(preparedFbp,ringCfg.daqHz,&fbpError)||
-       !ring_fbp_settings::validate(preparedFbp,ringCfg,delays,&fbpError)) {
-        emit svcError(fbpError);return false;
+    auto preparedFbp = fbp;
+    preparedFbp.calibrationFile.clear();
+    QString fbpError;
+    if (!ring_fbp_settings::validate(preparedFbp, ringCfg, delays, &fbpError)) {
+        emit svcError(fbpError);
+        return false;
+    }
+    bool calibrationFallback = false;
+    if (fbp.enabled && !fbp.calibrationFile.isEmpty()) {
+        auto candidate = fbp;
+        if (ring_fbp_settings::loadCalibration(candidate, ringCfg.daqHz, &fbpError) &&
+            ring_fbp_settings::validate(candidate, ringCfg, delays, &fbpError))
+            preparedFbp = std::move(candidate);
+        else
+            calibrationFallback = true;
     }
     const double grid = std::ceil(ringCfg.fov / ringCfg.gridSize);
     const auto alines = std::int64_t(ringCfg.enabledChannelCount) * ringCfg.alinesPerChannelPerBlock;
@@ -384,6 +395,9 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
                        .arg(m_ringConfig.sampDepth)
                        .arg(m_ringConfig.alinesPerBlock)
                        .arg(nx), 0);
+    if (calibrationFallback)
+        emit svcStatus(QStringLiteral("FBP 标定未应用，使用本次基础参数。文件 %1。原因 %2")
+            .arg(fbp.calibrationFile, fbpError), 0);
     // 运行中变更通道数/块尺寸时，共享内存与子进程仍按旧尺寸工作，
     // 通知主窗口自动重启成像服务，避免提交块大小不匹配导致成像错误。
     if (restart) emit ringConfigChangedWhileRunning();
@@ -753,6 +767,9 @@ void ImagingController::processRingMessage(const QJsonObject &msg)
         return;
     }
 
+#ifdef MAINWINDOW_START_TEST_SEAM
+    m_testLastRingAlgorithm = msg.value(QStringLiteral("recon_algorithm")).toString();
+#endif
     const QJsonValue submitValue = msg.value(QStringLiteral("submit_index"));
     const bool hasSubmitIndex = !submitValue.isUndefined() &&
                                  !submitValue.isNull() &&

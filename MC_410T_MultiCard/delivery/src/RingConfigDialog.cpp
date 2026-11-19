@@ -855,13 +855,10 @@ bool RingConfigDialog::validateDraft(QString* error) const
     if(fe!=frontend_filter::Validation::Ok)return fail(QString::fromUtf8(frontend_filter::validationMessage(fe)));
     std::string e;
     if(!ring_timevar::validate(timevarConfig(),m_daqHz,m_sampDepth,&e))return fail(QString::fromStdString(e));
-    auto fbp=fbpSettings();
     int delays[8][2];sysDelayPerChannel(delays);
     const auto cfg=config();
     if(!ring_sample_window::validate(m_sampDepth,cfg.delayCut!=0,delays,cfg.enabledChannels,&e))return fail(QString::fromStdString(e));
-    if(!ring_fbp_settings::loadCalibration(fbp,m_daqHz,error)||
-       !ring_fbp_settings::validate(fbp,config(),delays,error))return false;
-    return true;
+    return ring_fbp_settings::validate(fbpSettings(), cfg, delays, error);
 }
 
 void RingConfigDialog::sysDelayPerChannel(int out[8][2]) const
