@@ -56,7 +56,14 @@ public:
     void startSaving(const QString& directory,
                      int triggersPerFile = 1000,
                      const QString& suffix = "");
-    void stopSaving();
+    struct SaveResult {
+        int cardId;
+        std::uint64_t confirmed;
+        std::uint64_t discarded;
+        std::uint64_t failed;
+        bool ioFault;
+    };
+    SaveResult stopSaving();
     // 请求线程退出（设置 m_running=false，使 run() 循环退出）
     void requestStop() {
         m_saving.store(false, std::memory_order_release);
@@ -200,6 +207,9 @@ private:
     // 首次写盘故障只告警一次（磁盘满通常是持续性的，不要每段刷一条）。
     // startSaving() 开新会话时复位。
     bool m_writeFaulted = false;
+    std::uint64_t m_requestReceived = 0;
+    std::uint64_t m_requestSavedAtStart = 0;
+    std::uint64_t m_requestAcceptedAtStart = 0;
 
 #ifdef FILESAVER_TEST_SEAM
 public:

@@ -26,7 +26,8 @@ public:
     void requestStop(){stopping_=true;cardReady_.notify_all();syncReady_.notify_all();}
     void beginSession(std::uint64_t);
     void setSavingEnabled(bool);
-    std::uint64_t configureSaving(bool,std::function<void()>);
+    std::uint64_t reserveSavingConfiguration();
+    std::uint64_t configureSaving(bool, std::function<void()>, std::uint64_t reserved = 0);
     // Execute after all frames admitted before this call finish their save
     // callbacks.  Control actions are not subject to the per-card data limit.
     void enqueueSaveBarrier(std::function<void()>);
@@ -35,7 +36,7 @@ public:
     void setSavingHooks(std::function<void()> idle,std::function<void()> exit) {
         saveIdle_=std::move(idle);saveExit_=std::move(exit);
     }
-    void pushCard(Frame);
+    bool pushCard(Frame);
     unsigned cardDepth(int card){std::lock_guard<std::mutex> lock(cardMutex_);return cardQueue_.cardDepth(card);}
     void pushSync(std::uint16_t,const std::vector<Frame>&,bool startupRelease,
                   bool beyondCountBoundary=false);
@@ -54,8 +55,12 @@ private:
     bool saving_=false;
     std::uint64_t saveGeneration_=0;
     std::atomic<std::uint64_t> saveApplied_{0};
-    std::function<void()> saveApply_,saveIdle_,saveExit_;
-    struct SaveBarrier { std::uint64_t after; std::function<void()> apply; };
+    std::function<void()> saveIdle_,saveExit_;
+    struct SaveBarrier {
+        std::uint64_t after;
+        std::function<void()> apply;
+        std::uint64_t generation = 0;
+    };
     std::deque<SaveBarrier> saveBarriers_;
     std::uint64_t acceptedOrdinal_=0, completedOrdinal_=0;
     std::thread cardWorker_,syncWorker_;

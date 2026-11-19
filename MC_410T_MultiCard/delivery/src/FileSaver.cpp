@@ -1,4 +1,5 @@
 #include "FileSaver.h"
+#include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 #include <QDir>
 #include <QDateTime>
 #include <QDebug>
@@ -128,9 +129,14 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
     m_fileSequence      = 0;
     m_currentFileTriggers = 0;
     m_currentSourceIPv4 = 0;
+    m_currentGen = 0;
+    m_dropGen = 0;
     m_currentSamples=0;
     m_currentIdentity={};m_sealedThrough={};
-    m_writeFaulted = false;   // 新会话重新武装写盘故障告警
+    m_writeFaulted = false;
+    m_requestReceived = 0;
+    m_requestSavedAtStart = savedCount();
+    m_requestAcceptedAtStart = acceptedCount();
     m_faultDetail.clear();
     resetPhysicalRoundState();
     // 不保证从 000 开始，只保证不覆盖：复用一个已有数据的目录时让号到空闲序号。
@@ -139,7 +145,7 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
     emit statusMessage(QString("Card%1: 开始保存到 %2").arg(m_cardId + 1).arg(directory));
 }
 
-void FileSaver::stopSaving() {
+FileSaver::SaveResult FileSaver::stopSaving() {
     m_saving.store(false, std::memory_order_release);
     // 停止时立即刷盘 + 关闭文件，确保未达触发数部分也能完整写入
     const bool flushed = closeFiles();
@@ -149,8 +155,14 @@ void FileSaver::stopSaving() {
     m_currentFileTriggers = 0;
     resetPhysicalRoundState();
     if (!flushed) handleWriteFault(QStringLiteral("停止保存时的落盘"));
-    emit statusMessage(QString("Card%1: 停止保存，共保存 %2 触发")
-                       .arg(m_cardId + 1).arg(m_savedCount.load()));
+    const auto buffered = acceptedCount() - m_requestAcceptedAtStart;
+    const auto confirmed = savedCount() - m_requestSavedAtStart;
+    const SaveResult result{m_cardId, confirmed, m_requestReceived - buffered,
+                            buffered - confirmed, m_writeFaulted};
+    emit statusMessage(QStringLiteral("Card%1: 停写确认 %2，丢弃 %3，写入未确认 %4")
+                       .arg(m_cardId + 1).arg(result.confirmed)
+                       .arg(result.discarded).arg(result.failed));
+    return result;
 }
 
 void FileSaver::saveTriggerGroup(const TriggerGroupPtr& group) {
@@ -433,6 +445,9 @@ void FileSaver::sealRound(paimage::RoundIdentity identity){
 
 bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     if (!group) return false;
+    ++m_requestReceived;
+    if (group->sessionGen == paimage::AutoSaveRoundCoordinator::kFailedGeneration)
+        return false;
     if (!m_saving.load()) {
         // 保存已停止 → 丢弃队列中的残余数据
         // 不做刷盘/关文件，因为 stopSaving() 已处理

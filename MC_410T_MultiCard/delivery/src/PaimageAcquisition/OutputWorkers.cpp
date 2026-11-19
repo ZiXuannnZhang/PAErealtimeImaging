@@ -38,13 +38,20 @@ void OutputWorkers::setSavingEnabled(bool enabled){
     // save generation. Host file lifecycle handshake is outside this boundary.
     cardReady_.notify_all();
 }
-std::uint64_t OutputWorkers::configureSaving(bool enabled,std::function<void()> apply){
+std::uint64_t OutputWorkers::reserveSavingConfiguration()
+{
     std::lock_guard<std::mutex> lock(cardMutex_);
+    return ++saveGeneration_;
+}
+
+std::uint64_t OutputWorkers::configureSaving(bool enabled, std::function<void()> apply,
+                                             std::uint64_t reserved){
+    std::lock_guard<std::mutex> lock(cardMutex_);
+    // The FIFO before this fence belongs to the preceding request, even
+    // when admission is closed or the operator immediately starts again.
+    const auto generation = reserved ? reserved : ++saveGeneration_;
+    saveBarriers_.push_back({acceptedOrdinal_,std::move(apply),generation});
     saving_=enabled;
-    while(auto f=cardQueue_.popCard()){++completedOrdinal_;saveDepth_.fetch_sub(1);event(Result::SavingDiscard,f);}
-    saveBarriers_.clear(); // configuration supersedes prior file-boundary controls
-    saveApply_=std::move(apply);
-    const auto generation=++saveGeneration_;
     cardReady_.notify_all();
     return generation;
 }
@@ -53,13 +60,23 @@ void OutputWorkers::enqueueSaveBarrier(std::function<void()> apply){
     saveBarriers_.push_back({acceptedOrdinal_,std::move(apply)});
     cardReady_.notify_one();
 }
-void OutputWorkers::pushCard(Frame f){
+bool OutputWorkers::pushCard(Frame f)
+{
     std::lock_guard<std::mutex> lock(cardMutex_);
-    if(!saving_){event(Result::CardDisabled,f);return;}
-    if(stopping_){event(Result::ListenerDiscard,f);return;}
-    if(!cardQueue_.pushCard(f)){saveQueueFull_.fetch_add(1);event(Result::CardFull,f);return;}
-    ++acceptedOrdinal_;saveEnqueued_.fetch_add(1);const auto depth=saveDepth_.fetch_add(1)+1;updateMax(savePeakDepth_,depth);
-    event(Result::CardQueued,f);cardReady_.notify_one();
+    if (!saving_) { event(Result::CardDisabled, f); return false; }
+    if (stopping_) { event(Result::ListenerDiscard, f); return false; }
+    if (!cardQueue_.pushCard(f)) {
+        saveQueueFull_.fetch_add(1);
+        event(Result::CardFull, f);
+        return false;
+    }
+    ++acceptedOrdinal_;
+    saveEnqueued_.fetch_add(1);
+    const auto depth = saveDepth_.fetch_add(1) + 1;
+    updateMax(savePeakDepth_, depth);
+    event(Result::CardQueued, f);
+    cardReady_.notify_one();
+    return true;
 }
 void OutputWorkers::pushSync(std::uint16_t trigger,const std::vector<Frame>& frames,bool startup,
                              bool beyondCountBoundary){
@@ -72,20 +89,31 @@ void OutputWorkers::pushSync(std::uint16_t trigger,const std::vector<Frame>& fra
 }
 void OutputWorkers::cardLoop(){
     // 14409d / 1440c3: 50ms condition wait. Source has no priority request here.
-    while(true){Frame f;std::function<void()> apply,barrier;std::uint64_t generation=0;
-        {std::unique_lock<std::mutex> lock(cardMutex_);
-            cardReady_.wait_for(lock,std::chrono::milliseconds(50),[&]{return stopping_||saveGeneration_!=saveApplied_.load()||(!saveBarriers_.empty()&&saveBarriers_.front().after<=completedOrdinal_)||(saving_&&cardQueue_.cardDepth());});
-            if(saveGeneration_!=saveApplied_.load()){generation=saveGeneration_;apply=saveApply_;}
-            else if(!saveBarriers_.empty()&&saveBarriers_.front().after<=completedOrdinal_){barrier=std::move(saveBarriers_.front().apply);saveBarriers_.pop_front();}
-            else if(saving_)f=cardQueue_.popCard();
-            if(stopping_&&!generation&&!barrier&&!f)break;}
-        if(generation){
-            try{if(apply)apply();}
-            catch(...){event(Result::CallbackFailed,{});setSavingEnabled(false);}
-            saveApplied_=generation;
+    while (true) {
+        Frame f;
+        std::optional<SaveBarrier> barrier;
+        {
+            std::unique_lock<std::mutex> lock(cardMutex_);
+            const auto barrierReady = [this] {
+                return !saveBarriers_.empty() && saveBarriers_.front().after <= completedOrdinal_;
+            };
+            cardReady_.wait_for(lock, std::chrono::milliseconds(50), [&] {
+                return stopping_ || barrierReady() || cardQueue_.cardDepth();
+            });
+            if (barrierReady()) {
+                barrier = std::move(saveBarriers_.front());
+                saveBarriers_.pop_front();
+            } else {
+                f = cardQueue_.popCard();
+            }
+            if (stopping_ && !barrier && !f) break;
+        }
+        if (barrier) {
+            try { if (barrier->apply) barrier->apply(); }
+            catch (...) { event(Result::CallbackFailed, {}); setSavingEnabled(false); }
+            if (barrier->generation) saveApplied_ = barrier->generation;
             continue;
         }
-        if(barrier){try{barrier();}catch(...){event(Result::CallbackFailed,{});setSavingEnabled(false);}continue;}
         if(!f){try{if(saveIdle_)saveIdle_();}catch(...){event(Result::CallbackFailed,{});setSavingEnabled(false);}continue;}
         saveDequeued_.fetch_add(1);saveDepth_.fetch_sub(1);const auto begin=std::chrono::steady_clock::now();
         try{if(cardSink_)cardSink_(f);event(Result::CardConsumed,f);}

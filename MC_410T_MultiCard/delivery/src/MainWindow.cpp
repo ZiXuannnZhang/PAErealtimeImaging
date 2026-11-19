@@ -414,7 +414,7 @@ MainWindow::MainWindow(QWidget *parent)
                 : action == paimage::RingRoundPresentationState::SnapshotAction::Missing
                     ? QStringLiteral("missing") : QStringLiteral("invalid");
             if (hasPresentation && countPresentation.failed)
-                queueAutoSaveFailure(countPresentation);
+                queueAutoSaveFailure(countPresentation, m_netController);
             else if (hasPresentation && presentation.shouldApply)
                 applyAutoSaveCommitToUi(countPresentation);
             recordDiagnosticAction(QStringLiteral("ring_presentation_transition"),
@@ -2151,7 +2151,7 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
             return ringFeedSink(frame);
         });
     m_netController->setPhysicalRoundBoundarySink(
-        [this](const paimage::PhysicalRoundEvent& event) {
+        [this, source = m_netController](const paimage::PhysicalRoundEvent& event) {
             // RoundStarted 不依赖 startupFilter 数量，首物理触发返回前关闸。
             if (m_motorScanMonitor) m_motorScanMonitor->onPhysicalRoundEvent(event);
             if (event.kind == paimage::PhysicalRoundEvent::Kind::RoundStarted) {
@@ -2165,8 +2165,8 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                 // Ring assembler here.
                 AutoSaveCommit autoCommit;
                 bool hasAutoCommit = false;
-                if (m_netController && m_netController->autoSaveEnabled()) {
-                    autoCommit = m_netController->commitAutoSaveBoundary(
+                if (source->autoSaveEnabled()) {
+                    autoCommit = source->commitAutoSaveBoundary(
                         event.measurementSession,
                         event.roundGeneration,
                         paimage::AutoSaveBoundaryKind::Count,
@@ -2174,7 +2174,7 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                     hasAutoCommit = true;
                 }
                 if (hasAutoCommit && autoCommit.failed)
-                    queueAutoSaveFailure(autoCommit);
+                    queueAutoSaveFailure(autoCommit, source);
                 paimage::RingPresentationTransition transition;
                 paimage::RingRoundPresentationState::RegisterResult registration =
                     paimage::RingRoundPresentationState::RegisterResult::Invalid;
@@ -2227,14 +2227,16 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
             // is deliberately queued and cannot determine the generation.
             AutoSaveCommit autoCommit;
             bool hasAutoCommit = false;
-            if (m_netController && m_netController->autoSaveEnabled()) {
-                autoCommit = m_netController->commitAutoSaveBoundary(
+            if (source->autoSaveEnabled()) {
+                autoCommit = source->commitAutoSaveBoundary(
                     event.measurementSession,
                     event.roundGeneration,
                     paimage::AutoSaveBoundaryKind::Timeout,
                     QStringLiteral("normalizer_timeout_boundary"));
                 hasAutoCommit = true;
             }
+            if (hasAutoCommit && autoCommit.failed)
+                queueAutoSaveFailure(autoCommit, source);
             const auto uiBefore = m_roundUi.snapshot();
             paimage::TimeoutPresentation::Job pngJob;
             bool resetFailed = false;
@@ -2267,13 +2269,12 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
             // Render/write after reset without reading live UI/CUDA state.
             const bool captured = bool(pngJob);
             if (pngJob) QThreadPool::globalInstance()->start([pngJob] { pngJob(); });
-            QMetaObject::invokeMethod(this, [this, event, uiBefore, autoCommit,
+            QMetaObject::invokeMethod(this, [this, source, event, uiBefore, autoCommit,
                                              hasAutoCommit, captured, resetFailed] {
+                if (m_netController != source) return;
                 updateRingImagingStatus();
-                if (hasAutoCommit) {
-                    if (autoCommit.failed) queueAutoSaveFailure(autoCommit);
-                    else applyAutoSaveCommitToUi(autoCommit);
-                }
+                if (hasAutoCommit && !autoCommit.failed)
+                    applyAutoSaveCommitToUi(autoCommit);
                 const auto uiAfter = m_roundUi.snapshot();
                 recordDiagnosticAction(QStringLiteral("physical_round_boundary"),
                     {{QStringLiteral("measurementSession"), qint64(event.measurementSession)},
@@ -2644,10 +2645,11 @@ void MainWindow::onToggleSaveClicked()
 
 void MainWindow::applyAutoSaveCommitToUi(const AutoSaveCommit& commit)
 {
-    if (!m_autoSaveEnabled || !m_isListening)
+    if (!m_autoSaveEnabled || !m_isListening || !m_netController ||
+        commit.requestId != m_netController->autoSaveRequestId())
         return;
     if (commit.failed) {
-        queueAutoSaveFailure(commit);
+        queueAutoSaveFailure(commit, m_netController);
         return;
     }
     if ((!commit.committed && !commit.alreadyApplied) ||
@@ -2701,16 +2703,16 @@ void MainWindow::applyAutoSaveCommitToUi(const AutoSaveCommit& commit)
                ? QStringLiteral("already_current") : QStringLiteral("applied")}});
 }
 
-void MainWindow::queueAutoSaveFailure(const AutoSaveCommit& commit)
+void MainWindow::queueAutoSaveFailure(const AutoSaveCommit& commit, NetworkController *source)
 {
-    const auto apply = [this, commit]() {
-        if (m_netController) {
-            // Stop the producer/consumer path before clearing the active
-            // controller state.  The coordinator itself also retains its
-            // failed sentinel until the next configure().
-            m_netController->stopSaving();
-            m_netController->disableAutoSave();
-        }
+    // START can replay on the GUI thread while holding HostOutput's lock.
+    QMetaObject::invokeMethod(this, [this, commit, source = QPointer<NetworkController>(source)] {
+        if (!source || m_netController != source.data() || !m_autoSaveEnabled ||
+            commit.requestId != source->autoSaveRequestId())
+            return;
+
+        source->stopSaving();
+        source->disableAutoSave();
         m_autoSaveEnabled = false;
         m_reconSaveEnabled = false;
         syncTimeoutPngSettings();
@@ -2735,11 +2737,7 @@ void MainWindow::queueAutoSaveFailure(const AutoSaveCommit& commit)
              {QStringLiteral("behavior"), QStringLiteral("save_disabled_fail_closed")}});
         logMessage(QString("错误: 自动保存已停用（目录未注册，数据不会回退到旧目录）：%1")
                    .arg(commit.error));
-    };
-    if (QThread::currentThread() == thread())
-        apply();
-    else
-        QMetaObject::invokeMethod(this, apply, Qt::QueuedConnection);
+    }, Qt::QueuedConnection);
 }
 
 // 方案B：在当前控制器上（重）建自动保存（勾选时与监听重启恢复共用）。
@@ -2767,9 +2765,9 @@ void MainWindow::initAutoSaveSavers()
         int tpf = ui->edtTriggersPerFile->text().toInt();
         if (tpf <= 0) tpf = 1000;
         m_netController->startSaving(first.directory, tpf,
-                                     ui->edtFileSuffix->text().trimmed());
+                                     ui->edtFileSuffix->text().trimmed(), true);
     } else {
-        queueAutoSaveFailure(first);
+        queueAutoSaveFailure(first, m_netController);
     }
 }
 
@@ -2785,6 +2783,8 @@ void MainWindow::onAutoSaveToggled(bool checked)
             ui->chkAutoSave->setChecked(false);
             return;
         }
+        if (m_netController && m_netController->isSaving())
+            onToggleSaveClicked();
         m_autoSaveEnabled = true;
         // 自动保存期间禁用手动保存按钮，避免两者争用同一保存器/目录
         ui->btnToggleSave->setEnabled(false);
@@ -2799,8 +2799,7 @@ void MainWindow::onAutoSaveToggled(bool checked)
         logMessage(QString("自动保存已开启：基线目录 %1").arg(base));
     } else {
         m_autoSaveEnabled = false;
-        // 关闭自动保存：先停写并清理队列，再清除活动会话代，避免异步
-        // 停写窗口把新组误标为手动模式并回落到旧目录。
+        // 先关闭本次接纳。写端继续按该请求的目录结算既有数据。
         if (m_netController) {
             m_netController->stopSaving();
             m_netController->disableAutoSave();

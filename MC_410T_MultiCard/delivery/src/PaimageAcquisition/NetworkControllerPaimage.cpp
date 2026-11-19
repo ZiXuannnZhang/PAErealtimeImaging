@@ -194,6 +194,15 @@ bool NetworkController::createPaimageBackend(QString& error){
                     paimage::AutoSaveRoundCoordinator::kFailedGeneration :
                     binding.newSessionGen;
             });
+        m_paimage->output().setSaveBoundaryFaultProbe([this] { return autoSaveFaulted(); });
+        m_paimage->output().setSaveTailSink([this](paimage::RoundIdentity round, std::uint16_t trigger,
+                                                  int card, bool admitted) {
+            recordDiagnosticEvent("paimage.save", "failed_boundary_tail",
+                admitted ? DiagnosticRecorder::Severity::Info : DiagnosticRecorder::Severity::Warning,
+                {{"traceSession", QString::number(round.measurementSession)},
+                 {"roundGeneration", QString::number(round.roundGeneration)}, {"trigger", trigger},
+                 {"card", card}, {"admitted", admitted}});
+        });
         m_paimage->output().setSaveSessionResolver(
             [this](std::uint64_t measurementSession, std::uint64_t roundGeneration) {
                 return resolveAutoSaveRound(measurementSession, roundGeneration);
@@ -305,7 +314,6 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
     if(config.enablePublisher)m_publisher->start();
     for(int c=0;c<config.nCards;++c){
         auto display=std::make_unique<DisplayBuffer>();auto saver=std::make_unique<FileSaver>(c);
-        saver->setSessionDirResolver([this](auto gen){return sessionDir(gen);});
         // Frontend Preprocessing Stage：每卡一个异步 worker。stage 必须在任何
         // 可能提交 frontend frame 的路径之前启动（Task 3.7）。
         auto frontend=std::make_unique<FrontendPreprocessor>(c);

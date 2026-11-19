@@ -96,7 +96,7 @@ public:
     //  存储控制
     void startSaving(const QString& directory,
                      int triggersPerFile,
-                     const QString& suffix);
+                     const QString& suffix, bool autoSave = false);
     void stopSaving();
     // 自动保存会话代协调器：目录准备/注册完成后才发布 generation。
     // 物理边界源调用 commit，HostOutput 按 round identity 解析后再打标。
@@ -124,6 +124,7 @@ public:
     void disableAutoSave();
     bool autoSaveEnabled() const;
     bool autoSaveFaulted() const;
+    std::uint64_t autoSaveRequestId() const noexcept { return m_autoSaveCoordinator.requestId(); }
     uint64_t autoSessionGen() const;
     QString sessionDir(uint64_t gen) const;
     // Round-aware resolver used by HostOutput before a TriggerGroup enters
@@ -258,6 +259,7 @@ private:
     int m_paimageSaveCount=1000;
     bool m_paimageSavingRequested=false;
     quint64 m_paimageSaveGeneration=0;
+    quint64 m_saveRequestId = 0;
     bool m_paimageSaveAppliedLogged=false;
     std::vector<std::uint64_t> m_paimageLastBytes;
     quint64 m_paimageLastBurstEpoch=0;

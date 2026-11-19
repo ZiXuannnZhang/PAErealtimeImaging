@@ -6,6 +6,7 @@
 #include "DataProcessor.h"
 #include "FileSaver.h"
 #include <functional>
+#include <limits>
 #include <memory>
 #include <utility>
 #include "RoundIdentity.h"
@@ -38,11 +39,12 @@ public:
                 bool disableCountBoundary = false);
     ~HostOutput();
     void start(){workers_.start();}
-    void stop(){workers_.stop();}
-    void requestStop(){workers_.requestStop();}
+    void stop();
+    void requestStop();
     void beginSession(std::uint64_t s){
         std::lock_guard<std::mutex> lock(normalizationMutex_);
         cancelTailState(true);
+        expireFailedBoundary((std::numeric_limits<Time>::max)(), nullptr);
         if(measurementSessionBinder_)
             measurementSessionBinder_(s);
         if(normalizer_)normalizer_->beginSession(s);
@@ -56,6 +58,7 @@ public:
     void endSession(){
         std::lock_guard<std::mutex> lock(normalizationMutex_);
         cancelTailState(true);
+        expireFailedBoundary((std::numeric_limits<Time>::max)(), nullptr);
         if(frontendSessionSink_)frontendSessionSink_(0);
     }
     void setFrontendSessionSink(FrontendSessionSink sink){
@@ -73,6 +76,11 @@ public:
     void setSaveSessionResolver(SaveSessionResolver resolver){
         saveSessionResolver_=std::move(resolver);
     }
+    void setSaveBoundaryFaultProbe(std::function<bool()> probe) {
+        saveBoundaryFaulted_ = std::move(probe);
+    }
+    using SaveTailSink = std::function<void(RoundIdentity, std::uint16_t, int, bool)>;
+    void setSaveTailSink(SaveTailSink sink) { saveTailSink_ = std::move(sink); }
     void setMeasurementSessionBinder(MeasurementSessionBinder binder){
         measurementSessionBinder_=std::move(binder);
     }
@@ -86,6 +94,7 @@ public:
         preBoundarySnapshot_=normalizer_->snapshot();
         const bool result=now>0 && normalizer_->timeoutBoundaryIfIdle(now);
         finishTailSeals(now,cardWatermarks);
+        expireFailedBoundary(now, cardWatermarks);
         return result;
     }
     void setConfiguredLogicalTriggersPerRound(std::uint64_t count){
@@ -103,8 +112,10 @@ public:
         if(normalizer_)normalizer_->setDisableCountBoundary(disable);
     }
     PhysicalRoundNormalizer::Snapshot normalizerSnapshot() const;
-    std::uint64_t startSaving(const QString&,int,const QString&);
-    std::uint64_t stopSaving();
+    using SaveResultSink = std::function<void(const FileSaver::SaveResult&)>;
+    std::uint64_t startSaving(const QString&, int, const QString&,
+                              std::function<QString(std::uint64_t)> directoryFor = {});
+    std::uint64_t stopSaving(SaveResultSink done = {});
     void prepareConfigurationRestart(){configurationRestart_=true;}
     std::uint64_t resumeSaving();
     bool savingApplied(std::uint64_t g)const{return workers_.savingConfigurationApplied(g);}
@@ -116,6 +127,12 @@ private:
     void finishTailSeals(Time,const std::vector<Time>*);
     void sealCard(int,RoundIdentity);
     void cancelTailState(bool seal);
+    void failSaveBoundary(const PhysicalRoundEvent&);
+    void expireFailedBoundary(Time, const std::vector<Time>*);
+    void finishFailedBoundary();
+    bool waitingForFailedBoundary() const;
+    void pushSaveFrame(const Frame&, const PhysicalRoundClassification&, bool timeoutEligible = false);
+    std::uint64_t configureSaving(bool enabled, std::function<void()> apply);
     void consumeCard(Frame);void consumeSync(const SyncFrame&);
     void observe(Frame,std::uint8_t stage,std::uint8_t reason,std::uint32_t value=0);
     std::vector<DataProcessor*> processors_;std::vector<FileSaver*> savers_;
@@ -135,7 +152,21 @@ private:
     std::vector<Tail> tails_;
     std::vector<RoundIdentity> cardSaveRounds_;
     PhysicalRoundNormalizer::Snapshot preBoundarySnapshot_;
+    struct FailedBoundary {
+        RoundIdentity round;
+        std::uint64_t saveGeneration = 0;
+        std::uint16_t trigger = 0;
+        Time deadline = 0;
+        bool count = false;
+        std::vector<bool> waiting;
+    };
+    std::optional<FailedBoundary> failedBoundary_;
+    std::deque<std::function<void()>> deferredSaveControls_;
+    Time boundaryObservedNs_ = 0;
+    bool saveRequested_ = false;
     SaveSessionResolver saveSessionResolver_;
+    std::function<bool()> saveBoundaryFaulted_;
+    SaveTailSink saveTailSink_;
     MeasurementSessionBinder measurementSessionBinder_;
     FrontendSessionSink frontendSessionSink_;
     FrontendBarrierSink frontendBarrierSink_;

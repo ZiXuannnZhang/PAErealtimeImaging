@@ -156,7 +156,7 @@ private:
     void updateNetworkInfoIndicator(); // 把只读网络信息汇总到感叹号悬停提示
     void saveReconImage(const QImage &image, const QString &tag); // 实时重建图像 PNG 保存
     void applyAutoSaveCommitToUi(const AutoSaveCommit& commit);
-    void queueAutoSaveFailure(const AutoSaveCommit& commit);
+    void queueAutoSaveFailure(const AutoSaveCommit& commit, NetworkController *source);
     void updateRingImagingStatus(); // 环形模式成像运行状态反馈（当前块脉冲数，主线程调用）
     // targetSourceKind: "explicit_target_ips" 或 "config_ack_discovery"
     void startListeningWithIPs(const QVector<QString>& onlineIPs,

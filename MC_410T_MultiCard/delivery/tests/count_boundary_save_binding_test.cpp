@@ -465,6 +465,46 @@ int main(int argc, char** argv)
               "C7 stale apply cannot roll back or allocate");
     }
 
+    // The boundary callback runs before the final old group is enqueued.
+    {
+        QTemporaryDir root;
+        AutoSaveRoundCoordinator coordinator;
+        coordinator.configure(root.path(), 0);
+        const auto first = coordinator.beginSession(0);
+        coordinator.setDirectoryPreparer([](const QString&) { return false; });
+        FileSaver saver(0);
+        saver.setSessionDirResolver([&](auto gen) { return coordinator.directoryFor(gen); });
+        AcqConfig config;
+        config.acqTimeNs = 64;
+        DataProcessor processor(0, nullptr, nullptr, config);
+        HostOutput output(32, 50, {&processor}, {&saver}, nullptr, nullptr, 2,
+            [&](const PhysicalRoundEvent& event) {
+                if (event.kind == PhysicalRoundEvent::Kind::CountBoundary &&
+                    coordinator.enabled())
+                    coordinator.commitBoundary(event.measurementSession, event.roundGeneration,
+                        AutoSaveBoundaryKind::Count, QStringLiteral("test_failed_next_directory"));
+            }, 0.0, 0);
+        output.setMeasurementSessionBinder([&](auto session) {
+            return coordinator.bindMeasurementSession(session).newSessionGen;
+        });
+        output.setSaveSessionResolver([&](auto session, auto round) {
+            return coordinator.resolveRound(session, round).sessionGen;
+        });
+        output.beginSession(900);
+        output.start();
+        output.startSaving(first.directory, 100, QStringLiteral("fault"));
+        output.card(makeFrame(900, 0, 110, 1000, 1));
+        output.card(makeFrame(900, 0, 111, 2000, 2));
+        check(coordinator.faulted(), "failed next directory leaves old boundary active");
+        output.card(makeFrame(900, 0, 112, 3000, 3));
+        const auto stopped = output.stopSaving();
+        check(until([&] { return output.savingApplied(stopped); }), "fault stop drained");
+        check(saver.savedCount() == 2 &&
+              hasSize(dataFile(first.directory, 0, "fault"), 64),
+              "fault stop saved exactly the old round including its final group");
+        output.stop();
+    }
+
     // C8: timeout uses the same round-aware binding resolver; the next round
     // is routable immediately after the source boundary.
     {
@@ -604,6 +644,69 @@ int main(int argc, char** argv)
         check(fresh.committed && fresh.newSessionGen == 21 &&
                   coordinator.directoryFor(initial.newSessionGen).isEmpty(),
               "C10 reconfigure starts an isolated directory registry");
+    }
+
+    // The GUI can request stop before the other card publishes the old frame.
+    for (const bool count : {true, false}) {
+        QTemporaryDir root;
+        QTemporaryDir newRoot;
+        AutoSaveRoundCoordinator coordinator;
+        coordinator.configure(root.path(), 0);
+        const auto initial = coordinator.beginSession(0);
+        coordinator.setDirectoryPreparer([](const QString&) { return false; });
+        FileSaver a(0), b(1);
+        AcqConfig config;
+        config.acqTimeNs = 64;
+        DataProcessor pa(0, nullptr, nullptr, config), pb(1, nullptr, nullptr, config);
+        HostOutput output(32, 50, {&pa, &pb}, {&a, &b}, nullptr, nullptr, 2,
+            [&](const PhysicalRoundEvent& event) {
+                if (event.kind == PhysicalRoundEvent::Kind::CountBoundary ||
+                    event.kind == PhysicalRoundEvent::Kind::TimeoutBoundary) {
+                    coordinator.commitBoundary(event.measurementSession, event.roundGeneration,
+                        count ? AutoSaveBoundaryKind::Count : AutoSaveBoundaryKind::Timeout, "fault-tail");
+                }
+            }, 1.0, 0, !count);
+        output.setSaveBoundaryFaultProbe([&] { return coordinator.faulted(); });
+        output.setMeasurementSessionBinder([&](auto session) {
+            return coordinator.bindMeasurementSession(session).newSessionGen;
+        });
+        output.setSaveSessionResolver([&](auto session, auto round) {
+            return coordinator.resolveRound(session, round).sessionGen;
+        });
+        output.start();
+        output.beginSession(777);
+        const auto started = output.startSaving(initial.directory, 100, "tail-fault",
+                                                coordinator.directoryResolver());
+        check(until([&] { return output.savingApplied(started); }), "fault-tail request applied");
+        output.card(makeFrame(777, 0, 10, 1000000000LL, 1));
+        output.card(makeFrame(777, 1, 10, 1000000000LL, 1));
+        if (count)
+            output.card(makeFrame(777, 0, 11, 1900000000LL, 2));
+        else {
+            output.assemblyStarted(1, 777, 11, 1900000000LL);
+            check(output.pollPhysicalRoundTimeout(2000000000LL), "fault-tail timeout reached");
+        }
+        check(coordinator.faulted(), "fault-tail next folder refused");
+        const auto stopped = output.stopSaving();
+        check(!output.savingApplied(stopped), "old tail defers GUI stop");
+        coordinator.disable();
+        auto tail = std::const_pointer_cast<CardFrame>(makeFrame(777, 1, 11, 1900000000LL, 2));
+        tail->firstIngressId = 11;
+        tail->closed = count ? 1910000000LL : 2050000000LL;
+        output.card(tail);
+        check(until([&] { return output.savingApplied(stopped); }), "old tail and stop settled");
+        coordinator.selectManualSave();
+        const auto restarted = output.startSaving(newRoot.path(), 100, "next");
+        output.card(makeFrame(777, 0, 12, 2200000000LL, 3));
+        const auto stoppedAgain = output.stopSaving();
+        check(until([&] { return output.savingApplied(stoppedAgain); }), "next request settled");
+        check(output.savingApplied(restarted), "next request applied");
+        output.stop();
+        check(hasSize(dataFile(initial.directory, 0, "tail-fault"), count ? 64 : 32),
+              "first card kept its old data");
+        check(hasSize(dataFile(initial.directory, 1, "tail-fault"), 64),
+              "delayed card kept both old columns");
+        check(hasSize(dataFile(newRoot.path(), 0, "next"), 32), "new request has only new data");
     }
 
     // T1: only the exact pre-cutoff in-flight object may join the open tail.
