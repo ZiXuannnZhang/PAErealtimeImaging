@@ -109,7 +109,8 @@ void HostOutput::beginTailSeals(const PhysicalRoundEvent& event){
         auto& t=tails_[c];t={};const auto& a=activeAssemblies_[c];
         t.round=old;t.deadline=cutoff+kSaveTailGraceNs;
         t.generation=saveSessionResolver_ ? saveSessionResolver_(old.measurementSession,old.roundGeneration) : 0;
-        t.waiting=a.round==old && cardSaveRounds_[c]==old && a.ingress && a.first>0 && a.first<=cutoff;
+        const bool healthy = !sourceSaveRequest_ || !sourceSaveRequest_->cards[c].fault.load();
+        t.waiting=healthy && a.round==old && cardSaveRounds_[c]==old && a.ingress && a.first>0 && a.first<=cutoff;
         if(t.waiting)t.active=a;
         if(!t.waiting)sealCard(int(c),old);
     }

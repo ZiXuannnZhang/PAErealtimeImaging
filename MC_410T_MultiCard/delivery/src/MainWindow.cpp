@@ -210,7 +210,7 @@ static paimage::TimeoutPresentation::Target pngTargetForRound(
         ? (commit && commit->requestId == intent.autoSaveRequestId ? commit->oldDirectory : QString{})
         : intent.directory;
     if (directory.isEmpty()) return {};
-    return {QDir(directory).filePath("recon_png"), intent.suffix, intent.requestId};
+    return {QDir(directory).filePath("recon_png"), intent.suffix, intent.requestId, intent.listenId};
 }
 
 MainWindow::MainWindow(QWidget *parent)
@@ -5486,6 +5486,8 @@ void MainWindow::reportTerminalPng(const paimage::RoundIdentity& round,
     QJsonObject fields{{"measurementSession", QString::number(round.measurementSession)},
         {"roundGeneration", QString::number(round.roundGeneration)}, {"requestId", QString::number(target.requestId)},
         {"submitIndex", QString::number(submitIndex)}, {"directory", target.directory}, {"result", status}};
+    fields.insert(QStringLiteral("source"), QStringLiteral("ui"));
+    if (!target.listenId.isEmpty()) fields.insert(QStringLiteral("listenId"), target.listenId);
     if (!retained.isEmpty()) fields.insert(QStringLiteral("retainedFile"), retained);
     if (auto* recorder = DiagnosticRecorder::instance()) {
         recorder->recordEvent(QStringLiteral("ui.action"), saved ? QStringLiteral("ring_final_png_saved")

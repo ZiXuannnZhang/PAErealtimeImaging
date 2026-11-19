@@ -9,6 +9,7 @@
 #include <vector>
 #include <deque>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <atomic>
 #include <thread>
@@ -104,6 +105,7 @@ public:
         QString directory;
         QString suffix;
         bool automatic = false;
+        QString listenId;
     };
     RawSaveIntent rawSaveIntent() const {
         const std::lock_guard<std::mutex> lock(m_rawSaveIntentMutex);
@@ -254,6 +256,21 @@ private:
     bool configurePaimage(int,int,int,const QString&);
     bool dispatchPaimageConfig(int ns, int a, int b, const QString& trigger);
     void applyPaimageSaveRequest(bool resume);
+    struct SaveReceipt {
+        struct Card {
+            FileSaver::SaveResult totals{};
+            bool finished = false;
+        };
+        SaveReceipt(quint64 id, std::size_t count) : requestId(id), cards(count) {}
+        quint64 requestId;
+        std::mutex mutex;
+        std::vector<Card> cards;
+    };
+    void recordPaimageSaveResult(const std::shared_ptr<SaveReceipt>&, FileSaver::SaveResult,
+                                 const QString& reason = {});
+    void finishPaimageSaveReceipt(const std::shared_ptr<SaveReceipt>&, const QString& reason);
+    std::shared_ptr<SaveReceipt> m_paimageSaveReceipt;
+    std::shared_ptr<SaveReceipt> m_suspendedSaveReceipt;
     bool startPaimageMeasurement();
     bool stopPaimageMeasurement();
     void pollPaimage();

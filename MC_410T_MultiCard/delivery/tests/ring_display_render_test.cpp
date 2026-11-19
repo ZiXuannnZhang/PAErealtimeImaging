@@ -358,7 +358,8 @@ int main(int argc, char **argv)
 
     {
         QTemporaryDir root;
-        const QImage image(8, 8, QImage::Format_ARGB32);
+        QImage image(8, 8, QImage::Format_ARGB32);
+        image.fill(Qt::white);
         const ImagingDisplayWindow::PngPair pair{image, image};
         const auto first = root.filePath("532nm.png");
         const auto missingSecondParent = root.filePath("missing/1064nm.png");

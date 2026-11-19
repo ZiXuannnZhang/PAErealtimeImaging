@@ -477,6 +477,10 @@ void NetworkController::requestPaimageStop() {
     m_running = false;
     m_paimageStopPending = true;
     m_paimageStartPending = false;
+    {
+        const std::lock_guard<std::mutex> lock(m_rawSaveIntentMutex);
+        m_rawSaveIntent = {};
+    }
     for (QTimer** timer : {&m_paimageTimer, &m_paimageLoopMonitorTimer, &m_statsTimer}) {
         if (*timer) {
             (*timer)->stop();
@@ -506,6 +510,10 @@ void NetworkController::finishPaimageStop() {
         requestPaimageStop();
         waitForPaimageWorkers();
     }
+    finishPaimageSaveReceipt(m_suspendedSaveReceipt, QStringLiteral("listener_stopped_during_configuration"));
+    finishPaimageSaveReceipt(m_paimageSaveReceipt, QStringLiteral("listener_stopped"));
+    m_suspendedSaveReceipt.reset();
+    m_paimageSaveReceipt.reset();
     m_paimage.reset();
     m_paimageTrace.reset();
     m_paimageTiming.reset();
@@ -538,17 +546,52 @@ void NetworkController::stopPaimage() {
     });
 }
 
+void NetworkController::recordPaimageSaveResult(const std::shared_ptr<SaveReceipt>& receipt,
+                                                FileSaver::SaveResult result, const QString& reason)
+{
+    if (!receipt) return;
+    {
+        const std::lock_guard<std::mutex> lock(receipt->mutex);
+        auto& card = receipt->cards.at(result.cardId);
+        if (card.finished) return;
+        auto& totals = card.totals;
+        totals.cardId = result.cardId;
+        totals.confirmed += result.confirmed;
+        totals.discarded += result.discarded;
+        totals.failed += result.failed;
+        totals.admitted += result.admitted;
+        totals.rejected += result.rejected;
+        totals.ioFault = totals.ioFault || result.ioFault;
+        if (!result.configurationSegment) {
+            card.finished = true;
+            result = totals;
+        }
+    }
+    recordDiagnosticEvent("paimage.save", result.configurationSegment
+            ? "save_request_segment_settled" : "save_request_settled",
+        result.ioFault ? DiagnosticRecorder::Severity::Error : DiagnosticRecorder::Severity::Info,
+        {{"requestId", QString::number(receipt->requestId)}, {"card", result.cardId},
+         {"admitted", QString::number(result.admitted)}, {"rejected", QString::number(result.rejected)},
+         {"confirmed", QString::number(result.confirmed)}, {"discarded", QString::number(result.discarded)},
+         {"failed", QString::number(result.failed)}, {"ioFault", result.ioFault}, {"reason", reason}});
+}
+
+void NetworkController::finishPaimageSaveReceipt(const std::shared_ptr<SaveReceipt>& receipt, const QString& reason)
+{
+    if (!receipt) return;
+    for (std::size_t card = 0; card < receipt->cards.size(); ++card) {
+        FileSaver::SaveResult result{};
+        result.cardId = int(card);
+        recordPaimageSaveResult(receipt, result, reason);
+    }
+}
+
 void NetworkController::applyPaimageSaveRequest(bool resume)
 {
     const auto request = m_saveRequestId;
-    const auto resultSink = [this, request](const FileSaver::SaveResult& result) {
-        recordDiagnosticEvent("paimage.save", result.configurationSegment
-                ? "save_request_segment_settled" : "save_request_settled",
-            result.ioFault ? DiagnosticRecorder::Severity::Error : DiagnosticRecorder::Severity::Info,
-            {{"requestId", QString::number(request)}, {"card", result.cardId},
-             {"admitted", QString::number(result.admitted)}, {"rejected", QString::number(result.rejected)},
-             {"confirmed", QString::number(result.confirmed)}, {"discarded", QString::number(result.discarded)},
-             {"failed", QString::number(result.failed)}, {"ioFault", result.ioFault}});
+    const auto resultSink = [this, receipt = m_paimageSaveReceipt](const FileSaver::SaveResult& result) {
+        recordPaimageSaveResult(receipt, result,
+            result.configurationSegment ? QStringLiteral("configuration_drain") : QStringLiteral("writer_settled"));
     };
     const auto healthSink = [this, request](int healthy, int total) {
         QMetaObject::invokeMethod(this, [this, request, healthy, total] {
@@ -573,18 +616,18 @@ bool NetworkController::configurePaimage(int ns, int a, int b, const QString& tr
     m_currentConfigId = QString("config-%1").arg(m_nextConfigId++);
     if (ns == m_config.acqTimeNs) return dispatchPaimageConfig(ns, a, b, trigger);
 
-    const auto suspendedRequest = m_paimageSavingRequested ? m_saveRequestId : 0;
-    if (suspendedRequest) m_paimage->output().prepareConfigurationRestart();
+    m_suspendedSaveReceipt = m_paimageSavingRequested ? m_paimageSaveReceipt : nullptr;
+    if (m_suspendedSaveReceipt) m_paimage->output().prepareConfigurationRestart();
     m_paimageConfigDrain = true;
     m_configPhase = ConfigPhase::WaitingAck;
     emit configurationDrainChanged(true);
-    m_stopThread = std::thread([this, ns, a, b, trigger, suspendedRequest] {
+    m_stopThread = std::thread([this, ns, a, b, trigger] {
         m_paimage->stop();
         if (m_paimageTrace) m_paimageTrace->stop();
         if (m_paimageTiming) m_paimageTiming->stop();
         if (m_paimageLoopLog) m_paimageLoopLog->stop();
 
-        QMetaObject::invokeMethod(this, [this, ns, a, b, trigger, suspendedRequest] {
+        QMetaObject::invokeMethod(this, [this, ns, a, b, trigger] {
             m_stopThread.join();
             m_paimageConfigDrain = false;
             emit configurationDrainChanged(false);
@@ -601,8 +644,13 @@ bool NetworkController::configurePaimage(int ns, int a, int b, const QString& tr
             m_paimageTraceLease.reset();
             m_config.acqTimeNs = ns;
 
+            const bool resume = m_paimageSavingRequested && m_paimageSaveReceipt == m_suspendedSaveReceipt;
+            if (!resume)
+                finishPaimageSaveReceipt(m_suspendedSaveReceipt, QStringLiteral("stopped_during_configuration"));
+            m_suspendedSaveReceipt.reset();
             QString error;
             if (!createPaimageBackend(error)) {
+                finishPaimageSaveReceipt(m_paimageSaveReceipt, QStringLiteral("configuration_failed"));
                 m_configPhase = ConfigPhase::Failed;
                 if (m_paimageStartPending)
                     emit measurementStartFailed(m_pendingMeasurementSessionId, error);
@@ -610,7 +658,7 @@ bool NetworkController::configurePaimage(int ns, int a, int b, const QString& tr
                 stopPaimage();
                 return;
             }
-            if (m_paimageSavingRequested) applyPaimageSaveRequest(suspendedRequest == m_saveRequestId);
+            if (m_paimageSavingRequested) applyPaimageSaveRequest(resume);
             recordDiagnosticEvent("paimage.lifecycle", "configuration_listener_restart",
                 DiagnosticRecorder::Severity::Info, {{"samples", m_config.samplesPerTrig()}});
             dispatchPaimageConfig(ns, a, b, trigger);

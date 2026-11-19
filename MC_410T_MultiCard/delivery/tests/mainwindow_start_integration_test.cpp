@@ -263,9 +263,67 @@ public:
                           "raw file trigger count in the same round directory");
                 }
             }
+
+            // Stage a valid reconstruction-only calibration while the service
+            // is resident, then remove the file before the real Start button.
+            const auto calibrationFile = save.filePath("fbp-calibration.json");
+            auto calibration = ring_fbp_settings::toJson(RingFbpSettings{});
+            calibration.insert("formatVersion", 1);
+            calibration.insert("geometry", "concentric-ring");
+            calibration.insert("daqHz", 250e6);
+            {
+                QFile file(calibrationFile);
+                check(file.open(QIODevice::WriteOnly), "create temporary FBP calibration");
+                const auto json = QJsonDocument(calibration).toJson();
+                check(file.write(json) == json.size(), "write temporary FBP calibration");
+            }
+            auto& dialog = *window.m_ringConfigDialog;
+            dialog.setAcquisitionParams(4, durationNs);
+            dialog.setMeasurementConfigFrozen(true);
+            widget<QComboBox>(dialog, "ringReconAlgorithm")->setCurrentIndex(1);
+            widget<QLineEdit>(dialog, "ringFbpCalibrationFile")->setText(calibrationFile);
+            QString calibrationError;
+            check(dialog.applyConfig(&calibrationError), "stage a valid FBP calibration");
+            dialog.setMeasurementConfigFrozen(false);
+            check(QFile::remove(calibrationFile), "invalidate staged calibration before START");
+
+            window.startListeningWithIPs({"127.0.0.2"}, QStringLiteral("explicit_target_ips"));
+            check(window.m_isListening && window.m_chkRealtimeImaging->isChecked(),
+                  "raw start test still requests imaging");
+            waitFor([&]{ return window.m_netController && window.m_netController->isSaving(); }, "raw save armed");
+            const auto rawDirectory = QDir(window.m_reconSaveDir).absoluteFilePath("..");
+            const auto delayA = widget<QLineEdit>(window, "edtADelay")->text().toInt();
+            const auto delayB = widget<QLineEdit>(window, "edtBDelay")->text().toInt();
+            window.onStartMeasureClicked();
+            expectCommand(paimage::configCommand(durationNs, delayA, delayB));
+            send(8000, std::vector<unsigned char>(60));
+            waitFor([&]{ return window.m_isMeasuring; }, "missing FBP file must still start acquisition");
+            expectCommand(paimage::startCommand());
+            check(!window.m_measurementRingImagingAvailable.load(), "missing FBP file is reported independently");
+            for (int trigger = 0; trigger < 4; ++trigger) {
+                for (int offset = 0; offset < durationNs * 2; offset += 1440) {
+                    const auto size = std::min(1440, durationNs * 2 - offset);
+                    std::vector<unsigned char> bytes(size + 4);
+                    bytes[0] = offset / 1440;
+                    bytes[2] = trigger;
+                    send(8001, bytes);
+                }
+                pump(8);
+            }
+            waitFor([&] { return window.m_netController->physicalRoundSnapshot().logicalDistinctAccepted > 0; },
+                    "acquisition accepted data without FBP");
+            window.onStartListenClicked();
+            expectCommand(paimage::stopCommand());
+            waitFor([&]{ return !window.m_netController; }, "close raw acquisition listener");
+            const QDir rawFiles(QDir::cleanPath(rawDirectory));
+            for (const auto* pattern : {"Card1_ChA_*.dat", "Card1_ChB_*.dat"}) {
+                const auto files = rawFiles.entryList({QString::fromLatin1(pattern)}, QDir::Files);
+                check(files.size() == 1 && QFileInfo(rawFiles.filePath(files.front())).size() > 0,
+                      "raw writer saved both waveform channels without FBP");
+            }
         }
         QFile::remove(paimageSettingsPath());
-        std::cout << "PASS same MainWindow and Ring service, two listeners, one PNG pair and raw round per listener\n";
+        std::cout << "PASS same MainWindow, terminal PNG after listener restart, slow imaging and unavailable FBP\n";
     }
 
     static void run() {

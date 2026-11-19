@@ -341,7 +341,9 @@ void RingConfigDialog::buildUi()
     m_chkFbpInvert=new QCheckBox("输入取反（MATLAB 原型极性）");m_chkFbpInvert->setChecked(true);
     m_edtFbpDensities=new QLineEdit("1000,1100,1100,1100,1100,1100,1100,1100");
     m_edtFbpDensities->setObjectName("fbpDensities");
-    m_edtFbpCalibration=new QLineEdit;m_edtFbpCalibration->setPlaceholderText("可选环形标定 JSON：角度偏移及亚采样时延");
+    m_edtFbpCalibration = new QLineEdit;
+    m_edtFbpCalibration->setObjectName(QStringLiteral("ringFbpCalibrationFile"));
+    m_edtFbpCalibration->setPlaceholderText("可选环形标定 JSON：角度偏移及亚采样时延");
     auto* calibrationBrowse=new QPushButton("选择标定文件");
     connect(calibrationBrowse,&QPushButton::clicked,this,[this]{auto p=QFileDialog::getOpenFileName(this,"选择环形 FBP 标定",m_edtFbpCalibration->text(),"JSON (*.json)");if(!p.isEmpty())m_edtFbpCalibration->setText(p);});
     fGrid->addRow("FBP 预处理",m_chkFbpMedian);fGrid->addRow("",m_chkFbpInvert);

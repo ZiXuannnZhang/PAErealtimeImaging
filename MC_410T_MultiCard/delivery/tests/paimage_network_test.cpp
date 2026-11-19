@@ -57,6 +57,9 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
             ringTriggers[c].push_back(frame->triggerSeq);
             ringIndices[c].push_back(frame->logicalTriggerIndex);}
         ++rings;return ImagingSubmitResult::Accepted;});
+    std::vector<bool> configurationDrain;
+    QObject::connect(&controller, &NetworkController::configurationDrainChanged,
+                     [&](bool waiting) { configurationDrain.push_back(waiting); });
     quint64 preparing = 0;
     QObject::connect(&controller, &NetworkController::measurementPreparing,
                      [&](quint64 session) { preparing = session; });
@@ -124,6 +127,8 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
         ++phase;
     }
     if(!stress){
+        require(configurationDrain == std::vector<bool>({true, false, true, false}),
+                "sample-depth restarts visibly wait for old saves without blocking the controller");
         unsigned tailCount=0;
         auto tail=[&]{++tailCount;for(int c=0;c<4;++c)send(c,8001+c,std::vector<unsigned char>{0,0,99,0});
             require(until([&]{auto stats=controller.getAllCardStats();for(const auto& s:stats)if(s.sessionBoundaryPacketsDiscarded<tailCount)return false;return true;}),"disabled tails observed before parsing admission");};

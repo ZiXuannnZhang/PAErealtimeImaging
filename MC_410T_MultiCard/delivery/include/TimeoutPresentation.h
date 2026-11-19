@@ -17,6 +17,7 @@ public:
         QString directory;
         QString suffix;
         std::uint64_t requestId = 0;
+        QString listenId;
         explicit operator bool() const { return !directory.isEmpty(); }
     };
     void configure(bool enabled, const QString& directory, const QString& suffix) {

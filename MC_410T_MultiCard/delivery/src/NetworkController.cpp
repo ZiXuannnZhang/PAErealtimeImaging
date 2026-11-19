@@ -570,9 +570,10 @@ void NetworkController::startSaving(const QString& directory,
         m_paimageSaveDir=directory;m_paimageSaveCount=triggersPerFile;m_paimageSaveSuffix=suffix;
         m_paimageSavingRequested=true;
         ++m_saveRequestId;
+        m_paimageSaveReceipt = std::make_shared<SaveReceipt>(m_saveRequestId, m_savers.size());
         {
             const std::lock_guard<std::mutex> lock(m_rawSaveIntentMutex);
-            m_rawSaveIntent = {m_saveRequestId, autoSaveRequestId(), directory, suffix, autoSave};
+            m_rawSaveIntent = {m_saveRequestId, autoSaveRequestId(), directory, suffix, autoSave, m_diagnosticListenId};
         }
         m_paimageSaveGeneration = 0;
         m_paimageSaveAppliedLogged = false;
@@ -598,6 +599,8 @@ void NetworkController::stopSaving() {
         }
         const auto request = m_saveRequestId;
         const auto generation = m_paimageConfigDrain ? 0 : m_paimage->output().stopSaving();
+        if (m_paimageConfigDrain && m_paimageSaveReceipt != m_suspendedSaveReceipt)
+            finishPaimageSaveReceipt(m_paimageSaveReceipt, QStringLiteral("stopped_before_activation"));
         recordDiagnosticEvent("paimage.save","save_stop_requested",DiagnosticRecorder::Severity::Info,
             {{"generation",QString::number(generation)}, {"requestId",QString::number(request)},
              {"requestedMonotonicNs",QString::number(paimage::SocketReceiver::now())},
