@@ -88,7 +88,7 @@ protected:
 private slots:
     void onStartListenClicked();
     void onStartMeasureClicked();
-    void onConfigParamsClicked(bool fromStartMeasure = false);
+    bool onConfigParamsClicked(bool fromStartMeasure = false);
     void onExportDiagnosticClicked();
     void onSelectDirClicked();
     void onToggleSaveClicked();
@@ -330,6 +330,11 @@ private:
     paimage::RingRoundUiState m_roundUi;
     paimage::RoundIdentity m_lastRingFinalRound;
     quint64 m_firstRingMeasurementSession = 0;
+    void prepareRingMeasurement(quint64 session);
+    std::atomic<bool> m_measurementRingImagingAvailable{true};
+    paimage::RoundIdentity m_ringReadyFromRound; // guarded by m_ringAssemblerMutex
+    quint64 m_ringAdmissionSession = 0;        // guarded by m_ringAssemblerMutex
+    bool m_ringSkippedForReadiness = false;    // guarded by m_ringAssemblerMutex
     paimage::TimeoutPresentation m_timeoutPresentation;
     void syncTimeoutPngSettings();
     // Count/timeout presentation transitions are retained by old physical
@@ -346,6 +351,8 @@ private:
     void startRingFeedWorker();        // 环形模式：独立工作线程消费触发队列→组包器
     void stopRingFeedWorker();
     ImagingSubmitResult ringFeedSink(const TriggerGroupConstPtr& frame);
+    void freezeMeasurementConfig(bool frozen);
+    bool m_measurementConfigFrozen = false;
     void configureRingAssembler();     // 按控制器环形配置初始化组包器
     void ensureRingConfigDialog();     // 惰性创建环形参数窗口并接通物理轮次策略转发
     // 显示窗口几何/掩膜注入（显示层任务）：窗口创建时与每次 applyConfig 后，

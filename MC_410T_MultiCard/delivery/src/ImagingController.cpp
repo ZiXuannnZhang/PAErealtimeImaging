@@ -388,13 +388,14 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
     return true;
 }
 
-void ImagingController::applyMotorRingDirection(int sectorCcw)
+void ImagingController::applyMotorRingDirection(int sectorCcw, bool updateOrigin)
 {
     if (!m_ringMode) return;
     const bool directionChanged = m_ringConfig.sectorCcw != sectorCcw;
-    const bool originChanged = m_ringConfig.sectorStartDeg != ring_sector::kNineOClockDeg;
+    const bool originChanged = updateOrigin &&
+        m_ringConfig.sectorStartDeg != ring_sector::kNineOClockDeg;
     m_ringConfig.sectorCcw = sectorCcw;
-    m_ringConfig.sectorStartDeg = ring_sector::kNineOClockDeg;
+    if (updateOrigin) m_ringConfig.sectorStartDeg = ring_sector::kNineOClockDeg;
     if (originChanged && m_svcResourcesActive && !m_stopping) {
         m_ringAdmission.store(false);
         ++m_svcLifecycleToken;

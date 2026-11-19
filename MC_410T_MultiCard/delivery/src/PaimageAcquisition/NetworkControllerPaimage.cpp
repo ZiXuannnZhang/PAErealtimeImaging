@@ -638,16 +638,35 @@ void NetworkController::pollPaimage(){
         m_paimageConfigReported=true;
         if(m_paimage->configured()){m_configPhase=ConfigPhase::Confirmed;emit configConfirmed();}
         else{m_configPhase=ConfigPhase::Failed;for(int c=0;c<m_config.nCards;++c)if(!m_paimage->acknowledgements()[c])emit configAckFailed(c);
-            if(m_paimageStartPending){m_paimageStartPending=false;emit measurementStartFailed(m_pendingMeasurementSessionId,"PAimage CONFIG failed");}}
+            if (m_paimageStartPending) {
+                m_paimageStartPending = false;
+                emit measurementStartFailed(std::exchange(m_pendingMeasurementSessionId, {}), "PAimage CONFIG failed");
+            }
+        }
     }
-    if(m_paimageStartPending&&m_paimage->configured()){m_paimageStartPending=false;startPaimageMeasurement();}
+    if (m_paimageStartPending && m_configPhase == ConfigPhase::Confirmed) {
+        m_paimageStartPending = false;
+        startPaimageMeasurement();
+    }
 }
 bool NetworkController::startPaimageMeasurement(){
-    if(!m_running||m_measurementRunning)return false;
-    if(m_paimageConfigDrain || m_paimage->configuring()){m_paimageStartPending=true;m_pendingMeasurementSessionId=newMeasurementSessionId();return true;}
-    const QString id=m_pendingMeasurementSessionId.isEmpty()?newMeasurementSessionId():m_pendingMeasurementSessionId;
-    m_pendingMeasurementSessionId.clear();
-    bool ok=m_paimage->startMeasurement(m_measurementSessionToken);
+    if (!m_running || !m_paimage || m_measurementRunning || m_paimageStartPending) return false;
+    if (m_paimageConfigDrain || m_paimage->configuring()) {
+        m_paimageStartPending = true;
+        m_pendingMeasurementSessionId = newMeasurementSessionId();
+        return true;
+    }
+    if (m_configPhase != ConfigPhase::Confirmed || !m_paimage->configured())
+        return false;
+    const auto id = m_pendingMeasurementSessionId.isEmpty()
+        ? newMeasurementSessionId() : std::exchange(m_pendingMeasurementSessionId, {});
+    auto& output = m_paimage->output();
+    output.setConfiguredLogicalTriggersPerRound(m_config.logicalTriggersPerRound);
+    output.setPhysicalRoundTimeout(m_physicalRoundTimeoutSec);
+    output.setStartupFilterTriggerCount(m_startupFilterTriggerCount);
+    output.setDisableCountBoundary(m_disableCountBoundary);
+    emit measurementPreparing(m_measurementSessionToken);
+    const bool ok = m_paimage->startMeasurement(m_measurementSessionToken);
     recordDiagnosticEvent("paimage.measure",ok?"measurement_started":"measurement_start_failed",DiagnosticRecorder::Severity::Info,
         {{"measurementSessionId",id},{"traceSession",QString::number(m_measurementSessionToken)},{"configId",m_currentConfigId},{"backendId","paimage-derived"}});
     if(ok){m_measurementSessionId=id;m_measurementRunning=true;m_measurementState=MeasurementState::Running;emit measurementStarted(id);}

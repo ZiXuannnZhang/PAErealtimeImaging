@@ -130,6 +130,33 @@ int main(int argc,char** argv) {
         check(fbpRestart.fbpSettings().enabled,"restart lost FBP algorithm");
         fbpRestart.show();fbpRestart.findChild<QTabWidget*>()->setCurrentIndex(1);app.processEvents();
         fbpRestart.grab().save(QCoreApplication::applicationDirPath()+"/ring-fbp-ui.png");
+
+        quint64 triggers = 0;
+        bool countDisabled = false;
+        int displays = 0;
+        QObject::connect(&fbpRestart, &RingConfigDialog::ringRoundTriggersChanged,
+                         [&](quint64 value) { triggers = value; });
+        QObject::connect(&fbpRestart, &RingConfigDialog::roundPolicyChanged,
+                         [&](quint64, bool disabled) { countDisabled = disabled; });
+        QObject::connect(&fbpRestart, &RingConfigDialog::displayMaskChanged,
+                         [&](bool, double) { ++displays; });
+        check(fbpRestart.prepareMeasurement(&err), "initial measurement configuration");
+        const auto initialTriggers = triggers;
+        const auto initialTotal = controller.ringConfig().alinesPerFrame;
+        fbpRestart.setMeasurementConfigFrozen(true);
+        click(fbpRestart, QStringLiteral("应用显示掩膜"));
+        check(displays == 2 && triggers == initialTriggers, "display changed acquisition");
+        widget<QSpinBox>(fbpRestart, "ringTotalAlines")->setValue(initialTotal * 2);
+        widget<QCheckBox>(fbpRestart, "ringDisableCountBoundary")->setChecked(true);
+        check(fbpRestart.applyConfig(&err), "valid next measurement configuration was rejected");
+        check(triggers == initialTriggers && !countDisabled &&
+              controller.ringConfig().alinesPerFrame == initialTotal,
+              "active measurement used edited geometry or round policy");
+        fbpRestart.setMeasurementConfigFrozen(false);
+        check(fbpRestart.prepareMeasurement(&err), "staged measurement configuration was rejected");
+        check(triggers == initialTriggers * 2 && countDisabled &&
+              controller.ringConfig().alinesPerFrame == initialTotal * 2,
+              "next measurement did not activate the same geometry and round policy");
         QFile::remove(paimageSettingsPath());
         std::cout<<"PASS UI advanced/parent cancel, apply, defaults, restart, invalid draft isolation\n";
         return 0;

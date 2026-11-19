@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QDialog>
+#include <optional>
 #include "Constants.h"
 #include "FrontendFilter.h"
 #include "RingTimevarLowpassConfig.h"
@@ -36,6 +37,8 @@ public:
     void sysDelayPerChannel(int out[8][2]) const;   // 每通道双波长延时截断（[通道][波长]）
     bool applyConfig(QString *error = nullptr); // 自动联动传入 error 时不弹出模态窗口
     bool applyMotorScanDirection(bool ccw, QString *error);
+    void setMeasurementConfigFrozen(bool frozen) { m_measurementConfigFrozen = frozen; }
+    bool prepareMeasurement(QString *error);
 
     // 物理轮次启动策略控件当前值（Session B；持久化见 RoundPolicySettings）
     quint64 startupFilterTriggerCount() const;
@@ -63,11 +66,9 @@ signals:
     // applyConfig 成功后发出，由 MainWindow 转发给
     // NetworkController::setFrontendFilterConfig（与重建配置下发相互独立）。
     void frontendFilterChanged(const frontend_filter::Config& config);
-    // applyConfig 成功后发出「每圈设计触发数」（= 单圈总A-line数 / 启用通道数，
-    // 由 ringLogicalTriggersPerRound() 推导），由 MainWindow 转发给
-    // NetworkController::setLogicalTriggersPerRound。这是前端刷新闸门阈值的
-    // 唯一来源：改参数即生效，不依赖实时成像是否已开启。
+    // 在有效配置切换时同步采集侧，每圈触发数由组包所用几何推导。
     void ringRoundTriggersChanged(quint64 logicalTriggersPerRound);
+    void roundTimeoutChanged(double seconds);
     // applyConfig 成功后发出显示掩膜参数（工作一）。仅显示层：不写
     // RingReconCudaConfig / 不进 ring JSON / ImagingSvc；MainWindow 持有最新值
     // 并转发给 ImagingDisplayWindow::setDisplayMask（窗口未创建则缓存）。
@@ -145,6 +146,22 @@ private:
     void setTimevarDraft(const RingTimevarLowpassConfig&);
     void editTimevarAdvanced();
     bool validateDraft(QString* error) const;
+
+    struct MeasurementConfig {
+        RingReconCudaConfig ring;
+        RingTimevarLowpassConfig timevar;
+        RingFbpSettings fbp;
+        int delays[8][2];
+        quint64 startupFilterCount;
+        bool disableCountBoundary;
+        frontend_filter::Config frontend;
+    };
+    bool activateMeasurementConfig(const MeasurementConfig &config, QString *error);
+    void publishMeasurementConfig(const MeasurementConfig &config);
+    void applyDisplayMask();
+    std::optional<MeasurementConfig> m_requestedMeasurementConfig;
+    bool m_measurementConfigFrozen = false;
+    bool m_measurementConfigPending = false;
 public slots:
     void reject() override;
 private:

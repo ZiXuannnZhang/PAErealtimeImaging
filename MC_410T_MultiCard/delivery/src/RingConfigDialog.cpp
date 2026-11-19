@@ -262,6 +262,7 @@ void RingConfigDialog::buildUi()
     syncRadiusEditable();
     syncSpliceEnabled();
     m_spnTotalAlines = new QSpinBox; m_spnTotalAlines->setRange(2, 1000000);
+    m_spnTotalAlines->setObjectName(QStringLiteral("ringTotalAlines"));
     m_spnTotalAlines->setSingleStep(100); m_spnTotalAlines->setValue(8000);
     m_spnTotalAlines->setToolTip("单圈总A-line数（含双波长）。\n"
         "每通道每波长每圈A-line数 = 单圈总A-line数 / (启用通道数 × 2)");
@@ -312,6 +313,7 @@ void RingConfigDialog::buildUi()
         "0 = 不过滤启动 trigger；1 = 兼容行为（过滤首枚）；N = 过滤前 N 枚。");
     fRound->addRow("启动过滤触发数", m_spnStartupFilterTriggers);
     m_chkDisableCountBoundary = new QCheckBox("禁用计数重置");
+    m_chkDisableCountBoundary->setObjectName(QStringLiteral("ringDisableCountBoundary"));
     m_chkDisableCountBoundary->setChecked(false);
     m_chkDisableCountBoundary->setToolTip(
         "未勾选：达到配置的逻辑触发数仍产生现有计数边界（CountBoundary）。\n"
@@ -375,6 +377,9 @@ void RingConfigDialog::buildUi()
         "勾选后环内（显示掩膜半径以内）像素显示为 0，关闭即恢复。\n"
         "仅显示层：不限制环内反演，不改任何成像数据与链路。");
     fGrid->addRow("", m_chkDisplayMask);
+    auto *applyMask = new QPushButton(QStringLiteral("应用显示掩膜"));
+    fGrid->addRow("", applyMask);
+    connect(applyMask, &QPushButton::clicked, this, &RingConfigDialog::applyDisplayMask);
     reconLayout->addWidget(grpGrid);
 
     auto *grpEnhance = new QGroupBox("重建增强");
@@ -921,33 +926,88 @@ bool RingConfigDialog::applyConfig(QString *error)
         }
     }
 
-    int sysDelayCh[8][2] = {{0}};
-    sysDelayPerChannel(sysDelayCh);
-    const RingReconCudaConfig applied = config();
-    const auto timevar=timevarConfig();
-    // Reject editable drafts before controller errors can affect a resident service/UI.
     QString draftError;
     if (!validateDraft(&draftError)) return rejectConfig(draftError);
-    if (!m_controller->configureRing(applied,timevar,sysDelayCh,fbpSettings()))
-        return rejectConfig(QStringLiteral("成像服务拒绝联动配置，保留当前配置"));
-    m_fbpAccepted=fbpSettings();
-    m_timevarAccepted=timevar;
-    // 应用成功后将物理轮次启动策略同步给当前 NetworkController（MainWindow 转发）
-    emit roundPolicyChanged(startupFilterTriggerCount(), disableCountBoundary());
-    // 前端滤波参数经独立接线下发到 Frontend Preprocessing 配置（MainWindow 转发），
-    // 与重建配置的下发相互独立。
-    emit frontendFilterChanged(frontendFilterConfig());
-    // 每圈设计触发数 = 单圈总A-line数 / 启用通道数（前端刷新闸门阈值的唯一来源）。
-    // 改参数即下发，不等实时成像开启、不等 svcReady。
-    const int logicalTriggers =
-        ringLogicalTriggersPerRound(applied.alinesPerFrame, applied.enabledChannelCount);
-    if (logicalTriggers > 0)
-        emit ringRoundTriggersChanged(static_cast<quint64>(logicalTriggers));
-    // 显示掩膜参数（工作一）：applyConfig 成功后随其他信号一并下发；
-    // MainWindow 持有最新值并转发给显示窗口（未创建则缓存、创建后注入）。
+    MeasurementConfig requested{config(), timevarConfig(), fbpSettings(), {},
+        startupFilterTriggerCount(), disableCountBoundary(), frontendFilterConfig()};
+    sysDelayPerChannel(requested.delays);
+    if (!m_measurementConfigFrozen &&
+        !activateMeasurementConfig(requested, &draftError))
+        return rejectConfig(draftError);
+
+    m_requestedMeasurementConfig = requested;
+    m_measurementConfigPending = m_measurementConfigFrozen;
+    if (!m_measurementConfigFrozen) publishMeasurementConfig(requested);
+    m_fbpAccepted = requested.fbp;
+    m_timevarAccepted = requested.timevar;
+    applyDisplayMask();
+    return true;
+}
+
+bool RingConfigDialog::activateMeasurementConfig(const MeasurementConfig &requested,
+                                                 QString *error)
+{
+    if (!m_controller->configureRing(requested.ring, requested.timevar,
+                                     requested.delays, requested.fbp)) {
+        if (error) *error = QStringLiteral("成像服务拒绝联动配置，保留当前配置");
+        return false;
+    }
+    return true;
+}
+
+void RingConfigDialog::publishMeasurementConfig(const MeasurementConfig &requested)
+{
+    emit roundPolicyChanged(requested.startupFilterCount, requested.disableCountBoundary);
+    emit frontendFilterChanged(requested.frontend);
+    const auto &ring = requested.ring;
+    emit roundTimeoutChanged(ring.timeoutResetSec);
+    emit ringRoundTriggersChanged(ringLogicalTriggersPerRound(
+        ring.alinesPerFrame, ring.enabledChannelCount));
+}
+
+bool RingConfigDialog::prepareMeasurement(QString *error)
+{
+    if (!m_requestedMeasurementConfig) {
+        if (applyConfig(error)) return true;
+        const auto ring = config();
+        const auto frontend = frontendFilterConfig();
+        if (ringLogicalTriggersPerRound(ring.alinesPerFrame, ring.enabledChannelCount) > 0 &&
+            frontend_filter::validate(frontend) == frontend_filter::Validation::Ok) {
+            const MeasurementConfig common{ring, {}, {}, {}, startupFilterTriggerCount(),
+                                         disableCountBoundary(), frontend};
+            publishMeasurementConfig(common);
+        }
+        return false;
+    }
+
+    auto requested = *m_requestedMeasurementConfig;
+    requested.ring.daqHz = m_daqHz;
+    requested.ring.sampDepth = m_sampDepth;
+    requested.ring.reconDepth = m_sampDepth;
+    requested.ring.sectorCcw = m_motorSectorCcw;
+    if (m_motorStartLinked)
+        requested.ring.sectorStartDeg = ring_sector::kNineOClockDeg;
+
+    // The source must receive its validated geometry even when an imaging-only
+    // artifact can no longer be loaded.
+    publishMeasurementConfig(requested);
+    const auto &active = m_controller->ringConfig();
+    if (m_measurementConfigPending || !m_controller->isRingMode() ||
+        active.daqHz != requested.ring.daqHz ||
+        active.sampDepth != requested.ring.sampDepth ||
+        active.sectorStartDeg != requested.ring.sectorStartDeg) {
+        if (!activateMeasurementConfig(requested, error)) return false;
+    }
+
+    m_requestedMeasurementConfig = requested;
+    m_measurementConfigPending = false;
+    return true;
+}
+
+void RingConfigDialog::applyDisplayMask()
+{
     emit displayMaskChanged(m_chkDisplayMask->isChecked(),
                             m_spnDisplayMaskRadiusMm->value());
-    return true;
 }
 
 quint64 RingConfigDialog::startupFilterTriggerCount() const
@@ -969,8 +1029,9 @@ bool RingConfigDialog::applyMotorScanDirection(bool ccw, QString *error)
     m_motorStartLinked = true;
     // The first link can also move a previously manual origin to nine o'clock.
     // Subsequent reversals only change the direction on the next round.
-    if (m_controller && m_controller->isRingMode() && m_controller->isRunning()) {
-        m_controller->applyMotorRingDirection(m_motorSectorCcw);
+    if (m_controller && m_controller->isRingMode() &&
+        (m_measurementConfigFrozen || m_controller->isRunning())) {
+        m_controller->applyMotorRingDirection(m_motorSectorCcw, true);
         if (error) error->clear();
         return true;
     }

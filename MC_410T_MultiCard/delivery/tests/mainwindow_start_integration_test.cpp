@@ -94,6 +94,10 @@ public:
         setsockopt(card.socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<char*>(&timeout), sizeof(timeout));
         inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
         auto expectCommand = [&](const paimage::Command& expected) {
+            waitFor([&] {
+                u_long bytes = 0;
+                return ioctlsocket(card.socket, FIONREAD, &bytes) == 0 && bytes > 0;
+            }, "card command present");
             paimage::Command actual{};
             check(recv(card.socket, reinterpret_cast<char*>(actual.data()), actual.size(), 0) ==
                   static_cast<int>(actual.size()) && actual == expected, "card control command");

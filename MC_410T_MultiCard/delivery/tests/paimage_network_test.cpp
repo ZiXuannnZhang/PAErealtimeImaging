@@ -31,7 +31,17 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
         SOCKET s=socket(AF_INET,SOCK_DGRAM,IPPROTO_UDP);sockaddr_in address{};address.sin_family=AF_INET;address.sin_port=htons(8080);inet_pton(AF_INET,ip.c_str(),&address.sin_addr);
         require(bind(s,reinterpret_cast<sockaddr*>(&address),sizeof(address))==0,"hardware control bind");DWORD timeout=2000;setsockopt(s,SOL_SOCKET,SO_RCVTIMEO,reinterpret_cast<char*>(&timeout),sizeof(timeout));hardware.push_back(s);
     }
-    auto readCommands=[&](paimage::Command expected){for(auto s:hardware){paimage::Command actual{};int n=recv(s,reinterpret_cast<char*>(actual.data()),58,0);require(n==58&&actual==expected,"production wire command");}};
+    auto readCommands = [&](paimage::Command expected) {
+        for (const auto socket : hardware) {
+            require(until([&] {
+                u_long bytes = 0;
+                return ioctlsocket(socket, FIONREAD, &bytes) == 0 && bytes > 0;
+            }), "production wire command available");
+            paimage::Command actual{};
+            const int n = recv(socket, reinterpret_cast<char*>(actual.data()), 58, 0);
+            require(n == 58 && actual == expected, "production wire command");
+        }
+    };
     auto send=[&](int c,int port,const std::vector<unsigned char>& bytes){sockaddr_in dst{};dst.sin_family=AF_INET;dst.sin_port=htons(port);inet_pton(AF_INET,"127.0.0.1",&dst.sin_addr);
         require(sendto(hardware[c],reinterpret_cast<const char*>(bytes.data()),int(bytes.size()),0,reinterpret_cast<sockaddr*>(&dst),sizeof(dst))==int(bytes.size()),"hardware data send");};
     NetworkController controller;std::atomic<int> rings{0};std::atomic<bool> values{true};int started=0;bool stopped=false;
@@ -47,6 +57,9 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
             ringTriggers[c].push_back(frame->triggerSeq);
             ringIndices[c].push_back(frame->logicalTriggerIndex);}
         ++rings;return ImagingSubmitResult::Accepted;});
+    quint64 preparing = 0;
+    QObject::connect(&controller, &NetworkController::measurementPreparing,
+                     [&](quint64 session) { preparing = session; });
     QObject::connect(&controller,&NetworkController::measurementStarted,[&]{++started;});
     QObject::connect(&controller,&NetworkController::stopped,[&]{stopped=true;});
     // 前端高/低通零相位滤波默认启用，并且只改写 frontend clone。下面的
@@ -61,13 +74,28 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);try{
     require(controller.start(config),"production listen");
     require(!controller.sendStartMeasure(),"unconfigured START must fail and remain recoverable");
     QTemporaryDir dir(QDir::currentPath()+"/network-save-XXXXXX");require(dir.isValid(),"save directory");
-    if(!stress){controller.startSaving(dir.path(),1000,"switch");require(until([&]{return controller.isSaving();}),"saving applied");}
+    if(!stress){controller.startSaving(dir.path(),1000,"switch");require(controller.isSaving(),"saving requested");}
     int phase=0;
+    std::uint64_t stagedRoundLength = 0;
     for(int ns:durations){
         require(controller.sendConfigCommand(ns,1000,1000),"configure accepted");
         require(controller.sendStartMeasure(),"start queued behind CONFIG");readCommands(paimage::configCommand(ns,1000,1000));
         for(int c=0;c<4;++c)send(c,8000,std::vector<unsigned char>(60));
         require(until([&]{return started==phase+1;}),"ACK starts measurement");readCommands(paimage::startCommand());
+        const auto active = controller.physicalRoundSnapshot();
+        require(preparing && preparing == active.measurementSession, "START used the prepared identity");
+        if (!stress && phase == 0) {
+            stagedRoundLength = active.configuredLogicalTriggersPerRound + 2;
+            controller.setLogicalTriggersPerRound(stagedRoundLength);
+            controller.setDisableCountBoundary(true);
+            const auto stillActive = controller.physicalRoundSnapshot();
+            require(stillActive.configuredLogicalTriggersPerRound == active.configuredLogicalTriggersPerRound &&
+                    stillActive.disableCountBoundary == active.disableCountBoundary,
+                    "active receiver retained the original round configuration");
+        } else if (!stress) {
+            require(active.configuredLogicalTriggersPerRound == stagedRoundLength &&
+                    active.disableCountBoundary, "next START activates the staged round configuration");
+        }
         auto schedule=std::chrono::steady_clock::now();
         for(int trigger=0;trigger<triggers;++trigger){
             auto deadline=schedule+std::chrono::microseconds(trigger*(1000000ll/hz));std::this_thread::sleep_until(deadline);
