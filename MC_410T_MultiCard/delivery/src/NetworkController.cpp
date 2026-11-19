@@ -570,6 +570,10 @@ void NetworkController::startSaving(const QString& directory,
         m_paimageSaveDir=directory;m_paimageSaveCount=triggersPerFile;m_paimageSaveSuffix=suffix;
         m_paimageSavingRequested=true;
         ++m_saveRequestId;
+        {
+            const std::lock_guard<std::mutex> lock(m_rawSaveIntentMutex);
+            m_rawSaveIntent = {m_saveRequestId, autoSaveRequestId(), directory, suffix, autoSave};
+        }
         m_paimageSaveGeneration = 0;
         m_paimageSaveAppliedLogged = false;
         if (!m_paimageConfigDrain) applyPaimageSaveRequest(false);
@@ -588,6 +592,10 @@ void NetworkController::stopSaving() {
     if(m_paimage){
         if (!m_paimageSavingRequested) return;
         m_paimageSavingRequested = false;
+        {
+            const std::lock_guard<std::mutex> lock(m_rawSaveIntentMutex);
+            m_rawSaveIntent = {};
+        }
         const auto request = m_saveRequestId;
         const auto generation = m_paimageConfigDrain ? 0 : m_paimage->output().stopSaving();
         recordDiagnosticEvent("paimage.save","save_stop_requested",DiagnosticRecorder::Severity::Info,

@@ -22,6 +22,7 @@
 #include <thread>
 #include <cmath>
 #include <memory>
+#include <map>
 #include "qcustomplot.h"
 #include "DataTypes.h"
 #include "CardStatusFormatting.h"
@@ -328,7 +329,9 @@ private:
     // TimeoutBoundary 立即清零、CountBoundary 保留帧末驱动清零。
     // 取代原 m_ringBlockCounter / m_imagingFrameCount（单一事实来源，可测试）。
     paimage::RingRoundUiState m_roundUi;
-    paimage::RoundIdentity m_lastRingFinalRound;
+    paimage::RoundIdentity m_lastPresentedRingRound;
+    quint64 m_lastPresentedRingSubmit = 0;
+    std::map<paimage::RoundIdentity, paimage::TimeoutPresentation::Target> m_terminalPngTargets;
     quint64 m_firstRingMeasurementSession = 0;
     void prepareRingMeasurement(quint64 session);
     std::atomic<bool> m_measurementRingImagingAvailable{true};

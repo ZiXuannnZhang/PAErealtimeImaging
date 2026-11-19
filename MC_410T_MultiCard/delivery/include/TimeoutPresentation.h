@@ -13,6 +13,12 @@ class TimeoutPresentation {
 public:
     using Writer = std::function<bool(const QString&, const QString&)>;
     using Job = std::function<bool()>;
+    struct Target {
+        QString directory;
+        QString suffix;
+        std::uint64_t requestId = 0;
+        explicit operator bool() const { return !directory.isEmpty(); }
+    };
     void configure(bool enabled, const QString& directory, const QString& suffix) {
         std::lock_guard<std::mutex> lock(mutex_);
         enabled_ = enabled; directory_ = directory; suffix_ = suffix;
@@ -33,17 +39,24 @@ public:
     template<class Reset>
     Job close(std::uint64_t session, std::uint64_t nextGeneration,
               bool autoSave, const QString& oldDirectory, Reset reset) {
+        Target target;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (enabled_)
+                target = {autoSave ? (oldDirectory.isEmpty() ? QString() : QDir(oldDirectory).filePath("recon_png"))
+                                   : directory_, suffix_, 0};
+        }
+        return close(session, nextGeneration, std::move(target), std::move(reset));
+    }
+    template<class Reset>
+    Job close(std::uint64_t session, std::uint64_t nextGeneration, Target target, Reset reset) {
         Job job;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            const QString target = autoSave
-                ? (oldDirectory.isEmpty() ? QString() : QDir(oldDirectory).filePath("recon_png"))
-                : directory_;
-            if (enabled_ && writer_ && !target.isEmpty() &&
-                session_ == session && nextGeneration > 0 && generation_ == nextGeneration - 1) {
+            if (target && writer_ && session_ == session && nextGeneration > 0 &&
+                generation_ == nextGeneration - 1) {
                 const auto writer = writer_;
-                const auto suffix = suffix_;
-                job = [writer, target, suffix] { return writer(target, suffix); };
+                job = [writer, target] { return writer(target.directory, target.suffix); };
             }
             writer_ = {};
             closed_ = true; closedSession_ = session; closedGeneration_ = nextGeneration - 1;

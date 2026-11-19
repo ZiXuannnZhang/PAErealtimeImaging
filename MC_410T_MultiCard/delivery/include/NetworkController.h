@@ -98,6 +98,17 @@ public:
                      int triggersPerFile,
                      const QString& suffix, bool autoSave = false);
     void stopSaving();
+    struct RawSaveIntent {
+        quint64 requestId = 0;
+        std::uint64_t autoSaveRequestId = 0;
+        QString directory;
+        QString suffix;
+        bool automatic = false;
+    };
+    RawSaveIntent rawSaveIntent() const {
+        const std::lock_guard<std::mutex> lock(m_rawSaveIntentMutex);
+        return m_rawSaveIntent;
+    }
     // 自动保存会话代协调器：目录准备/注册完成后才发布 generation。
     // 物理边界源调用 commit，HostOutput 按 round identity 解析后再打标。
     using AutoSaveCommit = paimage::AutoSaveRoundCoordinator::CommitResult;
@@ -267,6 +278,8 @@ private:
     bool m_paimageSavingRequested=false;
     quint64 m_paimageSaveGeneration=0;
     quint64 m_saveRequestId = 0;
+    mutable std::mutex m_rawSaveIntentMutex;
+    RawSaveIntent m_rawSaveIntent;
     bool m_paimageSaveAppliedLogged=false;
     std::vector<std::uint64_t> m_paimageLastBytes;
     quint64 m_paimageLastBurstEpoch=0;

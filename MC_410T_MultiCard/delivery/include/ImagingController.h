@@ -112,6 +112,8 @@ public:
     void releaseSnapshotBuffer(int index);
     std::shared_ptr<std::vector<float>> terminalSnapshotBuffer(int index) const;
 
+    quint64 serviceLifecycleToken() const noexcept { return m_svcLifecycleToken; }
+
 signals:
     void imageReady(const QImage &image, int seq);
     void ringSnapshotReady(int seq,

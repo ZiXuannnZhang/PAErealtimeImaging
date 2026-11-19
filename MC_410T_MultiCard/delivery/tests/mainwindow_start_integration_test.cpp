@@ -160,6 +160,10 @@ public:
                 const QDir pngDir(window.m_reconSaveDir);
                 check(pngDir.absolutePath() != previousDirectory, "new listener has a new save directory");
                 previousDirectory = pngDir.absolutePath();
+                // A stale display request and the old UI save flag must not own a Count target.
+                window.m_reconSaveEnabled = false;
+                window.syncTimeoutPngSettings();
+                window.m_lastPresentedRingSubmit = pass == 0 ? (std::numeric_limits<quint64>::max)() : 0;
                 check(network.sendConfigCommand(durationNs,1000,1000) && network.sendStartMeasure(), "queue CONFIG and START");
                 expectCommand(paimage::configCommand(durationNs,1000,1000));
                 send(8000,std::vector<unsigned char>(60));
@@ -204,6 +208,12 @@ public:
                         check(qRed(png.pixel(x,y)) == expectedGray[wl][pixel++], "PNG belongs to terminal wavelength pixels");
                 }
                 check(pngDir.entryList({"*.png"},QDir::Files).size() == 2, "exactly one PNG pair per round");
+                if (!pass) {
+                    const auto state = window.m_roundUi.snapshot();
+                    check(state.frameCount == 0 && state.frameEndEvents == 0 &&
+                          !window.m_lblImagingStatus->text().contains(QStringLiteral("软件覆盖完整")),
+                          "a stale terminal cannot change the current display state");
+                }
                 window.onStartListenClicked();
                 expectCommand(paimage::stopCommand());
                 waitFor([&]{ return !window.m_isListening && !window.m_netController; }, "listener stopped");
@@ -279,8 +289,13 @@ public:
             auto start = [&] {
                 // Actual UI signal -> production MainWindow::onRealtimeImagingToggled.
                 checkbox->setChecked(true);
-                waitFor([&] { return controller.isRunning() && window.m_imagingEnabled
-                    && window.m_imagingServiceReady.load() && checkbox->isEnabled(); }, "valid startup did not become ready");
+                try {
+                    waitFor([&] { return controller.isRunning() && window.m_imagingEnabled
+                        && window.m_imagingServiceReady.load() && checkbox->isEnabled(); }, "valid startup did not become ready");
+                } catch (...) {
+                    std::cerr << logView->toPlainText().toStdString() << '\n';
+                    throw;
+                }
                 check(checkbox->isChecked() && !depth->isEnabled(), "running UI not locked");
             };
             auto stop = [&] {
