@@ -220,6 +220,7 @@ private:
     double m_sampleIntervalNs = 0.0;
     std::unique_ptr<QFile> m_rawMetadata;
     std::shared_ptr<const std::string> m_rawFileCaptureId;
+    paimage::RoundIdentity m_rawFileRound;
     QByteArray m_rawMetadataBatch;
     // 首次写盘故障只告警一次（磁盘满通常是持续性的，不要每段刷一条）。
     // startSaving() 开新会话时复位。

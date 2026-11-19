@@ -1,4 +1,4 @@
-function [data, evidence] = read_ring_saved_channel(dataDir, channelId, fileSuffix, fileCount, triggersPerFile, sampleCount, fileIndices)
+function [data, evidence] = read_ring_saved_channel(dataDir, channelId, fileSuffix, fileCount, triggersPerFile, sampleCount, fileIndices, metadataOnly)
 %READ_RING_SAVED_CHANNEL 读取监听程序保存的单通道连续数据文件
 %
 % 输入:
@@ -8,6 +8,7 @@ function [data, evidence] = read_ring_saved_channel(dataDir, channelId, fileSuff
 %   fileCount       : 读取文件数量（序号 000 到 fileCount-1，按顺序拼接）
 %   triggersPerFile : 单个文件包含的触发数（当前为 1000）
 %   sampleCount     : 单触发采样点数（当前为 4000）
+%   metadataOnly    : 核验文件对及旁车，跳过分配和读取波形（可选）。
 %
 % 输出:
 %   data : [sampleCount x fileCount*triggersPerFile] single 矩阵，
@@ -41,7 +42,9 @@ if ~isempty(suffix)
     suffix = ['_' suffix];
 end
 
-data = zeros(sampleCount, fileCount * triggersPerFile, 'single');
+if nargin < 8, metadataOnly = false; end
+data = [];
+if ~metadataOnly, data = zeros(sampleCount, fileCount * triggersPerFile, 'single'); end
 columns = cell(fileCount, 1);
 hasSidecar = false(1, fileCount);
 sampleInterval = NaN(1, fileCount);
@@ -78,6 +81,8 @@ for k = 0:(fileCount - 1)
         end
         hasSidecar(k+1) = true;
     end
+
+    if metadataOnly, continue; end
 
     fid = fopen(filePath, 'r', 'ieee-le');
     if fid < 0
@@ -157,6 +162,13 @@ try
             any(cellfun(@isempty, regexp({rows.round}, '^[0-9]+$', 'once'))) || ...
             any([rows.triggerSeq] < 0 | [rows.triggerSeq] > 65535 | mod([rows.triggerSeq], 1) ~= 0)
         error('旁车触发身份无效。');
+    end
+    if layout.version == 2
+        [declared, fileSession, fileRound] = ring_raw_pair_round(layout);
+        if declared && (fileRound == "" || any(string({rows.session}) ~= fileSession) || ...
+                any(string({rows.round}) ~= fileRound))
+            error('文件轮次声明与逐列身份不一致。');
+        end
     end
     complete = [rows.complete] & [rows.expectedSlots] > 0 & ...
         [rows.receivedSlots] == [rows.expectedSlots] & ~[rows.late] & [rows.logicalIndex] >= 0;

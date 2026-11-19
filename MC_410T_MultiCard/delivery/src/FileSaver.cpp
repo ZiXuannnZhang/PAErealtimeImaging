@@ -327,6 +327,7 @@ bool FileSaver::closeFiles() {
     }
     m_rawMetadata.reset();
     m_rawMetadataBatch.clear();
+    m_rawFileRound = {};
     return ok;
 }
 
@@ -360,7 +361,7 @@ void FileSaver::recordRawColumn(const TriggerGroup& group)
             abandonRawMetadata(m_rawMetadata->errorString());
             return;
         }
-        const QJsonObject layout{
+        QJsonObject layout{
             {"type", "pae-raw-pair"}, {"version", 2}, {"card", m_cardId + 1},
             {"captureId", QString::fromStdString(*m_rawFileCaptureId)},
             {"fileA", QFileInfo(m_fileChannelA->fileName()).fileName()},
@@ -368,6 +369,12 @@ void FileSaver::recordRawColumn(const TriggerGroup& group)
             {"sampleCount", group.sampleCount}, {"sampleIntervalNs", m_sampleIntervalNs},
             {"sourceBits", m_sourceBits}, {"sourceIPv4", qint64(group.sourceIPv4)},
             {"packetAnchor", "first-arrival"}, {"physicalPhase", "unverified"}};
+        if (group.normalizationApplied && group.physicalDecision == paimage::PhysicalTriggerDecision::LogicalScan &&
+            group.measurementSession != 0) {
+            m_rawFileRound = {group.measurementSession, group.roundGeneration};
+            layout.insert("fileSession", QString::number(m_rawFileRound.measurementSession));
+            layout.insert("fileRound", QString::number(m_rawFileRound.roundGeneration));
+        }
         writeRawMetadata(QJsonDocument(layout).toJson(QJsonDocument::Compact) + '\n');
     }
     if (!m_rawMetadata) return;
@@ -605,21 +612,24 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     // late groups have already been routed above. A save-generation change
     // has already closed the pair and reset m_fileRound, so do not advance
     // the file sequence again when adopting the first identity there.
-    if (group->normalizationApplied &&
-        group->physicalDecision == paimage::PhysicalTriggerDecision::LogicalScan) {
-        const bool roundChanged = m_fileRound &&
+    const bool logical = group->normalizationApplied &&
+        group->physicalDecision == paimage::PhysicalTriggerDecision::LogicalScan;
+    const bool declaredMismatch = m_rawFileRound.valid() && (!logical || identity != m_rawFileRound);
+    if (logical || declaredMismatch) {
+        const bool roundChanged = declaredMismatch || (m_fileRound &&
             (identity.valid() && m_fileRound->valid()
                 ? *m_fileRound != identity
-                : m_fileRound->roundGeneration != identity.roundGeneration);
+                : m_fileRound->roundGeneration != identity.roundGeneration));
         FileRolloverInfo info;
         if (roundChanged) {
+            const auto previousRound = m_fileRound ? m_fileRound->roundGeneration : m_rawFileRound.roundGeneration;
             if (!closeFiles()) {
                 handleWriteFault(QStringLiteral("物理轮次轮转时的落盘"));
                 return false;
             }
             info.happened = true;
             info.reason = QStringLiteral("physical_round");
-            info.oldRoundGeneration = m_fileRound->roundGeneration;
+            info.oldRoundGeneration = previousRound;
             info.newRoundGeneration = identity.roundGeneration;
             info.oldFileSequence = m_fileSequence;
             info.oldFileTriggerCount = m_currentFileTriggers;
@@ -628,9 +638,13 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
             info.newFileSequence = m_fileSequence;
             info.manualMode = (m_currentGen == 0);
         }
-        if (!m_fileRound || roundChanged || identity.valid())
+        // A sidecar declaration is a property of the entire pair, even
+        // if closure is interrupted. An untagged group therefore rolls too.
+        if (!logical)
+            m_fileRound.reset();
+        else if (!m_fileRound || roundChanged || identity.valid())
             m_fileRound = identity;
-        if (identity.valid()) {
+        if (logical && identity.valid()) {
             if (m_currentIdentity.valid() && m_currentIdentity < identity &&
                 (!m_sealedThrough.valid() || m_sealedThrough < m_currentIdentity))
                 m_sealedThrough = m_currentIdentity;

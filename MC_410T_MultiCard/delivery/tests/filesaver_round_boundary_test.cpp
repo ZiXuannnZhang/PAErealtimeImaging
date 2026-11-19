@@ -1066,11 +1066,45 @@ int main(int argc, char** argv)
         check(layout.value("version").toInt() == 2 && layout.value("captureId").toString().toStdString() == *group->captureId &&
               layout.value("fileB").toString() == "Card1_ChB_columns_000.dat" &&
               layout.value("sampleIntervalNs").toDouble() == 4.0 &&
+              layout.value("fileSession").toString() == "600" && layout.value("fileRound").toString() == "1" &&
               column.value("column").toInt() == 1 && column.value("logicalIndex").toInt() == 13 &&
               column.value("receivedSlots").toInt() == 1 &&
               column.value("firstPacketSeq").toInt() == 23 && !column.value("complete").toBool() &&
               end.value("confirmedColumns").toInt() == 1 && metadata.atEnd(),
               "raw sidecar records exact column, relative slots and paired confirmation");
+    }
+    {
+        QTemporaryDir dir;
+        FileSaver saver(0);
+        saver.setRawAcquisitionEvidence(32, 4.0);
+        saver.startSaving(dir.path(), 2, "declared");
+        for (int i = 0; i < 5; ++i) {
+            auto group = makeGroup(i, i < 3 ? 4 : 5, i + 1, 0, 0x0100007f, 601);
+            group->captureId = std::make_shared<const std::string>("12345678-1234-4321-a123-1234567890ab");
+            if (i == 4) group->normalizationApplied = false;
+            check(saver.consumeTriggerGroup(group), "raw file header cannot mix declared and untagged columns");
+        }
+        check(saver.stopSaving().confirmed == 5, "rollovers keep raw columns confirmed");
+        const std::array<QString, 4> rounds{"4", "4", "5", ""};
+        const std::array<int, 4> counts{2, 1, 1, 1};
+        for (int i = 0; i < 4; ++i) {
+            const QString prefix = QStringLiteral("Card1_Ch%1_declared_%2.dat");
+            const QString seq = QStringLiteral("%1").arg(i, 3, 10, QLatin1Char('0'));
+            const QString path = dir.filePath(prefix.arg("A", seq));
+            QFile metadata(path + ".jsonl");
+            check(metadata.open(QIODevice::ReadOnly), "declared pair metadata available");
+            const auto layout = QJsonDocument::fromJson(metadata.readLine()).object();
+            check(layout.value("fileRound").toString() == rounds[i] &&
+                  layout.value("fileSession").toString() == (i == 3 ? "" : "601"),
+                  "capacity and physical rollover preserve matching round declarations");
+            for (int col = 0; col < counts[i]; ++col)
+                check(QJsonDocument::fromJson(metadata.readLine()).object().value("round").toString() ==
+                      (i == 3 ? "5" : rounds[i]), "declared round matches column");
+            check(QJsonDocument::fromJson(metadata.readLine()).object().value("confirmedColumns").toInt() ==
+                    counts[i] && metadata.atEnd() && fileSizeOf(path) == counts[i] * kSamples * 2 &&
+                  fileSizeOf(dir.filePath(prefix.arg("B", seq))) == counts[i] * kSamples * 2,
+                  "paired output lengths, file sequence and seal agree");
+        }
     }
     {
         QTemporaryDir dir(QDir::currentPath()+"/r3-late-XXXXXX");

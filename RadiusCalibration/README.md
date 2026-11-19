@@ -53,7 +53,8 @@ radius_calibration
 cfg.dataDir = fullfile(fileparts(scriptDir), 'testdata', '01');
 cfg.channelSel = 1:8;              % 选择 1..8 任意数量通道
 cfg.fileSuffix = 'test';           % 文件名中的 z 段
-cfg.filesPerChannel = 4;           % 顺序读取 000..003 四个文件
+cfg.filesPerChannel = 4;           % 每张卡实际读取的文件对上限
+cfg.scanFilesPerCard = 512;         % 每张卡候选文件对扫描上限
 cfg.fullAlinesPerChannel = 4000;   % 每通道每圈总 A-line 数（含双波长，全孔径标定）
 cfg.triggersPerFile = 1000;
 cfg.sampleCount = 4000;
@@ -109,7 +110,8 @@ bscan.wl2{ch} : [sampleCount x Nwl] 通道 ch 的 1064nm 原始 Bscan
 | --- | --- | --- |
 | `channelSel` | `1:8` | 启用的通道代号数组，1..8 任意数量 |
 | `fileSuffix` | `'test'` | 文件名 z 段字符串 |
-| `filesPerChannel` | `4` | 每通道顺序读取 000..N-1 |
+| `filesPerChannel` | `4` | 所选轮次每张卡实际读取的文件对上限 |
+| `scanFilesPerCard` | `512` | 每张卡候选文件对扫描上限 |
 | `fullAlinesPerChannel` | 4000 | 每通道每圈总 A-line 数（含双波长，全孔径标定） |
 | `enableAngleAlign` | true | 是否做整数列循环互相关角度对齐 |
 | `angleAlignWavelength` | 1 | 角度对齐使用 532nm Bscan |
@@ -185,7 +187,9 @@ bscan.wl2{ch} : [sampleCount x Nwl] 通道 ch 的 1064nm 原始 Bscan
 
 ### 新采集的标定证据
 
-采集软件在每次 START 分配新的 `captureId`。读取器按旁车 V2 的采集 ID 和轮次检查各卡共同的完整轮，文件序号可随卡让号。目录有多个采集时填写 `cfg.captureId`，可用 `cfg.roundId` 指定轮次。`filesPerChannel` 是每张卡读取所选采集的文件对上限。
+采集软件在每次 START 分配新的 `captureId`。读取器扫描旁车 V2 定位采集和轮次，再严格核对所选轮实际使用的 A/B 文件对。目录有多个采集时填写 `cfg.captureId`，可用 `cfg.roundId` 指定轮次。开启 `useAllRounds` 后，可列出多个轮次，如 `["0","2"]`。跨文件的波形按逻辑索引拼接，文件序号可随卡让号。
+
+`scanFilesPerCard` 限制每张卡扫描的候选文件对数。`filesPerChannel` 限制每张卡为所选轮读取的文件对数。新旁车在文件头记录 `fileSession` 和 `fileRound`。这个声明可用于识别已中断文件的范围，所选轮仍须通过封尾、成对长度及逻辑覆盖校验。能确认只属于非选中轮次的坏件记入 `captureEvidence.unrelatedFailures`。旧 V2 未封尾且无法确认归属时，可按设备或其他文件证据在 `cfg.roundFileIndices` 中填写逐卡序号，例如 `{[4 5],[8 9],[],[]}`。范围内的文件仍执行全部校验。
 
 定量标定前填写 `cfg.roundEvidence`。每条记录包含 `captureId`、`roundId`、设备证据引用 `reference`、`direction`（CW 或 CCW）、首触发的 `startAngleDeg` 和 `firstWavelengthNm`。用 `secondOffsetDeg` 记录沿扫描方向到另一波长首触发的角度差。多圈合并要求每圈都有相容证据。旁车的软件槽位以首到包为基准。
 
