@@ -26,7 +26,7 @@ if captureId == "" && isfield(cfg, 'allowUnverifiedLegacy') && cfg.allowUnverifi
     [data, columns, evidence] = readLegacy(cfg, selectedCh, cards, n);
 else
     [captureId, catalog] = discoverPairs(cfg, cards, captureId);
-    [rounds, indices, catalog, verified] = chooseRounds(cfg, cards, catalog, captureId, n);
+    [rounds, indices, catalog, verified, skippedRounds] = chooseRounds(cfg, cards, catalog, captureId, n);
     checkReadBudget(cfg.filesPerChannel, cards, indices);
     if isempty(verified)
         [data, provenance] = readPairs(cfg, selectedCh, indices, false);
@@ -54,7 +54,8 @@ else
     unrelated = catalog([catalog.knownRounds] & [catalog.issue] ~= "" & ...
         arrayfun(@(pair) ~any(ismember(pair.rounds, rounds)), catalog));
     evidence = struct('source', 'paired-sidecar-v2', 'softwareRounds', numel(rounds), ...
-        'captureId', captureId, 'rounds', rounds, 'files', {files}, 'unrelatedFailures', {unrelated});
+        'captureId', captureId, 'rounds', rounds, 'files', {files}, ...
+        'unrelatedFailures', {unrelated}, 'skippedRounds', {skippedRounds});
 end
 
 bscan.wl1 = cell(1, 8);
@@ -130,8 +131,9 @@ end
 catalog = catalog(~[catalog.legacy] & (ids == captureId | ids == ""));
 end
 
-function [rounds, indices, catalog, verified] = chooseRounds(cfg, cards, catalog, captureId, n)
+function [rounds, indices, catalog, verified, skippedRounds] = chooseRounds(cfg, cards, catalog, captureId, n)
 verified = [];
+skippedRounds = struct('round', {}, 'files', {}, 'issue', {}, 'cards', {});
 requested = strings(0,1);
 if isfield(cfg, 'roundId')
     requested = string(cfg.roundId(:));
@@ -155,7 +157,6 @@ rounds = rounds(order);
 if isempty(rounds) && ~isempty(catalog) && any(~[catalog.knownRounds])
     reportUncertain(catalog(find(~[catalog.knownRounds], 1)));
 end
-failures = strings(0,1);
 if ~isempty(rounds)
     if ~isempty(requested) || cfg.useAllRounds
         indices = collectPairs(catalog, rounds);
@@ -170,34 +171,50 @@ if ~isempty(rounds)
             [indices, matching] = collectPairs(catalog, round);
             pairs = catalog(matching);
             verifyCandidateConfiguration(cfg, pairs);
-            issue = "";
-            if any(cellfun(@isempty, indices(cards)))
+            verifyCandidateFiles(cfg.dataDir, pairs);
+            files = [pairs.fileA; pairs.fileB].';
+            affectedCards = cards(cellfun(@isempty, indices(cards)));
+            if ~isempty(affectedCards)
                 issue = "missing_cards";
             else
                 bad = find([pairs.issue] ~= "", 1);
                 if ~isempty(bad)
-                    issue = pairs(bad).fileA + " " + pairs(bad).issue;
+                    issue = pairs(bad).issue;
+                    affectedCards = pairs(bad).card;
+                    files = files(bad,:);
                 else
                     refChannels = 2 * cards - 1;
                     [~, info, badPair] = readPairs(cfg, refChannels, indices, true);
                     if ~isempty(badPair)
-                        affected = matching([pairs.fileA] == badPair.fileA);
-                        catalog(affected).issue = badPair.issue;
-                        issue = badPair.fileA + " " + badPair.issue;
-                    elseif verifyCoverage(cfg, refChannels, info, captureId, round, n)
-                        rounds = round;
-                        verified = info;
-                        return;
+                        bad = [pairs.fileA] == badPair.fileA;
+                        catalog(matching(bad)).issue = badPair.issue;
+                        issue = badPair.issue;
+                        affectedCards = [pairs(bad).card];
+                        files = files(bad,:);
                     else
-                        issue = "incomplete_or_inconsistent_columns";
+                        [valid, ~, ~, issue, channel] = verifyCoverage(cfg, refChannels, info, captureId, round, n);
+                        if valid
+                            rounds = round;
+                            verified = info;
+                            return;
+                        end
+                        affectedCards = ceil(channel / 2);
+                        if issue == "cross_card_column_identity"
+                            affectedCards = unique([cards(1), affectedCards]);
+                        end
+                        files = files(ismember([pairs.card], affectedCards),:);
                     end
                 end
             end
-            if numel(failures) < 6
-                failures(end+1,1) = round + ": " + issue + " [" + strjoin([pairs.fileA], ", ") + "]";
-            end
+            skippedRounds(end+1) = struct('round', round, 'files', files, ...
+                'issue', issue, 'cards', affectedCards);
         end
     end
+end
+failures = strings(0,1);
+for skipped = skippedRounds(1:min(end,6))
+    failures(end+1,1) = skipped.round + ": " + skipped.issue + " [" + ...
+        strjoin(reshape(skipped.files.', 1, []), ", ") + "]";
 end
 error('read_ring_bscan:UnverifiedCoverage', ...
     '选定扫描范围内没有各卡共同的完整轮次。%s', strjoin(failures, '；'));
@@ -211,6 +228,21 @@ for pair = pairs
     end
     if isfield(cfg, 'fs') && abs(pair.sampleIntervalNs * cfg.fs / 1e9 - 1) > 1e-9
         error('read_ring_bscan:SamplingRate', 'cfg.fs 与采集旁车中的采样间隔不一致（%s）。', pair.fileA);
+    end
+end
+end
+
+function verifyCandidateFiles(dataDir, pairs)
+% A failed open is ambiguous even if dir also reports the path missing.
+% An unreadable member must not turn a candidate into skippable bad data.
+for pair = pairs
+    for file = [pair.fileA + ".jsonl", pair.fileA, pair.fileB]
+        path = fullfile(dataDir, file);
+        [fid, message] = fopen(path, 'rb');
+        if fid < 0
+            error('read_ring_saved_channel:Open', '%s (%s)', path, message);
+        end
+        fclose(fid);
     end
 end
 end
@@ -292,7 +324,7 @@ evidence = struct('source', 'legacy-explicit', 'softwareRounds', NaN, ...
     'captureId', "", 'rounds', "legacy", 'files', {inputFiles});
 end
 
-function [valid, columns, files] = verifyCoverage(cfg, channels, provenance, captureId, rounds, n)
+function [valid, columns, files, issue, channel] = verifyCoverage(cfg, channels, provenance, captureId, rounds, n)
 ref = provenance{channels(1)};
 if ~ref.hasSidecar
     error('read_ring_bscan:UnverifiedMetadata', '选定采集缺少旁车。');
@@ -306,6 +338,8 @@ end
 columns = cell(1, 8);
 files = cell(1, 8);
 valid = false;
+issue = "";
+channel = 0;
 for ch = channels
     info = provenance{ch};
     if ~info.hasSidecar || any(info.columns.captureId ~= captureId) || ...
@@ -322,9 +356,14 @@ for round = rounds.'
         [~, order] = sort(rows.index(rowIndices));
         rowIndices = rowIndices(order);
         block = rows(rowIndices, :);
-        if ~completeRound(block, n), return; end
+        issue = coverageIssue(block, n);
+        if issue ~= "", channel = ch; return; end
         if isempty(reference), reference = block(:, fields); end
-        if ~isequal(block(:, fields), reference), return; end
+        if ~isequal(block(:, fields), reference)
+            issue = "cross_card_column_identity";
+            channel = ch;
+            return;
+        end
         columns{ch} = [columns{ch}; rowIndices];
     end
 end
@@ -335,8 +374,17 @@ for ch = channels
 end
 end
 
-function result = completeRound(rows, n)
-result = height(rows) == n && all(rows.complete) && rows.session(1) ~= "0" && ...
-    all(rows.session == rows.session(1)) && isequal(rows.index, (0:(n-1)).') && ...
-    all(mod(diff(rows.trigger), 65536) == 1);
+function issue = coverageIssue(rows, n)
+issue = "";
+if numel(unique(rows.index)) < height(rows)
+    issue = "duplicate_logical_columns";
+elseif height(rows) ~= n || ~isequal(rows.index, (0:(n-1)).')
+    issue = "missing_logical_columns";
+elseif ~all(rows.complete)
+    issue = "incomplete_source_columns";
+elseif rows.session(1) == "0" || any(rows.session ~= rows.session(1))
+    issue = "invalid_measurement_session";
+elseif any(mod(diff(rows.trigger), 65536) ~= 1)
+    issue = "nonconsecutive_triggers";
+end
 end

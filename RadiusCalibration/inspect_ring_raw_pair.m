@@ -1,6 +1,6 @@
 function pair = inspect_ring_raw_pair(dataDir, card, sequence, fileA, fileB, captureFilter)
 % Discover round membership from the sidecar without reading waveform samples.
-pair = struct('card', card, 'sequence', sequence, 'fileA', string(fileA), ...
+pair = struct('card', card, 'sequence', sequence, 'fileA', string(fileA), 'fileB', string(fileB), ...
     'captureId', "", 'legacy', false, 'rounds', strings(0, 1), ...
     'knownRounds', false, 'sampleCount', NaN, 'sampleIntervalNs', NaN, 'issue', "");
 path = fullfile(dataDir, [fileA '.jsonl']);
@@ -83,8 +83,8 @@ if contradiction || (declared && fileRound == "")
 elseif ~sealed
     pair.issue = "unsealed_sidecar";
 elseif ~isnan(pair.sampleCount) && ...
-        (~matchesLength(dataDir, fileA, 2 * pair.sampleCount * count) || ...
-         ~matchesLength(dataDir, fileB, 2 * pair.sampleCount * count))
+        (knownLengthMismatch(dataDir, fileA, 2 * pair.sampleCount * count) || ...
+         knownLengthMismatch(dataDir, fileB, 2 * pair.sampleCount * count))
     pair.issue = "paired_length_mismatch";
 end
 end
@@ -108,7 +108,7 @@ function valid = validPositive(value)
 valid = isnumeric(value) && isscalar(value) && isreal(value) && isfinite(value) && value > 0;
 end
 
-function same = matchesLength(dataDir, name, expected)
+function mismatch = knownLengthMismatch(dataDir, name, expected)
 file = dir(fullfile(dataDir, name));
-same = isscalar(file) && ~file.isdir && file.bytes == expected;
+mismatch = isscalar(file) && ~file.isdir && file.bytes ~= expected;
 end

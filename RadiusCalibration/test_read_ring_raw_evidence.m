@@ -103,6 +103,36 @@ cfg.filesPerChannel = 1;
 cfg.useAllRounds = false;
 cfg.roundId = "";
 
+% Coverage failures remain visible after a successful fallback, including
+% the affected pair and its original round rather than every round it spans.
+writePair(cfg.dataDir, 1, 0, captureId, [0 1 1 3], 20:23, true, true, 0, true);
+picked = read_ring_bscan(cfg);
+skipped = picked.captureEvidence.skippedRounds;
+assert(picked.captureEvidence.rounds == "1" && isscalar(skipped) && skipped.round == "0" && ...
+       skipped.issue == "duplicate_logical_columns" && skipped.cards == 1 && ...
+       isequal(skipped.files, ["Card1_ChA_fixture_000.dat" "Card1_ChB_fixture_000.dat"]));
+writePair(cfg.dataDir, 1, 0, captureId, 0:2, 20:22, true, true, 0, true);
+picked = read_ring_bscan(cfg);
+assert(picked.captureEvidence.skippedRounds.issue == "missing_logical_columns");
+
+% Even a candidate with a separate known defect must surface an access
+% error. A sharing lock denies reads while keeping the name and size visible.
+writePair(cfg.dataDir, 1, 0, captureId, 0:3, 20:23, true, false, 0, true);
+lane = fullfile(cfg.dataDir, 'Card1_ChB_fixture_000.dat');
+if ispc
+    locked = System.IO.File.Open(lane, System.IO.FileMode.Open, ...
+        System.IO.FileAccess.Read, System.IO.FileShare.None);
+    unlock = onCleanup(@() locked.Dispose());
+    expectError(@() read_ring_bscan(cfg), 'read_ring_saved_channel:Open');
+    clear unlock;
+end
+delete(lane);
+expectError(@() read_ring_bscan(cfg), 'read_ring_saved_channel:Open');
+cfg.roundFileIndices = {5, 7, [], []};
+picked = read_ring_bscan(cfg);
+assert(picked.captureEvidence.rounds == "1");
+cfg.roundFileIndices = {};
+
 % A damaged old V2 pair has exactly the two identified rounds. Neither
 % is eligible, even if the other card has a complete copy of each round.
 writePair(cfg.dataDir, 1, 0, captureId, [0:3 0:3], 20:27, true, true);

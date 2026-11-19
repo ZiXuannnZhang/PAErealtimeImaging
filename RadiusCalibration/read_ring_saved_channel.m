@@ -97,8 +97,13 @@ for k = 0:(fileCount - 1)
     if fid < 0
         error('read_ring_saved_channel:Open', '无法打开文件：%s', filePath);
     end
+    guard = onCleanup(@() fclose(fid));
     u = fread(fid, Inf, 'uint16=>uint16');
-    fclose(fid);
+    [message, readError] = ferror(fid);
+    if readError ~= 0 && ~feof(fid)
+        error('read_ring_saved_channel:Open', '%s (%s)', filePath, message);
+    end
+    clear guard;
 
     expectedPerFile = double(nColumns) * double(sampleCount);
     if numel(u) ~= expectedPerFile
@@ -171,7 +176,11 @@ try
     end
     for lane = 1:2
         names = {fileA, fileB};
-        stamp = fileStamp(fullfile(dataDir, names{lane}));
+        lanePath = fullfile(dataDir, names{lane});
+        stamp = fileStamp(lanePath);
+        if isnan(stamp(1))
+            error('read_ring_saved_channel:Open', '%s', lanePath);
+        end
         stamps(2*lane-1:2*lane) = stamp;
         if stamp(1) ~= 2 * sampleCount * count
             error('read_ring_saved_channel:PairLength', '双通道文件长度与确认列数不匹配。');
