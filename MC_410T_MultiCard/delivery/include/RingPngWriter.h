@@ -11,6 +11,7 @@
 
 namespace ring_png {
 constexpr int kEdge = 1600;
+constexpr int kShutdownGraceMs = 4000;
 constexpr std::size_t kPairBytes = 2 * kEdge * kEdge * sizeof(QRgb);
 using Pair = std::array<QImage, 2>;
 using Paths = std::array<QString, 2>;
@@ -42,6 +43,7 @@ public:
     void setTestMode(TestMode mode);
     bool testBlocked() const;
     bool testReceiptReady() const;
+    void deferTestReceiptNotification();
     void setTestExecutable(QString path);
     void releaseTestGate();
     qint64 testProcessId() const;

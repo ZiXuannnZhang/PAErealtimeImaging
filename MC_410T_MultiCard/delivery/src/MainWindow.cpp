@@ -4175,12 +4175,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
     if (m_closing) return;
     m_closing = true;
     m_restartRingOnSvcStop = false;
-#ifdef MAINWINDOW_START_TEST_SEAM
-    const int pngGraceMs = m_testPngGraceMs;
-#else
-    constexpr int pngGraceMs = 4000;
-#endif
-    QTimer::singleShot(pngGraceMs, Qt::PreciseTimer, this, [this] {
+    QTimer::singleShot(ring_png::kShutdownGraceMs, Qt::PreciseTimer, this, [this] {
         closePngDelivery();
         settlePendingTerminalPngs(QStringLiteral("application_closed"));
         finishWindowClose();

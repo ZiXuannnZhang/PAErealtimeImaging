@@ -67,6 +67,67 @@ static void pump(int milliseconds) {
     }
 }
 
+class LoopbackCard {
+public:
+    LoopbackCard() {
+        WSADATA winsock{};
+        check(WSAStartup(MAKEWORD(2,2), &winsock) == 0, "winsock startup");
+        socket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        address_.sin_family = AF_INET;
+        address_.sin_port = htons(8080);
+        inet_pton(AF_INET, "127.0.0.2", &address_.sin_addr);
+        if (bind(socket_, reinterpret_cast<sockaddr*>(&address_), sizeof(address_)) != 0) {
+            closesocket(socket_);
+            WSACleanup();
+            check(false, "bind loopback card");
+        }
+        inet_pton(AF_INET, "127.0.0.1", &address_.sin_addr);
+    }
+    ~LoopbackCard() { closesocket(socket_); WSACleanup(); }
+    LoopbackCard(const LoopbackCard&) = delete;
+    LoopbackCard& operator=(const LoopbackCard&) = delete;
+
+    void expectCommand(const paimage::Command& expected) const {
+        waitFor([&] {
+            u_long bytes = 0;
+            return ioctlsocket(socket_, FIONREAD, &bytes) == 0 && bytes > 0;
+        }, "card command present");
+        paimage::Command actual{};
+        check(recv(socket_, reinterpret_cast<char*>(actual.data()), actual.size(), 0) ==
+              static_cast<int>(actual.size()) && actual == expected, "card control command");
+    }
+
+    void send(int port, const std::vector<unsigned char>& bytes) {
+        address_.sin_port = htons(port);
+        check(sendto(socket_, reinterpret_cast<const char*>(bytes.data()), bytes.size(), 0,
+                     reinterpret_cast<sockaddr*>(&address_), sizeof(address_)) ==
+              static_cast<int>(bytes.size()), "loopback card packet");
+    }
+
+private:
+    SOCKET socket_ = INVALID_SOCKET;
+    sockaddr_in address_{};
+};
+
+using ProcessHandle = std::unique_ptr<void, decltype(&CloseHandle)>;
+
+static void checkOrdinaryToken(HANDLE process) {
+    HANDLE rawToken = nullptr;
+    check(OpenProcessToken(process, TOKEN_QUERY, &rawToken), "open process token");
+    const ProcessHandle token(rawToken, CloseHandle);
+    TOKEN_ELEVATION elevation{};
+    DWORD size = 0;
+    check(GetTokenInformation(token.get(), TokenElevation, &elevation, sizeof(elevation), &size) &&
+          !elevation.TokenIsElevated, "test requires an ordinary Windows token");
+}
+
+static void writeMarker(const QDir& directory, const QString& name, const QJsonObject& values = {}) {
+    QSaveFile file(directory.filePath(name));
+    const auto data = QJsonDocument(values).toJson(QJsonDocument::Compact);
+    check(file.open(QIODevice::WriteOnly) && file.write(data) == data.size() && file.commit(),
+          "persist fixture marker");
+}
+
 class MainWindowStartIntegrationTest {
 public:
     static void previewPressure() {
@@ -166,10 +227,30 @@ public:
             const paimage::TimeoutPresentation::Target target{output.path(), "preview", 92};
             return window.m_timeoutPresentation.close(9, round+1, target, []{});
         };
+        const paimage::TimeoutPresentation::Target budgetTarget{output.path(), "budget", 91};
+        for (const int grid : {3600, 3770, 3771, 4000}) {
+            const auto bytes = std::size_t(grid) * grid * 2 * sizeof(float);
+            std::atomic_bool rendered{false};
+            window.queueTimeoutPng({8, 0}, {budgetTarget, {bytes, "_probe", [&](const std::atomic_bool*) {
+                rendered.store(true);
+                return ring_png::Pair{}; // Only the admission path needs to run here.
+            }, grid}});
+            {
+                const std::lock_guard<std::mutex> lock(window.m_pngMutex);
+                check(window.m_timeoutPngBusy, "each validated grid enters the Timeout renderer");
+            }
+            waitFor([&] { return !window.m_timeoutPngBusy; }, "probe render failure releases the slot");
+            check(rendered.load(), "admitted layout reached the renderer");
+        }
+        const auto noRender = [](const std::atomic_bool*) { return ring_png::Pair{}; };
+        window.queueTimeoutPng({8, 1}, {budgetTarget, {8u * 3600 * 3600, "_wrong_size", noRender, 4000}});
+        window.queueTimeoutPng({8, 2}, {budgetTarget, {sizeof(float), "_overflow", noRender,
+                                                     (std::numeric_limits<int>::max)()}});
+        check(!window.m_timeoutPngBusy, "invalid layouts never enter Timeout admission");
+
         const auto renderGate = std::make_shared<QSemaphore>();
         auto releaseRender = std::shared_ptr<void>(nullptr, [renderGate](void*) { renderGate->release(); });
         window.m_timeoutPngWriter->setTestMode(ring_png::Channel::TestMode::Block);
-        window.m_timeoutPngPool.start([renderGate] { renderGate->acquire(); });
 
         constexpr int largeNx = 4000;
         auto first = pixelsFor(100, largeNx);
@@ -179,8 +260,18 @@ public:
         std::weak_ptr<std::vector<float>> firstLifetime = first;
         auto job = capture(0, first, largeNx);
         check(job && job.capture.frameBytes == 8u * largeNx * largeNx, "paired capture pixel byte count");
+        const auto renderEntered = std::make_shared<std::atomic_bool>(false);
+        job.capture.render = [render = std::move(job.capture.render), renderGate, renderEntered]
+                (const std::atomic_bool* cancel) {
+            renderEntered->store(true);
+            renderGate->acquire();
+            return render(cancel);
+        };
         window.queueTimeoutPng({9, 0}, std::move(job));
         first.reset();
+        waitFor([&] { return renderEntered->load(); }, "old Timeout render is in flight");
+        controller.stopSvc();
+        setup(768);
         for (quint64 round = 1; round <= 6; ++round) {
             auto next = pixelsFor(150, nx);
             std::weak_ptr<std::vector<float>> lifetime = next;
@@ -241,7 +332,6 @@ public:
             writer.setTestExecutable(executable.isEmpty() ? QDir(QCoreApplication::applicationDirPath())
                 .absoluteFilePath("../bin/PAimageReceiverDiagnostics.exe") : executable);
         }
-        window.m_testPngGraceMs = graceful ? 1400 : 650;
         const paimage::TimeoutPresentation::Target target{directory, scenario, 782};
         if (timeout) {
             ImagingDisplayWindow preview;
@@ -260,16 +350,49 @@ public:
                 return ring_png::Pair{image, image};
             });
         }
-        if (blocked && !graceful) {
+        std::shared_ptr<LoopbackCard> card;
+        QString rawDirectory;
+        const bool observeService = blocked && !graceful;
+        constexpr int durationNs = 6000;
+        if (observeService) {
             window.m_bitsPerChannel = 32;
             window.m_sampleIntervalNs = 4;
             window.m_cmbImagingMode->setCurrentIndex(1);
-            widget<QLineEdit>(window, "edtDataTime")->setText("6000");
+            widget<QLineEdit>(window, "edtDataTime")->setText(QString::number(durationNs));
             window.m_chkRealtimeImaging->setChecked(true);
+            waitFor([&] { return window.m_imagingServiceReady.load(); }, "Ring service ready before close");
+        }
+        if (observeService && timeout) {
+            card = std::make_shared<LoopbackCard>();
+            window.m_localBindIP = "127.0.0.1";
+            widget<QLineEdit>(window, "edtSaveDir")->setText(QDir(directory).filePath("raw"));
+            widget<QLineEdit>(window, "edtTriggersPerFile")->setText("100");
+            widget<QLineEdit>(window, "edtFileSuffix")->setText("closing");
+            widget<QCheckBox>(window, "chkAutoSave")->setChecked(true);
+            window.startListeningWithIPs({"127.0.0.2"}, QStringLiteral("explicit_target_ips"));
+            check(window.m_netController != nullptr, "loopback listener started");
+            auto& network = *window.m_netController;
+            network.setStartupFilterTriggerCount(0);
+            waitFor([&] { return network.isSaving(); }, "raw writer armed before close");
+            rawDirectory = QDir(window.m_reconSaveDir).absoluteFilePath("..");
+            check(network.sendConfigCommand(durationNs, 1000, 1000) && network.sendStartMeasure(),
+                  "queue loopback configuration and acquisition");
+            card->expectCommand(paimage::configCommand(durationNs, 1000, 1000));
+            card->send(8000, std::vector<unsigned char>(60));
+            card->expectCommand(paimage::startCommand());
+            for (int offset = 0; offset < durationNs * 2; offset += 1440) {
+                const auto size = std::min(1440, durationNs * 2 - offset);
+                std::vector<unsigned char> bytes(4 + size);
+                bytes[0] = offset / 1440;
+                card->send(8001, bytes);
+            }
+            waitFor([&] { return window.m_isMeasuring &&
+                network.physicalRoundSnapshot().logicalDistinctAccepted == 1; }, "one complete raw column entered saving");
         }
         auto* ready = new QTimer(&window);
-        QObject::connect(ready, &QTimer::timeout, &window, [&window, &writer, ready, directory, blocked, graceful, deadline,
-                           rendering, realExecutable, renderEntered] {
+        QObject::connect(ready, &QTimer::timeout, &window,
+            [&window, &writer, ready, directory = QDir(directory), blocked, graceful, deadline,
+             rendering, realExecutable, renderEntered, card, rawDirectory, announced = false]() mutable {
             const auto* svc = window.m_imagingController->m_svcProcess;
             if (blocked && !writer.testBlocked()) return;
             if (rendering && !renderEntered->load()) return;
@@ -278,27 +401,27 @@ public:
                 if (!window.m_pngTasks.empty()) return;
             }
             if (blocked && !graceful && (!svc || svc->state() != QProcess::Running)) return;
-            ready->stop();
-            QSaveFile marker(QDir(directory).filePath("closing.json"));
-            if (marker.open(QIODevice::WriteOnly)) {
+            if (!announced) {
+                announced = true;
                 const auto* recorder = DiagnosticRecorder::instance();
-                marker.write(QJsonDocument(QJsonObject{
+                writeMarker(directory, "closing.json", {
                     {"runDirectory", recorder ? recorder->runDirectory() : QString()},
-                    {"writerPid", double(writer.testProcessId())}, {"svcPid", svc ? double(svc->processId()) : 0.0}
-                }).toJson());
-                marker.commit();
+                    {"writerPid", double(writer.testProcessId())}, {"svcPid", svc ? double(svc->processId()) : 0.0},
+                    {"rawDirectory", rawDirectory}
+                });
             }
+            if (!directory.exists("observe.ready")) return;
+            ready->stop();
+            if (deadline) writer.deferTestReceiptNotification();
             window.close();
-            QTimer::singleShot(100, &window, [&window] { window.close(); });
+            const int repeatAfterMs = blocked && (!graceful || deadline) ? 2000 : 100;
+            QTimer::singleShot(repeatAfterMs, Qt::PreciseTimer, &window, [&window] { window.close(); });
             if (deadline) {
-                QTimer::singleShot(1150, &window, [&window, &writer] {
-                    writer.releaseTestGate();
-                    // Defer Qt's queued notifier while the native reply arrives.
-                    QElapsedTimer timer;
-                    timer.start();
-                    while (!writer.testReceiptReady() && timer.elapsed() < 450) QThread::msleep(1);
-                    window.closePngDelivery();
-                    window.finishWindowClose();
+                QTimer::singleShot(ring_png::kShutdownGraceMs - 800, Qt::PreciseTimer, &window,
+                                   [&writer] { writer.releaseTestGate(); });
+                QTimer::singleShot(ring_png::kShutdownGraceMs - 100, Qt::PreciseTimer, &window,
+                                   [&writer, directory] {
+                    if (writer.testReceiptReady()) writeMarker(directory, "reply.ready");
                 });
             } else if (graceful) {
                 QTimer::singleShot(150, &window, [&writer] { writer.releaseTestGate(); });
@@ -308,6 +431,7 @@ public:
     }
 
     static void pngShutdown(bool productionOnly = false) {
+        checkOrdinaryToken(GetCurrentProcess());
         const std::array<std::pair<QString, QString>, 9> scenarios{{
             {"timeout-blocked", "shutdown_unconfirmed"}, {"terminal-blocked", "shutdown_unconfirmed"},
             {"timeout-grace", "saved"}, {"terminal-deadline", "saved"}, {"terminal-production", "saved"},
@@ -320,6 +444,15 @@ public:
             QTemporaryDir output;
             check(output.isValid(), "shutdown fixture directory");
             QFile::remove(paimageSettingsPath());
+            {
+                QSettings settings(paimageSettingsPath(), QSettings::IniFormat);
+                settings.setValue("RingConfigDialog/Defaults/block", 4);
+                settings.setValue("RingConfigDialog/Defaults/totalAlines", 8);
+                settings.setValue("RingConfigDialog/Defaults/fovMm", 4.0);
+                settings.setValue("RingConfigDialog/Defaults/gridMm", 0.1);
+                for (int ch = 0; ch < 8; ++ch)
+                    settings.setValue(QString("RingConfigDialog/Defaults/ch%1").arg(ch), ch == 0);
+            }
             QProcess host;
             host.setProgram(QCoreApplication::applicationFilePath());
             host.setArguments({"--png-shutdown-child", output.path(), scenario});
@@ -331,24 +464,66 @@ public:
             QFile marker(closing);
             check(marker.open(QIODevice::ReadOnly), "receiver wrote closing marker");
             const auto info = QJsonDocument::fromJson(marker.readAll()).object();
-            const auto open = [&](const char* key) {
-                return OpenProcess(SYNCHRONIZE, FALSE, DWORD(info.value(key).toInteger()));
+            const auto observe = [&](qint64 pid) {
+                check(pid > 0, "observed process has a real PID");
+                ProcessHandle handle(OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                                  DWORD(pid)), CloseHandle);
+                if (!handle) {
+                    const auto error = GetLastError();
+                    throw std::runtime_error("cannot observe live process, Win32 error " + std::to_string(error));
+                }
+                check(WaitForSingleObject(handle.get(), 0) == WAIT_TIMEOUT, "process was alive before close");
+                checkOrdinaryToken(handle.get());
+                return handle;
             };
-            const auto wait = [](HANDLE handle) {
-                if (!handle) return true; // Already exited before inspection.
-                const bool done = WaitForSingleObject(handle, 1000) == WAIT_OBJECT_0;
-                CloseHandle(handle);
-                return done;
-            };
-            const HANDLE writer = open("writerPid"), svc = open("svcPid");
-            check(host.state() == QProcess::NotRunning || host.waitForFinished(6000),
-                  "receiver main and Qt shutdown finished with PNG gate unreleased");
-            check(host.exitStatus() == QProcess::NormalExit && host.exitCode() == 0, "receiver exited normally");
-            const bool writerStopped = wait(writer), imagingStopped = wait(svc);
-            check(writerStopped && imagingStopped, "receiver-owned writer and ImagingSvc exited");
-            if (scenario.endsWith("-blocked"))
-                check(info.value("writerPid").toInteger() > 0 && info.value("svcPid").toInteger() > 0,
-                      "both native child processes were active at close");
+            const bool blocked = scenario.endsWith("-blocked");
+            const bool deadline = scenario.endsWith("-deadline");
+            const auto hostHandle = observe(host.processId());
+            ProcessHandle writer(nullptr, CloseHandle), svc(nullptr, CloseHandle);
+            if (blocked || deadline || scenario.endsWith("-grace")) {
+                writer = observe(info.value("writerPid").toInteger());
+                const QDir dir(output.path());
+                const auto temps = dir.entryList({"*.png.*"}, QDir::Files);
+                check(temps.size() == 1 && QFileInfo(dir.filePath(temps.front())).size() > 8,
+                      "writer is paused after bytes reached the first temporary PNG");
+            }
+            if (blocked) svc = observe(info.value("svcPid").toInteger());
+            QElapsedTimer elapsed;
+            elapsed.start();
+            writeMarker(QDir(output.path()), "observe.ready");
+            check(host.state() == QProcess::NotRunning || host.waitForFinished(7500),
+                  "receiver main and Qt shutdown finished within the PNG grace plus cleanup allowance");
+            check(host.exitStatus() == QProcess::NormalExit && host.exitCode() == 0 &&
+                  WaitForSingleObject(hostHandle.get(), 0) == WAIT_OBJECT_0, "receiver exited normally");
+            const auto hostMs = elapsed.elapsed();
+            for (const auto* handle : {&writer, &svc})
+                if (*handle) check(WaitForSingleObject(handle->get(), 1000) == WAIT_OBJECT_0,
+                                   "observed child actually exited");
+            if (blocked || deadline) {
+                check(hostMs >= ring_png::kShutdownGraceMs - 100 && hostMs < ring_png::kShutdownGraceMs + 1800,
+                      "production grace expires once without an early exit or renewal on repeat close");
+                if (blocked) {
+                    DWORD code = 0;
+                    check(GetExitCodeProcess(writer.get(), &code) && code == 1,
+                          "writer stopped by the deadline while its gate was unreleased");
+                }
+            }
+            if (deadline) check(QFile::exists(output.filePath("reply.ready")),
+                                "reply was signaled before the production timer handled it");
+            if (scenario == "timeout-blocked") {
+                const QDir raw(info.value("rawDirectory").toString());
+                const auto pair = raw.entryList({"Card1_*.dat"}, QDir::Files);
+                check(pair.size() == 2 && QFileInfo(raw.filePath(pair[0])).size() == 3000 &&
+                      QFileInfo(raw.filePath(pair[1])).size() == 3000, "close drains one A/B waveform column");
+                const auto sidecars = raw.entryList({"Card1_ChA*.jsonl"}, QDir::Files);
+                check(sidecars.size() == 1, "close retains the paired raw sidecar");
+                QFile evidence(raw.filePath(sidecars.front()));
+                check(evidence.open(QIODevice::ReadOnly), "read settled raw sidecar");
+                const auto records = evidence.readAll().trimmed().split('\n');
+                const auto end = QJsonDocument::fromJson(records.back()).object();
+                check(records.size() == 3 && end.value("type").toString() == "end" &&
+                      end.value("confirmedColumns").toInt() == 1, "raw sidecar sealed during close");
+            }
 
             QFile events(QDir(info.value("runDirectory").toString()).filePath("events.jsonl"));
             check(events.open(QIODevice::ReadOnly), "closed receiver flushed diagnostic events");
@@ -369,6 +544,8 @@ public:
             const auto pngs = QDir(output.path()).entryList({"*.png"}, QDir::Files);
             check(pngs.size() == (expected == "saved" ? 2 : expected == "writer_exited_unconfirmed" ? 1 : 0),
                   "published files match the receipt");
+            std::cout << "PASS " << scenario.toStdString() << " [" << expected.toStdString()
+                      << ", close " << hostMs << " ms]" << std::endl;
         }
         QFile::remove(paimageSettingsPath());
     }
@@ -387,35 +564,7 @@ public:
         }
         QTemporaryDir save(QDir::currentPath()+"/restart-save-XXXXXX");
         check(save.isValid(), "temporary save root");
-        WSADATA winsock{};
-        check(WSAStartup(MAKEWORD(2,2), &winsock) == 0, "winsock startup");
-        struct CardSocket {
-            SOCKET socket;
-            ~CardSocket() { closesocket(socket); WSACleanup(); }
-        } card{socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)};
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_port = htons(8080);
-        inet_pton(AF_INET, "127.0.0.2", &address.sin_addr);
-        check(bind(card.socket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0, "bind loopback card");
-        DWORD timeout = 2500;
-        setsockopt(card.socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<char*>(&timeout), sizeof(timeout));
-        inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
-        auto expectCommand = [&](const paimage::Command& expected) {
-            waitFor([&] {
-                u_long bytes = 0;
-                return ioctlsocket(card.socket, FIONREAD, &bytes) == 0 && bytes > 0;
-            }, "card command present");
-            paimage::Command actual{};
-            check(recv(card.socket, reinterpret_cast<char*>(actual.data()), actual.size(), 0) ==
-                  static_cast<int>(actual.size()) && actual == expected, "card control command");
-        };
-        auto send = [&](int port, const std::vector<unsigned char>& bytes) {
-            address.sin_port = htons(port);
-            check(sendto(card.socket, reinterpret_cast<const char*>(bytes.data()), bytes.size(), 0,
-                         reinterpret_cast<sockaddr*>(&address), sizeof(address)) ==
-                  static_cast<int>(bytes.size()), "loopback card packet");
-        };
+        LoopbackCard card;
         {
             MainWindow window;
             auto& controller = *window.m_imagingController;
@@ -505,10 +654,10 @@ public:
                 window.syncTimeoutPngSettings();
                 window.m_lastPresentedRingSubmit = pass == 0 ? (std::numeric_limits<quint64>::max)() : 0;
                 check(network.sendConfigCommand(durationNs,1000,1000) && network.sendStartMeasure(), "queue CONFIG and START");
-                expectCommand(paimage::configCommand(durationNs,1000,1000));
-                send(8000,std::vector<unsigned char>(60));
+                card.expectCommand(paimage::configCommand(durationNs,1000,1000));
+                card.send(8000,std::vector<unsigned char>(60));
                 waitFor([&]{ return window.m_isMeasuring; }, "card START accepted");
-                expectCommand(paimage::startCommand());
+                card.expectCommand(paimage::startCommand());
 
                 const auto previewGate = std::make_shared<QSemaphore>();
                 auto releasePreview = std::shared_ptr<void>(nullptr, [previewGate](void*) { previewGate->release(); });
@@ -528,7 +677,7 @@ public:
                             std::memcpy(bytes.data()+4+i,&b,sizeof(b));
                             std::memcpy(bytes.data()+8+i,&a,sizeof(a));
                         }
-                        send(8001,bytes);
+                        card.send(8001,bytes);
                     }
                     pump(8);
                     if (pass && trigger == triggers - 1) {
@@ -570,7 +719,7 @@ public:
                           "a stale terminal cannot change the current display state");
                 }
                 window.onStartListenClicked();
-                expectCommand(paimage::stopCommand());
+                card.expectCommand(paimage::stopCommand());
                 waitFor([&]{ return !window.m_isListening && !window.m_netController; }, "listener stopped");
                 check(controller.isRunning(), "same Ring process stays resident between listeners");
                 QDir roundDir(pngDir.absolutePath());
@@ -616,10 +765,10 @@ public:
             const auto delayA = widget<QLineEdit>(window, "edtADelay")->text().toInt();
             const auto delayB = widget<QLineEdit>(window, "edtBDelay")->text().toInt();
             window.onStartMeasureClicked();
-            expectCommand(paimage::configCommand(durationNs, delayA, delayB));
-            send(8000, std::vector<unsigned char>(60));
+            card.expectCommand(paimage::configCommand(durationNs, delayA, delayB));
+            card.send(8000, std::vector<unsigned char>(60));
             waitFor([&]{ return window.m_isMeasuring; }, "missing FBP file must still start acquisition");
-            expectCommand(paimage::startCommand());
+            card.expectCommand(paimage::startCommand());
             check(!window.m_measurementRingImagingAvailable.load(), "missing FBP file is reported independently");
             for (int trigger = 0; trigger < 4; ++trigger) {
                 for (int offset = 0; offset < durationNs * 2; offset += 1440) {
@@ -627,14 +776,14 @@ public:
                     std::vector<unsigned char> bytes(size + 4);
                     bytes[0] = offset / 1440;
                     bytes[2] = trigger;
-                    send(8001, bytes);
+                    card.send(8001, bytes);
                 }
                 pump(8);
             }
             waitFor([&] { return window.m_netController->physicalRoundSnapshot().logicalDistinctAccepted > 0; },
                     "acquisition accepted data without FBP");
             window.onStartListenClicked();
-            expectCommand(paimage::stopCommand());
+            card.expectCommand(paimage::stopCommand());
             waitFor([&]{ return !window.m_netController; }, "close raw acquisition listener");
             const QDir rawFiles(QDir::cleanPath(rawDirectory));
             for (const auto* pattern : {"Card1_ChA_*.dat", "Card1_ChB_*.dat"}) {
@@ -1017,9 +1166,14 @@ int main(int argc, char** argv) {
         const QString directory = QString::fromLocal8Bit(argv[2]), scenario = QString::fromLatin1(argv[3]);
         int receiverArgc = 1;
         char* receiverArgs[]{argv[0], nullptr};
-        return runReceiverForTest(receiverArgc, receiverArgs, [&](MainWindow& window) {
-            MainWindowStartIntegrationTest::pngShutdownChild(window, directory, scenario);
-        });
+        try {
+            return runReceiverForTest(receiverArgc, receiverArgs, [&](MainWindow& window) {
+                MainWindowStartIntegrationTest::pngShutdownChild(window, directory, scenario);
+            });
+        } catch (const std::exception& e) {
+            std::cerr << "FAIL shutdown child: " << e.what() << '\n';
+            return 1;
+        }
     }
     QCoreApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
     QApplication app(argc, argv);

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cstring>
 #include <deque>
+#include <io.h>
 #include <new>
 #include <string>
 #include <utility>
@@ -116,16 +117,29 @@ bool publishFile(const QString& temporary, const QString& target)
     return MoveFileW(nativePath(temporary).c_str(), nativePath(target).c_str());
 }
 
-bool encodeTemp(const QImage& image, const QString& path, QString& written)
+// Match the best-effort sync previously done by QSaveFile::commit().
+void syncTempFile(QTemporaryFile& file)
+{
+    const int descriptor = file.handle();
+    if (descriptor < 0) return;
+    const auto handle = reinterpret_cast<HANDLE>(_get_osfhandle(descriptor));
+    if (handle != INVALID_HANDLE_VALUE) FlushFileBuffers(handle);
+}
+
+bool encodeTemp(const QImage& image, const QString& path, QString& written,
+                const std::function<void()>& beforeSync = {})
 {
     QTemporaryFile file(path + QStringLiteral(".XXXXXX"));
     if (!file.open() || !image.save(&file, "PNG") || !file.flush()) return false;
+    if (beforeSync) beforeSync();
+    syncTempFile(file);
     written = file.fileName();
     file.setAutoRemove(false);
     return true;
 }
 
-Receipt commit(const Pair& pair, const Paths& paths, const std::function<void()>& afterFirst = {})
+Receipt commit(const Pair& pair, const Paths& paths, const std::function<void()>& afterFirst = {},
+               const std::function<void()>& beforeSyncFirst = {})
 {
     if (!QDir().mkpath(QFileInfo(paths[0]).absolutePath())) return Receipt::DirectoryFailed;
     if (paths[0] == paths[1] || QFileInfo::exists(paths[0]) || QFileInfo::exists(paths[1]))
@@ -135,7 +149,7 @@ Receipt commit(const Pair& pair, const Paths& paths, const std::function<void()>
         Paths files;
         ~RemoveTemps() { for (const auto& file : files) if (!file.isEmpty()) QFile::remove(file); }
     } temps;
-    if (!encodeTemp(pair[0], paths[0], temps.files[0])) return Receipt::FirstFailed;
+    if (!encodeTemp(pair[0], paths[0], temps.files[0], beforeSyncFirst)) return Receipt::FirstFailed;
     if (!encodeTemp(pair[1], paths[1], temps.files[1])) return Receipt::SecondFailed;
     if (!publishFile(temps.files[0], paths[0])) return Receipt::FirstFailed;
     temps.files[0].clear();
@@ -250,11 +264,13 @@ std::optional<int> runWriterMode(int argc, char** argv)
         try {
 #ifdef MAINWINDOW_START_TEST_SEAM
             if (io.gate) {
-                SetEvent(io.blocked.get());
-                const HANDLE testWaits[]{io.gate.get(), parent.get(), io.stop.get()};
-                if (WaitForMultipleObjects(3, testWaits, FALSE, INFINITE) != WAIT_OBJECT_0) return 0;
-            }
-            if (testMode == "exit-after-first") {
+                receipt = commit(images, paths, {}, [&] {
+                    // First temporary PNG has been encoded and written.
+                    if (!SetEvent(io.blocked.get())) ExitProcess(3);
+                    const HANDLE testWaits[]{io.gate.get(), parent.get(), io.stop.get()};
+                    if (WaitForMultipleObjects(3, testWaits, FALSE, INFINITE) != WAIT_OBJECT_0) ExitProcess(0);
+                });
+            } else if (testMode == "exit-after-first") {
                 receipt = commit(images, paths, [] { ExitProcess(7); });
             } else
 #endif
@@ -460,6 +476,9 @@ void Channel::shutdown() { state_->shutdown(); }
 void Channel::setTestMode(TestMode mode) { state_->testMode = mode; }
 bool Channel::testBlocked() const { return state_->io && signaled(state_->io->blocked.get()); }
 bool Channel::testReceiptReady() const { return state_->io && signaled(state_->io->reply.get()); }
+void Channel::deferTestReceiptNotification() {
+    if (state_->receiptEvent) state_->receiptEvent->setEnabled(false);
+}
 void Channel::setTestExecutable(QString path) { state_->testExecutable = std::move(path); }
 void Channel::releaseTestGate() { if (state_->io && state_->io->gate) SetEvent(state_->io->gate.get()); }
 qint64 Channel::testProcessId() const { return state_->io ? state_->io->processId : 0; }

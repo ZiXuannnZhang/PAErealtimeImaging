@@ -121,7 +121,6 @@ private slots:
 private:
 #ifdef MAINWINDOW_START_TEST_SEAM
     friend class MainWindowStartIntegrationTest;
-    int m_testPngGraceMs = 4000;
     int m_testAssemblerConfigs = 0;
     int m_testFeedStarts = 0;
 #endif
