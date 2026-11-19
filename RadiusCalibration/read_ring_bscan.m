@@ -13,6 +13,8 @@ if rem(n, 2)
     error('read_ring_bscan:FullAlines', '每圈触发数必须为偶数。');
 end
 validateattributes(cfg.filesPerChannel, {'numeric'}, {'scalar', 'integer', 'positive'});
+validateattributes(cfg.triggersPerFile, {'numeric'}, {'scalar', 'integer', 'positive'});
+validateattributes(cfg.sampleCount, {'numeric'}, {'scalar', 'integer', 'positive'});
 
 cards = unique(ceil(selectedCh / 2));
 captureId = "";
@@ -24,9 +26,27 @@ if captureId == "" && isfield(cfg, 'allowUnverifiedLegacy') && cfg.allowUnverifi
     [data, columns, evidence] = readLegacy(cfg, selectedCh, cards, n);
 else
     [captureId, catalog] = discoverPairs(cfg, cards, captureId);
-    [rounds, indices] = chooseRounds(cfg, cards, catalog, captureId, n);
+    [rounds, indices, catalog, verified] = chooseRounds(cfg, cards, catalog, captureId, n);
     checkReadBudget(cfg.filesPerChannel, cards, indices);
-    [data, provenance] = readPairs(cfg, selectedCh, indices, false);
+    if isempty(verified)
+        [data, provenance] = readPairs(cfg, selectedCh, indices, false);
+    else
+        selectedFiles = [catalog(arrayfun(@(pair) any(pair.rounds == rounds), catalog)).fileA];
+        try
+            [data, provenance] = readPairs(cfg, selectedCh, indices, false);
+            for ch = selectedCh
+                ref = 2 * ceil(ch / 2) - 1;
+                if ~isequaln(provenance{ch}, verified{ref})
+                    error('read_ring_bscan:FileChanged', '已核验的文件在波形读取前发生变化。');
+                end
+            end
+        catch exception
+            if isempty(exception.identifier), rethrow(exception); end
+            failure = MException(exception.identifier, '所选轮次 %s，文件 %s。%s', ...
+                rounds, strjoin(selectedFiles, ', '), exception.message);
+            throw(addCause(failure, exception));
+        end
+    end
     [valid, columns, files] = verifyCoverage(cfg, selectedCh, provenance, captureId, rounds, n);
     if ~valid
         error('read_ring_bscan:UnverifiedCoverage', '所选卡缺少共同的完整轮次，或逻辑列有重复、不连续。');
@@ -110,7 +130,8 @@ end
 catalog = catalog(~[catalog.legacy] & (ids == captureId | ids == ""));
 end
 
-function [rounds, indices] = chooseRounds(cfg, cards, catalog, captureId, n)
+function [rounds, indices, catalog, verified] = chooseRounds(cfg, cards, catalog, captureId, n)
+verified = [];
 requested = strings(0,1);
 if isfield(cfg, 'roundId')
     requested = string(cfg.roundId(:));
@@ -134,32 +155,75 @@ rounds = rounds(order);
 if isempty(rounds) && ~isempty(catalog) && any(~[catalog.knownRounds])
     reportUncertain(catalog(find(~[catalog.knownRounds], 1)));
 end
+failures = strings(0,1);
 if ~isempty(rounds)
     if ~isempty(requested) || cfg.useAllRounds
         indices = collectPairs(catalog, rounds);
         if all(~cellfun(@isempty, indices(cards))), return; end
     else
+        unknown = find(~[catalog.knownRounds], 1);
+        if ~isempty(unknown), reportUncertain(catalog(unknown)); end
+        if isfield(cfg, 'fs')
+            validateattributes(cfg.fs, {'numeric'}, {'scalar', 'real', 'finite', 'positive'});
+        end
         for round = rounds.'
-            indices = collectPairs(catalog, round);
-            if any(cellfun(@isempty, indices(cards))), continue; end
-            refChannels = 2 * cards - 1;
-            [~, info] = readPairs(cfg, refChannels, indices, true);
-            if verifyCoverage(cfg, refChannels, info, captureId, round, n)
-                rounds = round;
-                return;
+            [indices, matching] = collectPairs(catalog, round);
+            pairs = catalog(matching);
+            verifyCandidateConfiguration(cfg, pairs);
+            issue = "";
+            if any(cellfun(@isempty, indices(cards)))
+                issue = "missing_cards";
+            else
+                bad = find([pairs.issue] ~= "", 1);
+                if ~isempty(bad)
+                    issue = pairs(bad).fileA + " " + pairs(bad).issue;
+                else
+                    refChannels = 2 * cards - 1;
+                    [~, info, badPair] = readPairs(cfg, refChannels, indices, true);
+                    if ~isempty(badPair)
+                        affected = matching([pairs.fileA] == badPair.fileA);
+                        catalog(affected).issue = badPair.issue;
+                        issue = badPair.fileA + " " + badPair.issue;
+                    elseif verifyCoverage(cfg, refChannels, info, captureId, round, n)
+                        rounds = round;
+                        verified = info;
+                        return;
+                    else
+                        issue = "incomplete_or_inconsistent_columns";
+                    end
+                end
+            end
+            if numel(failures) < 6
+                failures(end+1,1) = round + ": " + issue + " [" + strjoin([pairs.fileA], ", ") + "]";
             end
         end
     end
 end
-error('read_ring_bscan:UnverifiedCoverage', '选定扫描范围内没有各卡共同的完整轮次。');
+error('read_ring_bscan:UnverifiedCoverage', ...
+    '选定扫描范围内没有各卡共同的完整轮次。%s', strjoin(failures, '；'));
 end
 
-function indices = collectPairs(catalog, rounds)
+function verifyCandidateConfiguration(cfg, pairs)
+for pair = pairs
+    if pair.sampleCount ~= cfg.sampleCount || isnan(pair.sampleIntervalNs)
+        error('read_ring_saved_channel:UnverifiedMetadata', ...
+            '旁车采样布局无效或与配置不符（%s）。', pair.fileA);
+    end
+    if isfield(cfg, 'fs') && abs(pair.sampleIntervalNs * cfg.fs / 1e9 - 1) > 1e-9
+        error('read_ring_bscan:SamplingRate', 'cfg.fs 与采集旁车中的采样间隔不一致（%s）。', pair.fileA);
+    end
+end
+end
+
+function [indices, matching] = collectPairs(catalog, rounds)
 indices = cell(1,4);
-for pair = catalog
+matching = [];
+for k = 1:numel(catalog)
+    pair = catalog(k);
     if any(ismember(pair.rounds, rounds))
         % Even an unsealed contributing pair has to pass the strict reader.
         indices{pair.card}(end+1) = pair.sequence;
+        matching(end+1) = k;
     elseif ~pair.knownRounds
         reportUncertain(pair);
     end
@@ -182,13 +246,15 @@ error('read_ring_bscan:UncertainRound', ...
     pair.fileA);
 end
 
-function [data, provenance] = readPairs(cfg, channels, indices, metadataOnly)
+function [data, provenance, badPair] = readPairs(cfg, channels, indices, metadataOnly)
 data = cell(1, 8);
 provenance = cell(1, 8);
+badPair = [];
 for ch = channels
     files = indices{ceil(ch / 2)};
-    [data{ch}, provenance{ch}] = read_ring_saved_channel(cfg.dataDir, ch, cfg.fileSuffix, ...
+    [data{ch}, provenance{ch}, badPair] = read_ring_saved_channel(cfg.dataDir, ch, cfg.fileSuffix, ...
         numel(files), cfg.triggersPerFile, cfg.sampleCount, files, metadataOnly);
+    if ~isempty(badPair), return; end
 end
 end
 

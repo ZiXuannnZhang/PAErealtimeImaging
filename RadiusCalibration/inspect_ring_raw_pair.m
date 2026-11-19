@@ -2,7 +2,7 @@ function pair = inspect_ring_raw_pair(dataDir, card, sequence, fileA, fileB, cap
 % Discover round membership from the sidecar without reading waveform samples.
 pair = struct('card', card, 'sequence', sequence, 'fileA', string(fileA), ...
     'captureId', "", 'legacy', false, 'rounds', strings(0, 1), ...
-    'knownRounds', false, 'issue', "");
+    'knownRounds', false, 'sampleCount', NaN, 'sampleIntervalNs', NaN, 'issue', "");
 path = fullfile(dataDir, [fileA '.jsonl']);
 fid = fopen(path, 'rt');
 if fid < 0, return; end
@@ -23,6 +23,12 @@ if ~isequal(layout.version, 2) || ~isfield(layout, 'captureId') || ~ischar(layou
 end
 pair.captureId = lower(string(layout.captureId));
 if captureFilter ~= "" && pair.captureId ~= captureFilter, return; end
+if isfield(layout, 'sampleCount') && validPositive(layout.sampleCount) && mod(layout.sampleCount, 1) == 0
+    pair.sampleCount = layout.sampleCount;
+end
+if isfield(layout, 'sampleIntervalNs') && validPositive(layout.sampleIntervalNs)
+    pair.sampleIntervalNs = layout.sampleIntervalNs;
+end
 [declared, fileSession, fileRound] = ring_raw_pair_round(layout);
 rowsValid = true;
 contradiction = false;
@@ -59,24 +65,26 @@ while true
     end
     rowsValid = rowsValid && hasRound && hasSession && isfield(row, 'column') && isequal(row.column, count);
 end
+if ~feof(fid)
+    pair.issue = "unreadable_sidecar";
+    return;
+end
 sealed = rowsValid && count > 0 && isequal(ending, count);
 if fileRound ~= "" && ~contradiction
     % The writer splits pairs on a round change. The declaration identifies
     % even an interrupted pair but does not confirm a single waveform column.
     pair.rounds = fileRound;
     pair.knownRounds = true;
-elseif sealed && ~contradiction
+elseif sealed && ~declared
     pair.knownRounds = true;
 end
 if contradiction || (declared && fileRound == "")
     pair.issue = "invalid_round_declaration";
 elseif ~sealed
     pair.issue = "unsealed_sidecar";
-elseif ~isfield(layout, 'sampleCount') || ~isnumeric(layout.sampleCount) || ...
-        ~isscalar(layout.sampleCount) || ~isfinite(layout.sampleCount) || ...
-        layout.sampleCount <= 0 || mod(layout.sampleCount, 1) || ...
-        ~matchesLength(dataDir, fileA, 2 * layout.sampleCount * count) || ...
-        ~matchesLength(dataDir, fileB, 2 * layout.sampleCount * count)
+elseif ~isnan(pair.sampleCount) && ...
+        (~matchesLength(dataDir, fileA, 2 * pair.sampleCount * count) || ...
+         ~matchesLength(dataDir, fileB, 2 * pair.sampleCount * count))
     pair.issue = "paired_length_mismatch";
 end
 end
@@ -94,6 +102,10 @@ end
 
 function valid = isDecimalId(value)
 valid = ischar(value) && ~isempty(regexp(value, '^[0-9]+$', 'once'));
+end
+
+function valid = validPositive(value)
+valid = isnumeric(value) && isscalar(value) && isreal(value) && isfinite(value) && value > 0;
 end
 
 function same = matchesLength(dataDir, name, expected)

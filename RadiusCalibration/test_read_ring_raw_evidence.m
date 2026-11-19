@@ -8,6 +8,8 @@ cfg = struct('dataDir', root, 'channelSel', [1 2 3], 'fileSuffix', 'fixture', ..
     'filesPerChannel', 1, 'triggersPerFile', 8, 'sampleCount', 2, ...
     'fullAlinesPerChannel', 4, 'useAllRounds', false, 'fs', 250e6, 'captureId', captureA);
 
+testDefaultRoundFallback(root, captureA, cfg);
+
 writePair(root, 1, 0, captureA, 0:3, [65534 65535 0 1], true, true);
 writePair(root, 2, 0, captureA, 0:3, [65534 65535 0 1], true, true);
 bscan = read_ring_bscan(cfg);
@@ -23,7 +25,7 @@ expectError(@() read_ring_bscan(cfg), 'read_ring_bscan:UnverifiedCoverage');
 writePair(root, 2, 0, captureA, 0:3, [20 21 23 24], false, true);
 expectError(@() read_ring_bscan(cfg), 'read_ring_bscan:UnverifiedCoverage');
 writePair(root, 2, 0, captureA, 0:3, 20:23, true, false);
-expectError(@() read_ring_bscan(cfg), 'read_ring_saved_channel:UnverifiedMetadata');
+expectError(@() read_ring_bscan(cfg), 'read_ring_bscan:UncertainRound');
 % The restarted measurement reused trigger counters and suffix. Card 1 skipped
 % sequence zero, while card 2 was free to use it.
 writePair(root, 1, 0, captureA, 0:3, 20:23, true, true);
@@ -69,6 +71,78 @@ bscan = read_ring_bscan(cfg);
 assert(strcmp(bscan.captureEvidence.source, 'legacy-explicit'));
 testRoundDiscovery(root, captureA, cfg);
 disp('PASS capture identity, scoped round discovery, paired waveforms, historical selection and physical direction');
+end
+
+function testDefaultRoundFallback(root, captureId, cfg)
+cfg.dataDir = fullfile(root, 'fallback');
+mkdir(cfg.dataDir);
+writePair(cfg.dataDir, 1, 0, captureId, 0:3, 20:23, true, false, 0, true);
+writePair(cfg.dataDir, 2, 3, captureId, 0:3, 20:23, true, true, 0, true);
+writePair(cfg.dataDir, 1, 5, captureId, 0:3, 24:27, true, true, 1, true, [15360 16384 16896 17408]);
+writePair(cfg.dataDir, 2, 7, captureId, 0:3, 24:27, true, true, 1, true, [17408 16896 16384 15360]);
+bscan = read_ring_bscan(cfg);
+assert(bscan.captureEvidence.rounds == "1" && ...
+       bscan.captureEvidence.unrelatedFailures.issue == "unsealed_sidecar");
+assert(isequal(bscan.wl1{1}(1,:), single([1 3])) && isequal(bscan.wl2{3}(1,:), single([3 1])));
+wrong = cfg;
+wrong.fs = 125e6;
+expectError(@() read_ring_bscan(wrong), 'read_ring_bscan:SamplingRate');
+wrong = cfg;
+wrong.sampleCount = 4;
+expectError(@() read_ring_bscan(wrong), 'read_ring_saved_channel:UnverifiedMetadata');
+cfg.roundId = "0";
+expectError(@() read_ring_bscan(cfg), 'read_ring_saved_channel:UnverifiedMetadata');
+cfg.roundId = "1";
+picked = read_ring_bscan(cfg);
+assert(picked.captureEvidence.rounds == "1");
+cfg.useAllRounds = true;
+cfg.roundId = ["0"; "1"];
+cfg.filesPerChannel = 2;
+expectError(@() read_ring_bscan(cfg), 'read_ring_saved_channel:UnverifiedMetadata');
+cfg.filesPerChannel = 1;
+cfg.useAllRounds = false;
+cfg.roundId = "";
+
+% A damaged old V2 pair has exactly the two identified rounds. Neither
+% is eligible, even if the other card has a complete copy of each round.
+writePair(cfg.dataDir, 1, 0, captureId, [0:3 0:3], 20:27, true, true);
+fid = fopen(fullfile(cfg.dataDir, 'Card1_ChB_fixture_000.dat'), 'a');
+assert(fid >= 0);
+fwrite(fid, uint8(1));
+fclose(fid);
+for card = 1:2
+    writePair(cfg.dataDir, card, 9+card, captureId, 0:3, 28:31, true, true, 2, true);
+end
+picked = read_ring_bscan(cfg);
+assert(picked.captureEvidence.rounds == "2");
+cfg.roundFileIndices = {0, [3 7], [], []};
+expectError(@() read_ring_bscan(cfg), 'read_ring_bscan:UnverifiedCoverage');
+cfg.roundFileIndices = {};
+
+% A bad strict-parser field survives discovery, but can be associated with
+% its proven pair. Default skips it. Explicit selection keeps its error ID.
+writePair(cfg.dataDir, 1, 0, captureId, 0:3, 20:23, true, true, 0, true);
+sidecar = fullfile(cfg.dataDir, 'Card1_ChA_fixture_000.dat.jsonl');
+changeSidecar(sidecar, '"triggerSeq":20', '"triggerSeq":65536');
+bscan = read_ring_bscan(cfg);
+assert(bscan.captureEvidence.rounds == "1" && ...
+       bscan.captureEvidence.unrelatedFailures.issue == "invalid_trigger_identity");
+cfg.roundId = "0";
+expectError(@() read_ring_bscan(cfg), 'read_ring_saved_channel:UnverifiedMetadata');
+cfg.roundId = "";
+changeSidecar(sidecar, '"fileRound":"0"', '"fileRound":"4"');
+expectError(@() read_ring_bscan(cfg), 'read_ring_bscan:UncertainRound');
+cfg.roundFileIndices = {5, 7, [], []};
+picked = read_ring_bscan(cfg);
+assert(picked.captureEvidence.rounds == "1");
+end
+
+function changeSidecar(file, from, to)
+body = strrep(fileread(file), from, to);
+fid = fopen(file, 'w');
+assert(fid >= 0);
+fprintf(fid, '%s', body);
+fclose(fid);
 end
 
 function testRoundDiscovery(root, captureId, cfg)
@@ -146,6 +220,9 @@ for card = 1:2
 end
 cfg.roundId = "2";
 expectError(@() read_ring_bscan(cfg), 'read_ring_bscan:ReadLimit');
+cfg.roundId = "";
+expectError(@() read_ring_bscan(cfg), 'read_ring_bscan:ReadLimit');
+cfg.roundId = "2";
 cfg.filesPerChannel = 2;
 bscan = read_ring_bscan(cfg);
 assert(isequal(bscan.wl1{1}(1,:), single([1 3])) && ...

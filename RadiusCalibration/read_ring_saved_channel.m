@@ -1,4 +1,4 @@
-function [data, evidence] = read_ring_saved_channel(dataDir, channelId, fileSuffix, fileCount, triggersPerFile, sampleCount, fileIndices, metadataOnly)
+function [data, evidence, badPair] = read_ring_saved_channel(dataDir, channelId, fileSuffix, fileCount, triggersPerFile, sampleCount, fileIndices, metadataOnly)
 %READ_RING_SAVED_CHANNEL 读取监听程序保存的单通道连续数据文件
 %
 % 输入:
@@ -14,6 +14,7 @@ function [data, evidence] = read_ring_saved_channel(dataDir, channelId, fileSuff
 %   data : [sampleCount x fileCount*triggersPerFile] single 矩阵，
 %          列顺序 = 文件序号顺序、文件内触发顺序。
 %   evidence : 旁车覆盖、逐列身份和采样间隔。没有旁车的旧文件按原定长规则读取。
+%   badPair : 仅在 metadataOnly 且请求第三个输出时返回已识别的文件损坏。
 %
 % 命名规则（对应 FileSaver::generateFileName）:
 %   Card{N}_Ch{A|B}_{z}_{seq:03d}.dat
@@ -43,6 +44,9 @@ if ~isempty(suffix)
 end
 
 if nargin < 8, metadataOnly = false; end
+probe = metadataOnly && nargout >= 3;
+badPair = [];
+evidence = [];
 data = [];
 if ~metadataOnly, data = zeros(sampleCount, fileCount * triggersPerFile, 'single'); end
 columns = cell(fileCount, 1);
@@ -51,6 +55,7 @@ sampleInterval = NaN(1, fileCount);
 offset = 0;
 
 inputFiles = strings(fileCount, 2);
+fileStamps = NaN(fileCount, 6); % bytes and mtime for A, B and the sidecar
 for k = 0:(fileCount - 1)
     fileIndex = fileIndices(k+1);
     fileA = sprintf('Card%d_ChA%s_%03d.dat', cardId, suffix, fileIndex);
@@ -73,8 +78,12 @@ for k = 0:(fileCount - 1)
     sidecar = fullfile(dataDir, [fileA '.jsonl']);
     nColumns = triggersPerFile;
     if isfile(sidecar)
-        [columns{k+1}, sampleInterval(k+1)] = readSidecar( ...
-            sidecar, dataDir, fileA, fileB, cardId, sampleCount);
+        [columns{k+1}, sampleInterval(k+1), fileStamps(k+1,:), issue] = readSidecar( ...
+            sidecar, dataDir, fileA, fileB, cardId, sampleCount, probe);
+        if issue ~= ""
+            badPair = struct('fileA', string(fileA), 'issue', issue);
+            return;
+        end
         nColumns = height(columns{k+1});
         if nColumns > triggersPerFile
             error('read_ring_saved_channel:Size', '旁车列数超过每文件触发上限：%s', sidecar);
@@ -98,6 +107,13 @@ for k = 0:(fileCount - 1)
             fileName, numel(u), expectedPerFile, nColumns, sampleCount);
     end
 
+    if hasSidecar(k+1)
+        lane = 2 * isLaneB + (1:2);
+        if ~isequal(fileStamp(filePath), fileStamps(k+1,lane))
+            error('read_ring_saved_channel:FileChanged', '文件在读取期间发生变化（%s）。', filePath);
+        end
+    end
+
     % float16 -> single，再按列主序恢复为 [sampleCount x triggersPerFile]
     block = half_to_single(u);
     block = reshape(block, [sampleCount, nColumns]);
@@ -110,7 +126,7 @@ if any(hasSidecar) && ~all(hasSidecar)
     error('read_ring_saved_channel:UnverifiedMetadata', '文件中混有缺少旁车的数据。');
 end
 evidence = struct('hasSidecar', all(hasSidecar), 'columns', table(), ...
-    'sampleIntervalNs', NaN, 'inputFiles', inputFiles);
+    'sampleIntervalNs', NaN, 'inputFiles', inputFiles, 'fileStamps', fileStamps);
 if all(hasSidecar)
     if any(sampleInterval ~= sampleInterval(1))
         error('read_ring_saved_channel:UnverifiedMetadata', '所选文件的采样间隔不一致。');
@@ -120,8 +136,14 @@ if all(hasSidecar)
 end
 end
 
-function [columns, sampleInterval] = readSidecar(path, dataDir, fileA, fileB, card, sampleCount)
+function [columns, sampleInterval, stamps, issue] = readSidecar( ...
+        path, dataDir, fileA, fileB, card, sampleCount, probe)
+issue = "";
+columns = [];
+sampleInterval = NaN;
+stamps = NaN(1,6);
 try
+    stamps(5:6) = fileStamp(path);
     lines = splitlines(string(fileread(path)));
     lines(strlength(strtrim(lines)) == 0) = [];
     layout = jsondecode(char(lines(1)));
@@ -147,21 +169,23 @@ try
     if ~isscalar(sampleInterval) || ~isfinite(sampleInterval) || sampleInterval <= 0
         error('缺少有效采样间隔。');
     end
-    for name = {fileA, fileB}
-        lane = dir(fullfile(dataDir, name{1}));
-        if ~isscalar(lane) || lane.isdir || lane.bytes ~= 2 * sampleCount * count
-            error('双通道文件长度与确认列数不匹配。');
+    for lane = 1:2
+        names = {fileA, fileB};
+        stamp = fileStamp(fullfile(dataDir, names{lane}));
+        stamps(2*lane-1:2*lane) = stamp;
+        if stamp(1) ~= 2 * sampleCount * count
+            error('read_ring_saved_channel:PairLength', '双通道文件长度与确认列数不匹配。');
         end
     end
     decoded = arrayfun(@(line) jsondecode(char(line)), lines(2:end-1), 'UniformOutput', false);
     rows = vertcat(decoded{:});
     if any(~strcmp({rows.type}, 'column')) || ~isequal([rows.column], 1:count)
-        error('旁车列记录不连续。');
+        error('read_ring_saved_channel:InvalidColumns', '旁车列记录不连续。');
     end
     if any(cellfun(@isempty, regexp({rows.session}, '^[0-9]+$', 'once'))) || ...
             any(cellfun(@isempty, regexp({rows.round}, '^[0-9]+$', 'once'))) || ...
             any([rows.triggerSeq] < 0 | [rows.triggerSeq] > 65535 | mod([rows.triggerSeq], 1) ~= 0)
-        error('旁车触发身份无效。');
+        error('read_ring_saved_channel:InvalidTrigger', '旁车触发身份无效。');
     end
     if layout.version == 2
         [declared, fileSession, fileRound] = ring_raw_pair_round(layout);
@@ -179,8 +203,28 @@ try
         string({rows.round}).', [rows.logicalIndex].', [rows.triggerSeq].', complete.', ...
         repmat(string(fileA), count, 1), repmat(string(fileB), count, 1), ...
         'VariableNames', {'captureId', 'session', 'round', 'index', 'trigger', 'complete', 'fileA', 'fileB'});
+    if ~isequal(fileStamp(path), stamps(5:6))
+        error('read_ring_saved_channel:FileChanged', '旁车在读取期间发生变化（%s）。', path);
+    end
 catch exception
+    if probe
+        switch exception.identifier
+            case 'read_ring_saved_channel:PairLength'
+                issue = "paired_length_mismatch";
+            case 'read_ring_saved_channel:InvalidColumns'
+                issue = "invalid_column_record";
+            case 'read_ring_saved_channel:InvalidTrigger'
+                issue = "invalid_trigger_identity";
+        end
+        if issue ~= "", return; end
+    end
     error('read_ring_saved_channel:UnverifiedMetadata', ...
         '无法验证原始波形旁车 %s：%s', path, exception.message);
 end
+end
+
+function stamp = fileStamp(path)
+entry = dir(path);
+stamp = [NaN NaN];
+if isscalar(entry) && ~entry.isdir, stamp = [entry.bytes entry.datenum]; end
 end
