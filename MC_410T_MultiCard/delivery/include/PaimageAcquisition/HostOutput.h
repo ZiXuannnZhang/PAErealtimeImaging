@@ -45,7 +45,7 @@ public:
     void beginSession(std::uint64_t s){
         std::lock_guard<std::mutex> lock(normalizationMutex_);
         cancelTailState(true);
-        expireFailedBoundary((std::numeric_limits<Time>::max)(), nullptr);
+        expireFailedBoundary(0, nullptr, true);
         closedFailedCountRound_ = {};
         captureSession_ = s;
         captureId_ = std::make_shared<const std::string>(
@@ -63,7 +63,7 @@ public:
     void endSession(){
         std::lock_guard<std::mutex> lock(normalizationMutex_);
         cancelTailState(true);
-        expireFailedBoundary((std::numeric_limits<Time>::max)(), nullptr);
+        expireFailedBoundary(0, nullptr, true);
         if(frontendSessionSink_)frontendSessionSink_(0);
     }
     void setFrontendSessionSink(FrontendSessionSink sink){
@@ -86,7 +86,7 @@ public:
     }
     enum class SaveTailOutcome {
         Admitted, SourceIncomplete, SourceMissing, UnverifiedRound,
-        Expired, BindingUnavailable, WriterFault, QueueFull, Rejected
+        Expired, SessionEnded, BindingUnavailable, WriterFault, QueueFull, Rejected
     };
     using SaveTailSink = std::function<void(RoundIdentity, std::uint16_t, int, SaveTailOutcome)>;
     void setSaveTailSink(SaveTailSink sink) { saveTailSink_ = std::move(sink); }
@@ -136,7 +136,7 @@ private:
     void sealCard(int,RoundIdentity);
     void cancelTailState(bool seal);
     void failSaveBoundary(const PhysicalRoundEvent&, std::uint64_t oldSaveGeneration);
-    void expireFailedBoundary(Time, const std::vector<Time>*);
+    void expireFailedBoundary(Time, const std::vector<Time>*, bool sessionEnded = false);
     void finishFailedBoundary();
     bool waitingForFailedBoundary() const;
     void closeFailedCountCard(int);

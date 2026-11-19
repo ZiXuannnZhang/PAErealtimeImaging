@@ -205,6 +205,7 @@ bool NetworkController::createPaimageBackend(QString& error){
             case SaveTail::SourceMissing: reason = "source_missing"; break;
             case SaveTail::UnverifiedRound: reason = "unverified_round"; break;
             case SaveTail::Expired: reason = "expired"; break;
+            case SaveTail::SessionEnded: reason = "session_ended"; break;
             case SaveTail::BindingUnavailable: reason = "binding_unavailable"; break;
             case SaveTail::WriterFault: reason = "writer_fault"; break;
             case SaveTail::QueueFull: reason = "queue_full"; break;

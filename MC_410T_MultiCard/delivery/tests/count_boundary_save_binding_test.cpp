@@ -714,9 +714,9 @@ int main(int argc, char** argv)
 
     // Drive packet assembly as well as classification. Each trigger spans
     // two datagrams, and the final trigger wraps from 65535 to 0.
-    enum class TailCase { Complete, EarlyNext, Expired, Partial, AdjacentTimeout, TimeoutSplit };
+    enum class TailCase { Complete, EarlyNext, Expired, Partial, PartialFinal, SessionEnded, AdjacentTimeout, TimeoutSplit };
     for (const auto mode : {TailCase::Complete, TailCase::EarlyNext, TailCase::Expired, TailCase::Partial,
-                            TailCase::AdjacentTimeout, TailCase::TimeoutSplit}) {
+                            TailCase::PartialFinal, TailCase::SessionEnded, TailCase::AdjacentTimeout, TailCase::TimeoutSplit}) {
         const bool adjacentTimeout = mode == TailCase::AdjacentTimeout || mode == TailCase::TimeoutSplit;
         const bool split = mode == TailCase::TimeoutSplit;
         using Outcome = HostOutput::SaveTailOutcome;
@@ -790,6 +790,10 @@ int main(int argc, char** argv)
             send(1, 65535, 1, 1006);
             send(1, 1, 0, 1007);
         }
+        if (mode == TailCase::PartialFinal) {
+            send(1, 65535, 1, 1006);
+            check(send(1, 0, 0, 1008) == Decision::Accepted, "final assembly began with one packet");
+        }
         if (adjacentTimeout) {
             send(1, 65535, 1, 1006);
             send(1, 1, 0, 1020);
@@ -817,6 +821,11 @@ int main(int argc, char** argv)
         } else if (mode == TailCase::Partial) {
             whole(1, 0, 1013); // switches off the incomplete previous assembly
             check(send(1, 65535, 1, 1015) == Decision::RecentTrigger, "source rejected the missing packet");
+        } else if (mode == TailCase::PartialFinal) {
+            source.poll(1108 * ms);
+            check(send(1, 0, 1, 1109) == Decision::RecentTrigger, "closed final cannot be admitted twice");
+        } else if (mode == TailCase::SessionEnded) {
+            output.endSession();
         } else {
             const std::vector<Time> stalledWatermarks{1005 * ms, 1005 * ms};
             output.pollPhysicalRoundTimeout(1005 * ms, &stalledWatermarks, 1112 * ms);
@@ -826,6 +835,11 @@ int main(int argc, char** argv)
             send(1, 65535, 1, 1113);
             whole(1, 0, 1114);
         }
+        if (mode == TailCase::SessionEnded) {
+            source.prepareStart(779);
+            output.beginSession(779);
+            source.completeStart(true, 0);
+        }
         whole(1, 2, adjacentTimeout ? 1141 : 1116);
         const auto done = output.stopSaving();
         check(until([&] { return output.savingApplied(done); }), "new request settles");
@@ -834,7 +848,7 @@ int main(int argc, char** argv)
         const auto contains = [&](int card, std::uint16_t trigger, Outcome why) {
             return std::find(outcomes.begin(), outcomes.end(), std::make_tuple(card, trigger, why)) != outcomes.end();
         };
-        const auto oldCount = mode == TailCase::Expired ? 1 : 3;
+        const auto oldCount = mode == TailCase::Expired || mode == TailCase::SessionEnded ? 1 : 3;
         check(settled[0].confirmed == 3 && settled[1].confirmed == std::uint64_t(oldCount),
               "old request confirms just its own columns");
         check(settled[0].admitted == 3 && settled[0].rejected == 0 &&
@@ -852,7 +866,7 @@ int main(int argc, char** argv)
             check(hasSize(oldPath, (split ? 2 : oldCount) * samples * 2), "old paired lanes match expected Count tail");
             const auto finalPath = split ? QDir(initial.directory).filePath(
                 QString("Card2_Ch%1_wrap_001.dat").arg(QChar(lane))) : oldPath;
-            if (mode != TailCase::Expired) {
+            if (oldCount == 3 && mode != TailCase::PartialFinal) {
                 QFile finalFile(finalPath);
                 QByteArray lastColumn(samples * 2, '\0'), expected(samples * 2, '\0');
                 for (int sample = 0; sample < samples; ++sample) expected[2 * sample + 1] = 0x3c;
@@ -877,8 +891,12 @@ int main(int argc, char** argv)
             const auto row = QJsonDocument::fromJson(sidecar.readLine()).object();
             check(!row.value("late").toBool(true) && row.value("logicalIndex").toInt(-1) == col &&
                   row.value("triggerSeq").toInt(-1) == (65534 + col) % 65536 &&
-                  row.value("complete").toBool() == !(mode == TailCase::Partial && col == 1),
+                  row.value("complete").toBool() == !((mode == TailCase::Partial && col == 1) ||
+                      (mode == TailCase::PartialFinal && col == 2)),
                   "logical indices, wrap and source completeness stay truthful");
+            if (mode == TailCase::PartialFinal && col == 2)
+                check(row.value("receivedSlots").toInt() == 1 && row.value("expectedSlots").toInt() == 2,
+                      "sealed final retains its original missing packet evidence");
         }
         check(QJsonDocument::fromJson(sidecar.readLine()).object().value("confirmedColumns").toInt(-1) == (split ? 1 : oldCount),
               "old slow-card seal follows admitted source frames");
@@ -887,6 +905,11 @@ int main(int argc, char** argv)
                   "slow penultimate and final admissions reported");
         } else if (mode == TailCase::Partial) {
             check(contains(1, 65535, Outcome::SourceIncomplete), "partial source distinguished from save rejection");
+        } else if (mode == TailCase::PartialFinal) {
+            check(contains(1, 0, Outcome::SourceIncomplete), "incomplete final has its own admitted receipt");
+        } else if (mode == TailCase::SessionEnded) {
+            check(contains(1, 0, Outcome::SessionEnded) && !contains(1, 0, Outcome::Expired),
+                  "session stop does not report expiry");
         } else {
             check(mode == TailCase::Expired ? contains(1, 0, Outcome::Expired) :
                   contains(1, 0, Outcome::Admitted), "old final has a single admission or expiry");

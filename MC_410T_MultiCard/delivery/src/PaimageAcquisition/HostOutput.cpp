@@ -85,7 +85,7 @@ void HostOutput::requestStop()
 {
     std::lock_guard<std::mutex> lock(normalizationMutex_);
     cancelTailState(true);
-    expireFailedBoundary((std::numeric_limits<Time>::max)(), nullptr);
+    expireFailedBoundary(0, nullptr, true);
     sourceSaveRequest_.reset();
     workers_.requestStop();
 }
@@ -199,7 +199,7 @@ void HostOutput::closeFailedCountCard(int card)
     sealCard(card, failedBoundary_->round);
 }
 
-void HostOutput::expireFailedBoundary(Time now, const std::vector<Time>* cardWatermarks)
+void HostOutput::expireFailedBoundary(Time now, const std::vector<Time>* cardWatermarks, bool sessionEnded)
 {
     if (failedBoundary_ && failedBoundary_->count) {
         const auto& failure = *failedBoundary_;
@@ -208,9 +208,10 @@ void HostOutput::expireFailedBoundary(Time now, const std::vector<Time>* cardWat
             const auto watermark = cardWatermarks && card < cardWatermarks->size()
                 ? (*cardWatermarks)[card] : 0;
             const bool fault = sourceSaveRequest_->cards[card].fault.load();
-            if (!fault && now <= failure.deadline && watermark <= failure.deadline) continue;
-            reportSaveTail(failure.round, failure.trigger, int(card),
-                           fault ? SaveTailOutcome::WriterFault : SaveTailOutcome::Expired);
+            if (!fault && !sessionEnded && now <= failure.deadline && watermark <= failure.deadline) continue;
+            const auto outcome = fault ? SaveTailOutcome::WriterFault :
+                sessionEnded ? SaveTailOutcome::SessionEnded : SaveTailOutcome::Expired;
+            reportSaveTail(failure.round, failure.trigger, int(card), outcome);
             closeFailedCountCard(int(card));
         }
     }
