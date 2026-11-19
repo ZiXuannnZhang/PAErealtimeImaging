@@ -1,3 +1,4 @@
+#include "RingPngWriter.h"
 #include <QApplication>
 #include <QSettings>
 #include "PaimageAcquisition/TraceBundle.h"
@@ -512,7 +513,12 @@ static void redirectStdioToFile() {
 }
 #endif // _WIN32
 
+#ifdef MAINWINDOW_START_TEST_SEAM
+int runReceiverForTest(int argc, char** argv, const std::function<void(MainWindow&)>& configureWindow) {
+#else
 int main(int argc, char* argv[]) {
+#endif
+    if (const auto result = ring_png::runWriterMode(argc, argv)) return *result;
     QString targetIPsError;
     if (!parseTargetIPs(argc, argv, &g_targetIPs, &targetIPsError)) {
         const QByteArray errorBytes = targetIPsError.toLocal8Bit();
@@ -600,6 +606,9 @@ int main(int argc, char* argv[]) {
         MainWindow window;
         window.setWindowTitle(QStringLiteral("PAimage接收诊断版 — receiver-diagnostics — ")+QString::fromLatin1(PAIMAGE_GIT_SHA).left(12));
         window.show();
+#ifdef MAINWINDOW_START_TEST_SEAM
+        configureWindow(window);
+#endif
         if (!diagnosticError.isEmpty()) qWarning().noquote() << "诊断日志初始化：" << diagnosticError;
         ret = app.exec();
     }

@@ -53,6 +53,7 @@ public:
     bool startSvc();
     void stopSvc();
     bool isRunning() const;
+    bool hasActiveService() const { return m_svcResourcesActive; }
 
     // 配置（在 startSvc 之前调用）
     void configure(const GeneralParams &general,

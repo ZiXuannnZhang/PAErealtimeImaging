@@ -11,6 +11,7 @@
 #include "RingImageWidget.h"
 #include "RingColorBarWidget.h"
 #include "TimeoutPresentation.h"
+#include "RingPngWriter.h"
 
 class QLabel;
 class QVBoxLayout;
@@ -68,16 +69,12 @@ public:
     bool saveWindowPngs(const QString &dir, const QString &suffix, int seq) const;
     // UI-thread capture only; the returned writer owns immutable pixels and
     // ranges and can render/save on a worker after Ring/CUDA reset.
-    static constexpr int kPngEdge = 1600;
-    using PngPair = std::array<QImage, 2>;
-    struct PngResult {
-        QString status;
-        QString retainedFile;
-        bool saved() const { return status == QStringLiteral("saved"); }
-    };
+    static constexpr int kPngEdge = ring_png::kEdge;
+    using PngPair = ring_png::Pair;
+    using PngResult = ring_png::Result;
     static PngPair renderPngPair(const std::vector<float>& frame, int srcN,
                                  RingImageWidget::Range range1, RingImageWidget::Range range2,
-                                 std::shared_ptr<const DisplayMask> mask);
+                                 std::shared_ptr<const DisplayMask> mask, const std::atomic_bool* cancel = nullptr);
     static PngResult writePngPair(const PngPair&, const QString& dir, const QString& suffix, const QString& tag);
     static PngResult commitPngPair(const PngPair&, const QString& firstPath, const QString& secondPath);
     using PngWriter = std::function<bool(const QString&, const QString&)>;

@@ -26,7 +26,7 @@ public:
         }
         std::size_t frameBytes = 0;
         QString tag;
-        std::function<std::array<QImage, 2>()> render;
+        std::function<std::array<QImage, 2>(const std::atomic_bool*)> render;
         int nx = 0;
         explicit operator bool() const { return bool(render); }
     };

@@ -361,7 +361,9 @@ MainWindow::MainWindow(QWidget *parent)
     m_previewRenderPool.setMaxThreadCount(1);
     m_timeoutPngPool.setMaxThreadCount(1);
     m_terminalRenderPool.setMaxThreadCount(2);
-    m_terminalWritePool.setMaxThreadCount(1);
+    const auto completePng = [this](quint64 id, const ring_png::Result& result) { finishRingPng(id, result); };
+    m_timeoutPngWriter = std::make_unique<ring_png::Channel>(completePng);
+    m_terminalPngWriter = std::make_unique<ring_png::Channel>(completePng);
     connect(m_imagingController, &ImagingController::ringTerminalUnavailable, this,
         [this](quint64 session, quint64 round, quint64 submit, const QString& reason) {
             rejectTerminalPng({session, round}, submit, reason);
@@ -438,8 +440,8 @@ MainWindow::MainWindow(QWidget *parent)
         const QPointer<MainWindow> owner(this);
         if (target) {
             queueTerminalPng(round, target, submitIndex, seq, terminal->size() * sizeof(float),
-                [terminal, nx, r1, r2, mask] {
-                    return ImagingDisplayWindow::renderPngPair(*terminal, nx, r1, r2, mask);
+                [terminal, nx, r1, r2, mask](const std::atomic_bool* cancel) {
+                    return ImagingDisplayWindow::renderPngPair(*terminal, nx, r1, r2, mask, cancel);
                 });
         }
         if (terminal || !display) release();
@@ -666,7 +668,8 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_imagingController, &ImagingController::svcStopped, this, [this]() {
         m_imagingServiceReady.store(false, std::memory_order_release);
-        settlePendingTerminalPngs(QStringLiteral("service_cancelled"));
+        settlePendingTerminalPngs(m_closing ? QStringLiteral("application_closed") :
+                                             QStringLiteral("service_cancelled"));
         m_pendingRingDirectionRevision = 0;
         m_ringDirectionTarget = {};
         m_ringSnapshotAdmissionBlocked.store(true, std::memory_order_release);
@@ -701,7 +704,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_imagingController, &ImagingController::ringConfigChangedWhileRunning,
             this, [this]() {
-        if (!m_imagingController || !m_imagingController->isRingMode()) return;
+        if (m_closing || !m_imagingController || !m_imagingController->isRingMode()) return;
         m_restartRingOnSvcStop = true;
         m_imagingServiceReady.store(false, std::memory_order_release);
         updateRingImagingStatus();
@@ -779,14 +782,10 @@ MainWindow::~MainWindow()
 {
     m_imagingServiceReady.store(false, std::memory_order_release);
     settlePendingTerminalPngs(QStringLiteral("application_closed"));
-    {
-        const std::lock_guard<std::mutex> lock(m_timeoutPngMutex);
-        m_timeoutPngClosed = true;
-    }
+    closePngDelivery();
     m_timeoutPngPool.waitForDone();
     m_previewRenderPool.waitForDone();
     m_terminalRenderPool.waitForDone();
-    m_terminalWritePool.waitForDone();
     if (m_imagingBypass) m_imagingBypass->stop();
 
     // 关闭成像子进程
@@ -4168,44 +4167,73 @@ void MainWindow::updateNetworkInfoIndicator()
 // =====================================================================
 void MainWindow::closeEvent(QCloseEvent *event)
 {
-    // 发现线程在短轮询间隔内检查取消标志并尽快退出（socket 由 RAII 关闭）
+    if (m_closeReady) {
+        event->accept();
+        return;
+    }
+    event->ignore();
+    if (m_closing) return;
+    m_closing = true;
+    m_restartRingOnSvcStop = false;
+#ifdef MAINWINDOW_START_TEST_SEAM
+    const int pngGraceMs = m_testPngGraceMs;
+#else
+    constexpr int pngGraceMs = 4000;
+#endif
+    QTimer::singleShot(pngGraceMs, Qt::PreciseTimer, this, [this] {
+        closePngDelivery();
+        settlePendingTerminalPngs(QStringLiteral("application_closed"));
+        finishWindowClose();
+    });
+    setEnabled(false);
     if (m_discoveryCancel) m_discoveryCancel->store(true);
     saveSettings();
 
     if (!m_netController) {
-        event->accept();
+        finishNetworkClose();
         return;
     }
-
-    // 忽略本次关闭事件，等后台停止完成后再真正退出
-    event->ignore();
-    setEnabled(false);
-
-    // 用 lambda 连接 stopped() 信号，确保只触发一次后就 quit
-    // 使用 Qt::SingleShotConnection（Qt6）或手动 disconnect
-    auto conn = std::make_shared<QMetaObject::Connection>();
-    *conn = connect(m_netController, &NetworkController::stopped, this, [this, conn]() {
-        disconnect(*conn);   // 单次触发后立即断开
-        // 删除 controller（已完全停止，安全删除）
-        if (m_netController) {
-            m_netController->setParent(nullptr);
-            delete m_netController;
-            m_netController = nullptr;
-        }
-        QApplication::quit();
-    }, Qt::QueuedConnection);
-
-    // 超时兜底：最多 4s 后强制退出（防止某线程卡死无法正常退出）
-    QTimer::singleShot(4000, this, [this]() {
-        if (m_netController) {
-            m_netController->setParent(nullptr);
-            delete m_netController;
-            m_netController = nullptr;
-        }
-        QApplication::quit();
-    });
-
+    connect(m_netController, &NetworkController::stopped, this, &MainWindow::finishNetworkClose,
+            Qt::QueuedConnection);
+    // Give the PNG deadline its earlier event-loop turn before the network
+    // fallback may have to wait for a raw-save drain.
+    QTimer::singleShot(4000, Qt::PreciseTimer, this, &MainWindow::finishNetworkClose);
     m_netController->stop();
+}
+
+void MainWindow::finishNetworkClose()
+{
+    if (m_closeNetworkDone) return;
+    m_closeNetworkDone = true;
+    delete m_netController;
+    m_netController = nullptr;
+    m_imagingServiceReady.store(false, std::memory_order_release);
+    if (m_imagingBypass) m_imagingBypass->stop();
+    if (!m_imagingController || !m_imagingController->hasActiveService()) {
+        finishImagingClose();
+        return;
+    }
+    connect(m_imagingController, &ImagingController::svcStopped, this, &MainWindow::finishImagingClose);
+    m_imagingController->stopSvc();
+}
+
+void MainWindow::finishImagingClose()
+{
+    m_closeImagingDone = true;
+    settlePendingTerminalPngs(QStringLiteral("application_closed"));
+    finishWindowClose();
+}
+
+void MainWindow::finishWindowClose()
+{
+    if (!m_closing || !m_closeNetworkDone || !m_closeImagingDone || m_closeReady) return;
+    {
+        const std::lock_guard<std::mutex> lock(m_pngMutex);
+        if (!m_pngTasks.empty()) return;
+    }
+    closePngDelivery();
+    m_closeReady = true;
+    QApplication::quit();
 }
 
 // =====================================================================
@@ -5508,7 +5536,8 @@ void MainWindow::updateRingImagingStatus()
 
 void MainWindow::reportRingPng(const paimage::RoundIdentity& round,
                                const paimage::TimeoutPresentation::Target& target, quint64 submitIndex,
-                               const QString& status, const QString& retained, RingPngKind kind)
+                               const QString& status, const QString& retained, RingPngKind kind,
+                               const ring_png::Paths& paths)
 {
     const bool saved = status == QStringLiteral("saved");
     QJsonObject fields{{"measurementSession", QString::number(round.measurementSession)},
@@ -5517,6 +5546,8 @@ void MainWindow::reportRingPng(const paimage::RoundIdentity& round,
     fields.insert(QStringLiteral("source"), QStringLiteral("ui"));
     if (!target.listenId.isEmpty()) fields.insert(QStringLiteral("listenId"), target.listenId);
     if (!retained.isEmpty()) fields.insert(QStringLiteral("retainedFile"), retained);
+    if (!paths[0].isEmpty()) fields.insert(QStringLiteral("path532nm"), paths[0]);
+    if (!paths[1].isEmpty()) fields.insert(QStringLiteral("path1064nm"), paths[1]);
     const bool timeout = kind == RingPngKind::Timeout;
     const auto event = timeout
         ? (saved ? QStringLiteral("ring_timeout_png_saved") : QStringLiteral("ring_timeout_png_write_failed"))
@@ -5566,98 +5597,121 @@ void MainWindow::settlePendingTerminalPngs(const QString& cancellation)
 void MainWindow::queueTerminalPng(const paimage::RoundIdentity& round,
                                   const paimage::TimeoutPresentation::Target& target,
                                   quint64 submitIndex, int sequence, std::size_t frameBytes,
-                                  TerminalPngRender render)
+                                  PngRender render)
 {
-    // Budget two 3600-square float pairs plus the paired PNG staging images.
-    constexpr unsigned kMaxJobs = 2;
-    constexpr std::size_t kMaxPngBytes = 256u * 1024u * 1024u;
-    constexpr std::size_t kRenderedBytes = 2 * ImagingDisplayWindow::kPngEdge *
-        ImagingDisplayWindow::kPngEdge * sizeof(QRgb);
-    const auto bytes = frameBytes + kRenderedBytes;
-    bool reserved = false;
-    {
-        const std::lock_guard<std::mutex> lock(m_terminalPngBudgetMutex);
-        if (m_terminalPngJobs < kMaxJobs && bytes <= kMaxPngBytes - m_terminalPngBytes) {
-            ++m_terminalPngJobs;
-            m_terminalPngBytes += bytes;
-            reserved = true;
-        }
-    }
-    if (!reserved) {
-        reportRingPng(round, target, submitIndex, QStringLiteral("png_queue_full"));
-        return;
-    }
-    auto settle = [this, round, target, submitIndex, bytes](const ImagingDisplayWindow::PngResult& result) {
-        {
-            const std::lock_guard<std::mutex> lock(m_terminalPngBudgetMutex);
-            --m_terminalPngJobs;
-            m_terminalPngBytes -= bytes;
-        }
-        reportRingPng(round, target, submitIndex, result.status, result.retainedFile);
-    };
     const auto tag = QStringLiteral("_session%1_round%2_frame%3")
         .arg(round.measurementSession).arg(round.roundGeneration).arg(sequence);
-    try {
-        m_terminalRenderPool.start([this, target, tag, settle, render = std::move(render)]() mutable {
-            try {
-                auto images = render();
-                render = {}; // Slow disk I/O must never retain a terminal transport buffer.
-                m_terminalWritePool.start([target, tag, settle, images = std::move(images)] {
-                    ImagingDisplayWindow::PngResult result{QStringLiteral("write_exception"), {}};
-                    try {
-                        result = ImagingDisplayWindow::writePngPair(images, target.directory, target.suffix, tag);
-                    } catch (...) {}
-                    settle(result);
-                });
-            } catch (...) {
-                settle({QStringLiteral("render_exception"), {}});
-            }
-        });
-    } catch (...) {
-        settle({QStringLiteral("render_admission_failed"), {}});
-    }
+    queueRingPng(std::make_shared<RingPngTask>(round, target, submitIndex, RingPngKind::Terminal, frameBytes),
+                 tag, std::move(render));
 }
 
 void MainWindow::queueTimeoutPng(paimage::RoundIdentity round, paimage::TimeoutPresentation::Job job)
 {
-    const auto target = job.target;
-    auto report = [this, round, target](const QString& status, const QString& retained = {}) {
-        reportRingPng(round, target, 0, status, retained, RingPngKind::Timeout);
-    };
-    const std::lock_guard<std::mutex> lock(m_timeoutPngMutex);
-    if (m_timeoutPngClosed || !job) return;
+    if (!job) return;
     const auto bytes = job.capture.frameBytes;
-    if (m_timeoutPngBusy || bytes == 0 || bytes != paimage::TimeoutPresentation::Capture::checkedFrameBytes(
+    if (bytes == 0 || bytes != paimage::TimeoutPresentation::Capture::checkedFrameBytes(
             job.capture.nx, bytes / sizeof(float))) {
-        report(m_timeoutPngBusy ? QStringLiteral("png_queue_full") : QStringLiteral("invalid_capture_layout"));
+        reportRingPng(round, job.target, 0, QStringLiteral("invalid_capture_layout"), {}, RingPngKind::Timeout);
         return;
     }
-    m_timeoutPngBusy = true;
-    try {
-        m_timeoutPngPool.start([this, job = std::move(job), report]() mutable {
-            ImagingDisplayWindow::PngResult result{QStringLiteral("render_exception"), {}};
+    queueRingPng(std::make_shared<RingPngTask>(round, job.target, 0, RingPngKind::Timeout, bytes),
+                 std::move(job.capture.tag), std::move(job.capture.render));
+}
+
+void MainWindow::queueRingPng(std::shared_ptr<RingPngTask> task, QString tag, PngRender render)
+{
+    constexpr unsigned kTerminalLimit = 2;
+    constexpr std::size_t kTerminalBytes = 256u * 1024u * 1024u;
+    const bool timeout = task->kind == RingPngKind::Timeout;
+    QString rejection;
+    quint64 id = 0;
+    {
+        const std::lock_guard<std::mutex> lock(m_pngMutex);
+        if (m_pngAdmissionClosed) {
+            rejection = QStringLiteral("application_closed");
+        } else if (timeout ? m_timeoutPngBusy :
+                   m_terminalPngJobs >= kTerminalLimit ||
+                   task->bytes > kTerminalBytes - m_terminalPngBytes ||
+                   ring_png::kPairBytes > kTerminalBytes - m_terminalPngBytes - task->bytes) {
+            rejection = QStringLiteral("png_queue_full");
+        } else {
+            id = ++m_nextPngId;
+            m_pngTasks.emplace(id, task);
+            if (timeout) m_timeoutPngBusy = true;
+            else {
+                ++m_terminalPngJobs;
+                m_terminalPngBytes += task->bytes + ring_png::kPairBytes;
+            }
+            auto& pool = timeout ? m_timeoutPngPool : m_terminalRenderPool;
             try {
-                auto images = job.capture.render();
-                job.capture.render = {}; // Disk waits own only the downsampled pair.
-                result.status = QStringLiteral("write_exception");
-#ifdef MAINWINDOW_START_TEST_SEAM
-                if (m_testBeforeTimeoutPngWrite) m_testBeforeTimeoutPngWrite();
-#endif
-                result = ImagingDisplayWindow::writePngPair(images, job.target.directory,
-                                                             job.target.suffix, job.capture.tag);
+                pool.start([this, id, task, tag = std::move(tag), render = std::move(render)]() mutable {
+                    ring_png::Pair images;
+                    QString status;
+                    if (!task->cancel.load(std::memory_order_relaxed)) {
+                        try { images = render(&task->cancel); }
+                        catch (...) { status = QStringLiteral("render_exception"); }
+                    }
+                    render = {}; // Release the captured float pair before staging or writing.
+                    if (task->cancel.load(std::memory_order_relaxed)) return;
+                    QMetaObject::invokeMethod(this, [this, id, task, tag, status, images = std::move(images)]() mutable {
+                        if (task->cancel.load(std::memory_order_relaxed)) return;
+                        if (!status.isEmpty()) {
+                            finishRingPng(id, {status, {}});
+                            return;
+                        }
+                        auto& writer = task->kind == RingPngKind::Timeout ? m_timeoutPngWriter : m_terminalPngWriter;
+                        writer->enqueue(id, std::move(images), ring_png::targetPaths(task->target.directory,
+                                                                                  task->target.suffix, tag));
+                    }, Qt::QueuedConnection);
+                });
             } catch (...) {
-                job.capture.render = {};
+                rejection = QStringLiteral("render_admission_failed");
             }
-            {
-                const std::lock_guard<std::mutex> lock(m_timeoutPngMutex);
-                m_timeoutPngBusy = false;
-            }
-            report(result.status, result.retainedFile);
-        });
-    } catch (...) {
-        m_timeoutPngBusy = false;
-        report(QStringLiteral("render_admission_failed"));
+        }
     }
+    if (rejection.isEmpty()) return;
+    if (id) finishRingPng(id, {rejection, {}});
+    else reportRingPng(task->round, task->target, task->submitIndex, rejection, {}, task->kind);
+}
+
+void MainWindow::finishRingPng(quint64 id, const ring_png::Result& result)
+{
+    decltype(m_pngTasks)::node_type job;
+    {
+        const std::lock_guard<std::mutex> lock(m_pngMutex);
+        job = m_pngTasks.extract(id);
+        if (job.empty()) return;
+        const auto& task = *job.mapped();
+        if (task.kind == RingPngKind::Timeout) m_timeoutPngBusy = false;
+        else {
+            --m_terminalPngJobs;
+            m_terminalPngBytes -= task.bytes + ring_png::kPairBytes;
+        }
+    }
+    const auto& task = *job.mapped();
+    reportRingPng(task.round, task.target, task.submitIndex, result.status, result.retainedFile, task.kind, result.paths);
+    QMetaObject::invokeMethod(this, &MainWindow::finishWindowClose, Qt::QueuedConnection);
+}
+
+void MainWindow::closePngDelivery()
+{
+    std::vector<quint64> ids;
+    {
+        const std::lock_guard<std::mutex> lock(m_pngMutex);
+        if (m_pngAdmissionClosed) return;
+        m_pngAdmissionClosed = true;
+        for (const auto& [id, task] : m_pngTasks) {
+            task->cancel.store(true, std::memory_order_relaxed);
+            ids.push_back(id);
+        }
+        m_timeoutPngPool.clear();
+        m_terminalRenderPool.clear();
+    }
+    // Writers drain a ready receipt before classifying work that has already
+    // crossed the process boundary. Only work owned by this host is left below.
+    m_timeoutPngWriter->shutdown();
+    m_terminalPngWriter->shutdown();
+    for (const auto id : ids) finishRingPng(id, {QStringLiteral("application_closed"), {}});
 }
 
 void MainWindow::prepareRingMeasurement(quint64 session)

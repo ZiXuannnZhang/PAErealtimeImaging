@@ -1,7 +1,6 @@
-# Reuse the production target's complete sources and links, replacing only main().
+# Reuse production sources and links; the test entry can run the receiver's main loop.
 # MainWindow, controller, assembler, feed and ImagingSvc are all real implementations.
 get_target_property(_startup_sources MC410T_Receiver SOURCES)
-list(REMOVE_ITEM _startup_sources src/main.cpp)
 add_executable(mainwindow_start_integration_test
     ${_startup_sources} tests/mainwindow_start_integration_test.cpp)
 foreach(_property INCLUDE_DIRECTORIES COMPILE_DEFINITIONS LINK_LIBRARIES)
@@ -11,7 +10,7 @@ endforeach()
 target_compile_definitions(mainwindow_start_integration_test PRIVATE MAINWINDOW_START_TEST_SEAM)
 set_target_properties(mainwindow_start_integration_test PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/startup-isolated")
-add_dependencies(mainwindow_start_integration_test ImagingSvc)
+add_dependencies(mainwindow_start_integration_test ImagingSvc MC410T_Receiver)
 set_property(TARGET mainwindow_start_integration_test APPEND PROPERTY LINK_DEPENDS "$<TARGET_FILE:ImagingSvc>")
 add_custom_command(TARGET mainwindow_start_integration_test POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -29,5 +28,7 @@ enable_testing()
 add_test(NAME mainwindow_start_integration_test COMMAND mainwindow_start_integration_test)
 add_test(NAME mainwindow_listener_restart_png_test COMMAND mainwindow_start_integration_test --listener-restart-png)
 add_test(NAME mainwindow_preview_pressure_test COMMAND mainwindow_start_integration_test --preview-pressure)
-set_tests_properties(mainwindow_start_integration_test mainwindow_listener_restart_png_test mainwindow_preview_pressure_test PROPERTIES
+add_test(NAME mainwindow_png_shutdown_test COMMAND mainwindow_start_integration_test --png-shutdown)
+set_tests_properties(mainwindow_start_integration_test mainwindow_listener_restart_png_test
+    mainwindow_preview_pressure_test mainwindow_png_shutdown_test PROPERTIES
     RUN_SERIAL TRUE TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

@@ -1,6 +1,7 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 #include "TimeoutPresentation.h"
+#include "RingPngWriter.h"
 
 #include <QMainWindow>
 #include <QTimer>
@@ -120,7 +121,7 @@ private slots:
 private:
 #ifdef MAINWINDOW_START_TEST_SEAM
     friend class MainWindowStartIntegrationTest;
-    std::function<void()> m_testBeforeTimeoutPngWrite;
+    int m_testPngGraceMs = 4000;
     int m_testAssemblerConfigs = 0;
     int m_testFeedStarts = 0;
 #endif
@@ -342,22 +343,42 @@ private:
     void rejectTerminalPng(paimage::RoundIdentity, quint64 submitIndex, const QString& reason);
     void settlePendingTerminalPngs(const QString& cancellation = {});
     enum class RingPngKind { Terminal, Timeout };
+    struct RingPngTask {
+        paimage::RoundIdentity round;
+        paimage::TimeoutPresentation::Target target;
+        quint64 submitIndex;
+        RingPngKind kind;
+        std::size_t bytes;
+        std::atomic_bool cancel{false};
+
+        RingPngTask(paimage::RoundIdentity round, const paimage::TimeoutPresentation::Target& target,
+                    quint64 submitIndex, RingPngKind kind, std::size_t bytes)
+            : round(round), target(target), submitIndex(submitIndex), kind(kind), bytes(bytes) {}
+    };
     void reportRingPng(const paimage::RoundIdentity&, const paimage::TimeoutPresentation::Target&,
                        quint64 submitIndex, const QString& status, const QString& retained = {},
-                       RingPngKind kind = RingPngKind::Terminal);
-    using TerminalPngRender = std::function<std::array<QImage, 2>()>;
+                       RingPngKind kind = RingPngKind::Terminal, const ring_png::Paths& paths = {});
+    using PngRender = std::function<ring_png::Pair(const std::atomic_bool*)>;
     void queueTerminalPng(const paimage::RoundIdentity&, const paimage::TimeoutPresentation::Target&,
-                          quint64 submitIndex, int sequence, std::size_t frameBytes, TerminalPngRender);
+                          quint64 submitIndex, int sequence, std::size_t frameBytes, PngRender);
     void queueTimeoutPng(paimage::RoundIdentity, paimage::TimeoutPresentation::Job);
+    void queueRingPng(std::shared_ptr<RingPngTask>, QString tag, PngRender);
+    void finishRingPng(quint64 id, const ring_png::Result&);
+    void closePngDelivery();
+    void finishNetworkClose();
+    void finishImagingClose();
+    void finishWindowClose();
     QThreadPool m_previewRenderPool;
     QThreadPool m_timeoutPngPool;
-    std::mutex m_timeoutPngMutex;
-    bool m_timeoutPngBusy = false, m_timeoutPngClosed = false;
     QThreadPool m_terminalRenderPool;
-    QThreadPool m_terminalWritePool;
-    std::mutex m_terminalPngBudgetMutex;
+    std::unique_ptr<ring_png::Channel> m_terminalPngWriter, m_timeoutPngWriter;
+    std::mutex m_pngMutex;
+    std::map<quint64, std::shared_ptr<RingPngTask>> m_pngTasks;
+    quint64 m_nextPngId = 0;
+    bool m_timeoutPngBusy = false, m_pngAdmissionClosed = false;
     unsigned m_terminalPngJobs = 0;
     std::size_t m_terminalPngBytes = 0;
+    bool m_closing = false, m_closeNetworkDone = false, m_closeImagingDone = false, m_closeReady = false;
     std::shared_ptr<std::atomic_bool> m_terminalPreviewLease{std::make_shared<std::atomic_bool>(false)};
     quint64 m_firstRingMeasurementSession = 0;
     void prepareRingMeasurement(quint64 session);

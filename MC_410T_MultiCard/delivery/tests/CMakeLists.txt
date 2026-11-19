@@ -150,7 +150,7 @@ add_test(NAME ring_display_mapping_test COMMAND ring_display_mapping_test)
 # offscreen 平台先例同 diagnostic_dialog_test。
 add_executable(ring_display_render_test
     ring_display_render_test.cpp
-    ../src/ImagingDisplayWindow.cpp
+    ../src/ImagingDisplayWindow.cpp ../src/RingPngWriter.cpp
     ../src/RingImageWidget.cpp
     ../src/RingColorBarWidget.cpp
     # 头文件显式列出（沿主工程 add_executable 先例）：AUTOMOC 需要

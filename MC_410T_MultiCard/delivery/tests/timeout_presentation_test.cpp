@@ -19,7 +19,7 @@ int main(){
     auto pixels=std::make_shared<int>(42);
     std::weak_ptr<int> lifetime=pixels;
     std::vector<int> order{1}; // TimeoutBoundary / binding already committed.
-    presentation.publish(7,0,{sizeof(int), "_frame1", [pixels,&order] {
+    presentation.publish(7,0,{sizeof(int), "_frame1", [pixels,&order](const std::atomic_bool*) {
         check(*pixels==42,"C10 old pixels owned after live presentation destruction");
         order.push_back(3);
         return std::array<QImage, 2>{};
@@ -33,11 +33,11 @@ int main(){
     });
     check(job && job.target.directory=="old-directory/recon_png" && job.target.suffix=="suffix",
           "C10 committed old directory");
-    job.capture.render();
+    job.capture.render(nullptr);
     check(order==std::vector<int>({1,2,3}),"C10 boundary -> capture -> reset -> render");
     job.capture.render={};
     check(lifetime.expired(),"C10 full-size payload released before asynchronous write");
-    const TimeoutPresentation::Capture emptyPair{1, "_frame2", [] { return std::array<QImage, 2>{}; }};
+    const TimeoutPresentation::Capture emptyPair{1, "_frame2", [](const std::atomic_bool*) { return std::array<QImage, 2>{}; }};
     presentation.publish(7,1,emptyPair);
     job=presentation.close(7,2,false,{},[]{});
     check(job&&job.target.directory=="new-ui-directory/recon_png","C10 manual directory unchanged");

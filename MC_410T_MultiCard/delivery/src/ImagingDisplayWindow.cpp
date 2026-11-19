@@ -25,10 +25,6 @@
 #include <QTimer>
 #include <QSettings>
 #include <QImage>
-#include <QDateTime>
-#include <QSaveFile>
-#include <QFileInfo>
-#include <QDir>
 
 ImagingDisplayWindow::ImagingDisplayWindow(QWidget *parent)
     : QWidget(parent)
@@ -427,7 +423,7 @@ ImagingDisplayWindow::PngWriter ImagingDisplayWindow::makePngWriter(
     auto capture = makePngCapture(std::move(frame), srcN, range1, range2, std::move(mask), std::move(tag));
     if (!capture) return {};
     return [capture = std::move(capture)](const QString& dir, const QString& suffix) {
-        return writePngPair(capture.render(), dir, suffix, capture.tag).saved();
+        return writePngPair(capture.render(nullptr), dir, suffix, capture.tag).saved();
     };
 }
 
@@ -444,23 +440,24 @@ paimage::TimeoutPresentation::Capture ImagingDisplayWindow::makePngCapture(
 {
     const auto bytes = frame ? paimage::TimeoutPresentation::Capture::checkedFrameBytes(srcN, frame->size()) : 0;
     if (!bytes) return {};
-    return {bytes, std::move(tag), [frame = std::move(frame), range1, range2, mask = std::move(mask), srcN] {
-        return renderPngPair(*frame, srcN, range1, range2, mask);
+    return {bytes, std::move(tag), [frame = std::move(frame), range1, range2, mask = std::move(mask), srcN](const std::atomic_bool* cancel) {
+        return renderPngPair(*frame, srcN, range1, range2, mask, cancel);
     }, srcN};
 }
 
 ImagingDisplayWindow::PngPair ImagingDisplayWindow::renderPngPair(
     const std::vector<float>& frame, int srcN, RingImageWidget::Range range1,
-    RingImageWidget::Range range2, std::shared_ptr<const DisplayMask> mask)
+    RingImageWidget::Range range2, std::shared_ptr<const DisplayMask> mask,
+    const std::atomic_bool* cancel)
 {
-    if (srcN <= 0 || frame.size() < static_cast<std::size_t>(srcN) * srcN * 2) return {};
+    if (!paimage::TimeoutPresentation::Capture::checkedFrameBytes(srcN, frame.size())) return {};
     constexpr int kOut = kPngEdge;
 
     // 与窗口渲染一致的映射：当前手动/自适应色标范围（m_range1/2），块平均降采样到 1600²；
     // 方向与 renderFrame 相同（列=x、行自顶向下 y 由小到大，顺时针展开）。
     // 掩膜（工作一）：与 renderFrame 同步置零——掩膜内源像素按 0 参与块平均
     // （环内块全掩 → 输出 0；环外不变；掩膜关闭时与基线逐位一致）。
-    auto render = [srcN, mask](const float *buf, const RingImageWidget::Range &r) {
+    auto render = [srcN, mask, cancel](const float *buf, const RingImageWidget::Range &r) {
         QImage img(kOut, kOut, QImage::Format_ARGB32);
         if (img.isNull()) return img;
         const double lo = r.lower;
@@ -470,6 +467,7 @@ ImagingDisplayWindow::PngPair ImagingDisplayWindow::renderPngPair(
              static_cast<int>(mask->rows.size()) == srcN)
                 ? mask->rows.data() : nullptr;
         for (int y = 0; y < kOut; ++y) {
+            if (cancel && cancel->load(std::memory_order_relaxed)) return QImage{};
             const int y0 = y * srcN / kOut;
             const int y1 = std::max(y0 + 1, (y + 1) * srcN / kOut);
             const int sy0 = y0;   // 顺时针展开：行自顶向下 = 源 y 索引由小到大
@@ -509,30 +507,13 @@ ImagingDisplayWindow::PngPair ImagingDisplayWindow::renderPngPair(
 ImagingDisplayWindow::PngResult ImagingDisplayWindow::writePngPair(
     const PngPair& pair, const QString& dir, const QString& suffix, const QString& tag)
 {
-    if (dir.isEmpty() || !QDir().mkpath(dir)) return {QStringLiteral("directory_failed"), {}};
-    const QString time = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
-    const QString name = suffix.trimmed();
-    const QString base = (name.isEmpty() ? time : name + "_" + time) + tag;
-    return commitPngPair(pair, QDir(dir).filePath(base + "_532nm.png"),
-                         QDir(dir).filePath(base + "_1064nm.png"));
+    return ring_png::commitPair(pair, ring_png::targetPaths(dir, suffix, tag));
 }
 
 ImagingDisplayWindow::PngResult ImagingDisplayWindow::commitPngPair(
     const PngPair& pair, const QString& firstPath, const QString& secondPath)
 {
-    if (pair[0].isNull() || pair[1].isNull()) return {QStringLiteral("render_failed"), {}};
-    if (firstPath == secondPath || QFileInfo::exists(firstPath) || QFileInfo::exists(secondPath))
-        return {QStringLiteral("path_collision"), {}};
-
-    QSaveFile first(firstPath), second(secondPath);
-    if (!first.open(QIODevice::WriteOnly) || !pair[0].save(&first, "PNG"))
-        return {QStringLiteral("first_png_failed"), {}};
-    if (!second.open(QIODevice::WriteOnly) || !pair[1].save(&second, "PNG"))
-        return {QStringLiteral("second_png_failed"), {}};
-    if (!first.commit()) return {QStringLiteral("first_png_failed"), {}};
-    if (second.commit()) return {QStringLiteral("saved"), {}};
-    if (QFile::remove(firstPath)) return {QStringLiteral("second_png_failed"), {}};
-    return {QStringLiteral("partial_png"), firstPath};
+    return ring_png::commitPair(pair, {firstPath, secondPath});
 }
 
 void ImagingDisplayWindow::showImage(const QVector<float> &, int, int, int)

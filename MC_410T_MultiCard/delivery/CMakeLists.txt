@@ -53,6 +53,7 @@ set(SOURCES
     src/RingTimevarLowpass.cpp
     src/RingTimevarLowpassSettings.cpp
     src/ImagingDisplayWindow.cpp
+    src/RingPngWriter.cpp
     src/RingImageWidget.cpp
     src/RingColorBarWidget.cpp
     src/RingBlockAssembler.cpp
