@@ -109,15 +109,18 @@ void OutputWorkers::cardLoop(){
             if (stopping_ && !barrier && !f) break;
         }
         if (barrier) {
-            try { if (barrier->apply) barrier->apply(); }
-            catch (...) { event(Result::CallbackFailed, {}); setSavingEnabled(false); }
-            if (barrier->generation) saveApplied_ = barrier->generation;
+            try {
+                if (barrier->apply) barrier->apply();
+                if (barrier->generation) saveApplied_ = barrier->generation;
+            } catch (...) {
+                event(Result::CallbackFailed, {});
+            }
             continue;
         }
-        if(!f){try{if(saveIdle_)saveIdle_();}catch(...){event(Result::CallbackFailed,{});setSavingEnabled(false);}continue;}
+        if(!f){try{if(saveIdle_)saveIdle_();}catch(...){event(Result::CallbackFailed,{});}continue;}
         saveDequeued_.fetch_add(1);saveDepth_.fetch_sub(1);const auto begin=std::chrono::steady_clock::now();
         try{if(cardSink_)cardSink_(f);event(Result::CardConsumed,f);}
-        catch(...){event(Result::CallbackFailed,f);setSavingEnabled(false);}
+        catch(...){event(Result::CallbackFailed,f);}
         {std::lock_guard<std::mutex> lock(cardMutex_);++completedOrdinal_;}
         updateMax(maxSaveWorkerNs_,std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-begin).count());
     }

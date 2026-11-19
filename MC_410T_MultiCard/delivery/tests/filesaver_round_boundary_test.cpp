@@ -1055,6 +1055,46 @@ int main(int argc, char** argv)
               verifyFile(dir.path()+"/Card1_ChB_late_000.dat", halvesOf({-10})),
               "R3 parent pending data confirmed and preserved after late failure");
     }
+    for (const bool bothFault : {false, true}) {
+        QTemporaryDir root;
+        FileSaver a(0), b(1);
+        AcqConfig config;
+        config.acqTimeNs = kSamples * 4;
+        DataProcessor pa(0, nullptr, nullptr, config), pb(1, nullptr, nullptr, config);
+        std::atomic<int> healthy{-1};
+        std::vector<FileSaver::SaveResult> results;
+        HostOutput output(32, 50, {&pa, &pb}, {&a, &b}, nullptr);
+        a.setOpenRaceForTest([](const QString&, const QString&) {
+            throw std::runtime_error("save callback");
+        });
+        if (bothFault) b.setFlushFaultForTest(2);
+        output.start();
+        output.beginSession(1);
+        const auto started = output.startSaving(root.path(), 100, "request", {},
+            [&](const FileSaver::SaveResult& result) { results.push_back(result); },
+            [&](int count, int) { healthy = count; });
+        require(until([&] { return output.savingApplied(started); }), "writer request applied");
+        RoundFixture fixture(app, 4000);
+        output.card(fixture.makeFrame(3, 1000));
+        require(until([&] { return healthy == 1; }), "card callback fault degrades request");
+        output.card(fixture.makeFrame(4, 2000)); // Rejected before FIFO admission.
+        for (int i = 0; i < 16; ++i) {
+            auto frame = std::const_pointer_cast<CardFrame>(fixture.makeFrame(5 + i, 3000 + i));
+            frame->card = 1;
+            output.card(frame);
+        }
+        if (bothFault)
+            require(until([&] { return healthy == 0; }), "last healthy card fault is visible");
+        output.stop(); // Listener exit uses the same settlement as explicit stop.
+        require(results.size() == 2, "listener settled request for both cards");
+        check(results[0].admitted == 1 && results[0].rejected == 1 &&
+              results[0].failed == 1 && results[0].ioFault, "callback exception is attributed");
+        check(results[1].admitted == 16 && results[1].confirmed == (bothFault ? 0 : 16) &&
+              results[1].failed == (bothFault ? 16 : 0), "health does not affect the healthy card");
+        for (const auto& result : results)
+            check(result.admitted == result.confirmed + result.discarded + result.failed,
+                  "per-card receipt balances at the request boundary");
+    }
     if (g_failures == 0) {
         std::cout << "filesaver_round_boundary_test: ALL PASS\n";
         return 0;

@@ -47,7 +47,7 @@ HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors
                         frontendBarrierSink_(event.measurementSession,event.roundGeneration);
                     beginTailSeals(event);
                 }
-                const bool canFail = saveRequested_ && !failedBoundary_ && saveBoundaryFaulted_ &&
+                const bool canFail = sourceSaveRequest_ && !failedBoundary_ && saveBoundaryFaulted_ &&
                     (event.kind == PhysicalRoundEvent::Kind::CountBoundary ||
                      event.kind == PhysicalRoundEvent::Kind::TimeoutBoundary) &&
                     !saveBoundaryFaulted_();
@@ -61,8 +61,13 @@ HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors
     for(std::size_t i=0;i<processors_.size();++i){
         auto saver=savers_[i];processors_[i]->setDirectSaveSink([saver](const TriggerGroupPtr& f){return saver->consumeTriggerGroup(f);});
     }
-    workers_.setSavingHooks([this]{for(auto s:savers_)s->serviceCloseRequest();},
-                           [this]{for(auto s:savers_){if(configurationRestart_)s->suspendForSourceRestart();else s->stopSaving();}});
+    workers_.setSavingHooks([this] {
+        for (std::size_t card = 0; card < savers_.size(); ++card) {
+            try { savers_[card]->serviceCloseRequest(); }
+            catch (...) { savers_[card]->failSaveCallback(); }
+            updateSaveHealth(int(card));
+        }
+    }, [this] { settleSaveRequest(configurationRestart_.load()); });
 }
 HostOutput::~HostOutput(){stop();}
 
@@ -77,6 +82,7 @@ void HostOutput::requestStop()
     std::lock_guard<std::mutex> lock(normalizationMutex_);
     cancelTailState(true);
     expireFailedBoundary((std::numeric_limits<Time>::max)(), nullptr);
+    sourceSaveRequest_.reset();
     workers_.requestStop();
 }
 void HostOutput::assemblyStarted(int card,std::uint64_t session,std::uint64_t ingress,Time first){
@@ -88,7 +94,11 @@ void HostOutput::assemblyStarted(int card,std::uint64_t session,std::uint64_t in
             a.round={session,s.roundGeneration};}
 }
 void HostOutput::sealCard(int card,RoundIdentity round){
-    workers_.enqueueSaveBarrier([this,card,round]{savers_.at(card)->sealRound(round);});
+    workers_.enqueueSaveBarrier([this, card, round] {
+        try { savers_.at(card)->sealRound(round); }
+        catch (...) { savers_.at(card)->failSaveCallback(); }
+        updateSaveHealth(card);
+    });
 }
 void HostOutput::beginTailSeals(const PhysicalRoundEvent& event){
     if(!event.roundGeneration)return;
@@ -128,7 +138,9 @@ void HostOutput::failSaveBoundary(const PhysicalRoundEvent& event)
         failure.saveGeneration = saveSessionResolver_
             ? saveSessionResolver_(failure.round.measurementSession, failure.round.roundGeneration) : 0;
         failure.deadline = boundaryObservedNs_ + kSaveTailGraceNs;
-        failure.waiting.assign(savers_.size(), true);
+        failure.waiting.resize(savers_.size());
+        for (std::size_t card = 0; card < savers_.size(); ++card)
+            failure.waiting[card] = !sourceSaveRequest_->cards[card].fault.load();
     }
     failedBoundary_ = std::move(failure);
 }
@@ -146,7 +158,7 @@ bool HostOutput::waitingForFailedBoundary() const
 
 void HostOutput::finishFailedBoundary()
 {
-    if (waitingForFailedBoundary()) return;
+    if (deferredSaveControls_.empty() || waitingForFailedBoundary()) return;
     auto controls = std::move(deferredSaveControls_);
     deferredSaveControls_.clear();
     for (auto& apply : controls) apply();
@@ -159,7 +171,8 @@ void HostOutput::expireFailedBoundary(Time now, const std::vector<Time>* cardWat
         for (std::size_t card = 0; card < failure.waiting.size(); ++card) {
             const auto watermark = cardWatermarks && card < cardWatermarks->size()
                 ? (*cardWatermarks)[card] : now;
-            if (!failure.waiting[card] || watermark <= failure.deadline) continue;
+            const bool fault = sourceSaveRequest_ && sourceSaveRequest_->cards[card].fault.load();
+            if (!failure.waiting[card] || (!fault && watermark <= failure.deadline)) continue;
             failure.waiting[card] = false;
             if (saveTailSink_) saveTailSink_(failure.round, failure.trigger, int(card), false);
         }
@@ -171,25 +184,26 @@ void HostOutput::pushSaveFrame(const Frame& frame, const PhysicalRoundClassifica
                                bool timeoutEligible)
 {
     if (!failedBoundary_) {
-        workers_.pushCard(frame);
+        enqueueSaveFrame(frame, true);
         return;
     }
     auto& failure = *failedBoundary_;
     if (!failure.count) {
-        if (timeoutEligible) {
-            const bool queued = workers_.pushCard(frame);
-            if (saveTailSink_) saveTailSink_(failure.round, frame->trigger, frame->card, queued);
-        }
+        const bool queued = enqueueSaveFrame(frame, timeoutEligible);
+        if (timeoutEligible && saveTailSink_)
+            saveTailSink_(failure.round, frame->trigger, frame->card, queued);
         return;
     }
     const RoundIdentity round{classification.measurementSession, classification.roundGeneration};
     if (round != failure.round || frame->trigger != failure.trigger || !classification.isFinalLogicalTrigger ||
-        !failure.waiting[frame->card] || frame->closed <= 0 || frame->closed > failure.deadline)
+        !failure.waiting[frame->card] || frame->closed <= 0 || frame->closed > failure.deadline) {
+        enqueueSaveFrame(frame, false);
         return;
+    }
 
     failure.waiting[frame->card] = false;
     converter_.tagSaveSession(frame, failure.saveGeneration);
-    const bool queued = workers_.pushCard(frame);
+    const bool queued = enqueueSaveFrame(frame, true);
     if (saveTailSink_) saveTailSink_(failure.round, frame->trigger, frame->card, queued);
     finishFailedBoundary();
 }
@@ -315,10 +329,47 @@ void HostOutput::observe(Frame f,std::uint8_t stage,std::uint8_t reason,std::uin
         r.card=f->card;r.trigger=f->trigger;r.packet=f->basePacket;r.sourceIPv4=f->sourceIPv4;}
     trace_->push(r);
 }
+bool HostOutput::enqueueSaveFrame(const Frame& frame, bool eligible)
+{
+    if (!sourceSaveRequest_) return eligible && workers_.pushCard(frame);
+    auto& card = sourceSaveRequest_->cards[frame->card];
+    const bool queued = eligible && !card.fault.load() && workers_.pushCard(frame);
+    if (queued) ++card.admitted;
+    else ++card.rejected;
+    return queued;
+}
+
+void HostOutput::updateSaveHealth(int card, bool notify)
+{
+    if (!writerSaveRequest_ || savers_[card]->isSaving()) return;
+    auto& request = *writerSaveRequest_;
+    if (request.cards[card].fault.exchange(true)) return;
+    --request.healthy;
+    if (notify && request.healthChanged)
+        request.healthChanged(request.healthy, int(savers_.size()));
+}
+
 void HostOutput::consumeCard(Frame f){
     const auto begin=SocketReceiver::now();
-    auto group=converter_.convertForSave(f);
-    auto result=processors_.at(f->card)->deliverAssembled(group,true,false);
+    if (!writerSaveRequest_ || writerSaveRequest_->cards[f->card].fault.load()) {
+        observe(f, 5, std::uint8_t(OutputWorkers::Result::SavingDiscard));
+        return;
+    }
+    auto* saver = savers_[f->card];
+    const auto acceptedBefore = saver->acceptedCount();
+    DataProcessor::DeliveryResult result;
+    try {
+        auto group = converter_.convertForSave(f);
+        result = processors_.at(f->card)->deliverAssembled(group, true, false);
+    } catch (...) {
+        result.exception = true;
+    }
+    if (result.exception) {
+        if (acceptedBefore == saver->acceptedCount())
+            ++writerSaveRequest_->cards[f->card].callbackFailures;
+        saver->failSaveCallback();
+    }
+    updateSaveHealth(f->card);
     // stage 7: 0 save consumer result, 1 frontend enqueue accepted,
     // 2 frontend submit result (FrontendSubmitResult), 3 publisher returned,
     // 4 exception, 5 session stale after conversion.
@@ -349,51 +400,94 @@ void HostOutput::consumeSync(const SyncFrame& sync){
     }
     if(timing_){const auto end=SocketReceiver::now();TimingRecord r;r.startNs=begin;r.endNs=end;r.session=sync.session;r.threadId=GetCurrentThreadId();r.card=-1;r.kind=std::uint16_t(TimingKind::SyncWorker);r.value0=std::uint32_t(sync.cards.size());timing_->observe(r,end-begin>=500000);}
 }
-std::uint64_t HostOutput::configureSaving(bool enabled, std::function<void()> apply)
+std::uint64_t HostOutput::configureSaving(std::shared_ptr<SaveRequest> request,
+                                          std::function<void()> apply)
 {
     const auto generation = workers_.reserveSavingConfiguration();
-    auto control = [this, enabled, generation, apply = std::move(apply)]() mutable {
+    auto control = [this, request = std::move(request), generation, apply = std::move(apply)]() mutable {
         cancelTailState(false);
-        if (enabled) failedBoundary_.reset();
-        saveRequested_ = enabled;
-        workers_.configureSaving(enabled, std::move(apply), generation);
+        if (request) failedBoundary_.reset();
+        sourceSaveRequest_ = std::move(request);
+        workers_.configureSaving(bool(sourceSaveRequest_), std::move(apply), generation);
     };
     if (waitingForFailedBoundary()) deferredSaveControls_.push_back(std::move(control));
     else control();
     return generation;
 }
 
+void HostOutput::applySaveRequest(const std::shared_ptr<SaveRequest>& request,
+                                  const std::function<void(FileSaver&)>& apply)
+{
+    settleSaveRequest(false);
+    writerSaveRequest_ = request;
+    for (std::size_t card = 0; card < savers_.size(); ++card) {
+        auto* saver = savers_[card];
+        request->cards[card].confirmedAtStart = saver->savedCount();
+        try { apply(*saver); }
+        catch (...) { saver->failSaveCallback(); }
+        updateSaveHealth(int(card), false);
+    }
+    if (request->healthChanged) request->healthChanged(request->healthy, int(savers_.size()));
+}
+
+void HostOutput::settleSaveRequest(bool reconfigure)
+{
+    auto request = std::move(writerSaveRequest_);
+    if (!request) return;
+    for (std::size_t card = 0; card < savers_.size(); ++card) {
+        auto* saver = savers_[card];
+        const auto& totals = request->cards[card];
+        FileSaver::SaveResult result{};
+        result.cardId = int(card);
+        try {
+            result = reconfigure ? saver->suspendForSourceRestart() : saver->stopSaving();
+        } catch (...) {
+            saver->failSaveCallback();
+            result.confirmed = saver->savedCount() - totals.confirmedAtStart;
+            result.failed = totals.admitted - std::min(totals.admitted, result.confirmed);
+            result.ioFault = true;
+            result.configurationSegment = reconfigure;
+        }
+        result.ioFault = result.ioFault || totals.fault.load();
+        result.admitted = totals.admitted;
+        result.rejected = totals.rejected;
+        result.confirmed = std::min(result.confirmed, result.admitted);
+        const auto unconfirmed = result.admitted - result.confirmed;
+        result.failed = std::min(unconfirmed, result.failed + totals.callbackFailures);
+        result.discarded = unconfirmed - result.failed;
+        if (!reconfigure) saver->setSessionDirResolver({});
+        if (request->settled) request->settled(result);
+    }
+}
+
 std::uint64_t HostOutput::startSaving(const QString& dir, int count, const QString& suffix,
-                                     std::function<QString(std::uint64_t)> directoryFor)
+                                     std::function<QString(std::uint64_t)> directoryFor,
+                                     SaveResultSink settled, SaveHealthSink health)
 {
     std::lock_guard<std::mutex> lock(normalizationMutex_);
-    return configureSaving(true, [this, dir, count, suffix,
-                                           directoryFor = std::move(directoryFor)] {
-        for (auto saver : savers_) {
-            if (directoryFor) saver->setSessionDirResolver(directoryFor);
-            saver->startSaving(dir, count, suffix);
-        }
+    auto request = std::make_shared<SaveRequest>(savers_.size(), std::move(settled), std::move(health));
+    return configureSaving(request, [this, request, dir, count, suffix,
+                                      directoryFor = std::move(directoryFor)] {
+        applySaveRequest(request, [&](FileSaver& saver) {
+            if (directoryFor) saver.setSessionDirResolver(directoryFor);
+            saver.startSaving(dir, count, suffix);
+        });
     });
 }
 
-std::uint64_t HostOutput::stopSaving(SaveResultSink done)
+std::uint64_t HostOutput::stopSaving()
 {
     std::lock_guard<std::mutex> lock(normalizationMutex_);
-    return configureSaving(false, [this, done = std::move(done)] {
-        for (auto saver : savers_) {
-            const auto result = saver->stopSaving();
-            // Release the old request's bindings only after its accepted prefix
-            // has been written and both lanes have settled.
-            if (done) {
-                saver->setSessionDirResolver({});
-                done(result);
-            }
-        }
-    });
+    return configureSaving({}, [this] { settleSaveRequest(false); });
 }
-std::uint64_t HostOutput::resumeSaving(){
+
+std::uint64_t HostOutput::resumeSaving(SaveResultSink settled, SaveHealthSink health)
+{
     std::lock_guard<std::mutex> lock(normalizationMutex_);
-    return configureSaving(true,[this]{for(auto s:savers_)s->resumeAfterSourceRestart();});
+    auto request = std::make_shared<SaveRequest>(savers_.size(), std::move(settled), std::move(health));
+    return configureSaving(request, [this, request] {
+        applySaveRequest(request, [](FileSaver& saver) { saver.resumeAfterSourceRestart(); });
+    });
 }
 void HostOutput::requestClose(){for(auto s:savers_)s->requestClose();}
 }

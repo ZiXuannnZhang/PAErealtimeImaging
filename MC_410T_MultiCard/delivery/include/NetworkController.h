@@ -217,6 +217,8 @@ signals:
                             bool commandSucceeded);
     void measurementStopFailed(const QString& measurementSessionId,
                                const QString& reason);
+    void rawSaveHealthChanged(int healthyCards, int totalCards);
+    void configurationDrainChanged(bool waiting);
     void stopped();   // 所有子线程已退出，stop() 后台工作完成
     // started() 已移除，改用 start(config, onStarted回调) 方式通知 UI
     // 保存文件翻滚低频事件（容量 / 物理轮次），由 UI 桥接进诊断记录
@@ -237,6 +239,8 @@ private:
     void waitForPaimageWorkers();
     void finishPaimageStop();
     bool configurePaimage(int,int,int,const QString&);
+    bool dispatchPaimageConfig(int ns, int a, int b, const QString& trigger);
+    void applyPaimageSaveRequest(bool resume);
     bool startPaimageMeasurement();
     bool stopPaimageMeasurement();
     void pollPaimage();
@@ -248,6 +252,7 @@ private:
     QTimer* m_paimageTimer=nullptr;
     QTimer* m_paimageLoopMonitorTimer=nullptr;
     bool m_paimageStartPending=false;
+    bool m_paimageConfigDrain = false;
     bool m_paimageStopPending=false; // controller thread only; remains set until finalization
     bool m_paimageConfigReported=false;
     quint64 m_paimageGeneration=0;

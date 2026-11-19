@@ -113,11 +113,13 @@ public:
     }
     PhysicalRoundNormalizer::Snapshot normalizerSnapshot() const;
     using SaveResultSink = std::function<void(const FileSaver::SaveResult&)>;
+    using SaveHealthSink = std::function<void(int healthy, int total)>;
     std::uint64_t startSaving(const QString&, int, const QString&,
-                              std::function<QString(std::uint64_t)> directoryFor = {});
-    std::uint64_t stopSaving(SaveResultSink done = {});
+                              std::function<QString(std::uint64_t)> directoryFor = {},
+                              SaveResultSink = {}, SaveHealthSink = {});
+    std::uint64_t stopSaving();
     void prepareConfigurationRestart(){configurationRestart_=true;}
-    std::uint64_t resumeSaving();
+    std::uint64_t resumeSaving(SaveResultSink = {}, SaveHealthSink = {});
     bool savingApplied(std::uint64_t g)const{return workers_.savingConfigurationApplied(g);}
     void requestClose();
     unsigned cardDepth(int card){return workers_.cardDepth(card);}
@@ -132,7 +134,25 @@ private:
     void finishFailedBoundary();
     bool waitingForFailedBoundary() const;
     void pushSaveFrame(const Frame&, const PhysicalRoundClassification&, bool timeoutEligible = false);
-    std::uint64_t configureSaving(bool enabled, std::function<void()> apply);
+    struct SaveRequest {
+        struct Card {
+            std::uint64_t admitted = 0, rejected = 0;
+            std::uint64_t callbackFailures = 0, confirmedAtStart = 0;
+            std::atomic<bool> fault{false};
+        };
+        SaveRequest(std::size_t count, SaveResultSink result, SaveHealthSink health)
+            : cards(count), settled(std::move(result)), healthChanged(std::move(health)),
+              healthy(int(count)) {}
+        std::vector<Card> cards;
+        SaveResultSink settled;
+        SaveHealthSink healthChanged;
+        int healthy; // Sole saving worker.
+    };
+    std::uint64_t configureSaving(std::shared_ptr<SaveRequest>, std::function<void()> apply);
+    bool enqueueSaveFrame(const Frame&, bool eligible);
+    void updateSaveHealth(int card, bool notify = true);
+    void applySaveRequest(const std::shared_ptr<SaveRequest>&, const std::function<void(FileSaver&)>&);
+    void settleSaveRequest(bool reconfigure);
     void consumeCard(Frame);void consumeSync(const SyncFrame&);
     void observe(Frame,std::uint8_t stage,std::uint8_t reason,std::uint32_t value=0);
     std::vector<DataProcessor*> processors_;std::vector<FileSaver*> savers_;
@@ -163,7 +183,8 @@ private:
     std::optional<FailedBoundary> failedBoundary_;
     std::deque<std::function<void()>> deferredSaveControls_;
     Time boundaryObservedNs_ = 0;
-    bool saveRequested_ = false;
+    std::shared_ptr<SaveRequest> sourceSaveRequest_; // Under normalizationMutex_.
+    std::shared_ptr<SaveRequest> writerSaveRequest_; // Sole saving worker.
     SaveSessionResolver saveSessionResolver_;
     std::function<bool()> saveBoundaryFaulted_;
     SaveTailSink saveTailSink_;

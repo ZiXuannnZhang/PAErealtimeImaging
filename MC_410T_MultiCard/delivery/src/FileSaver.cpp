@@ -649,19 +649,28 @@ void FileSaver::serviceCloseRequest() {
     }
 }
 
-void FileSaver::suspendForSourceRestart() {
+void FileSaver::failSaveCallback() {
+    handleWriteFault(QStringLiteral("保存回调异常"));
+}
+
+FileSaver::SaveResult FileSaver::suspendForSourceRestart() {
     const bool hadData=m_currentFileTriggers>0;
-    stopSaving();
+    auto result = stopSaving();
     // The immutable source listener is rebuilt when sample count changes.
     // .dat 无文件头，同一文件里混入不同 sampleCount 的记录会让离线解析失去
     // 记录边界，所以换布局必须换文件（而不是为了防覆盖——防覆盖已由
     // resolveFreeSequence() + NewOnly 负责）。Format and names unchanged.
     if(hadData)++m_fileSequence;
+    result.configurationSegment = true;
+    return result;
 }
 
 void FileSaver::resumeAfterSourceRestart() {
     // stopSaving() (via suspendForSourceRestart) already reset the physical
     // round file state; keep the invariant explicit for the resume half.
     resetPhysicalRoundState();
+    m_requestReceived = 0;
+    m_requestSavedAtStart = savedCount();
+    m_requestAcceptedAtStart = acceptedCount();
     if (!m_writeFaulted) m_saving.store(true,std::memory_order_release);
 }

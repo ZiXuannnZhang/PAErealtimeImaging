@@ -2296,6 +2296,22 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
         });
     connect(m_netController, &NetworkController::statusMessage, this, &MainWindow::logMessage);
     connect(m_netController, &NetworkController::errorOccurred, this, &MainWindow::logMessage);
+    connect(m_netController, &NetworkController::configurationDrainChanged, this, [this](bool waiting) {
+        if (waiting) logMessage(QStringLiteral("采样配置等待旧保存队列结算"));
+        else logMessage(QStringLiteral("旧保存队列已结算，继续采样配置"));
+    });
+    connect(m_netController, &NetworkController::rawSaveHealthChanged, this, [this](int healthy, int total) {
+        if (healthy == total) {
+            ui->btnToggleSave->setToolTip(QString());
+            return;
+        }
+        const auto text = healthy == 0
+            ? QStringLiteral("原始保存已停止，所有参与卡的写端均已故障")
+            : QStringLiteral("原始保存降级，%1/%2 张卡继续写入").arg(healthy).arg(total);
+        ui->btnToggleSave->setToolTip(text);
+        logMessage(text);
+        if (healthy == 0 && m_autoSaveEnabled) onAutoSaveToggled(false);
+    });
     connect(m_netController, &NetworkController::fileSaverRollover, this,
             [this](int cardId, const QString& reason,
                    quint64 oldRoundGeneration, quint64 newRoundGeneration,

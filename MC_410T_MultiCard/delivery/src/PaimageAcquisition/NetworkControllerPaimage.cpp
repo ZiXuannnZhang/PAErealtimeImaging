@@ -424,7 +424,7 @@ void NetworkController::recordPaimageSnapshot(){
 }
 
 void NetworkController::pollPaimageLoopMonitor(){
-    if(!m_running||!m_paimage)return;
+    if(!m_running||!m_paimage||m_paimageConfigDrain)return;
     const auto nowNs=paimage::SocketReceiver::now();
     if(m_paimageSaveGeneration&&!m_paimageSaveAppliedLogged&&
        m_paimage->output().savingApplied(m_paimageSaveGeneration)){
@@ -483,7 +483,7 @@ void NetworkController::requestPaimageStop() {
             *timer = nullptr;
         }
     }
-    if (m_paimage) m_paimage->requestStop();
+    if (m_paimage && !m_paimageConfigDrain) m_paimage->requestStop();
     if (m_publisher) m_publisher->requestInterruption();
 }
 
@@ -518,6 +518,7 @@ void NetworkController::finishPaimageStop() {
     m_publisher.reset();
     m_measurementRunning = false;
     m_paimageSavingRequested = false;
+    m_paimageConfigDrain = false;
     m_paimageStopPending = false;
 }
 
@@ -525,6 +526,7 @@ void NetworkController::stopPaimage() {
     if (!m_running) return;
     recordPaimageSnapshot();
     requestPaimageStop();
+    if (m_paimageConfigDrain) return; // The existing drain completion finalizes stop.
     m_stopThread = std::thread([this] {
         waitForPaimageWorkers();
         QMetaObject::invokeMethod(this, [this] {
@@ -535,23 +537,89 @@ void NetworkController::stopPaimage() {
     });
 }
 
-bool NetworkController::configurePaimage(int ns,int a,int b,const QString& trigger){
-    if(!m_running||m_measurementRunning)return false;
-    m_currentConfigId=QString("config-%1").arg(m_nextConfigId++);
-    if(ns!=m_config.acqTimeNs){
-        // Source 141c70 copies configuration only while listener is stopped.
-        // Preserve host workflow by rebuilding that immutable source listener.
-        if(m_paimageSavingRequested)m_paimage->output().prepareConfigurationRestart();
-        m_paimage->stop();m_paimage.reset();
-        if(m_paimageTrace)m_paimageTrace->stop();m_paimageTrace.reset();
-        if(m_paimageTiming)m_paimageTiming->stop();m_paimageTiming.reset();
-        if(m_paimageLoopLog)m_paimageLoopLog->stop();m_paimageLoopLog.reset();
-        m_paimageTraceLease.reset();
-        m_config.acqTimeNs=ns;
-        QString error;if(!createPaimageBackend(error)){emit errorOccurred(error);stopPaimage();return false;}
-        if(m_paimageSavingRequested)m_paimage->output().resumeSaving();
-        recordDiagnosticEvent("paimage.lifecycle","configuration_listener_restart",DiagnosticRecorder::Severity::Info,{{"samples",m_config.samplesPerTrig()}});
-    }
+void NetworkController::applyPaimageSaveRequest(bool resume)
+{
+    const auto request = m_saveRequestId;
+    const auto resultSink = [this, request](const FileSaver::SaveResult& result) {
+        recordDiagnosticEvent("paimage.save", result.configurationSegment
+                ? "save_request_segment_settled" : "save_request_settled",
+            result.ioFault ? DiagnosticRecorder::Severity::Error : DiagnosticRecorder::Severity::Info,
+            {{"requestId", QString::number(request)}, {"card", result.cardId},
+             {"admitted", QString::number(result.admitted)}, {"rejected", QString::number(result.rejected)},
+             {"confirmed", QString::number(result.confirmed)}, {"discarded", QString::number(result.discarded)},
+             {"failed", QString::number(result.failed)}, {"ioFault", result.ioFault}});
+    };
+    const auto healthSink = [this, request](int healthy, int total) {
+        QMetaObject::invokeMethod(this, [this, request, healthy, total] {
+            if (!m_running || !m_paimageSavingRequested || request != m_saveRequestId) return;
+            recordDiagnosticEvent("paimage.save", "save_writer_health",
+                healthy == total ? DiagnosticRecorder::Severity::Info : DiagnosticRecorder::Severity::Warning,
+                {{"requestId", QString::number(request)}, {"healthyCards", healthy}, {"cards", total}});
+            if (healthy == 0) stopSaving();
+            emit rawSaveHealthChanged(healthy, total);
+        }, Qt::QueuedConnection);
+    };
+    m_paimageSaveGeneration = resume ? m_paimage->output().resumeSaving(resultSink, healthSink)
+        : m_paimage->output().startSaving(m_paimageSaveDir, m_paimageSaveCount, m_paimageSaveSuffix,
+              m_autoSaveCoordinator.directoryResolver(), resultSink, healthSink);
+    m_paimageSaveAppliedLogged = false;
+}
+
+bool NetworkController::configurePaimage(int ns, int a, int b, const QString& trigger)
+{
+    if (!m_running || !m_paimage || m_measurementRunning ||
+        m_paimageStartPending || m_paimageConfigDrain) return false;
+    m_currentConfigId = QString("config-%1").arg(m_nextConfigId++);
+    if (ns == m_config.acqTimeNs) return dispatchPaimageConfig(ns, a, b, trigger);
+
+    const auto suspendedRequest = m_paimageSavingRequested ? m_saveRequestId : 0;
+    if (suspendedRequest) m_paimage->output().prepareConfigurationRestart();
+    m_paimageConfigDrain = true;
+    m_configPhase = ConfigPhase::WaitingAck;
+    emit configurationDrainChanged(true);
+    m_stopThread = std::thread([this, ns, a, b, trigger, suspendedRequest] {
+        m_paimage->stop();
+        if (m_paimageTrace) m_paimageTrace->stop();
+        if (m_paimageTiming) m_paimageTiming->stop();
+        if (m_paimageLoopLog) m_paimageLoopLog->stop();
+
+        QMetaObject::invokeMethod(this, [this, ns, a, b, trigger, suspendedRequest] {
+            m_stopThread.join();
+            m_paimageConfigDrain = false;
+            emit configurationDrainChanged(false);
+            if (!m_running) {
+                finishPaimageStop();
+                diagnostic_storage::pruneTraces(QDir(QCoreApplication::applicationDirPath()).filePath("paimage-traces"));
+                emit stopped();
+                return;
+            }
+            m_paimage.reset();
+            m_paimageTrace.reset();
+            m_paimageTiming.reset();
+            m_paimageLoopLog.reset();
+            m_paimageTraceLease.reset();
+            m_config.acqTimeNs = ns;
+
+            QString error;
+            if (!createPaimageBackend(error)) {
+                m_configPhase = ConfigPhase::Failed;
+                if (m_paimageStartPending)
+                    emit measurementStartFailed(m_pendingMeasurementSessionId, error);
+                emit errorOccurred(error);
+                stopPaimage();
+                return;
+            }
+            if (m_paimageSavingRequested) applyPaimageSaveRequest(suspendedRequest == m_saveRequestId);
+            recordDiagnosticEvent("paimage.lifecycle", "configuration_listener_restart",
+                DiagnosticRecorder::Severity::Info, {{"samples", m_config.samplesPerTrig()}});
+            dispatchPaimageConfig(ns, a, b, trigger);
+        }, Qt::QueuedConnection);
+    });
+    return true;
+}
+
+bool NetworkController::dispatchPaimageConfig(int ns, int a, int b, const QString& trigger)
+{
     m_config.delayA=a;m_config.delayB=b;
     recordDiagnosticEvent("paimage.config","configuration_requested",DiagnosticRecorder::Severity::Info,
         {{"configId",m_currentConfigId},{"acqTimeNs",ns},{"delayA",a},{"delayB",b},
@@ -560,7 +628,7 @@ bool NetworkController::configurePaimage(int ns,int a,int b,const QString& trigg
     const bool ok=m_paimage->configure(ns,a,b);pollPaimage();return ok;
 }
 void NetworkController::pollPaimage(){
-    if(!m_running||!m_paimage)return;
+    if(!m_running||!m_paimage||m_paimageConfigDrain)return;
     if(!m_paimage->receiver().isRunning()){
         emit errorOccurred(QString("PAimage接收线程已退出，socket错误码 %1").arg(m_paimage->receiver().lastSocketError()));
         stopPaimage();return;
@@ -576,7 +644,7 @@ void NetworkController::pollPaimage(){
 }
 bool NetworkController::startPaimageMeasurement(){
     if(!m_running||m_measurementRunning)return false;
-    if(m_paimage->configuring()){m_paimageStartPending=true;m_pendingMeasurementSessionId=newMeasurementSessionId();return true;}
+    if(m_paimageConfigDrain || m_paimage->configuring()){m_paimageStartPending=true;m_pendingMeasurementSessionId=newMeasurementSessionId();return true;}
     const QString id=m_pendingMeasurementSessionId.isEmpty()?newMeasurementSessionId():m_pendingMeasurementSessionId;
     m_pendingMeasurementSessionId.clear();
     bool ok=m_paimage->startMeasurement(m_measurementSessionToken);

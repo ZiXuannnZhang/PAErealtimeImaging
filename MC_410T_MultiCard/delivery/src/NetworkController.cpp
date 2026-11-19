@@ -570,9 +570,10 @@ void NetworkController::startSaving(const QString& directory,
         m_paimageSaveDir=directory;m_paimageSaveCount=triggersPerFile;m_paimageSaveSuffix=suffix;
         m_paimageSavingRequested=true;
         ++m_saveRequestId;
-        const auto generation = m_paimage->output().startSaving(
-            directory, triggersPerFile, suffix, m_autoSaveCoordinator.directoryResolver());
-        m_paimageSaveGeneration=generation;m_paimageSaveAppliedLogged=false;
+        m_paimageSaveGeneration = 0;
+        m_paimageSaveAppliedLogged = false;
+        if (!m_paimageConfigDrain) applyPaimageSaveRequest(false);
+        const auto generation = m_paimageSaveGeneration;
         recordDiagnosticEvent("paimage.save","save_start_requested",DiagnosticRecorder::Severity::Info,
             {{"directory",directory},{"triggersPerFile",triggersPerFile},{"suffix",suffix},
              {"generation",QString::number(generation)}, {"requestId",QString::number(m_saveRequestId)},
@@ -588,15 +589,7 @@ void NetworkController::stopSaving() {
         if (!m_paimageSavingRequested) return;
         m_paimageSavingRequested = false;
         const auto request = m_saveRequestId;
-        const auto generation = m_paimage->output().stopSaving(
-            [this, request](const FileSaver::SaveResult& result) {
-                recordDiagnosticEvent("paimage.save", "save_request_settled",
-                    result.ioFault ? DiagnosticRecorder::Severity::Error : DiagnosticRecorder::Severity::Info,
-                    {{"requestId", QString::number(request)}, {"card", result.cardId},
-                     {"confirmed", QString::number(result.confirmed)},
-                     {"discarded", QString::number(result.discarded)},
-                     {"failed", QString::number(result.failed)}, {"ioFault", result.ioFault}});
-            });
+        const auto generation = m_paimageConfigDrain ? 0 : m_paimage->output().stopSaving();
         recordDiagnosticEvent("paimage.save","save_stop_requested",DiagnosticRecorder::Severity::Info,
             {{"generation",QString::number(generation)}, {"requestId",QString::number(request)},
              {"requestedMonotonicNs",QString::number(paimage::SocketReceiver::now())},

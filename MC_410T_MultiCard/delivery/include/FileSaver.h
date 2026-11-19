@@ -62,6 +62,9 @@ public:
         std::uint64_t discarded;
         std::uint64_t failed;
         bool ioFault;
+        std::uint64_t admitted = 0;
+        std::uint64_t rejected = 0;
+        bool configurationSegment = false;
     };
     SaveResult stopSaving();
     // 请求线程退出（设置 m_running=false，使 run() 循环退出）
@@ -83,7 +86,8 @@ public:
     bool consumeTriggerGroup(const TriggerGroupPtr& group);
     void sealRound(paimage::RoundIdentity identity);
     void serviceCloseRequest();
-    void suspendForSourceRestart();
+    SaveResult suspendForSourceRestart();
+    void failSaveCallback();
     void resumeAfterSourceRestart();
 
     // 自动保存会话代目录解析：按触发组携带的 sessionGen 查询保存目录。
