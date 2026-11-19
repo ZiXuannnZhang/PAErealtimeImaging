@@ -25,6 +25,7 @@
 #include <memory>
 #include <map>
 #include <array>
+#include <QThread>
 #include <QThreadPool>
 #include "qcustomplot.h"
 #include "DataTypes.h"
@@ -370,7 +371,11 @@ private:
     QThreadPool m_previewRenderPool;
     QThreadPool m_timeoutPngPool;
     QThreadPool m_terminalRenderPool;
-    std::unique_ptr<ring_png::Channel> m_terminalPngWriter, m_timeoutPngWriter;
+    QThread m_pngControlThread;
+    QObject* m_pngControl = nullptr;
+    ring_png::Channel* m_terminalPngWriter = nullptr;
+    ring_png::Channel* m_timeoutPngWriter = nullptr;
+    bool m_pngCloseRequested = false, m_pngCloseComplete = false; // GUI only
     std::mutex m_pngMutex;
     std::map<quint64, std::shared_ptr<RingPngTask>> m_pngTasks;
     quint64 m_nextPngId = 0;

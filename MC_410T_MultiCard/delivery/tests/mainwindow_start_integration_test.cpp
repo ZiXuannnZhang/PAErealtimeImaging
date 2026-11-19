@@ -38,6 +38,8 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <future>
+#include <type_traits>
 #include <stdexcept>
 
 int runReceiverForTest(int argc, char** argv, const std::function<void(MainWindow&)>& configureWindow);
@@ -130,9 +132,108 @@ static void writeMarker(const QDir& directory, const QString& name, const QJsonO
 
 class MainWindowStartIntegrationTest {
 public:
+    template<class F>
+    static auto onWriter(ring_png::Channel& writer, F action) {
+        using Result = std::invoke_result_t<F, ring_png::Channel&>;
+        if constexpr (std::is_void_v<Result>) {
+            check(QMetaObject::invokeMethod(&writer, [&] { action(writer); }, Qt::BlockingQueuedConnection),
+                  "invoke PNG writer control");
+        } else {
+            Result result{};
+            check(QMetaObject::invokeMethod(&writer, [&] { result = action(writer); }, Qt::BlockingQueuedConnection),
+                  "observe PNG writer control");
+            return result;
+        }
+    }
+
+    static bool timeoutPngBusy(MainWindow& window) {
+        const std::lock_guard<std::mutex> lock(window.m_pngMutex);
+        return window.m_timeoutPngBusy;
+    }
+
+    static bool finishPngsWhileGuiPaused(MainWindow& window, QSemaphore& renderGate, int releaseCount,
+                                         const QDir& directory, const QStringList& patterns, int files) {
+        // Waiting on this observer does not pump the GUI event loop.
+        return std::async(std::launch::async, [&] {
+            renderGate.release(releaseCount);
+            QElapsedTimer timer;
+            timer.start();
+            do {
+                bool settled = false;
+                {
+                    const std::lock_guard<std::mutex> lock(window.m_pngMutex);
+                    settled = window.m_pngTasks.empty() && !window.m_timeoutPngBusy &&
+                              window.m_terminalPngJobs == 0 && window.m_terminalPngBytes == 0;
+                }
+                if (settled && directory.entryList(patterns, QDir::Files).size() == files) return true;
+                QThread::msleep(5);
+            } while (timer.elapsed() < 5000);
+            return false;
+        }).get();
+    }
+
+    static void pngCompletesWhileGuiPaused() {
+        QTemporaryDir output, logs;
+        check(output.isValid() && logs.isValid(), "independent PNG fixture directories");
+        DiagnosticRecorder::Options options;
+        options.rootDirectory = logs.path();
+        auto* recorder = DiagnosticRecorder::initialize(options);
+        check(recorder != nullptr, "record PNG results");
+        const auto recorderLifetime = std::shared_ptr<void>(nullptr, [](void*) { DiagnosticRecorder::shutdown(); });
+        MainWindow window;
+        const auto renderGate = std::make_shared<QSemaphore>();
+        const auto releaseOnFailure = std::shared_ptr<void>(nullptr, [renderGate](void*) { renderGate->release(2); });
+        const auto entered = std::make_shared<QSemaphore>();
+        const auto render = [renderGate, entered](const std::atomic_bool*) {
+            entered->release();
+            renderGate->acquire();
+            QImage image(ring_png::kEdge, ring_png::kEdge, QImage::Format_ARGB32);
+            image.fill(Qt::gray);
+            return ring_png::Pair{image, image};
+        };
+        window.queueTerminalPng({30, 0}, {output.path(), "paused-terminal", 301}, 1, 1, 32, render);
+        window.queueTimeoutPng({30, 1}, {{output.path(), "paused-timeout", 302}, {32, "_frame2", render, 2}});
+        check(entered->tryAcquire(2, 3000), "both accepted renderers reached the latch");
+        {
+            const std::lock_guard<std::mutex> lock(window.m_pngMutex);
+            check(window.m_pngTasks.size() == 2 && window.m_timeoutPngBusy && window.m_terminalPngJobs == 1,
+                  "two distinct PNG jobs held their budgets before pausing the GUI");
+        }
+        const auto guiProcessedEvent = std::make_shared<bool>(false);
+        QTimer::singleShot(0, &window, [guiProcessedEvent] { *guiProcessedEvent = true; });
+        const QDir dir(output.path());
+        check(finishPngsWhileGuiPaused(window, *renderGate, 2, dir, {"paused-*.png"}, 4),
+              "accepted terminal and Timeout PNGs must write and release admission without GUI events");
+        check(!*guiProcessedEvent &&
+              dir.entryList({"paused-terminal_*.png"}, QDir::Files).size() == 2 &&
+              dir.entryList({"paused-timeout_*.png"}, QDir::Files).size() == 2, "both pairs delivered during the GUI pause");
+        int terminal = 0, timeout = 0;
+        waitFor([&] {
+            check(recorder->flush(), "flush PNG receipts");
+            QFile events(QDir(recorder->runDirectory()).filePath("events.jsonl"));
+            check(events.open(QIODevice::ReadOnly), "read PNG receipts");
+            terminal = timeout = 0;
+            while (!events.atEnd()) {
+                const auto fields = QJsonDocument::fromJson(events.readLine()).object().value("fields").toObject();
+                if (fields.value("requestId") == QJsonValue(QStringLiteral("301"))) {
+                    check(fields.value("result").toString() == "saved", "terminal receipt is saved");
+                    ++terminal;
+                }
+                if (fields.value("requestId") == QJsonValue(QStringLiteral("302"))) {
+                    check(fields.value("result").toString() == "saved", "Timeout receipt is saved");
+                    ++timeout;
+                }
+            }
+            return *guiProcessedEvent && terminal >= 1 && timeout >= 1;
+        }, "resume GUI and observe final PNG receipts");
+        check(terminal == 1 && timeout == 1, "one result per job after GUI resumes");
+        std::cout << "PASS both PNG pairs and budgets completed during the GUI pause" << std::endl;
+    }
+
     static void previewPressure() {
         check(QCoreApplication::applicationDirPath().endsWith("startup-isolated"), "isolated settings");
         QFile::remove(paimageSettingsPath());
+        pngCompletesWhileGuiPaused();
         MainWindow window;
         auto& controller = *window.m_imagingController;
         window.m_cmbImagingMode->setCurrentIndex(1);
@@ -239,18 +340,18 @@ public:
                 const std::lock_guard<std::mutex> lock(window.m_pngMutex);
                 check(window.m_timeoutPngBusy, "each validated grid enters the Timeout renderer");
             }
-            waitFor([&] { return !window.m_timeoutPngBusy; }, "probe render failure releases the slot");
+            waitFor([&] { return !timeoutPngBusy(window); }, "probe render failure releases the slot");
             check(rendered.load(), "admitted layout reached the renderer");
         }
         const auto noRender = [](const std::atomic_bool*) { return ring_png::Pair{}; };
         window.queueTimeoutPng({8, 1}, {budgetTarget, {8u * 3600 * 3600, "_wrong_size", noRender, 4000}});
         window.queueTimeoutPng({8, 2}, {budgetTarget, {sizeof(float), "_overflow", noRender,
                                                      (std::numeric_limits<int>::max)()}});
-        check(!window.m_timeoutPngBusy, "invalid layouts never enter Timeout admission");
+        check(!timeoutPngBusy(window), "invalid layouts never enter Timeout admission");
 
         const auto renderGate = std::make_shared<QSemaphore>();
         auto releaseRender = std::shared_ptr<void>(nullptr, [renderGate](void*) { renderGate->release(); });
-        window.m_timeoutPngWriter->setTestMode(ring_png::Channel::TestMode::Block);
+        onWriter(*window.m_timeoutPngWriter, [](auto& channel) { channel.setTestMode(ring_png::Channel::TestMode::Block); });
 
         constexpr int largeNx = 4000;
         auto first = pixelsFor(100, largeNx);
@@ -288,7 +389,7 @@ public:
             check(window.m_timeoutPngBusy && !firstLifetime.expired(), "exactly one queued Timeout frame retained");
         }
         releaseRender.reset();
-        waitFor([&] { return window.m_timeoutPngWriter->testBlocked(); }, "Timeout render entered blocked PNG writer");
+        waitFor([&] { return onWriter(*window.m_timeoutPngWriter, [](auto& channel) { return channel.testBlocked(); }); }, "Timeout render entered blocked PNG writer");
         check(firstLifetime.expired(), "Timeout disk wait only retained rendered pixels");
         const paimage::TimeoutPresentation::Target terminal{output.path(), "terminal", 93};
         window.queueTerminalPng({9, 7}, terminal, 1, 1, 64, [](const std::atomic_bool*) {
@@ -299,7 +400,7 @@ public:
         QDir dir(output.path());
         waitFor([&]{ return dir.entryList({"terminal_*.png"}, QDir::Files).size() == 2; },
                 "formal terminal pair completes while Timeout disk is blocked");
-        window.m_timeoutPngWriter->releaseTestGate();
+        onWriter(*window.m_timeoutPngWriter, [](auto& channel) { channel.releaseTestGate(); });
         waitFor([&] { return dir.entryList({"preview_*.png"}, QDir::Files).size() == 2; },
                 "first Timeout pair written and excess work rejected");
         const auto files = dir.entryList({"preview_*_532nm.png"}, QDir::Files);
@@ -308,7 +409,7 @@ public:
         check(files.size() == 1 && files2.size() == 1 && qRed(blue.pixel(0,0)) == 51 &&
               qRed(infrared.pixel(0,0)) == 102 && qRed(blue.pixel(800,800)) == 0,
               "4000-square Timeout retained both original wavelength ranges and mask after layout change");
-        waitFor([&] { return !window.m_timeoutPngBusy; }, "Timeout budget released after receipt");
+        waitFor([&] { return !timeoutPngBusy(window); }, "Timeout budget released after receipt");
         controller.stopSvc();
         std::cout << "PASS preview render and GUI stalls, restart, and bounded Timeout PNG with independent final delivery\n";
     }
@@ -324,13 +425,14 @@ public:
         const bool realExecutable = scenario.endsWith("-production");
         const auto renderEntered = std::make_shared<std::atomic_bool>(false);
         auto& writer = *(timeout ? window.m_timeoutPngWriter : window.m_terminalPngWriter);
-        if (blocked) writer.setTestMode(Mode::Block);
-        if (scenario.endsWith("-partial")) writer.setTestMode(Mode::ExitAfterFirst);
-        if (scenario.endsWith("-startup")) writer.setTestMode(Mode::FailStart);
+        if (blocked) onWriter(writer, [](auto& channel) { channel.setTestMode(Mode::Block); });
+        if (scenario.endsWith("-partial")) onWriter(writer, [](auto& channel) { channel.setTestMode(Mode::ExitAfterFirst); });
+        if (scenario.endsWith("-startup")) onWriter(writer, [](auto& channel) { channel.setTestMode(Mode::FailStart); });
         if (realExecutable) {
             const auto executable = qEnvironmentVariable("PAIMAGE_TEST_PNG_EXECUTABLE");
-            writer.setTestExecutable(executable.isEmpty() ? QDir(QCoreApplication::applicationDirPath())
-                .absoluteFilePath("../bin/PAimageReceiverDiagnostics.exe") : executable);
+            const auto target = executable.isEmpty() ? QDir(QCoreApplication::applicationDirPath())
+                .absoluteFilePath("../bin/PAimageReceiverDiagnostics.exe") : executable;
+            onWriter(writer, [&](auto& channel) { channel.setTestExecutable(target); });
         }
         const paimage::TimeoutPresentation::Target target{directory, scenario, 782};
         if (timeout) {
@@ -394,7 +496,7 @@ public:
             [&window, &writer, ready, directory = QDir(directory), blocked, graceful, deadline,
              rendering, realExecutable, renderEntered, card, rawDirectory, announced = false]() mutable {
             const auto* svc = window.m_imagingController->m_svcProcess;
-            if (blocked && !writer.testBlocked()) return;
+            if (blocked && !onWriter(writer, [](auto& channel) { return channel.testBlocked(); })) return;
             if (rendering && !renderEntered->load()) return;
             if (realExecutable) {
                 const std::lock_guard<std::mutex> lock(window.m_pngMutex);
@@ -406,25 +508,25 @@ public:
                 const auto* recorder = DiagnosticRecorder::instance();
                 writeMarker(directory, "closing.json", {
                     {"runDirectory", recorder ? recorder->runDirectory() : QString()},
-                    {"writerPid", double(writer.testProcessId())}, {"svcPid", svc ? double(svc->processId()) : 0.0},
+                    {"writerPid", double(onWriter(writer, [](auto& channel) { return channel.testProcessId(); }))}, {"svcPid", svc ? double(svc->processId()) : 0.0},
                     {"rawDirectory", rawDirectory}
                 });
             }
             if (!directory.exists("observe.ready")) return;
             ready->stop();
-            if (deadline) writer.deferTestReceiptNotification();
+            if (deadline) onWriter(writer, [](auto& channel) { channel.deferTestReceiptNotification(); });
             window.close();
             const int repeatAfterMs = blocked && (!graceful || deadline) ? 2000 : 100;
             QTimer::singleShot(repeatAfterMs, Qt::PreciseTimer, &window, [&window] { window.close(); });
             if (deadline) {
                 QTimer::singleShot(ring_png::kShutdownGraceMs - 800, Qt::PreciseTimer, &window,
-                                   [&writer] { writer.releaseTestGate(); });
+                                   [&writer] { onWriter(writer, [](auto& channel) { channel.releaseTestGate(); }); });
                 QTimer::singleShot(ring_png::kShutdownGraceMs - 100, Qt::PreciseTimer, &window,
                                    [&writer, directory] {
-                    if (writer.testReceiptReady()) writeMarker(directory, "reply.ready");
+                    if (onWriter(writer, [](auto& channel) { return channel.testReceiptReady(); })) writeMarker(directory, "reply.ready");
                 });
             } else if (graceful) {
-                QTimer::singleShot(150, &window, [&writer] { writer.releaseTestGate(); });
+                QTimer::singleShot(150, &window, [&writer] { onWriter(writer, [](auto& channel) { channel.releaseTestGate(); }); });
             }
         });
         ready->start(10);
@@ -586,7 +688,7 @@ public:
 
             {
                 QTemporaryDir queueTarget;
-                window.m_terminalPngWriter->setTestMode(ring_png::Channel::TestMode::Block);
+                onWriter(*window.m_terminalPngWriter, [](auto& channel) { channel.setTestMode(ring_png::Channel::TestMode::Block); });
                 const paimage::TimeoutPresentation::Target target{queueTarget.path(), "bounded", 91};
                 const auto render = [](const std::atomic_bool*) {
                     QImage image(ring_png::kEdge, ring_png::kEdge, QImage::Format_ARGB32);
@@ -599,8 +701,8 @@ public:
                     const std::lock_guard<std::mutex> lock(window.m_pngMutex);
                     check(window.m_terminalPngJobs == 2, "slow PNG writer bounds the number of pending jobs");
                 }
-                waitFor([&] { return window.m_terminalPngWriter->testBlocked(); }, "admitted PNG reached child gate");
-                window.m_terminalPngWriter->releaseTestGate();
+                waitFor([&] { return onWriter(*window.m_terminalPngWriter, [](auto& channel) { return channel.testBlocked(); }); }, "admitted PNG reached child gate");
+                onWriter(*window.m_terminalPngWriter, [](auto& channel) { channel.releaseTestGate(); });
                 waitFor([&] { return QDir(queueTarget.path()).entryList({"*.png"}, QDir::Files).size() == 4; },
                     "admitted PNG pairs finish after the writer resumes");
             }
@@ -629,7 +731,7 @@ public:
                     }
                 });
             QTemporaryDir timeoutWhileSaving;
-            window.m_timeoutPngWriter->setTestMode(ring_png::Channel::TestMode::Block);
+            onWriter(*window.m_timeoutPngWriter, [](auto& channel) { channel.setTestMode(ring_png::Channel::TestMode::Block); });
             {
                 ImagingDisplayWindow preview;
                 QImage view(2, 2, QImage::Format_ARGB32);
@@ -638,7 +740,7 @@ public:
                 window.queueTimeoutPng({997, 0},
                     {{timeoutWhileSaving.path(), "blocked", 97}, preview.capturePngRender(1)});
             }
-            waitFor([&] { return window.m_timeoutPngWriter->testBlocked(); }, "Timeout writer blocked during acquisition");
+            waitFor([&] { return onWriter(*window.m_timeoutPngWriter, [](auto& channel) { return channel.testBlocked(); }); }, "Timeout writer blocked during acquisition");
             QString previousDirectory;
             for (int pass = 0; pass < 2; ++pass) {
                 window.startListeningWithIPs({"127.0.0.2"}, QStringLiteral("explicit_target_ips"));
@@ -791,11 +893,11 @@ public:
                 check(files.size() == 1 && QFileInfo(rawFiles.filePath(files.front())).size() > 0,
                       "raw writer saved both waveform channels without FBP");
             }
-            check(window.m_timeoutPngWriter->testBlocked() &&
+            check(onWriter(*window.m_timeoutPngWriter, [](auto& channel) { return channel.testBlocked(); }) &&
                   QDir(timeoutWhileSaving.path()).entryList({"*.png"}, QDir::Files).isEmpty(),
                   "terminal delivery, preview and raw saving advanced with Timeout writer still blocked");
-            window.m_timeoutPngWriter->releaseTestGate();
-            waitFor([&] { return !window.m_timeoutPngBusy; }, "original Timeout pair settled after gate release");
+            onWriter(*window.m_timeoutPngWriter, [](auto& channel) { channel.releaseTestGate(); });
+            waitFor([&] { return !timeoutPngBusy(window); }, "original Timeout pair settled after gate release");
             check(QDir(timeoutWhileSaving.path()).entryList({"*.png"}, QDir::Files).size() == 2,
                   "Timeout pair kept its original target through listener changes");
         }

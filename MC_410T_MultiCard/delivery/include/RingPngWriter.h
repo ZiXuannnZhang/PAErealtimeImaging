@@ -32,10 +32,11 @@ std::optional<int> runWriterMode(int argc, char** argv);
 class Channel : public QObject {
 public:
     using Completion = std::function<void(std::uint64_t, Result)>;
-    explicit Channel(Completion completion);
+    explicit Channel(Completion completion, QObject* parent = nullptr);
     ~Channel() override;
 
-    // GUI thread. The caller retains admission until the completion callback.
+    // Call on the owning event-loop thread, including shutdown.
+    // The caller retains admission until the completion callback.
     void enqueue(std::uint64_t id, Pair images, Paths paths);
     void shutdown();
 #ifdef MAINWINDOW_START_TEST_SEAM

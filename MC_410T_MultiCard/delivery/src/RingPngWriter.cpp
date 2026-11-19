@@ -7,7 +7,6 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryFile>
-#include <QThreadPool>
 #include <QUuid>
 #include <QWinEventNotifier>
 #include <algorithm>
@@ -293,10 +292,9 @@ struct Channel::State {
 
     Channel& owner;
     Completion complete;
-    QThreadPool staging;
     std::deque<Job> pending;
     std::optional<Job> current;
-    std::shared_ptr<Transport> io;
+    std::unique_ptr<Transport> io;
     std::unique_ptr<QWinEventNotifier> receiptEvent, exitEvent;
     bool sent = false;
     bool closed = false;
@@ -305,14 +303,12 @@ struct Channel::State {
     QString testExecutable;
 #endif
 
-    State(Channel& owner, Completion complete) : owner(owner), complete(std::move(complete)) {
-        staging.setMaxThreadCount(1);
-    }
+    State(Channel& owner, Completion complete) : owner(owner), complete(std::move(complete)) {}
 
     bool start()
     {
         const auto instance = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdWString();
-        auto child = std::make_shared<Transport>();
+        auto child = std::make_unique<Transport>();
         if (child->mapping.create(sizeof(SharedSlot), name(instance, L"_map").c_str()) != ring_input::Result::Ok)
             return false;
         auto* slot = new (child->mapping.data()) SharedSlot;
@@ -373,7 +369,7 @@ struct Channel::State {
     {
         receiptEvent.reset();
         exitEvent.reset();
-        io.reset(); // An in-progress local copy owns its distinct mapping view.
+        io.reset();
     }
 
     void collect()
@@ -403,35 +399,24 @@ struct Channel::State {
                 finish({QStringLiteral("writer_start_failed"), {}});
                 continue;
             }
-            const auto transport = io;
-            if (!encodePaths(*transport->slot(), current->paths)) {
+            auto* slot = io->slot();
+            if (!encodePaths(*slot, current->paths)) {
                 finish({QStringLiteral("writer_invalid_target"), {}});
                 continue;
             }
-            const auto id = current->id;
-            staging.start([this, transport, id, images = std::move(current->images)] {
-                auto* slot = transport->slot();
-                for (std::size_t i = 0; i < images.size(); ++i)
-                    std::memcpy(slot->pixels + i * kPairBytes / 2, images[i].constBits(), kPairBytes / 2);
-                QMetaObject::invokeMethod(&owner, [this, transport, id] {
-                    if (closed || !current || current->id != id) return;
-                    if (io != transport || signaled(io->process.get())) {
-                        if (io == transport) disconnectTransport();
-                        finish({QStringLiteral("writer_start_failed"), {}});
-                        pump();
-                        return;
-                    }
-                    auto* slot = transport->slot();
-                    slot->stride = kStride;
-                    slot->bytes = kPairBytes;
-                    slot->task = id;
-                    sent = SetEvent(transport->request.get());
-                    if (!sent) {
-                        finish({QStringLiteral("writer_signal_failed"), {}});
-                        pump();
-                    }
-                }, Qt::QueuedConnection);
-            });
+            for (std::size_t i = 0; i < current->images.size(); ++i)
+                std::memcpy(slot->pixels + i * kPairBytes / 2, current->images[i].constBits(), kPairBytes / 2);
+            current->images = {};
+            if (signaled(io->process.get())) {
+                disconnectTransport();
+                finish({QStringLiteral("writer_start_failed"), {}});
+                continue;
+            }
+            slot->stride = kStride;
+            slot->bytes = kPairBytes;
+            slot->task = current->id;
+            sent = SetEvent(io->request.get());
+            if (!sent) finish({QStringLiteral("writer_signal_failed"), {}});
         }
     }
 
@@ -451,12 +436,12 @@ struct Channel::State {
             pending.pop_front();
             complete(job.id, {QStringLiteral("application_closed"), {}, std::move(job.paths)});
         }
-        staging.clear();
     }
 };
 
-Channel::Channel(Completion completion) : state_(std::make_unique<State>(*this, std::move(completion))) {}
-Channel::~Channel() { shutdown(); state_->staging.waitForDone(); }
+Channel::Channel(Completion completion, QObject* parent)
+    : QObject(parent), state_(std::make_unique<State>(*this, std::move(completion))) {}
+Channel::~Channel() { shutdown(); }
 
 void Channel::enqueue(std::uint64_t id, Pair images, Paths paths)
 {
