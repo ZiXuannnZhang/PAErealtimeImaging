@@ -353,10 +353,13 @@ MainWindow::MainWindow(QWidget *parent)
     m_peizhunLoaded = false;
     m_peizhunFilePath.clear();
 
-    m_imagingController = new ImagingController(this);
+    // The preview slot remains leased until the GUI has presented or discarded it.
+    m_imagingController = new ImagingController(this, true);
     connect(m_imagingController, &ImagingController::imageReady,
             this, &MainWindow::onImagingImageReady);
     // 每块显示快照：固定双缓冲 → 显示窗口（方案A：全分辨率 3600²）
+    m_previewRenderPool.setMaxThreadCount(1);
+    m_timeoutPngPool.setMaxThreadCount(1);
     m_terminalRenderPool.setMaxThreadCount(2);
     m_terminalWritePool.setMaxThreadCount(1);
     connect(m_imagingController, &ImagingController::ringTerminalUnavailable, this,
@@ -415,7 +418,7 @@ MainWindow::MainWindow(QWidget *parent)
         }
         const int nx = controller->ringDisplayNx();
         if ((!display && !target) || nx <= 0 || (roundComplete && !terminal)) {
-            if (target) reportTerminalPng(round, target, submitIndex, QStringLiteral("invalid_terminal"));
+            if (target) reportRingPng(round, target, submitIndex, QStringLiteral("invalid_terminal"));
             release();
             return;
         }
@@ -423,8 +426,8 @@ MainWindow::MainWindow(QWidget *parent)
         if (!m_imagingDisplayWindow) {
             m_imagingDisplayWindow = new ImagingDisplayWindow();
             connect(m_imagingDisplayWindow, &ImagingDisplayWindow::presentationChanged, this, [this] {
-                m_timeoutPresentation.updateWriter(
-                    m_imagingDisplayWindow->capturePngWriter(m_imagingDisplayWindow->lastSeq()));
+                m_timeoutPresentation.updateCapture(
+                    m_imagingDisplayWindow->capturePngRender(m_imagingDisplayWindow->lastSeq()));
             });
             m_imagingDisplayWindow->setDisplayMask(m_displayMaskEnabled, m_displayMaskRadiusMm);
         }
@@ -449,11 +452,27 @@ MainWindow::MainWindow(QWidget *parent)
         const auto renderDisplay = [=](std::shared_ptr<std::vector<float>> frame,
                                         const std::shared_ptr<void>& lease) {
             const auto count = std::size_t(nx) * nx;
-            const auto image1 = ImagingDisplayWindow::renderFrame(frame->data(), nx, r1.lower, r1.upper, mask);
-            const auto image2 = ImagingDisplayWindow::renderFrame(frame->data() + count, nx, r2.lower, r2.upper, mask);
-            QMetaObject::invokeMethod(qApp, [=] {
-                (void)lease; // Retain the one detached terminal display until publication.
-                if (!owner || !win || !ctrl || ctrl->serviceLifecycleToken() != lifecycle) return;
+            auto image1 = ImagingDisplayWindow::renderFrame(frame->data(), nx, r1.lower, r1.upper, mask);
+            auto image2 = ImagingDisplayWindow::renderFrame(frame->data() + count, nx, r2.lower, r2.upper, mask);
+            if (image1.isNull() || image2.isNull()) return;
+            QMetaObject::invokeMethod(qApp, [=]() mutable {
+                (void)lease; // Hold admission through queued GUI publication, including a stale drop.
+                if (!owner || !win || !ctrl || ctrl->serviceLifecycleToken() != lifecycle ||
+                    ctrl->ringDisplayNx() != nx || !owner->m_imagingEnabled) return;
+                const auto ui = owner->m_roundUi.snapshot();
+                if (owner->m_ringSnapshotAdmissionBlocked.load() || ui.epoch != presentationEpoch ||
+                    !owner->m_timeoutPresentation.accepts(measurementSession, roundGeneration)) return;
+                // A control change while rendering must not publish a frame
+                // with new color bars but old pixels or capture settings.
+                const auto current1 = win->range1();
+                const auto current2 = win->range2();
+                const auto currentMask = win->displayMaskForFrame(nx);
+                if (current1.lower != r1.lower || current1.upper != r1.upper ||
+                    current2.lower != r2.lower || current2.upper != r2.upper || currentMask != mask) {
+                    image1 = ImagingDisplayWindow::renderFrame(frame->data(), nx, current1.lower, current1.upper, currentMask);
+                    image2 = ImagingDisplayWindow::renderFrame(frame->data() + count, nx, current2.lower, current2.upper, currentMask);
+                    if (image1.isNull() || image2.isNull()) return;
+                }
                 {
                     const std::lock_guard<std::mutex> lock(owner->m_ringAssemblerMutex);
                     if (owner->m_ringSnapshotAdmissionBlocked.load() ||
@@ -478,7 +497,7 @@ MainWindow::MainWindow(QWidget *parent)
                     if (owner->m_roundUi.noteSnapshot(roundComplete)) owner->m_roundUi.resetFrameCount();
                     win->applyRingFrame(frame, nx, frameIndex, image1, image2);
                     owner->m_timeoutPresentation.publish(measurementSession, roundGeneration,
-                        win->capturePngWriter(win->lastSeq()));
+                        win->capturePngRender(win->lastSeq()));
                 }
                 if (!win->isVisible()) { win->show(); win->raise(); win->activateWindow(); }
                 owner->updateRingImagingStatus();
@@ -499,16 +518,17 @@ MainWindow::MainWindow(QWidget *parent)
                 QThreadPool::globalInstance()->start([=] { renderDisplay(pixels, lease); });
             });
         } else {
-            m_terminalRenderPool.start([=] {
-                const float* source = ctrl ? ctrl->snapshotBuffer(bufferIndex) : nullptr;
-                std::shared_ptr<std::vector<float>> pixels;
-                if (source) {
-                    const auto count = std::size_t(nx) * nx * 2;
-                    try { pixels = std::make_shared<std::vector<float>>(source, source + count); }
-                    catch (...) {}
-                }
+            auto lease = std::shared_ptr<void>(nullptr, [ctrl, bufferIndex](void*) {
                 if (ctrl) ctrl->releaseSnapshotBuffer(bufferIndex);
-                if (pixels) QThreadPool::globalInstance()->start([=] { renderDisplay(pixels, {}); });
+            });
+            m_previewRenderPool.start([=] {
+                const float* source = ctrl ? ctrl->snapshotBuffer(bufferIndex) : nullptr;
+                if (!source) return;
+                const auto count = std::size_t(nx) * nx * 2;
+                std::shared_ptr<std::vector<float>> pixels;
+                try { pixels = std::make_shared<std::vector<float>>(source, source + count); }
+                catch (...) { return; }
+                renderDisplay(std::move(pixels), lease);
             });
         }
     });
@@ -656,6 +676,7 @@ MainWindow::MainWindow(QWidget *parent)
         m_ringAssemblerConfigured = false;
         { std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
           m_ringPresentation.reset();
+          m_timeoutPresentation.reset();
           if (m_ringAssembler) m_ringAssembler->reset(); }
         m_ringInvalidIdentityReported.store(false, std::memory_order_release);
         if (m_imagingController && m_imagingController->isRingMode())
@@ -758,6 +779,12 @@ MainWindow::~MainWindow()
 {
     m_imagingServiceReady.store(false, std::memory_order_release);
     settlePendingTerminalPngs(QStringLiteral("application_closed"));
+    {
+        const std::lock_guard<std::mutex> lock(m_timeoutPngMutex);
+        m_timeoutPngClosed = true;
+    }
+    m_timeoutPngPool.waitForDone();
+    m_previewRenderPool.waitForDone();
     m_terminalRenderPool.waitForDone();
     m_terminalWritePool.waitForDone();
     if (m_imagingBypass) m_imagingBypass->stop();
@@ -2124,7 +2151,7 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                                 auto dropped = m_terminalPngTargets.extract(m_terminalPngTargets.begin());
                                 QMetaObject::invokeMethod(this, [this, round = dropped.key(),
                                     intent = dropped.mapped().target] {
-                                    reportTerminalPng(round, intent, 0, QStringLiteral("intent_capacity"));
+                                    reportRingPng(round, intent, 0, QStringLiteral("intent_capacity"));
                                 }, Qt::QueuedConnection);
                             }
                         }
@@ -2213,7 +2240,8 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
             // The captured payload owns old pixels/ranges and directory.
             // Render/write after reset without reading live UI/CUDA state.
             const bool captured = bool(pngJob);
-            if (pngJob) QThreadPool::globalInstance()->start([pngJob] { pngJob(); });
+            if (captured)
+                queueTimeoutPng({event.measurementSession, event.roundGeneration - 1}, std::move(pngJob));
             QMetaObject::invokeMethod(this, [this, source, event, uiBefore, autoCommit,
                                              hasAutoCommit, captured, resetFailed] {
                 if (m_netController != source) return;
@@ -5478,9 +5506,9 @@ void MainWindow::updateRingImagingStatus()
     m_lblImagingStatus->setStyleSheet(amberStyle);
 }
 
-void MainWindow::reportTerminalPng(const paimage::RoundIdentity& round,
-                                   const paimage::TimeoutPresentation::Target& target, quint64 submitIndex,
-                                   const QString& status, const QString& retained)
+void MainWindow::reportRingPng(const paimage::RoundIdentity& round,
+                               const paimage::TimeoutPresentation::Target& target, quint64 submitIndex,
+                               const QString& status, const QString& retained, RingPngKind kind)
 {
     const bool saved = status == QStringLiteral("saved");
     QJsonObject fields{{"measurementSession", QString::number(round.measurementSession)},
@@ -5489,15 +5517,19 @@ void MainWindow::reportTerminalPng(const paimage::RoundIdentity& round,
     fields.insert(QStringLiteral("source"), QStringLiteral("ui"));
     if (!target.listenId.isEmpty()) fields.insert(QStringLiteral("listenId"), target.listenId);
     if (!retained.isEmpty()) fields.insert(QStringLiteral("retainedFile"), retained);
+    const bool timeout = kind == RingPngKind::Timeout;
+    const auto event = timeout
+        ? (saved ? QStringLiteral("ring_timeout_png_saved") : QStringLiteral("ring_timeout_png_write_failed"))
+        : (saved ? QStringLiteral("ring_final_png_saved") : QStringLiteral("ring_final_png_write_failed"));
     if (auto* recorder = DiagnosticRecorder::instance()) {
-        recorder->recordEvent(QStringLiteral("ui.action"), saved ? QStringLiteral("ring_final_png_saved")
-            : QStringLiteral("ring_final_png_write_failed"),
+        recorder->recordEvent(QStringLiteral("ui.action"), event,
             saved ? DiagnosticRecorder::Severity::Info : DiagnosticRecorder::Severity::Warning, fields);
     }
     if (!saved) {
-        QMetaObject::invokeMethod(this, [this, round, status] {
-            logMessage(QStringLiteral("环形终帧未交付 · 会话 %1 轮次 %2 · %3")
-                .arg(round.measurementSession).arg(round.roundGeneration).arg(status));
+        const auto label = timeout ? QStringLiteral("环形超时截图未交付") : QStringLiteral("环形终帧未交付");
+        QMetaObject::invokeMethod(this, [this, round, status, label] {
+            logMessage(QStringLiteral("%1 · 会话 %2 轮次 %3 · %4")
+                .arg(label).arg(round.measurementSession).arg(round.roundGeneration).arg(status));
         }, Qt::QueuedConnection);
     }
 }
@@ -5509,7 +5541,7 @@ void MainWindow::rejectTerminalPng(paimage::RoundIdentity round, quint64 submitI
         const std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
         node = m_terminalPngTargets.extract(round);
     }
-    if (!node.empty()) reportTerminalPng(round, node.mapped().target, submitIndex, reason);
+    if (!node.empty()) reportRingPng(round, node.mapped().target, submitIndex, reason);
 }
 
 void MainWindow::settlePendingTerminalPngs(const QString& cancellation)
@@ -5528,7 +5560,7 @@ void MainWindow::settlePendingTerminalPngs(const QString& cancellation)
         }
     }
     const auto reason = cancellation.isEmpty() ? QStringLiteral("terminal_timeout") : cancellation;
-    for (const auto& terminal : settled) reportTerminalPng(terminal.first, terminal.second, 0, reason);
+    for (const auto& terminal : settled) reportRingPng(terminal.first, terminal.second, 0, reason);
 }
 
 void MainWindow::queueTerminalPng(const paimage::RoundIdentity& round,
@@ -5552,7 +5584,7 @@ void MainWindow::queueTerminalPng(const paimage::RoundIdentity& round,
         }
     }
     if (!reserved) {
-        reportTerminalPng(round, target, submitIndex, QStringLiteral("png_queue_full"));
+        reportRingPng(round, target, submitIndex, QStringLiteral("png_queue_full"));
         return;
     }
     auto settle = [this, round, target, submitIndex, bytes](const ImagingDisplayWindow::PngResult& result) {
@@ -5561,7 +5593,7 @@ void MainWindow::queueTerminalPng(const paimage::RoundIdentity& round,
             --m_terminalPngJobs;
             m_terminalPngBytes -= bytes;
         }
-        reportTerminalPng(round, target, submitIndex, result.status, result.retainedFile);
+        reportRingPng(round, target, submitIndex, result.status, result.retainedFile);
     };
     const auto tag = QStringLiteral("_session%1_round%2_frame%3")
         .arg(round.measurementSession).arg(round.roundGeneration).arg(sequence);
@@ -5583,6 +5615,49 @@ void MainWindow::queueTerminalPng(const paimage::RoundIdentity& round,
         });
     } catch (...) {
         settle({QStringLiteral("render_admission_failed"), {}});
+    }
+}
+
+void MainWindow::queueTimeoutPng(paimage::RoundIdentity round, paimage::TimeoutPresentation::Job job)
+{
+    constexpr std::size_t kMaxBytes = 128u * 1024u * 1024u;
+    constexpr std::size_t kPngBytes = 2 * ImagingDisplayWindow::kPngEdge *
+        ImagingDisplayWindow::kPngEdge * sizeof(QRgb);
+    const auto target = job.target;
+    auto report = [this, round, target](const QString& status, const QString& retained = {}) {
+        reportRingPng(round, target, 0, status, retained, RingPngKind::Timeout);
+    };
+    const std::lock_guard<std::mutex> lock(m_timeoutPngMutex);
+    if (m_timeoutPngClosed || !job) return;
+    if (m_timeoutPngBusy || job.capture.frameBytes > kMaxBytes - kPngBytes) {
+        report(m_timeoutPngBusy ? QStringLiteral("png_queue_full") : QStringLiteral("png_byte_budget"));
+        return;
+    }
+    m_timeoutPngBusy = true;
+    try {
+        m_timeoutPngPool.start([this, job = std::move(job), report]() mutable {
+            ImagingDisplayWindow::PngResult result{QStringLiteral("render_exception"), {}};
+            try {
+                auto images = job.capture.render();
+                job.capture.render = {}; // Disk waits own only the downsampled pair.
+                result.status = QStringLiteral("write_exception");
+#ifdef MAINWINDOW_START_TEST_SEAM
+                if (m_testBeforeTimeoutPngWrite) m_testBeforeTimeoutPngWrite();
+#endif
+                result = ImagingDisplayWindow::writePngPair(images, job.target.directory,
+                                                             job.target.suffix, job.capture.tag);
+            } catch (...) {
+                job.capture.render = {};
+            }
+            {
+                const std::lock_guard<std::mutex> lock(m_timeoutPngMutex);
+                m_timeoutPngBusy = false;
+            }
+            report(result.status, result.retainedFile);
+        });
+    } catch (...) {
+        m_timeoutPngBusy = false;
+        report(QStringLiteral("render_admission_failed"));
     }
 }
 

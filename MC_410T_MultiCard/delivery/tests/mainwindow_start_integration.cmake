@@ -28,5 +28,6 @@ add_custom_command(TARGET mainwindow_start_integration_test POST_BUILD
 enable_testing()
 add_test(NAME mainwindow_start_integration_test COMMAND mainwindow_start_integration_test)
 add_test(NAME mainwindow_listener_restart_png_test COMMAND mainwindow_start_integration_test --listener-restart-png)
-set_tests_properties(mainwindow_start_integration_test mainwindow_listener_restart_png_test PROPERTIES
+add_test(NAME mainwindow_preview_pressure_test COMMAND mainwindow_start_integration_test --preview-pressure)
+set_tests_properties(mainwindow_start_integration_test mainwindow_listener_restart_png_test mainwindow_preview_pressure_test PROPERTIES
     RUN_SERIAL TRUE TIMEOUT 90 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

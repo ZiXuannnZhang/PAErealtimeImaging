@@ -10,6 +10,7 @@
 #include "RingDisplayMapping.h"
 #include "RingImageWidget.h"
 #include "RingColorBarWidget.h"
+#include "TimeoutPresentation.h"
 
 class QLabel;
 class QVBoxLayout;
@@ -81,6 +82,7 @@ public:
     static PngResult commitPngPair(const PngPair&, const QString& firstPath, const QString& secondPath);
     using PngWriter = std::function<bool(const QString&, const QString&)>;
     PngWriter capturePngWriter(int seq) const;
+    paimage::TimeoutPresentation::Capture capturePngRender(int seq) const;
     static PngWriter makePngWriter(std::shared_ptr<const std::vector<float>> frame, int srcN,
                                   RingImageWidget::Range range1, RingImageWidget::Range range2,
                                   std::shared_ptr<const DisplayMask> mask, QString tag);
@@ -96,6 +98,9 @@ public:
     void showImage(const QVector<float> &frameData, int nx, int ny, int seq);
 
 private:
+    static paimage::TimeoutPresentation::Capture makePngCapture(
+        std::shared_ptr<const std::vector<float>>, int, RingImageWidget::Range, RingImageWidget::Range,
+        std::shared_ptr<const DisplayMask>, QString);
     void buildUi();
     void applyRangeToAll(int index, const RingImageWidget::Range &r);
     void syncBarHeights();       // 尺寸/状态变化后，让色标高度跟随图像正方形

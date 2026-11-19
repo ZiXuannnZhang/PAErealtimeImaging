@@ -1,24 +1,36 @@
 #pragma once
 #include "RingRoundUiState.h"
 #include <QDir>
+#include <QImage>
+#include <array>
+#include <cstddef>
 #include <QString>
 #include <atomic>
 #include <functional>
 #include <mutex>
 
 namespace paimage {
-// UI publishes an immutable frame/range writer. The source boundary captures
-// that payload without waiting for the UI or performing PNG/disk work.
+// The source boundary takes the displayed frame and its render settings
+// without waiting for the UI or performing PNG/disk work.
 class TimeoutPresentation {
 public:
-    using Writer = std::function<bool(const QString&, const QString&)>;
-    using Job = std::function<bool()>;
+    struct Capture {
+        std::size_t frameBytes = 0;
+        QString tag;
+        std::function<std::array<QImage, 2>()> render;
+        explicit operator bool() const { return bool(render); }
+    };
     struct Target {
         QString directory;
         QString suffix;
         std::uint64_t requestId = 0;
         QString listenId;
         explicit operator bool() const { return !directory.isEmpty(); }
+    };
+    struct Job {
+        Target target;
+        Capture capture;
+        explicit operator bool() const { return bool(capture); }
     };
     void configure(bool enabled, const QString& directory, const QString& suffix) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -29,13 +41,13 @@ public:
         return !closed_ || session > closedSession_ ||
             (session == closedSession_ && generation > closedGeneration_);
     }
-    void publish(std::uint64_t session, std::uint64_t generation, Writer writer) {
+    void publish(std::uint64_t session, std::uint64_t generation, Capture capture) {
         std::lock_guard<std::mutex> lock(mutex_);
-        session_ = session; generation_ = generation; writer_ = std::move(writer);
+        session_ = session; generation_ = generation; capture_ = std::move(capture);
     }
-    void updateWriter(Writer writer) {
+    void updateCapture(Capture capture) {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (writer_) writer_ = std::move(writer);
+        if (capture_) capture_ = std::move(capture);
     }
     template<class Reset>
     Job close(std::uint64_t session, std::uint64_t nextGeneration,
@@ -51,15 +63,13 @@ public:
     }
     template<class Reset>
     Job close(std::uint64_t session, std::uint64_t nextGeneration, Target target, Reset reset) {
-        Job job;
+        Job job{std::move(target), {}};
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (target && writer_ && session_ == session && nextGeneration > 0 &&
-                generation_ == nextGeneration - 1) {
-                const auto writer = writer_;
-                job = [writer, target] { return writer(target.directory, target.suffix); };
-            }
-            writer_ = {};
+            if (job.target && capture_ && session_ == session && nextGeneration > 0 &&
+                generation_ == nextGeneration - 1)
+                job.capture = std::move(capture_);
+            capture_ = {};
             closed_ = true; closedSession_ = session; closedGeneration_ = nextGeneration - 1;
         }
         // Capture is complete. The owned pixels/ranges and old directory stay
@@ -73,11 +83,11 @@ public:
         else { blocked.store(true, std::memory_order_release); ui.disarmStaleCutoff(); }
     }
     void reset() {
-        std::lock_guard<std::mutex> lock(mutex_); writer_ = {}; closed_ = false;
+        std::lock_guard<std::mutex> lock(mutex_); capture_ = {}; closed_ = false;
     }
 private:
     mutable std::mutex mutex_;
-    Writer writer_;
+    Capture capture_;
     QString directory_, suffix_;
     bool enabled_ = false, closed_ = false;
     std::uint64_t session_ = 0, generation_ = 0, closedSession_ = 0, closedGeneration_ = 0;

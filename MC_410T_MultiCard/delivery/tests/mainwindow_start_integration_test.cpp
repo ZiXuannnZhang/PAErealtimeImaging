@@ -32,6 +32,8 @@
 #include <QThread>
 #include <QTemporaryDir>
 #include <QSemaphore>
+#include <QUuid>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -66,6 +68,155 @@ static void pump(int milliseconds) {
 
 class MainWindowStartIntegrationTest {
 public:
+    static void previewPressure() {
+        check(QCoreApplication::applicationDirPath().endsWith("startup-isolated"), "isolated settings");
+        QFile::remove(paimageSettingsPath());
+        MainWindow window;
+        auto& controller = *window.m_imagingController;
+        window.m_cmbImagingMode->setCurrentIndex(1);
+        auto setup = [&](int nx) {
+            ImagingController::RingLayout layout{nx, 32, 4, nx * nx, {}, 0};
+            check(ring_snapshot::checkedLayout(32, 4, nx * nx, layout.bytes), "test preview layout");
+            const auto name = (QStringLiteral("Local\\ring-preview-") + QUuid::createUuid().toString()).toStdWString();
+            check(controller.setupRingSharedMemory(layout, name.c_str()), "test preview mapping");
+            controller.m_svcResourcesActive = true;
+            controller.m_ringWorkerStop = false;
+            controller.m_ringAdmission = true;
+            window.m_ringSnapshotAdmissionBlocked.store(false);
+            window.m_imagingEnabled = true;
+        };
+        constexpr int nx = 1024;
+        setup(nx);
+        const auto publish = [&](int seq) {
+            const auto& layout = controller.m_ringLayout;
+            auto* header = static_cast<RingImagingShmHeader*>(controller.m_ringMapping.data());
+            check(controller.m_ringOutputMutex.lock(100) == ring_input::Result::Ok, "publish preview under output lock");
+            header->frame_ready = 1;
+            header->frame_seq = seq;
+            auto* pixels = reinterpret_cast<float*>(reinterpret_cast<std::uint8_t*>(header) + layout.bytes.frameOffset);
+            std::fill_n(pixels, layout.frameSize, float(seq));
+            std::fill_n(pixels + layout.frameSize, layout.frameSize, float(seq + 50));
+            controller.m_ringOutputMutex.unlock();
+            controller.startRingFrameWorker(seq, seq, true, {7, 0}, false);
+        };
+        const auto freeSlots = [&] {
+            return int(controller.m_dispConsumed[0].load()) + int(controller.m_dispConsumed[1].load());
+        };
+        std::vector<quint64> previewSubmits;
+        QObject::connect(&controller, &ImagingController::ringSnapshotReady, &window,
+            [&](int, quint64 submit, bool, quint64, quint64, bool complete, int) {
+                if (!complete) previewSubmits.push_back(submit);
+            });
+        auto blockPreview = [&] {
+            const auto gate = std::make_shared<QSemaphore>();
+            auto release = std::shared_ptr<void>(nullptr, [gate](void*) { gate->release(); });
+            window.m_previewRenderPool.start([gate] { gate->acquire(); });
+            return release;
+        };
+        auto blocked = blockPreview();
+        publish(1);
+        waitFor([&] { return !previewSubmits.empty(); }, "first preview leased before copy");
+        for (int seq = 2; seq <= 24; ++seq) { publish(seq); pump(3); }
+        check(previewSubmits == std::vector<quint64>{1} && freeSlots() == 1 &&
+              window.m_lastPresentedRingSubmit == 0, "render pressure kept only one full-size preview");
+        blocked.reset();
+        // No GUI events run while the completed render waits for presentation.
+        check(window.m_previewRenderPool.waitForDone(8000), "first preview rendered");
+        publish(25);
+        QThread::msleep(60);
+        check(freeSlots() == 1 && window.m_lastPresentedRingSubmit == 0,
+              "GUI stall kept the same preview lease");
+        {
+            const std::lock_guard<std::mutex> lock(controller.m_ringReqMutex);
+            check(controller.m_ringReqPending && controller.m_ringReqSubmitIndex == 25,
+                  "GUI stall kept only the latest metadata");
+        }
+        waitFor([&] { return window.m_lastPresentedRingSubmit == 25 && freeSlots() == 2; },
+                "released slot pulls latest preview without another block");
+        check(previewSubmits == std::vector<quint64>({1,25}) && freeSlots() == 2,
+              "only first and last valid previews published");
+        auto* preview = window.m_imagingDisplayWindow;
+        const auto* widget1 = preview->findChild<RingImageWidget*>();
+        check(widget1 && qRed(widget1->image().pixel(0,0)) == 12, "last valid preview supplied the displayed pixels");
+
+        blocked = blockPreview();
+        publish(26);
+        waitFor([&] { return previewSubmits.size() == 3; }, "old layout render queued");
+        publish(27);
+        controller.stopSvc();
+        setup(512);
+        publish(28);
+        blocked.reset();
+        waitFor([&]{ return window.m_lastPresentedRingSubmit == 28; }, "old lease released after reconfiguration");
+        check(previewSubmits == std::vector<quint64>({1,25,26,28}) &&
+              preview->findChild<RingImageWidget*>()->image().size() == QSize(512, 512),
+              "stopped layout yielded no additional snapshot and old work cannot paste");
+
+        QTemporaryDir output;
+        check(output.isValid(), "timeout test directory");
+        auto pixelsFor = [](float value) {
+            return std::make_shared<std::vector<float>>(2 * nx * nx, value);
+        };
+        auto capture = [&](quint64 round, const auto& pixels) {
+            const auto view = ImagingDisplayWindow::renderFrame(pixels->data(), nx, 0, 500);
+            preview->applyRingFrame(pixels, nx, int(round), view, view);
+            window.m_timeoutPresentation.publish(9, round, preview->capturePngRender(int(round)));
+            const paimage::TimeoutPresentation::Target target{output.path(), "preview", 92};
+            return window.m_timeoutPresentation.close(9, round+1, target, []{});
+        };
+        const auto renderGate = std::make_shared<QSemaphore>();
+        auto releaseRender = std::shared_ptr<void>(nullptr, [renderGate](void*) { renderGate->release(); });
+        const auto diskGate = std::make_shared<QSemaphore>();
+        auto releaseDisk = std::shared_ptr<void>(nullptr, [diskGate](void*) { diskGate->release(); });
+        const auto atDisk = std::make_shared<std::atomic_bool>(false);
+        window.m_testBeforeTimeoutPngWrite = [diskGate, atDisk] { atDisk->store(true); diskGate->acquire(); };
+        window.m_timeoutPngPool.start([renderGate] { renderGate->acquire(); });
+
+        auto first = pixelsFor(100);
+        std::weak_ptr<std::vector<float>> firstLifetime = first;
+        auto job = capture(0, first);
+        check(job && job.capture.frameBytes == 8u * nx * nx, "paired capture pixel byte count");
+        window.queueTimeoutPng({9, 0}, std::move(job));
+        first.reset();
+        for (quint64 round = 1; round <= 6; ++round) {
+            auto next = pixelsFor(150);
+            std::weak_ptr<std::vector<float>> lifetime = next;
+            window.queueTimeoutPng({9, round}, capture(round, next));
+            // Replace the live display; an unadmitted screenshot must not pin it.
+            QImage image(2, 2, QImage::Format_Grayscale8);
+            image.fill(0);
+            preview->applyRingFrame(std::make_shared<std::vector<float>>(8, 0.f), 2, 0, image, image);
+            next.reset();
+            check(lifetime.expired(), "each rejected Timeout releases its frame");
+        }
+        {
+            const std::lock_guard<std::mutex> lock(window.m_timeoutPngMutex);
+            check(window.m_timeoutPngBusy && !firstLifetime.expired(), "exactly one queued Timeout frame retained");
+        }
+        releaseRender.reset();
+        waitFor([&] { return atDisk->load(); }, "Timeout render entered blocked PNG writer");
+        check(firstLifetime.expired(), "Timeout disk wait only retained rendered pixels");
+        const paimage::TimeoutPresentation::Target terminal{output.path(), "terminal", 93};
+        window.queueTerminalPng({9, 7}, terminal, 1, 1, 64, [] {
+            QImage image(8, 8, QImage::Format_ARGB32);
+            image.fill(Qt::white);
+            return std::array<QImage, 2>{image, image};
+        });
+        QDir dir(output.path());
+        waitFor([&]{ return dir.entryList({"terminal_*.png"}, QDir::Files).size() == 2; },
+                "formal terminal pair completes while Timeout disk is blocked");
+        releaseDisk.reset();
+        waitFor([&] { return dir.entryList({"preview_*.png"}, QDir::Files).size() == 2; },
+                "first Timeout pair written and excess work rejected");
+        const auto files = dir.entryList({"preview_*_532nm.png"}, QDir::Files);
+        check(files.size() == 1 && qRed(QImage(dir.filePath(files.front())).pixel(0,0)) == 51,
+              "Timeout PNG used the saved display rather than a subsequent frame");
+        window.m_timeoutPngPool.waitForDone();
+        window.m_testBeforeTimeoutPngWrite = {};
+        controller.stopSvc();
+        std::cout << "PASS preview render and GUI stalls, restart, and bounded Timeout PNG with independent final delivery\n";
+    }
+
     static void listenerRestartPng() {
         check(QCoreApplication::applicationDirPath().endsWith("startup-isolated"), "isolated settings");
         QFile::remove(paimageSettingsPath());
@@ -193,6 +344,9 @@ public:
                 waitFor([&]{ return window.m_isMeasuring; }, "card START accepted");
                 expectCommand(paimage::startCommand());
 
+                const auto previewGate = std::make_shared<QSemaphore>();
+                auto releasePreview = std::shared_ptr<void>(nullptr, [previewGate](void*) { previewGate->release(); });
+                window.m_previewRenderPool.start([previewGate] { previewGate->acquire(); });
                 if (pass) window.m_imagingServiceReady.store(false);
                 const int requestedRounds = pass ? 2 : 1;
                 for (int trigger = 0; trigger < triggers * requestedRounds; ++trigger) {
@@ -262,6 +416,7 @@ public:
                           QFileInfo(roundDir.filePath(files.front())).size() == qint64(triggers)*cfg.sampDepth*2,
                           "raw file trigger count in the same round directory");
                 }
+                releasePreview.reset();
             }
 
             // Stage a valid reconstruction-only calibration while the service
@@ -689,6 +844,8 @@ int main(int argc, char** argv) {
     try {
         if (app.arguments().contains("--listener-restart-png"))
             MainWindowStartIntegrationTest::listenerRestartPng();
+        else if (app.arguments().contains("--preview-pressure"))
+            MainWindowStartIntegrationTest::previewPressure();
         else
             MainWindowStartIntegrationTest::run();
         return 0;

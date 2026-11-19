@@ -46,7 +46,7 @@ class ImagingController : public QObject
 {
     Q_OBJECT
 public:
-    explicit ImagingController(QObject *parent = nullptr);
+    explicit ImagingController(QObject *parent = nullptr, bool singlePreviewInFlight = false);
     ~ImagingController();
 
     // 生命周期
@@ -105,9 +105,8 @@ public:
     int ringDisplayNx() const { return m_ringLayout.nx ? m_ringLayout.nx : m_pendingRingLayout.nx; }
     std::uint64_t ringLastSubmitIndex() const;
 
-    // 固定双缓冲访问（仅 UI 线程调用）：
-    // snapshotBuffer 返回已发布缓冲的只读指针，使用完必须 releaseSnapshotBuffer，
-    // 否则工作线程将丢弃后续快照（latest-wins）。
+    // A published buffer is immutable until releaseSnapshotBuffer. The
+    // preview worker keeps one latest request while publication is blocked.
     const float *snapshotBuffer(int index) const;
     void releaseSnapshotBuffer(int index);
     std::shared_ptr<std::vector<float>> terminalSnapshotBuffer(int index) const;
@@ -256,6 +255,7 @@ private:
     std::atomic<bool> m_running{false};
 
     // 方案A：固定显示双缓冲（各 nx²*2 float，运行期零分配）
+    const bool m_singlePreviewInFlight;
     std::vector<float> m_dispBuf[2];
     // Indices 2 and 3 on ringSnapshotReady. A retained shared_ptr keeps the
     // buffer unavailable until asynchronous PNG writing has finished.

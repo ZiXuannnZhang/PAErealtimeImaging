@@ -178,7 +178,7 @@ target_compile_features(ring_block_assembler_test PRIVATE cxx_std_17)
 enable_testing()
 add_executable(timeout_presentation_test timeout_presentation_test.cpp ../src/RingRoundUiState.cpp)
 target_include_directories(timeout_presentation_test PRIVATE ../include)
-target_link_libraries(timeout_presentation_test PRIVATE Qt6::Core)
+target_link_libraries(timeout_presentation_test PRIVATE Qt6::Core Qt6::Gui)
 add_test(NAME timeout_presentation_test COMMAND timeout_presentation_test)
 add_test(NAME ring_block_assembler_test COMMAND ring_block_assembler_test)
 

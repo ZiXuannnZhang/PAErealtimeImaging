@@ -11,11 +11,11 @@ int main(){
     auto pixels=std::make_shared<int>(42);
     std::weak_ptr<int> lifetime=pixels;
     std::vector<int> order{1}; // TimeoutBoundary / binding already committed.
-    presentation.publish(7,0,[pixels,&order](const QString& dir,const QString& suffix){
+    presentation.publish(7,0,{sizeof(int), "_frame1", [pixels,&order] {
         check(*pixels==42,"C10 old pixels owned after live presentation destruction");
-        check(dir=="old-directory/recon_png"&&suffix=="suffix","C10 committed old directory");
-        order.push_back(3);return true;
-    });
+        order.push_back(3);
+        return std::array<QImage, 2>{};
+    }});
     pixels.reset();
     auto job=presentation.close(7,1,true,"old-directory",[&]{
         // close removed live writer, so ONLY the captured job can own pixels.
@@ -23,11 +23,17 @@ int main(){
         check(!presentation.accepts(7,0)&&presentation.accepts(7,1),"C10 delayed old UI conversion rejected");
         order.push_back(2);
     });
-    check(job && job() && order==std::vector<int>({1,2,3}),"C10 boundary -> capture -> reset -> write");
-    job={};check(lifetime.expired(),"C10 payload released after asynchronous write");
-    presentation.publish(7,1,[](const QString& d,const QString&){return d=="new-ui-directory/recon_png";});
-    job=presentation.close(7,2,false,{},[]{});check(job&&job(),"C10 manual directory unchanged");
-    presentation.publish(7,2,[](const QString&,const QString&){return true;});
+    check(job && job.target.directory=="old-directory/recon_png" && job.target.suffix=="suffix",
+          "C10 committed old directory");
+    job.capture.render();
+    check(order==std::vector<int>({1,2,3}),"C10 boundary -> capture -> reset -> render");
+    job.capture.render={};
+    check(lifetime.expired(),"C10 full-size payload released before asynchronous write");
+    const TimeoutPresentation::Capture emptyPair{1, "_frame2", [] { return std::array<QImage, 2>{}; }};
+    presentation.publish(7,1,emptyPair);
+    job=presentation.close(7,2,false,{},[]{});
+    check(job&&job.target.directory=="new-ui-directory/recon_png","C10 manual directory unchanged");
+    presentation.publish(7,2,emptyPair);
     check(!presentation.close(7,3,true,{},[]{}),"C10 missing auto directory cannot use new UI target");
     RingRoundUiState ui;std::atomic<bool> blocked{false};
     ui.recordSubmitIndex(5);ui.onTimeoutBoundary();

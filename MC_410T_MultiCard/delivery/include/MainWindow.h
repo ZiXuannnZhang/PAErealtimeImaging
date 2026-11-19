@@ -120,6 +120,7 @@ private slots:
 private:
 #ifdef MAINWINDOW_START_TEST_SEAM
     friend class MainWindowStartIntegrationTest;
+    std::function<void()> m_testBeforeTimeoutPngWrite;
     int m_testAssemblerConfigs = 0;
     int m_testFeedStarts = 0;
 #endif
@@ -340,11 +341,18 @@ private:
     std::map<paimage::RoundIdentity, PendingTerminalPng> m_terminalPngTargets;
     void rejectTerminalPng(paimage::RoundIdentity, quint64 submitIndex, const QString& reason);
     void settlePendingTerminalPngs(const QString& cancellation = {});
-    void reportTerminalPng(const paimage::RoundIdentity&, const paimage::TimeoutPresentation::Target&,
-                           quint64 submitIndex, const QString& status, const QString& retained = {});
+    enum class RingPngKind { Terminal, Timeout };
+    void reportRingPng(const paimage::RoundIdentity&, const paimage::TimeoutPresentation::Target&,
+                       quint64 submitIndex, const QString& status, const QString& retained = {},
+                       RingPngKind kind = RingPngKind::Terminal);
     using TerminalPngRender = std::function<std::array<QImage, 2>()>;
     void queueTerminalPng(const paimage::RoundIdentity&, const paimage::TimeoutPresentation::Target&,
                           quint64 submitIndex, int sequence, std::size_t frameBytes, TerminalPngRender);
+    void queueTimeoutPng(paimage::RoundIdentity, paimage::TimeoutPresentation::Job);
+    QThreadPool m_previewRenderPool;
+    QThreadPool m_timeoutPngPool;
+    std::mutex m_timeoutPngMutex;
+    bool m_timeoutPngBusy = false, m_timeoutPngClosed = false;
     QThreadPool m_terminalRenderPool;
     QThreadPool m_terminalWritePool;
     std::mutex m_terminalPngBudgetMutex;

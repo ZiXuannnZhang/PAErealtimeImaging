@@ -274,6 +274,7 @@ QImage ImagingDisplayWindow::renderFrame(const float *buf, int dn, double lo, do
     // （9 点钟方向 = 数学角 180°，x 最小、y 居中）落在图像左侧中心，
     // 且重建随角度沿顺时针方向展开。
     QImage img(dn, dn, QImage::Format_Grayscale8);
+    if (img.isNull()) return img;
     // 分块转置读取：源缓冲按列存放（xIdx 固定、yIdx 连续）。逐块读取可完全
     // 利用缓存行，避免逐像素跨 3600×4 字节步长导致的缓存行失效（旧实现每
     // 像素一次缓存未命中，两幅 3600² 图转换耗时秒级，阻塞信号显示刷新）。
@@ -423,11 +424,30 @@ ImagingDisplayWindow::PngWriter ImagingDisplayWindow::makePngWriter(
     RingImageWidget::Range range1, RingImageWidget::Range range2,
     std::shared_ptr<const DisplayMask> mask, QString tag)
 {
+    auto capture = makePngCapture(std::move(frame), srcN, range1, range2, std::move(mask), std::move(tag));
+    if (!capture) return {};
+    return [capture = std::move(capture)](const QString& dir, const QString& suffix) {
+        return writePngPair(capture.render(), dir, suffix, capture.tag).saved();
+    };
+}
+
+paimage::TimeoutPresentation::Capture ImagingDisplayWindow::capturePngRender(int seq) const
+{
+    return makePngCapture(m_ringFrame, m_lastDn, m_range1, m_range2, m_mask,
+                          QStringLiteral("_frame%1").arg(seq));
+}
+
+paimage::TimeoutPresentation::Capture ImagingDisplayWindow::makePngCapture(
+    std::shared_ptr<const std::vector<float>> frame, int srcN,
+    RingImageWidget::Range range1, RingImageWidget::Range range2,
+    std::shared_ptr<const DisplayMask> mask, QString tag)
+{
     if (srcN <= 0 || !frame || frame->size() < static_cast<size_t>(srcN) * srcN * 2)
         return {};
-    return [frame, range1, range2, mask, srcN, tag](const QString& dir, const QString& suffix) {
-        return writePngPair(renderPngPair(*frame, srcN, range1, range2, mask), dir, suffix, tag).saved();
-    };
+    const auto bytes = frame->size() * sizeof(float);
+    return {bytes, std::move(tag), [frame = std::move(frame), range1, range2, mask = std::move(mask), srcN] {
+        return renderPngPair(*frame, srcN, range1, range2, mask);
+    }};
 }
 
 ImagingDisplayWindow::PngPair ImagingDisplayWindow::renderPngPair(

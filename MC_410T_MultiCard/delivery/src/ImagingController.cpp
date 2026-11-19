@@ -38,7 +38,7 @@ static QJsonObject makeRingObservation(const char *kind,
 // =====================================================================
 // 构造 / 析构
 // =====================================================================
-ImagingController::ImagingController(QObject *parent)
+ImagingController::ImagingController(QObject *parent, bool singlePreviewInFlight)
     : QObject(parent)
     , m_svcProcess(nullptr)
     , m_sharedMemory(nullptr)
@@ -48,6 +48,7 @@ ImagingController::ImagingController(QObject *parent)
     , m_frameWidth(0)
     , m_frameHeight(0)
     , m_running(false)
+    , m_singlePreviewInFlight(singlePreviewInFlight)
     , m_pulseAccumCount(0)
     , m_pulseAccumSeq(0)
 {
@@ -829,10 +830,16 @@ void ImagingController::ringWorkerLoop(quint64 lifecycle, const RingLayout &layo
         bool roundComplete = false;
         {
             std::unique_lock<std::mutex> lk(m_ringReqMutex);
-            if (!m_ringWorkerStop && !m_ringReqPending)
+            const auto canPublishPreview = [this] {
+                if (!m_ringReqPending) return false;
+                const bool first = m_dispConsumed[0].load(std::memory_order_acquire);
+                const bool second = m_dispConsumed[1].load(std::memory_order_acquire);
+                return m_singlePreviewInFlight ? first && second : first || second;
+            };
+            if (!m_ringWorkerStop && !canPublishPreview())
                 m_ringReqCv.wait_for(lk, std::chrono::milliseconds(20));
             if (m_ringWorkerStop) break;
-            if (!m_ringReqPending) continue;
+            if (!canPublishPreview()) continue;
             seq = m_ringReqSeq;
             submitIndex = m_ringReqSubmitIndex;
             hasSubmitIndex = m_ringReqHasSubmitIndex;
@@ -893,19 +900,22 @@ void ImagingController::processRingFrame(int seq,
     if (m_testBeforeRingCopy) m_testBeforeRingCopy();
 #endif
 
-    // 方案A：固定双缓冲（各 nx²*2 float）。worker 只写“已被 UI 消费”的缓冲，
-    // UI 读期间缓冲被占用，worker 直接丢弃本快照（latest-wins），杜绝覆盖竞态。
+    // The sole Ring worker can write only into a released transport slot.
     const int active = m_dispActive.load(std::memory_order_relaxed);
-    int target = (active < 0) ? 0 : (1 - active);
+    int target = active < 0 ? 0 : 1 - active;
     if (!m_dispConsumed[target].exchange(false)) {
-        if (active >= 0) return;
-        // An earlier lifecycle can still have a display buffer leased.
-        target = 1;
+        target = 1 - target;
         if (!m_dispConsumed[target].exchange(false)) return;
     }
     const auto floats = layout.bytes.frameBytes / sizeof(float);
-    if (m_dispBuf[target].size() != floats)
-        m_dispBuf[target].assign(floats, 0.0f);
+    try {
+        if (m_dispBuf[target].size() != floats)
+            m_dispBuf[target].resize(floats);
+    } catch (...) {
+        releaseSnapshotBuffer(target);
+        emit svcStatus(QStringLiteral("[RingSnapshot] preview buffer allocation failed"), 0);
+        return;
+    }
 
     std::uint32_t observedSeq = 0;
     auto copied = ring_snapshot::CopyResult::LockFailed;
@@ -1069,6 +1079,7 @@ void ImagingController::releaseSnapshotBuffer(int index)
     }
     if (index < 0 || index > 1) return;
     m_dispConsumed[index].store(true, std::memory_order_release);
+    m_ringReqCv.notify_one();
 }
 
 std::shared_ptr<std::vector<float>> ImagingController::terminalSnapshotBuffer(int index) const
