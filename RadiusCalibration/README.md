@@ -33,9 +33,12 @@
   - `z`：自定义字符串（保存时填写的后缀）；
   - `seq`：从 000 开始的组号，每满 1000 个触发递增。
 - 内容：**无文件头、float16、按触发顺序追加**；
-  每触发 `sampleCount` 点（当前 4000），文件字节数 =
-  `2 × sampleCount × triggersPerFile`。
-- 触发奇偶即波长：第 1、3、5… 列为 532nm，第 2、4、6… 列为 1064nm。
+  每触发 `sampleCount` 点。短文件由轮转或停写正常产生，字节数为
+  `2 × sampleCount × 实际列数`。
+- 每对 A/B 文件使用 `<ChA 文件名>.jsonl` 旁车。每列记录该卡的采集会话、轮次、
+  逻辑索引、触发号及收包证据。槽号以首到包为基准，物理槽零和波长相位仍需实机确认。
+  旁车只记录 A/B 双侧写入并 flush 确认的列。完整文件必须有封尾，且 A/B 长度一致。
+- 新数据进入标定前需通过旁车的覆盖和卡间对齐检查，并按设备记录设置
 
 ## 运行方法
 
@@ -119,7 +122,7 @@ bscan.wl2{ch} : [sampleCount x Nwl] 通道 ch 的 1064nm 原始 Bscan
 | `calibGridSize` | 0.1e-3 | 标定网格（米） |
 | `validateGridSize` | 0.1e-3 | 验证重建网格 |
 | `doFigures` | true | 预处理检查图 / 标定曲线图 / 参考通道前后对比图 |
-| `saveResults` | true | 保存 `.mat` 与 `radiusPerChannel_mm.txt` |
+| `saveResults` | true | 保存同编号的 `.mat` 与半径 TXT |
 
 ## 输出与应用
 
@@ -179,3 +182,11 @@ bscan.wl2{ch} : [sampleCount x Nwl] 通道 ch 的 1064nm 原始 Bscan
 - 参考通道绝对半径误差会传递给其他通道，应选信噪比和聚焦曲线明确的参考通道；
 - 若修改当前 CUDA/ImagingSvc 的几何或 preprocessing 语义，应重新核对本 MATLAB reference，而不是假设该目录自动同步；
 - 本目录 README 是当前说明入口；旧 `HANDOFF.md` 的“未跟踪工作区/其他会话未提交改动”等会话状态已经过时，不再保留为当前事实。
+
+### 新采集的标定证据
+
+采集软件在每次 START 分配新的 `captureId`。读取器按旁车 V2 的采集 ID 和轮次检查各卡共同的完整轮，文件序号可随卡让号。目录有多个采集时填写 `cfg.captureId`，可用 `cfg.roundId` 指定轮次。`filesPerChannel` 是每张卡读取所选采集的文件对上限。
+
+定量标定前填写 `cfg.roundEvidence`。每条记录包含 `captureId`、`roundId`、设备证据引用 `reference`、`direction`（CW 或 CCW）、首触发的 `startAngleDeg` 和 `firstWavelengthNm`。用 `secondOffsetDeg` 记录沿扫描方向到另一波长首触发的角度差。多圈合并要求每圈都有相容证据。旁车的软件槽位以首到包为基准。
+
+历史读法需要设置 `allowUnverifiedLegacy=true` 并明确列出 `legacyFileIndices`，该模式的唯一证据轮次填写 `legacy`，采集 ID 留空。默认导出的半径 TXT 与记录输入和设备证据的 MAT 使用同一结果编号。`writeLegacyRadiusTxt=true` 另外保留固定文件名的兼容导出。

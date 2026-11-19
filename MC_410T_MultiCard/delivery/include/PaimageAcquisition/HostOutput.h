@@ -6,6 +6,7 @@
 #include "DataProcessor.h"
 #include "FileSaver.h"
 #include <functional>
+#include <QUuid>
 #include <limits>
 #include <memory>
 #include <utility>
@@ -45,6 +46,9 @@ public:
         std::lock_guard<std::mutex> lock(normalizationMutex_);
         cancelTailState(true);
         expireFailedBoundary((std::numeric_limits<Time>::max)(), nullptr);
+        captureSession_ = s;
+        captureId_ = std::make_shared<const std::string>(
+            QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString());
         if(measurementSessionBinder_)
             measurementSessionBinder_(s);
         if(normalizer_)normalizer_->beginSession(s);
@@ -112,6 +116,10 @@ public:
         if(normalizer_)normalizer_->setDisableCountBoundary(disable);
     }
     PhysicalRoundNormalizer::Snapshot normalizerSnapshot() const;
+    QString captureId() {
+        std::lock_guard<std::mutex> lock(normalizationMutex_);
+        return captureId_ ? QString::fromStdString(*captureId_) : QString{};
+    }
     using SaveResultSink = std::function<void(const FileSaver::SaveResult&)>;
     using SaveHealthSink = std::function<void(int healthy, int total)>;
     std::uint64_t startSaving(const QString&, int, const QString&,
@@ -183,6 +191,8 @@ private:
     std::optional<FailedBoundary> failedBoundary_;
     std::deque<std::function<void()>> deferredSaveControls_;
     Time boundaryObservedNs_ = 0;
+    std::uint64_t captureSession_ = 0;
+    std::shared_ptr<const std::string> captureId_;
     std::shared_ptr<SaveRequest> sourceSaveRequest_; // Under normalizationMutex_.
     std::shared_ptr<SaveRequest> writerSaveRequest_; // Sole saving worker.
     SaveSessionResolver saveSessionResolver_;

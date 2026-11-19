@@ -12,14 +12,16 @@ TriggerGroupPtr FrameConverter::convertForSave(Frame frame){
     auto source=convert(frame,&override);
     if(!override)return source;
     auto result=std::make_shared<TriggerGroup>(*source);
+    if (source->measurementSession != override->session || source->roundGeneration != override->round)
+        result->logicalTriggerIndex = -1; // A storage tail token does not certify a logical index.
     result->measurementSession=override->session;result->roundGeneration=override->round;
     result->sessionGen=override->generation;result->normalizationApplied=true;
     result->physicalDecision=PhysicalTriggerDecision::LogicalScan;result->saveForceLate=override->late;
     result->saveTailCandidate=!override->late;
     return result;
 }
-void FrameConverter::tagSaveSession(Frame frame,std::uint64_t generation){
-    if(!generation)return;
+void FrameConverter::tagSaveSession(Frame frame, std::uint64_t generation, const std::shared_ptr<const std::string>& captureId){
+    if (!generation && !captureId) return;
     std::lock_guard<std::mutex> lock(mutex_);
     auto& entry=entries_[frame.get()];
     if(!entry||entry->source.lock()!=frame){entry=std::make_shared<Entry>();entry->source=frame;
@@ -27,6 +29,7 @@ void FrameConverter::tagSaveSession(Frame frame,std::uint64_t generation){
             if(p->second->source.expired())p=entries_.erase(p);else ++p;}
     }
     entry->saveSession=generation;
+    if (captureId) entry->captureId = captureId;
 }
 void FrameConverter::tagNormalization(Frame frame,const PhysicalRoundClassification& classification){
     if(!frame)return;
@@ -71,15 +74,22 @@ TriggerGroupPtr FrameConverter::convert(Frame frame,std::optional<Entry::SaveOve
         // conversion metadata together, and never hold mutex_ while decoding
         // or while waiting for another call_once participant.
         std::uint64_t saveSession;
+        std::shared_ptr<const std::string> captureId;
         std::optional<PhysicalRoundClassification> normalization;
         {std::lock_guard<std::mutex> lock(mutex_);
             saveSession=entry->saveSession;normalization=entry->normalization;
+            captureId = entry->captureId;
             entry->frozenSaveOverride=entry->saveOverride;}
         if(afterSnapshot_)afterSnapshot_();
         auto group=std::make_shared<TriggerGroup>();group->cardId=frame->card;group->triggerSeq=frame->trigger;
         group->sessionGen=saveSession;
+        group->captureId = std::move(captureId);
         group->measurementSession=frame->measurementSession;
         group->isComplete=frame->complete;group->sourceIPv4=frame->sourceIPv4;
+        group->firstPacketSeq = frame->basePacket;
+        group->expectedPacketSlots = frame->expected;
+        group->receivedPacketSlots = frame->unique;
+        if (!frame->complete) group->receivedSlotMask = frame->seen;
         group->sourceTimedOut=frame->reason==Decision::Timeout;
         if(normalization){
             const auto& n=*normalization;

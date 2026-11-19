@@ -2,6 +2,10 @@
 #include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 #include <QDir>
 #include <QDateTime>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QDebug>
 #include <cstring>
 #include <cmath>
@@ -224,8 +228,10 @@ int FileSaver::resolveFreeSequence() {
         if (candidate > static_cast<long long>((std::numeric_limits<int>::max)()))
             break;
         const int seq = static_cast<int>(candidate);
-        if (QFile::exists(fileNameFor(QStringLiteral("A"), seq)) ||
-            QFile::exists(fileNameFor(QStringLiteral("B"), seq)))
+        const QString channelA = fileNameFor(QStringLiteral("A"), seq);
+        if (QFile::exists(channelA) ||
+            QFile::exists(fileNameFor(QStringLiteral("B"), seq)) ||
+            (m_sourceBits > 0 && QFile::exists(channelA + QStringLiteral(".jsonl"))))
             continue;
         if (seq != start) {
             FileRolloverInfo info;
@@ -315,7 +321,73 @@ bool FileSaver::closeFiles() {
     };
     closeOne(m_fileChannelA);
     closeOne(m_fileChannelB);
+    if (m_rawMetadata && ok) {
+        const QJsonObject end{{"type", "end"}, {"confirmedColumns", m_currentFileTriggers}};
+        writeRawMetadata(QJsonDocument(end).toJson(QJsonDocument::Compact) + '\n');
+    }
+    m_rawMetadata.reset();
+    m_rawMetadataBatch.clear();
     return ok;
+}
+
+void FileSaver::abandonRawMetadata(const QString& reason)
+{
+    m_rawMetadata.reset();
+    m_rawMetadataBatch.clear();
+    emit errorOccurred(QStringLiteral("Card%1: 原始波形旁车未确认：%2")
+                           .arg(m_cardId + 1).arg(reason));
+}
+
+void FileSaver::writeRawMetadata(const QByteArray& bytes)
+{
+    if (m_rawMetadata &&
+        (m_rawMetadata->write(bytes) != bytes.size() || !m_rawMetadata->flush()))
+        abandonRawMetadata(m_rawMetadata->errorString());
+}
+
+void FileSaver::recordRawColumn(const TriggerGroup& group)
+{
+    if (m_sourceBits == 0) return;
+    if (m_currentFileTriggers == 0) {
+        if (!group.captureId) {
+            abandonRawMetadata(QStringLiteral("缺少采集 ID"));
+            return;
+        }
+        m_rawFileCaptureId = group.captureId;
+        const QString path = m_fileChannelA->fileName() + QStringLiteral(".jsonl");
+        m_rawMetadata = std::make_unique<QFile>(path);
+        if (!m_rawMetadata->open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+            abandonRawMetadata(m_rawMetadata->errorString());
+            return;
+        }
+        const QJsonObject layout{
+            {"type", "pae-raw-pair"}, {"version", 2}, {"card", m_cardId + 1},
+            {"captureId", QString::fromStdString(*m_rawFileCaptureId)},
+            {"fileA", QFileInfo(m_fileChannelA->fileName()).fileName()},
+            {"fileB", QFileInfo(m_fileChannelB->fileName()).fileName()},
+            {"sampleCount", group.sampleCount}, {"sampleIntervalNs", m_sampleIntervalNs},
+            {"sourceBits", m_sourceBits}, {"sourceIPv4", qint64(group.sourceIPv4)},
+            {"packetAnchor", "first-arrival"}, {"physicalPhase", "unverified"}};
+        writeRawMetadata(QJsonDocument(layout).toJson(QJsonDocument::Compact) + '\n');
+    }
+    if (!m_rawMetadata) return;
+    if (m_rawFileCaptureId != group.captureId &&
+        (!group.captureId || *m_rawFileCaptureId != *group.captureId)) {
+        abandonRawMetadata(QStringLiteral("文件内采集 ID 不一致"));
+        return;
+    }
+    QJsonArray slotWords;
+    for (const auto word : group.receivedSlotMask) slotWords.append(qint64(word));
+    const QJsonObject trigger{
+        {"type", "column"}, {"column", m_currentFileTriggers + 1},
+        {"session", QString::number(group.measurementSession)},
+        {"round", QString::number(group.roundGeneration)},
+        {"logicalIndex", qint64(group.logicalTriggerIndex)}, {"triggerSeq", group.triggerSeq},
+        {"complete", group.isComplete}, {"firstPacketSeq", group.firstPacketSeq},
+        {"expectedSlots", qint64(group.expectedPacketSlots)},
+        {"receivedSlots", qint64(group.receivedPacketSlots)}, {"receivedSlotMask", slotWords},
+        {"late", m_isLateWriter}, {"tail", group.saveTailCandidate}};
+    m_rawMetadataBatch += QJsonDocument(trigger).toJson(QJsonDocument::Compact) + '\n';
 }
 
 void FileSaver::handleWriteFault(const QString& where) {
@@ -360,7 +432,10 @@ bool FileSaver::flushWriteBuffers()
     if (ok) {
         m_confirmedA += bytesA; m_confirmedB += bytesB;
         m_savedCount.fetch_add(static_cast<uint64_t>(m_accumTriggers), std::memory_order_relaxed);
+        writeRawMetadata(m_rawMetadataBatch);
     } else {
+        // An interrupted/rolled-back raw pair has no successful end record.
+        m_rawMetadata.reset();
         auto description = [](QFile* f) { return f ? f->fileName() : QStringLiteral("<未打开>"); };
         const QString pathA = description(m_fileChannelA), pathB = description(m_fileChannelB);
         m_faultDetail = QStringLiteral("；写入/flush A %1 (%2/%3, flush=%4, %5)，B %6 (%7/%8, flush=%9, %10)")
@@ -407,6 +482,7 @@ bool FileSaver::flushWriteBuffers()
         if (rolledA && rolledB) m_faultDetail += QStringLiteral("；两侧已回退至此前确认的边界");
         m_currentFileTriggers -= m_accumTriggers;
     }
+    m_rawMetadataBatch.clear();
     m_writeAccumA.clear(); m_writeAccumB.clear(); m_accumTriggers = 0;
     return ok;
 }
@@ -461,6 +537,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         const QString root=group->sessionGen ? (m_dirResolver ? m_dirResolver(group->sessionGen) : QString()) : m_saveDirectory;
         if(root.isEmpty()){emit errorOccurred(QStringLiteral("迟到帧保存目录不可用"));return false;}
         FileSaver late(m_cardId);late.m_isLateWriter=true;
+        late.setRawAcquisitionEvidence(m_sourceBits, m_sampleIntervalNs);
         const QString dir=QDir(root).filePath(QStringLiteral("_late/session-%1-round-%2").arg(identity.measurementSession).arg(identity.roundGeneration));
         late.startSaving(dir,1,m_fileSuffix);
         auto copy=std::make_shared<TriggerGroup>(*group);copy->sessionGen=0;
@@ -568,7 +645,8 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     // 物理轮次轮转刚做的 ++m_fileSequence「安全推进」。新来源改落到下一个空闲
     // 序号，旧文件保持不动（见 FileSaver.h 的落盘不变量）。
     if (!m_fileChannelA || !m_fileChannelB ||
-        group->sourceIPv4 != m_currentSourceIPv4) {
+        group->sourceIPv4 != m_currentSourceIPv4 ||
+        (m_currentSamples > 0 && group->sampleCount != m_currentSamples)) {
         openNewFiles(group->sourceIPv4);
         if (!m_fileChannelA || !m_fileChannelB) return false;
     }
@@ -629,6 +707,11 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     }
 
     ++m_accumTriggers;
+    try {
+        recordRawColumn(*group);
+    } catch (const std::bad_alloc&) {
+        abandonRawMetadata(QStringLiteral("旁车缓冲分配失败"));
+    }
     // 记账在周期性 flush 之前完成：flushWriteBuffers 的失败回退按 m_accumTriggers
     // 扣减，只有当本触发也已入账时扣减才与文件里的实际记录数完全对齐。
     ++m_currentFileTriggers;

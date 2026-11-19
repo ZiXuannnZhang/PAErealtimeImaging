@@ -17,7 +17,7 @@ public:
     TriggerGroupPtr convert(Frame);
     TriggerGroupPtr convertForSave(Frame);
     void tagSaveOverride(Frame,std::uint64_t session,std::uint64_t round,std::uint64_t generation,bool late);
-    void tagSaveSession(Frame,std::uint64_t);
+    void tagSaveSession(Frame, std::uint64_t, const std::shared_ptr<const std::string>& captureId = {});
     void tagNormalization(Frame,const PhysicalRoundClassification&);
     std::uint64_t conversions()const{return conversions_.load();}
 private:
@@ -26,6 +26,7 @@ private:
         std::once_flag once;
         TriggerGroupPtr group;
         std::uint64_t saveSession=0;
+        std::shared_ptr<const std::string> captureId;
         std::optional<PhysicalRoundClassification> normalization;
         struct SaveOverride {std::uint64_t session,round,generation;bool late;};
         std::optional<SaveOverride> saveOverride;

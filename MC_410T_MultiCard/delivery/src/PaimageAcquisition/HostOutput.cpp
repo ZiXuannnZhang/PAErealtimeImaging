@@ -240,7 +240,9 @@ void HostOutput::card(Frame f){
     // The resolver returns the coordinator's fail-closed sentinel for an
     // enabled lookup miss.  FrameConverter stores it on this source frame so
     // FileSaver cannot silently reuse its previous directory.
-    converter_.tagSaveSession(f,saveGeneration);const auto begin=SocketReceiver::now();const auto session=f->measurementSession,link=f->firstIngressId;const int card=f->card;
+    converter_.tagSaveSession(f, saveGeneration,
+        sourceSaveRequest_ && f->measurementSession == captureSession_ ? captureId_ : nullptr);
+    const auto begin=SocketReceiver::now();const auto session=f->measurementSession,link=f->firstIngressId;const int card=f->card;
     auto& tail=tails_.at(card);
     const bool token=tail.round.valid() && tail.active.session==session && tail.active.ingress && tail.active.ingress==link && tail.active.first==f->first;
     // A cache hit bypasses the normalizer's idle test.  Do not let a frame

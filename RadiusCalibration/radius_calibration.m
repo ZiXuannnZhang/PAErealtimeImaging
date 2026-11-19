@@ -28,15 +28,20 @@ cfg = struct();
 cfg.dataDir = fullfile(fileparts(scriptDir), 'testdata', '01');
 cfg.channelSel = 1:8;                   % 启用的通道代号数组，可取 1..8 任意数量
 cfg.fileSuffix = 'test';                % 文件名中的自定义字符串 z
-cfg.filesPerChannel = 8;                % 单通道读取文件数量（顺序读 000..N-1）
+cfg.filesPerChannel = 8;                % 每张卡读取所选采集的文件对上限
+cfg.captureId = "";                    % 目录内有多个采集时填写 V2 旁车的 captureId
+cfg.roundId = "";                      % 留空选各卡共同的第一个完整轮
 cfg.triggersPerFile = 1000;             % 单文件触发数（FileSaver 默认 1000）
 cfg.sampleCount = 5000;                 % 单触发采样点数
 cfg.fullAlinesPerChannel = 8000;        % 每通道每圈总 A-line 数量（含双波长，全孔径标定）
 cfg.useAllRounds = false;               % true=多圈全部参与重建（时间×圈数）
+cfg.roundEvidence = [];                % 每圈填写 captureId/roundId/reference/direction
+                                       % 以及 startAngleDeg/firstWavelengthNm/secondOffsetDeg
+cfg.allowUnverifiedLegacy = false;
+cfg.legacyFileIndices = [];            % 显式列出历史文件序号，证据 roundId 使用 "legacy"
 
 % ---- 采集 / 几何参数 ----
 cfg.fs = 250e6;                         % 监听程序实际采样率 [Hz]
-cfg.angleStartDeg = 180;                % 基准通道全孔径起始角度（9 点钟方向）
 cfg.radiusNominalMm = 6.57;             % 统一标称半径 [mm]
 
 % ---- 预处理（默认只做延时截断，其余开关保留但默认关闭）----
@@ -89,11 +94,19 @@ cfg.fineStepMm = 0.002;                 % 细扫步长 [mm]
 % ---- 可视化 / 输出 ----
 cfg.doFigures = true;
 cfg.saveResults = true;
+cfg.writeLegacyRadiusTxt = false;      % 需要固定名称的纯数值 TXT 时启用
 cfg.outDir = fullfile(scriptDir, 'calib_out');
 cfg.previewChannel = 4;
 
 %% ================= 读取原始数据 =================
 bscanRaw = read_ring_bscan(cfg);
+captureEvidence = bscanRaw.captureEvidence;
+phase = ring_calibration_phase(captureEvidence, cfg.roundEvidence);
+if phase.firstLane == 2
+    [bscanRaw.wl1, bscanRaw.wl2] = deal(bscanRaw.wl2, bscanRaw.wl1);
+end
+captureEvidence.physicalPhase = 'documented';
+captureEvidence.roundEvidence = phase.records;
 
 selectedCh = sort(unique(cfg.channelSel(:)'));
 if isempty(selectedCh) || any(selectedCh < 1 | selectedCh > 8)
@@ -122,7 +135,7 @@ if rem(cfg.fullAlinesPerChannel, 2) || K < 2
     error('radius_calibration:FullAlines', ...
         'cfg.fullAlinesPerChannel 必须为偶数且不小于 4。');
 end
-stepDeg = 360 / K;                      % 每根 A-line 角度步长
+stepDeg = phase.stepSign * 360 / K;                      % 每根 A-line 角度步长
 
 %% ================= 预处理（默认仅延时截断）=================
 if ~isempty(cfg.externalFunctionPath) && exist(cfg.externalFunctionPath, 'dir')
@@ -188,9 +201,8 @@ thetaWl{2} = cell(1, 8);
 for ch = selectedCh
     offsetDeg = -angleShift(ch) * stepDeg;   % 等价于把 Bscan 循环右移 shift 列
     idx = 0:(nWlPerChannel - 1);
-    % 每圈角度按 K 回绕；wl2 原始列相对 wl1 提前一列，故 (idx+1)
-    thetaWl{1}{ch} = cfg.angleStartDeg + offsetDeg + mod(idx, K) * stepDeg;
-    thetaWl{2}{ch} = cfg.angleStartDeg + offsetDeg + mod(idx + 1, K) * stepDeg;
+    thetaWl{1}{ch} = phase.startDeg(1) + offsetDeg + mod(idx, K) * stepDeg;
+    thetaWl{2}{ch} = phase.startDeg(2) + offsetDeg + mod(idx, K) * stepDeg;
 end
 
 fprintf('每通道全孔径：每波长 A-line=%d，步长=%.4f°，基准通道=%d\n', ...
@@ -432,19 +444,18 @@ if cfg.saveResults
     if ~exist(cfg.outDir, 'dir')
         mkdir(cfg.outDir);
     end
-    stamp = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss'));
-    matPath = fullfile(cfg.outDir, sprintf('radius_calib_%s.mat', stamp));
+    resultId = char(datetime('now', 'Format', 'yyyyMMdd_HHmmss_SSS'));
+    captureEvidence.resultId = resultId;
+    matPath = fullfile(cfg.outDir, sprintf('radius_calib_%s.mat', resultId));
     save(matPath, 'radiusMm', 'radiusBest', 'corrPeak', 'curves', ...
-         'angleShift', 'angleOffsetDeg', 'cfg', 'selectedCh', ...
+         'angleShift', 'angleOffsetDeg', 'cfg', 'selectedCh', 'captureEvidence', ...
          'imgRefWl', 'imgNomWl', 'xVal', 'yVal');
 
-    txtPath = fullfile(cfg.outDir, 'radiusPerChannel_mm.txt');
-    fid = fopen(txtPath, 'w');
-    if fid < 0
-        error('radius_calibration:Save', '无法打开输出文件：%s', txtPath);
+    txtPath = fullfile(cfg.outDir, sprintf('radiusPerChannel_mm_%s.txt', resultId));
+    writelines(string(radius_csv(radiusMm)), txtPath);
+    if cfg.writeLegacyRadiusTxt
+        copyfile(txtPath, fullfile(cfg.outDir, 'radiusPerChannel_mm.txt'));
     end
-    fprintf(fid, '%s\n', radius_csv(radiusMm));
-    fclose(fid);
 
     fprintf('\n已保存：%s\n已保存：%s\n', matPath, txtPath);
 end
