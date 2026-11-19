@@ -29,7 +29,7 @@ public:
         const auto now = SocketReceiver::now();
         control_.poll(now);
         const auto cardWatermarks=receiver_.cardIdleWatermarks();
-        output_.pollPhysicalRoundTimeout(receiver_.ingressIdleWatermark(),&cardWatermarks);
+        output_.pollPhysicalRoundTimeout(receiver_.ingressIdleWatermark(), &cardWatermarks, SocketReceiver::now());
 
     }
     bool configured()const{return control_.configured();}

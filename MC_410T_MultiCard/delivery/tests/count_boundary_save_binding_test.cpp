@@ -6,6 +6,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -16,6 +18,7 @@
 #include <iostream>
 #include <memory>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 using namespace paimage;
@@ -707,6 +710,195 @@ int main(int argc, char** argv)
         check(hasSize(dataFile(initial.directory, 1, "tail-fault"), 64),
               "delayed card kept both old columns");
         check(hasSize(dataFile(newRoot.path(), 0, "next"), 32), "new request has only new data");
+    }
+
+    // Drive packet assembly as well as classification. Each trigger spans
+    // two datagrams, and the final trigger wraps from 65535 to 0.
+    enum class TailCase { Complete, EarlyNext, Expired, Partial };
+    for (const auto mode : {TailCase::Complete, TailCase::EarlyNext, TailCase::Expired, TailCase::Partial}) {
+        using Outcome = HostOutput::SaveTailOutcome;
+        QTemporaryDir root, newRoot;
+        AutoSaveRoundCoordinator coordinator;
+        coordinator.configure(root.path(), 0);
+        const auto initial = coordinator.beginSession(0);
+        coordinator.setDirectoryPreparer([](const QString&) { return false; });
+        FileSaver a(0), b(1);
+        for (auto* saver : {&a, &b}) saver->setRawAcquisitionEvidence(32, 4);
+        AcqConfig config;
+        constexpr int samples = 200;
+        config.acqTimeNs = samples * 4;
+        DataProcessor pa(0, nullptr, nullptr, config), pb(1, nullptr, nullptr, config);
+        std::vector<std::tuple<int, std::uint16_t, Outcome>> outcomes;
+        std::array<FileSaver::SaveResult, 2> settled;
+        HostOutput output(32, 50, {&pa, &pb}, {&a, &b}, nullptr, nullptr, 3,
+            [&](const PhysicalRoundEvent& event) {
+                if (event.kind == PhysicalRoundEvent::Kind::CountBoundary)
+                    coordinator.commitBoundary(event.measurementSession, event.roundGeneration,
+                        AutoSaveBoundaryKind::Count, "count-tail");
+            }, 0.0, 0);
+        output.setSaveBoundaryFaultProbe([&] { return coordinator.faulted(); });
+        output.setMeasurementSessionBinder([&](auto session) {
+            return coordinator.bindMeasurementSession(session).newSessionGen;
+        });
+        output.setSaveSessionResolver([&](auto session, auto round) {
+            return coordinator.resolveRound(session, round).sessionGen;
+        });
+        output.setSaveTailSink([&](auto round, auto trigger, int card, Outcome outcome) {
+            check(round == RoundIdentity{778, 0}, "failed Count outcome stays with the old round");
+            outcomes.emplace_back(card, trigger, outcome);
+        });
+        output.beginSession(778);
+        output.start();
+        const auto started = output.startSaving(initial.directory, 100, "wrap", coordinator.directoryResolver(),
+            [&](const auto& result) { settled.at(result.cardId) = result; });
+        check(until([&] { return output.savingApplied(started); }), "source Count request ready");
+        SourceCore source({2, samples, 32, 0}, [&](Frame frame) { output.card(frame); },
+                          [&](auto seq, const auto& frames, bool startup) { output.sync(seq, frames, startup); });
+        source.setAssemblySink([&](int card, auto session, auto ingress, Time first) {
+            output.assemblyStarted(card, session, ingress, first);
+        });
+        source.prepareStart(778);
+        source.completeStart(true, 0);
+        std::uint64_t ingress = 0;
+        constexpr Time ms = 1000000;
+        auto send = [&](int card, std::uint16_t seq, int packet, Time time) {
+            std::vector<std::uint8_t> bytes(4 + (packet == 0 ? 1440 : 160));
+            bytes[0] = std::uint8_t(packet);
+            bytes[2] = std::uint8_t(seq);
+            bytes[3] = std::uint8_t(seq >> 8);
+            const std::int32_t amplitude = 1 + (seq & 7);
+            for (std::size_t offset = 4; offset < bytes.size(); offset += 4)
+                std::memcpy(bytes.data() + offset, &amplitude, 4);
+            return source.ingest(card, bytes.data(), bytes.size(), time * ms, ++ingress);
+        };
+        auto whole = [&](int card, std::uint16_t seq, Time time) {
+            check(send(card, seq, 0, time) == Decision::Accepted, "first raw packet accepted");
+            check(send(card, seq, 1, time + 1) == Decision::Accepted, "last raw packet accepted");
+        };
+        whole(0, 65534, 1000);
+        whole(1, 65534, 1001);
+        whole(0, 65535, 1003);
+        send(1, 65535, 0, 1005);
+        if (mode == TailCase::EarlyNext) {
+            send(1, 65535, 1, 1006);
+            send(1, 1, 0, 1007);
+        }
+        whole(0, 0, 1010);
+        check(coordinator.faulted(), "Count directory creation refused");
+        const auto stopped = output.stopSaving();
+        coordinator.selectManualSave();
+        const auto restarted = output.startSaving(newRoot.path(), 100, "next");
+        check(!output.savingApplied(stopped), "old request drains before queued restart");
+
+        if (mode == TailCase::Complete) {
+            send(1, 65535, 1, 1012);
+            whole(1, 0, 1013);
+            check(send(1, 65535, 1, 1015) == Decision::RecentTrigger, "duplicate tail packet stays deduplicated");
+        } else if (mode == TailCase::Partial) {
+            whole(1, 0, 1013); // switches off the incomplete previous assembly
+            check(send(1, 65535, 1, 1015) == Decision::RecentTrigger, "source rejected the missing packet");
+        } else {
+            if (mode == TailCase::EarlyNext) send(1, 1, 1, 1012);
+            const std::vector<Time> stalledWatermarks{1005 * ms, 1005 * ms};
+            output.pollPhysicalRoundTimeout(1005 * ms, &stalledWatermarks, 1112 * ms);
+        }
+        check(until([&] { return output.savingApplied(restarted); }), "bounded drain releases restart");
+        if (mode == TailCase::Expired) {
+            send(1, 65535, 1, 1113);
+            whole(1, 0, 1114);
+        }
+        whole(1, 2, 1116);
+        const auto done = output.stopSaving();
+        check(until([&] { return output.savingApplied(done); }), "new request settles");
+        output.stop();
+
+        const auto contains = [&](int card, std::uint16_t trigger, Outcome why) {
+            return std::find(outcomes.begin(), outcomes.end(), std::make_tuple(card, trigger, why)) != outcomes.end();
+        };
+        const auto oldCount = mode == TailCase::Expired ? 1 : mode == TailCase::EarlyNext ? 2 : 3;
+        check(settled[0].confirmed == 3 && settled[1].confirmed == std::uint64_t(oldCount),
+              "old request confirms just its own columns");
+        for (const auto lane : {'A', 'B'}) {
+            const auto oldPath = QDir(initial.directory).filePath(QString("Card2_Ch%1_wrap_000.dat").arg(QChar(lane)));
+            const auto newPath = QDir(newRoot.path()).filePath(QString("Card2_Ch%1_next_000.dat").arg(QChar(lane)));
+            check(hasSize(oldPath, oldCount * samples * 2), "old paired lanes match expected Count tail");
+            check(allHalfValues(newPath, 0x4200, samples), "restart contains only its own next-round waveform");
+        }
+        QFile sidecar(dataFile(initial.directory, 1, "wrap") + ".jsonl");
+        check(sidecar.open(QIODevice::ReadOnly), "old slow-card evidence sealed");
+        sidecar.readLine();
+        for (int col = 0; col < oldCount; ++col) {
+            const auto row = QJsonDocument::fromJson(sidecar.readLine()).object();
+            check(row.value("logicalIndex").toInt(-1) == col &&
+                  row.value("triggerSeq").toInt(-1) == (65534 + col) % 65536 &&
+                  row.value("complete").toBool() == !(mode == TailCase::Partial && col == 1),
+                  "logical indices, wrap and source completeness stay truthful");
+        }
+        check(QJsonDocument::fromJson(sidecar.readLine()).object().value("confirmedColumns").toInt(-1) == oldCount,
+              "old slow-card seal follows admitted source frames");
+        if (mode == TailCase::Complete) {
+            check(contains(1, 65535, Outcome::Admitted) && contains(1, 0, Outcome::Admitted),
+                  "slow penultimate and final admissions reported");
+        } else if (mode == TailCase::Partial) {
+            check(contains(1, 65535, Outcome::SourceIncomplete), "partial source distinguished from save rejection");
+        } else {
+            check(contains(1, 0, Outcome::SourceMissing), "missing source settled without an idle watermark");
+            if (mode == TailCase::EarlyNext)
+                check(contains(1, 1, Outcome::UnverifiedRound), "early next assembly cannot qualify merely by ingress time");
+        }
+    }
+
+    {
+        using Outcome = HostOutput::SaveTailOutcome;
+        QTemporaryDir root;
+        AutoSaveRoundCoordinator coordinator;
+        coordinator.configure(root.path(), 0);
+        const auto initial = coordinator.beginSession(0);
+        coordinator.setDirectoryPreparer([](const QString&) { return false; });
+        FileSaver a(0), b(1);
+        AcqConfig config;
+        config.acqTimeNs = 64;
+        DataProcessor pa(0, nullptr, nullptr, config), pb(1, nullptr, nullptr, config);
+        std::atomic<bool> writerEntered{false}, releaseWriter{false};
+        bool queueFull = false;
+        HostOutput output(32, 50, {&pa, &pb}, {&a, &b}, nullptr, nullptr, 401,
+            [&](const PhysicalRoundEvent& event) {
+                if (event.kind == PhysicalRoundEvent::Kind::CountBoundary)
+                    coordinator.commitBoundary(event.measurementSession, event.roundGeneration,
+                                               AutoSaveBoundaryKind::Count, "count-full");
+            }, 0.0, 0);
+        output.setSaveBoundaryFaultProbe([&] { return coordinator.faulted(); });
+        output.setMeasurementSessionBinder([&](auto session) {
+            return coordinator.bindMeasurementSession(session).newSessionGen;
+        });
+        output.setSaveSessionResolver([&](auto session, auto round) {
+            return coordinator.resolveRound(session, round).sessionGen;
+        });
+        output.setSaveTailSink([&](auto, auto, int card, Outcome outcome) {
+            if (card == 1 && outcome == Outcome::QueueFull) queueFull = true;
+        });
+        output.beginSession(779);
+        output.start();
+        auto directory = coordinator.directoryResolver();
+        const auto started = output.startSaving(initial.directory, 500, "full", [&](auto gen) {
+            writerEntered = true;
+            until([&] { return releaseWriter.load(); });
+            return directory(gen);
+        });
+        check(until([&] { return output.savingApplied(started); }), "Count queue-full request ready");
+        output.card(makeFrame(779, 0, 1, 1000000000, 1));
+        check(until([&] { return writerEntered.load(); }), "save worker held at directory lookup");
+        for (int trigger = 1; trigger <= 400; ++trigger)
+            output.card(makeFrame(779, 1, std::uint16_t(trigger), 1000000000 + trigger, 1));
+        output.card(makeFrame(779, 0, 401, 1001000000, 1));
+        const auto stopped = output.stopSaving();
+        output.card(makeFrame(779, 1, 401, 1002000000, 1));
+        check(queueFull && output.stats().saveQueueFull == 1, "tail admission reports full queue separately");
+        releaseWriter = true;
+        check(until([&] { return output.savingApplied(stopped); }), "queue-full tail releases stop");
+        output.stop();
+        check(hasSize(dataFile(initial.directory, 1, "full"), 400 * 16 * 2),
+              "already queued columns drain after queue-full rejection");
     }
 
     // T1: only the exact pre-cutoff in-flight object may join the open tail.

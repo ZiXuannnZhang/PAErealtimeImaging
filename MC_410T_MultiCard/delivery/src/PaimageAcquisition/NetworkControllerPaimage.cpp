@@ -195,13 +195,27 @@ bool NetworkController::createPaimageBackend(QString& error){
                     binding.newSessionGen;
             });
         m_paimage->output().setSaveBoundaryFaultProbe([this] { return autoSaveFaulted(); });
+        using SaveTail = paimage::HostOutput::SaveTailOutcome;
         m_paimage->output().setSaveTailSink([this](paimage::RoundIdentity round, std::uint16_t trigger,
-                                                  int card, bool admitted) {
+                                                  int card, SaveTail outcome) {
+            const char* reason = "rejected";
+            switch (outcome) {
+            case SaveTail::Admitted: reason = "admitted"; break;
+            case SaveTail::SourceIncomplete: reason = "source_incomplete"; break;
+            case SaveTail::SourceMissing: reason = "source_missing"; break;
+            case SaveTail::UnverifiedRound: reason = "unverified_round"; break;
+            case SaveTail::Expired: reason = "expired"; break;
+            case SaveTail::BindingUnavailable: reason = "binding_unavailable"; break;
+            case SaveTail::WriterFault: reason = "writer_fault"; break;
+            case SaveTail::QueueFull: reason = "queue_full"; break;
+            case SaveTail::Rejected: break;
+            }
+            const bool admitted = outcome == SaveTail::Admitted || outcome == SaveTail::SourceIncomplete;
             recordDiagnosticEvent("paimage.save", "failed_boundary_tail",
-                admitted ? DiagnosticRecorder::Severity::Info : DiagnosticRecorder::Severity::Warning,
+                outcome == SaveTail::Admitted ? DiagnosticRecorder::Severity::Info : DiagnosticRecorder::Severity::Warning,
                 {{"traceSession", QString::number(round.measurementSession)},
                  {"roundGeneration", QString::number(round.roundGeneration)}, {"trigger", trigger},
-                 {"card", card}, {"admitted", admitted}});
+                 {"card", card}, {"admitted", admitted}, {"outcome", QString::fromLatin1(reason)}});
         });
         m_paimage->output().setSaveSessionResolver(
             [this](std::uint64_t measurementSession, std::uint64_t roundGeneration) {

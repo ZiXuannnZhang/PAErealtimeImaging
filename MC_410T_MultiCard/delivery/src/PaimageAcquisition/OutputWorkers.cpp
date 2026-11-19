@@ -60,15 +60,19 @@ void OutputWorkers::enqueueSaveBarrier(std::function<void()> apply){
     saveBarriers_.push_back({acceptedOrdinal_,std::move(apply)});
     cardReady_.notify_one();
 }
-bool OutputWorkers::pushCard(Frame f)
+bool OutputWorkers::pushCard(Frame f, Result* rejection)
 {
     std::lock_guard<std::mutex> lock(cardMutex_);
-    if (!saving_) { event(Result::CardDisabled, f); return false; }
-    if (stopping_) { event(Result::ListenerDiscard, f); return false; }
+    const auto reject = [&](Result why) {
+        if (rejection) *rejection = why;
+        event(why, f);
+        return false;
+    };
+    if (!saving_) return reject(Result::CardDisabled);
+    if (stopping_) return reject(Result::ListenerDiscard);
     if (!cardQueue_.pushCard(f)) {
         saveQueueFull_.fetch_add(1);
-        event(Result::CardFull, f);
-        return false;
+        return reject(Result::CardFull);
     }
     ++acceptedOrdinal_;
     saveEnqueued_.fetch_add(1);

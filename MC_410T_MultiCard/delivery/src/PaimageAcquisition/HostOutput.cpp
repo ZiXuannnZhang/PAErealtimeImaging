@@ -3,6 +3,7 @@
 #endif
 #include <windows.h>
 #include "PaimageAcquisition/HostOutput.h"
+#include "PaimageAcquisition/AutoSaveRoundCoordinator.h"
 #include "PaimageAcquisition/SocketReceiver.h"
 #include <QDateTime>
 #include <algorithm>
@@ -51,8 +52,11 @@ HostOutput::HostOutput(int bits,int block,std::vector<DataProcessor*> processors
                     (event.kind == PhysicalRoundEvent::Kind::CountBoundary ||
                      event.kind == PhysicalRoundEvent::Kind::TimeoutBoundary) &&
                     !saveBoundaryFaulted_();
+                const auto oldGeneration = canFail && event.kind == PhysicalRoundEvent::Kind::CountBoundary &&
+                    event.roundGeneration && saveSessionResolver_
+                    ? saveSessionResolver_(event.measurementSession, event.roundGeneration - 1) : 0;
                 if (observer) observer(event);
-                if (canFail && saveBoundaryFaulted_()) failSaveBoundary(event);
+                if (canFail && saveBoundaryFaulted_()) failSaveBoundary(event, oldGeneration);
             });
         normalizer_->setTimeoutResetSec(physicalRoundTimeoutSec);
         normalizer_->setStartupFilterTriggerCount(startupFilterTriggerCount);
@@ -116,10 +120,18 @@ void HostOutput::beginTailSeals(const PhysicalRoundEvent& event){
     }
 }
 void HostOutput::finishTailSeals(Time now,const std::vector<Time>* cardWatermarks){
-    for(std::size_t c=0;c<tails_.size();++c)if(tails_[c].waiting && (cardWatermarks ? (c<cardWatermarks->size()?(*cardWatermarks)[c]:0) : now)>tails_[c].deadline){
-        tails_[c].waiting=false;sealCard(int(c),tails_[c].round);
-        if (failedBoundary_ && failedBoundary_->round == tails_[c].round && saveTailSink_)
-            saveTailSink_(tails_[c].round, failedBoundary_->trigger, int(c), false);
+    for (std::size_t c = 0; c < tails_.size(); ++c) {
+        auto& tail = tails_[c];
+        if (!tail.waiting) continue;
+        const auto watermark = cardWatermarks ? (c < cardWatermarks->size() ? (*cardWatermarks)[c] : 0) : now;
+        const bool failed = failedBoundary_ && !failedBoundary_->count && failedBoundary_->round == tail.round;
+        const bool writerFault = failed && sourceSaveRequest_->cards[c].fault.load();
+        if (watermark <= tail.deadline && !(failed && now > tail.deadline) && !writerFault) continue;
+        tail.waiting = false;
+        sealCard(int(c), tail.round);
+        if (failed)
+            reportSaveTail(tail.round, failedBoundary_->trigger, int(c),
+                           writerFault ? SaveTailOutcome::WriterFault : SaveTailOutcome::SourceMissing);
     }
 }
 void HostOutput::cancelTailState(bool seal){
@@ -128,7 +140,7 @@ void HostOutput::cancelTailState(bool seal){
         tails_[c]={};activeAssemblies_[c]={};cardSaveRounds_[c]={};
     }
 }
-void HostOutput::failSaveBoundary(const PhysicalRoundEvent& event)
+void HostOutput::failSaveBoundary(const PhysicalRoundEvent& event, std::uint64_t oldSaveGeneration)
 {
     if (!event.roundGeneration) return;
     FailedBoundary failure;
@@ -136,12 +148,19 @@ void HostOutput::failSaveBoundary(const PhysicalRoundEvent& event)
     failure.count = event.kind == PhysicalRoundEvent::Kind::CountBoundary;
     failure.trigger = event.triggerSeq;
     if (failure.count) {
-        failure.saveGeneration = saveSessionResolver_
-            ? saveSessionResolver_(failure.round.measurementSession, failure.round.roundGeneration) : 0;
-        failure.deadline = boundaryObservedNs_ + kSaveTailGraceNs;
-        failure.waiting.resize(savers_.size());
-        for (std::size_t card = 0; card < savers_.size(); ++card)
-            failure.waiting[card] = !sourceSaveRequest_->cards[card].fault.load();
+        failure.saveGeneration = oldSaveGeneration;
+        failure.observed = boundaryObservedNs_;
+        failure.deadline = failure.observed + kSaveTailGraceNs;
+        failure.cards.resize(savers_.size());
+        closedFailedCountRound_ = failure.round;
+        for (std::size_t card = 0; card < savers_.size(); ++card) {
+            const bool fault = sourceSaveRequest_->cards[card].fault.load();
+            failure.cards[card] = {activeAssemblies_[card], !fault};
+            if (fault) {
+                sealCard(int(card), failure.round);
+                reportSaveTail(failure.round, failure.trigger, int(card), SaveTailOutcome::WriterFault);
+            }
+        }
     }
     failedBoundary_ = std::move(failure);
 }
@@ -150,8 +169,8 @@ bool HostOutput::waitingForFailedBoundary() const
 {
     if (!failedBoundary_) return false;
     if (failedBoundary_->count)
-        return std::any_of(failedBoundary_->waiting.begin(), failedBoundary_->waiting.end(),
-                           [](bool waiting) { return waiting; });
+        return std::any_of(failedBoundary_->cards.begin(), failedBoundary_->cards.end(),
+                           [](const auto& card) { return card.waiting; });
     return std::any_of(tails_.begin(), tails_.end(), [this](const Tail& tail) {
         return tail.round == failedBoundary_->round && tail.waiting;
     });
@@ -165,48 +184,118 @@ void HostOutput::finishFailedBoundary()
     for (auto& apply : controls) apply();
 }
 
+void HostOutput::reportSaveTail(RoundIdentity round, std::uint16_t trigger, int card,
+                                 SaveTailOutcome outcome)
+{
+    if (saveTailSink_) saveTailSink_(round, trigger, card, outcome);
+}
+
+void HostOutput::closeFailedCountCard(int card)
+{
+    failedBoundary_->cards[card].waiting = false;
+    sealCard(card, failedBoundary_->round);
+}
+
 void HostOutput::expireFailedBoundary(Time now, const std::vector<Time>* cardWatermarks)
 {
     if (failedBoundary_ && failedBoundary_->count) {
-        auto& failure = *failedBoundary_;
-        for (std::size_t card = 0; card < failure.waiting.size(); ++card) {
+        const auto& failure = *failedBoundary_;
+        for (std::size_t card = 0; card < failure.cards.size(); ++card) {
+            if (!failure.cards[card].waiting) continue;
             const auto watermark = cardWatermarks && card < cardWatermarks->size()
-                ? (*cardWatermarks)[card] : now;
-            const bool fault = sourceSaveRequest_ && sourceSaveRequest_->cards[card].fault.load();
-            if (!failure.waiting[card] || (!fault && watermark <= failure.deadline)) continue;
-            failure.waiting[card] = false;
-            if (saveTailSink_) saveTailSink_(failure.round, failure.trigger, int(card), false);
+                ? (*cardWatermarks)[card] : 0;
+            const bool fault = sourceSaveRequest_->cards[card].fault.load();
+            if (!fault && now <= failure.deadline && watermark <= failure.deadline) continue;
+            reportSaveTail(failure.round, failure.trigger, int(card),
+                           fault ? SaveTailOutcome::WriterFault : SaveTailOutcome::SourceMissing);
+            closeFailedCountCard(int(card));
         }
     }
+    finishFailedBoundary();
+}
+
+void HostOutput::noteFailedCountCrossing(const Frame& frame, const PhysicalRoundClassification& classification)
+{
+    if (!failedBoundary_ || !failedBoundary_->count) return;
+    const auto& failure = *failedBoundary_;
+    if (!failure.cards[frame->card].waiting ||
+        classification.measurementSession != failure.round.measurementSession ||
+        classification.roundGeneration <= failure.round.roundGeneration ||
+        (classification.newDistinct && frame->first <= failure.observed)) return;
+
+    // The source has a single assembly per card. A later classified round on
+    // this card leaves no old assembly to finish. A pre-boundary cache miss
+    // alone cannot prove that the card has advanced past the old round.
+    reportSaveTail(failure.round, failure.trigger, frame->card, SaveTailOutcome::SourceMissing);
+    closeFailedCountCard(frame->card);
     finishFailedBoundary();
 }
 
 void HostOutput::pushSaveFrame(const Frame& frame, const PhysicalRoundClassification& classification,
                                bool timeoutEligible)
 {
+    const RoundIdentity round{classification.measurementSession, classification.roundGeneration};
     if (!failedBoundary_) {
+        if (closedFailedCountRound_.valid() && round.measurementSession == closedFailedCountRound_.measurementSession &&
+            round <= closedFailedCountRound_) return;
         enqueueSaveFrame(frame, true);
         return;
     }
     auto& failure = *failedBoundary_;
     if (!failure.count) {
-        const bool queued = enqueueSaveFrame(frame, timeoutEligible);
-        if (timeoutEligible && saveTailSink_)
-            saveTailSink_(failure.round, frame->trigger, frame->card, queued);
-        return;
-    }
-    const RoundIdentity round{classification.measurementSession, classification.roundGeneration};
-    if (round != failure.round || frame->trigger != failure.trigger || !classification.isFinalLogicalTrigger ||
-        !failure.waiting[frame->card] || frame->closed <= 0 || frame->closed > failure.deadline) {
-        enqueueSaveFrame(frame, false);
+        const auto outcome = enqueueSaveFrame(frame, timeoutEligible);
+        if (timeoutEligible)
+            reportSaveTail(failure.round, frame->trigger, frame->card, outcome);
         return;
     }
 
-    failure.waiting[frame->card] = false;
-    converter_.tagSaveSession(frame, failure.saveGeneration);
-    const bool queued = enqueueSaveFrame(frame, true);
-    if (saveTailSink_) saveTailSink_(failure.round, frame->trigger, frame->card, queued);
-    finishFailedBoundary();
+    auto& card = failure.cards[frame->card];
+    const auto& active = card.inFlight;
+    const bool inFlight = active.session == frame->measurementSession && active.ingress &&
+        active.ingress == frame->firstIngressId && active.first == frame->first &&
+        active.first > 0 && active.first <= failure.observed;
+    if (inFlight) card.inFlight = {};
+    const bool final = frame->trigger == failure.trigger && classification.isFinalLogicalTrigger;
+    const bool belongs = round == failure.round && classification.logicalTriggerIndex >= 0 &&
+        (final || (inFlight && !classification.newDistinct));
+
+    if (!card.waiting || !belongs) {
+        enqueueSaveFrame(frame, false);
+        if (card.waiting && inFlight)
+            reportSaveTail(failure.round, frame->trigger, frame->card, SaveTailOutcome::UnverifiedRound);
+        return;
+    }
+
+    SaveTailOutcome outcome;
+    if (frame->closed <= 0 || frame->closed > failure.deadline) {
+        outcome = SaveTailOutcome::Expired;
+        enqueueSaveFrame(frame, false);
+    } else if (failure.saveGeneration == AutoSaveRoundCoordinator::kFailedGeneration) {
+        outcome = SaveTailOutcome::BindingUnavailable;
+        enqueueSaveFrame(frame, false);
+    } else {
+        // Already classified in the original logical round. Use the regular
+        // writer so a split at the configured file length can still advance.
+        converter_.tagSaveSession(frame, failure.saveGeneration, captureId_);
+        outcome = enqueueSaveFrame(frame, true);
+    }
+    reportSaveTail(failure.round, frame->trigger, frame->card, outcome);
+    if (final || outcome == SaveTailOutcome::Expired || outcome == SaveTailOutcome::WriterFault) {
+        closeFailedCountCard(frame->card);
+        finishFailedBoundary();
+    }
+}
+
+bool HostOutput::pollPhysicalRoundTimeout(Time idleWatermark, const std::vector<Time>* cardWatermarks, Time now)
+{
+    std::lock_guard<std::mutex> lock(normalizationMutex_);
+    if (!normalizer_) return false;
+    preBoundarySnapshot_ = normalizer_->snapshot();
+    const bool result = idleWatermark > 0 && normalizer_->timeoutBoundaryIfIdle(idleWatermark);
+    if (!now) now = idleWatermark;
+    finishTailSeals(now, cardWatermarks);
+    expireFailedBoundary(now, cardWatermarks);
+    return result;
 }
 
 void HostOutput::card(Frame f){
@@ -219,6 +308,7 @@ void HostOutput::card(Frame f){
         classification=normalizer_->classify(f->measurementSession,f->trigger,
                                               normalizationTime(f));
         converter_.tagNormalization(f,classification);
+        noteFailedCountCrossing(f, classification);
         const auto& t=tails_.at(f->card);
         const bool token=t.round.valid() && t.active.session==f->measurementSession && t.active.ingress &&
                          t.active.ingress==f->firstIngressId && t.active.first==f->first;
@@ -262,8 +352,8 @@ void HostOutput::card(Frame f){
             tail.waiting = false;
             const auto closing = tail.round;
             pushSaveFrame(f, classification, accept);
-            if (!accept && failedBoundary_ && failedBoundary_->round == closing && saveTailSink_)
-                saveTailSink_(closing, f->trigger, card, false);
+            if (!accept && failedBoundary_ && !failedBoundary_->count && failedBoundary_->round == closing)
+                reportSaveTail(closing, f->trigger, card, SaveTailOutcome::Expired);
             sealCard(card, closing);
             auto& active = activeAssemblies_[card];
             if (active.session == session && active.ingress == link && active.first == f->first) active = {};
@@ -277,7 +367,9 @@ void HostOutput::card(Frame f){
        !(failedBoundary_ && !failedBoundary_->count && failedBoundary_->round == tail.round)){
         tail.waiting=false;sealCard(card,tail.round);
     }
-    if(classification.decision==PhysicalTriggerDecision::LogicalScan)cardSaveRounds_[card]={session,classification.roundGeneration};
+    const RoundIdentity round{session, classification.roundGeneration};
+    if (classification.decision == PhysicalTriggerDecision::LogicalScan && cardSaveRounds_[card] < round)
+        cardSaveRounds_[card] = round;
     // Publication contract: classification, save generation and any save
     // override are all tagged before this enqueue. SourceCore delivers each
     // card before publishing the corresponding sync group (also on startup).
@@ -332,14 +424,19 @@ void HostOutput::observe(Frame f,std::uint8_t stage,std::uint8_t reason,std::uin
         r.card=f->card;r.trigger=f->trigger;r.packet=f->basePacket;r.sourceIPv4=f->sourceIPv4;}
     trace_->push(r);
 }
-bool HostOutput::enqueueSaveFrame(const Frame& frame, bool eligible)
+HostOutput::SaveTailOutcome HostOutput::enqueueSaveFrame(const Frame& frame, bool eligible)
 {
-    if (!sourceSaveRequest_) return eligible && workers_.pushCard(frame);
-    auto& card = sourceSaveRequest_->cards[frame->card];
-    const bool queued = eligible && !card.fault.load() && workers_.pushCard(frame);
-    if (queued) ++card.admitted;
-    else ++card.rejected;
-    return queued;
+    auto* card = sourceSaveRequest_ ? &sourceSaveRequest_->cards[frame->card] : nullptr;
+    const bool fault = card && card->fault.load();
+    OutputWorkers::Result rejection = OutputWorkers::Result::CardDisabled;
+    if (eligible && !fault && workers_.pushCard(frame, &rejection)) {
+        if (card) ++card->admitted;
+        return frame->complete ? SaveTailOutcome::Admitted : SaveTailOutcome::SourceIncomplete;
+    }
+    if (card) ++card->rejected;
+    if (fault) return SaveTailOutcome::WriterFault;
+    if (rejection == OutputWorkers::Result::CardFull) return SaveTailOutcome::QueueFull;
+    return SaveTailOutcome::Rejected;
 }
 
 void HostOutput::updateSaveHealth(int card, bool notify)

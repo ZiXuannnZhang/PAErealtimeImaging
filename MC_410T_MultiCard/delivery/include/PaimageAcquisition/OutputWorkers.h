@@ -36,7 +36,7 @@ public:
     void setSavingHooks(std::function<void()> idle,std::function<void()> exit) {
         saveIdle_=std::move(idle);saveExit_=std::move(exit);
     }
-    bool pushCard(Frame);
+    bool pushCard(Frame, Result* rejection = nullptr);
     unsigned cardDepth(int card){std::lock_guard<std::mutex> lock(cardMutex_);return cardQueue_.cardDepth(card);}
     void pushSync(std::uint16_t,const std::vector<Frame>&,bool startupRelease,
                   bool beyondCountBoundary=false);

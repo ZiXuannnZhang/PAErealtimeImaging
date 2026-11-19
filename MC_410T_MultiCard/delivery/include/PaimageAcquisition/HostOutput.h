@@ -46,6 +46,7 @@ public:
         std::lock_guard<std::mutex> lock(normalizationMutex_);
         cancelTailState(true);
         expireFailedBoundary((std::numeric_limits<Time>::max)(), nullptr);
+        closedFailedCountRound_ = {};
         captureSession_ = s;
         captureId_ = std::make_shared<const std::string>(
             QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString());
@@ -83,7 +84,11 @@ public:
     void setSaveBoundaryFaultProbe(std::function<bool()> probe) {
         saveBoundaryFaulted_ = std::move(probe);
     }
-    using SaveTailSink = std::function<void(RoundIdentity, std::uint16_t, int, bool)>;
+    enum class SaveTailOutcome {
+        Admitted, SourceIncomplete, SourceMissing, UnverifiedRound,
+        Expired, BindingUnavailable, WriterFault, QueueFull, Rejected
+    };
+    using SaveTailSink = std::function<void(RoundIdentity, std::uint16_t, int, SaveTailOutcome)>;
     void setSaveTailSink(SaveTailSink sink) { saveTailSink_ = std::move(sink); }
     void setMeasurementSessionBinder(MeasurementSessionBinder binder){
         measurementSessionBinder_=std::move(binder);
@@ -92,15 +97,8 @@ public:
     // Called by the receiver with its core lock held, before packet assembly.
     void assemblyStarted(int card,std::uint64_t session,std::uint64_t ingress,Time first);
     void sync(std::uint16_t,const std::vector<Frame>&,bool startup);
-    bool pollPhysicalRoundTimeout(std::int64_t now,const std::vector<Time>* cardWatermarks=nullptr){
-        std::lock_guard<std::mutex> lock(normalizationMutex_);
-        if(!normalizer_)return false;
-        preBoundarySnapshot_=normalizer_->snapshot();
-        const bool result=now>0 && normalizer_->timeoutBoundaryIfIdle(now);
-        finishTailSeals(now,cardWatermarks);
-        expireFailedBoundary(now, cardWatermarks);
-        return result;
-    }
+    bool pollPhysicalRoundTimeout(Time idleWatermark, const std::vector<Time>* cardWatermarks = nullptr,
+                                  Time now = 0);
     void setConfiguredLogicalTriggersPerRound(std::uint64_t count){
         if(normalizer_)normalizer_->setConfiguredLogicalTriggersPerRound(count);
     }
@@ -137,10 +135,13 @@ private:
     void finishTailSeals(Time,const std::vector<Time>*);
     void sealCard(int,RoundIdentity);
     void cancelTailState(bool seal);
-    void failSaveBoundary(const PhysicalRoundEvent&);
+    void failSaveBoundary(const PhysicalRoundEvent&, std::uint64_t oldSaveGeneration);
     void expireFailedBoundary(Time, const std::vector<Time>*);
     void finishFailedBoundary();
     bool waitingForFailedBoundary() const;
+    void closeFailedCountCard(int);
+    void reportSaveTail(RoundIdentity, std::uint16_t, int, SaveTailOutcome);
+    void noteFailedCountCrossing(const Frame&, const PhysicalRoundClassification&);
     void pushSaveFrame(const Frame&, const PhysicalRoundClassification&, bool timeoutEligible = false);
     struct SaveRequest {
         struct Card {
@@ -157,7 +158,7 @@ private:
         int healthy; // Sole saving worker.
     };
     std::uint64_t configureSaving(std::shared_ptr<SaveRequest>, std::function<void()> apply);
-    bool enqueueSaveFrame(const Frame&, bool eligible);
+    SaveTailOutcome enqueueSaveFrame(const Frame&, bool eligible);
     void updateSaveHealth(int card, bool notify = true);
     void applySaveRequest(const std::shared_ptr<SaveRequest>&, const std::function<void(FileSaver&)>&);
     void settleSaveRequest(bool reconfigure);
@@ -184,11 +185,13 @@ private:
         RoundIdentity round;
         std::uint64_t saveGeneration = 0;
         std::uint16_t trigger = 0;
-        Time deadline = 0;
+        Time observed = 0, deadline = 0;
         bool count = false;
-        std::vector<bool> waiting;
+        struct CountCard { ActiveAssembly inFlight; bool waiting = false; };
+        std::vector<CountCard> cards;
     };
     std::optional<FailedBoundary> failedBoundary_;
+    RoundIdentity closedFailedCountRound_;
     std::deque<std::function<void()>> deferredSaveControls_;
     Time boundaryObservedNs_ = 0;
     std::uint64_t captureSession_ = 0;
