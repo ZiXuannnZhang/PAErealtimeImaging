@@ -102,6 +102,16 @@ static void setBtnText(QPushButton *btn, const QString &text)
     btn->setAccessibleName(text);
 }
 
+static QString ringTerminalFailureDetail(const QString &reason)
+{
+    if (reason == QStringLiteral("coverage_incomplete")) return QStringLiteral("环形重建缺块");
+    if (reason == QStringLiteral("terminal_input_rejected")) return QStringLiteral("成像输入队列容量不足，末块被拒收");
+    if (reason == QStringLiteral("terminal_slots_full")) return QStringLiteral("成像服务终帧槽已满");
+    if (reason == QStringLiteral("terminal_lock_failed")) return QStringLiteral("成像服务无法锁定终帧共享内存");
+    if (reason == QStringLiteral("terminal_delivery_failed")) return QStringLiteral("成像服务终帧发布失败");
+    return reason;
+}
+
 static QString uniqueDiagnosticZipPath(const QString &requestedPath)
 {
     const QFileInfo requested(requestedPath);
@@ -372,7 +382,19 @@ MainWindow::MainWindow(QWidget *parent)
     m_pngControlThread.start();
     connect(m_imagingController, &ImagingController::ringTerminalUnavailable, this,
         [this](quint64 session, quint64 round, quint64 submit, const QString& reason) {
-            rejectTerminalPng({session, round}, submit, reason);
+            const paimage::RoundIdentity identity{session, round};
+            const bool settledPng = rejectTerminalPng(identity, submit, reason);
+            if (!identity.valid() || identity <= m_lastTerminalWarning ||
+                reason == QStringLiteral("service_cancelled")) return;
+            {
+                const std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+                if (m_closing || session != m_ringAdmissionSession) return;
+            }
+            m_lastTerminalWarning = identity;
+            // An existing PNG request reports the same failure at settlement.
+            if (!settledPng)
+                logMessage(QStringLiteral("环形成像未得到终帧 · 会话 %1 轮次 %2 · %3")
+                           .arg(session).arg(round).arg(ringTerminalFailureDetail(reason)));
         });
     connect(m_imagingController, &ImagingController::ringSnapshotReady,
             this, [this](int seq, quint64 submitIndex, bool hasSubmitIndex,
@@ -548,7 +570,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_imagingController, &ImagingController::svcError,
             this, &MainWindow::onImagingError);
     connect(m_imagingController, &ImagingController::svcStatus,
-            this, [this](const QString &status, float fps) {
+            this, [this](const QString &status, float fps, bool diagnosticOnly) {
         if (status == "running") {
             // 更新进度指示显示帧率（线性/环形只读反馈格式一致）
             if (m_lblImagingStatus && m_imagingEnabled) {
@@ -566,6 +588,8 @@ MainWindow::MainWindow(QWidget *parent)
                         .arg(fps, 0, 'f', 1));
                 }
             }
+        } else if (diagnosticOnly) {
+            logDiagnosticMessage(QString("[成像] %1").arg(status));
         } else {
             logMessage(QString("[成像] %1").arg(status));
         }
@@ -777,10 +801,10 @@ MainWindow::MainWindow(QWidget *parent)
             int ww = s.value("Window/W", 1600).toInt();
             int wh = s.value("Window/H", 900).toInt();
             setGeometry(wx, wy, ww, wh);
-            logMessage(QString("恢复窗口几何: %1,%2 %3x%4").arg(wx).arg(wy).arg(ww).arg(wh));
+            logDiagnosticMessage(QString("恢复窗口几何: %1,%2 %3x%4").arg(wx).arg(wy).arg(ww).arg(wh));
         } else {
             resize(1600, 900);
-            logMessage("首次运行，使用默认窗口尺寸 1600x900");
+            logDiagnosticMessage("首次运行，使用默认窗口尺寸 1600x900");
         }
     }
 }
@@ -1002,7 +1026,7 @@ void MainWindow::rebuildDynamicUI()
         } else {
             ui->groupTabBarContainer->hide();
         }
-        logMessage(QString("[分组] nCards=%1 groups=%2 show=%3")
+        logDiagnosticMessage(QString("[分组] nCards=%1 groups=%2 show=%3")
                    .arg(m_nCards).arg(m_numGroups).arg(showGroups));
     }
 
@@ -1612,7 +1636,7 @@ void MainWindow::setupPlots()
                     }
                     saveSettings();
                 } else {
-                    logMessage(QString("[色条] 自适应跳过: hasFinite=%1 min=%2 max=%3")
+                    logDiagnosticMessage(QString("[色条] 自适应跳过: hasFinite=%1 min=%2 max=%3")
                                .arg(hasFinite).arg(minVal, 0, 'g', 4).arg(maxVal, 0, 'g', 4));
                 }
             }
@@ -2277,7 +2301,11 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                      {QStringLiteral("roundGeneration"), qint64(event.roundGeneration)}});
             }, Qt::QueuedConnection);
         });
-    connect(m_netController, &NetworkController::statusMessage, this, &MainWindow::logMessage);
+    connect(m_netController, &NetworkController::statusMessage, this,
+            [this](const QString &message, bool diagnosticOnly) {
+        if (diagnosticOnly) logDiagnosticMessage(message);
+        else logMessage(message);
+    });
     connect(m_netController, &NetworkController::errorOccurred, this, &MainWindow::logMessage);
     connect(m_netController, &NetworkController::configurationDrainChanged, this, [this](bool waiting) {
         if (waiting) logMessage(QStringLiteral("采样配置等待旧保存队列结算"));
@@ -2588,7 +2616,7 @@ void MainWindow::onToggleSaveClicked()
         ui->edtFileSuffix->setEnabled(true);
         m_reconSaveEnabled = false;   // 停止保存时同时停止重建图像保存
         syncTimeoutPngSettings();
-        logMessage("停止保存数据");
+        logMessage("已请求停止保存");
     } else {
         // ── 开始保存 ──
         QString saveDir = ui->edtSaveDir->text();
@@ -2679,7 +2707,7 @@ void MainWindow::applyAutoSaveCommitToUi(const AutoSaveCommit& commit)
                    .arg(m_reconSaveDir));
     }
     if (commit.committed)
-        logMessage(QString("自动保存会话目录：%1").arg(commit.directory));
+        logDiagnosticMessage(QString("自动保存会话目录：%1").arg(commit.directory));
     recordDiagnosticAction(QStringLiteral("auto_save_round_generation_applied_ui"),
         {{QStringLiteral("measurementSession"), qint64(commit.measurementSession)},
          {QStringLiteral("roundGeneration"), qint64(commit.roundGeneration)},
@@ -3068,7 +3096,7 @@ void MainWindow::onDisplayRefresh()
         if (slotIdx == 0) {
             static int diagCount = 0;
             if (++diagCount <= 5) {
-                logMessage(QString("[显示] 卡%1 读到%2点 phaseA[0]=%3 freqA[0]=%4")
+                logDiagnosticMessage(QString("[显示] 卡%1 读到%2点 phaseA[0]=%3 freqA[0]=%4")
                     .arg(globalCard).arg(snap.freqA.size())
                     .arg(snap.phaseA.empty() ? 0 : snap.phaseA[0], 0, 'f', 2)
                     .arg(snap.freqA.empty() ? 0 : snap.freqA[0], 0, 'f', 2));
@@ -3407,7 +3435,11 @@ void MainWindow::logMessage(const QString &message)
     cursor.movePosition(QTextCursor::End);
     ui->txtLog->setTextCursor(cursor);
     ui->txtLog->ensureCursorVisible();
+    logDiagnosticMessage(message);
+}
 
+void MainWindow::logDiagnosticMessage(const QString &message)
+{
     if (auto *recorder = DiagnosticRecorder::instance()) {
         QJsonObject fields{{QStringLiteral("source"), QStringLiteral("ui")}};
         if (!m_diagnosticListenId.isEmpty())
@@ -3552,7 +3584,7 @@ void MainWindow::loadStyleSheet()
     if (styleFile.open(QFile::ReadOnly | QFile::Text)) {
         qApp->setStyleSheet(QLatin1String(styleFile.readAll()));
         styleFile.close();
-        logMessage("样式表加载成功");
+        logDiagnosticMessage("样式表加载成功");
     } else {
         logMessage(QString("警告：无法加载样式表 - %1").arg(styleFile.fileName()));
     }
@@ -3804,7 +3836,7 @@ void MainWindow::saveSettings()
         settings.setValue("Window/Y", g.y());
         settings.setValue("Window/W", g.width());
         settings.setValue("Window/H", g.height());
-        logMessage(QString("保存窗口几何: %1,%2 %3x%4").arg(g.x()).arg(g.y()).arg(g.width()).arg(g.height()));
+        logDiagnosticMessage(QString("保存窗口几何: %1,%2 %3x%4").arg(g.x()).arg(g.y()).arg(g.width()).arg(g.height()));
     }
 
     settings.sync();
@@ -4997,7 +5029,7 @@ void MainWindow::onImagingImageReady(const QImage &image, int seq)
         accumUs += totalUs;
         if (frameCount >= 30) {
             uint64_t avgUs = accumUs / frameCount;
-            logMessage(QString("[成像帧耗时] %1 帧平均 %2 ms（约 %3 FPS）")
+            logDiagnosticMessage(QString("[成像帧耗时] %1 帧平均 %2 ms（约 %3 FPS）")
                        .arg(frameCount)
                        .arg(avgUs / 1000.0, 0, 'f', 1)
                        .arg(1000000.0 / avgUs, 0, 'f', 1));
@@ -5144,7 +5176,7 @@ void MainWindow::feedImagingPulse()
         static int feedCount = 0;
         accumFeed += (tFeedEnd - tFeedStart);
         if (++feedCount >= 200) {
-            logMessage(QString("[成像馈送耗时] %1 次平均 %2 us/脉冲")
+            logDiagnosticMessage(QString("[成像馈送耗时] %1 次平均 %2 us/脉冲")
                        .arg(feedCount).arg(accumFeed / feedCount));
             feedCount = 0; accumFeed = 0;
         }
@@ -5212,7 +5244,7 @@ void MainWindow::feedImagingPulse()
             if (szB > 0) memcpy(freqB.data(), snap.freqB.data(), szB * sizeof(float));
             m_imagingController->feedPulseData(globalCard, snap.triggerSeq, freqA, freqB);
             if (feedCounter % 600 == 0) {
-                logMessage(QString("[成像馈送] 卡%1 seq=%2 freqA=%3 freqB=%4")
+                logDiagnosticMessage(QString("[成像馈送] 卡%1 seq=%2 freqA=%3 freqB=%4")
                            .arg(globalCard).arg(snap.triggerSeq)
                            .arg(freqA.size()).arg(freqB.size()));
             }
@@ -5232,7 +5264,7 @@ void MainWindow::feedImagingPulse()
     static int feedCount = 0;
     accumFeed += (tFeedEnd - tFeedStart);
     if (++feedCount >= 200) {
-        logMessage(QString("[成像馈送耗时] %1 次平均 %2 us/脉冲")
+        logDiagnosticMessage(QString("[成像馈送耗时] %1 次平均 %2 us/脉冲")
                    .arg(feedCount).arg(accumFeed / feedCount));
         feedCount = 0; accumFeed = 0;
     }
@@ -5372,7 +5404,7 @@ void MainWindow::configureRingAssembler()
          {"configuredLogicalTriggersPerRound", logicalTriggersPerRound},
          {"logicalRoundConfigSource", QStringLiteral(
              "RingReconCudaConfig.alinesPerFrame/enabledChannelCount")}});
-    logMessage(QString("[环形采集] 组包器已配置: 通道=%1 每块=%2 step=%3°")
+    logDiagnosticMessage(QString("[环形采集] 组包器已配置: 通道=%1 每块=%2 step=%3°")
                .arg(cfg.enabledChannelCount)
                .arg(cfg.alinesPerChannelPerBlock)
                .arg(step, 0, 'f', 4));
@@ -5572,19 +5604,21 @@ void MainWindow::reportRingPng(const paimage::RoundIdentity& round,
         const auto label = timeout ? QStringLiteral("环形超时截图未交付") : QStringLiteral("环形终帧未交付");
         QMetaObject::invokeMethod(this, [this, round, status, label] {
             logMessage(QStringLiteral("%1 · 会话 %2 轮次 %3 · %4")
-                .arg(label).arg(round.measurementSession).arg(round.roundGeneration).arg(status));
+                .arg(label).arg(round.measurementSession).arg(round.roundGeneration).arg(ringTerminalFailureDetail(status)));
         }, Qt::QueuedConnection);
     }
 }
 
-void MainWindow::rejectTerminalPng(paimage::RoundIdentity round, quint64 submitIndex, const QString& reason)
+bool MainWindow::rejectTerminalPng(paimage::RoundIdentity round, quint64 submitIndex, const QString& reason)
 {
     decltype(m_terminalPngTargets)::node_type node;
     {
         const std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
         node = m_terminalPngTargets.extract(round);
     }
-    if (!node.empty()) reportRingPng(round, node.mapped().target, submitIndex, reason);
+    if (node.empty()) return false;
+    reportRingPng(round, node.mapped().target, submitIndex, reason);
+    return true;
 }
 
 void MainWindow::settlePendingTerminalPngs(const QString& cancellation)

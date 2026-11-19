@@ -215,7 +215,7 @@ public:
     void updateAllStats();
 
 signals:
-    void statusMessage(const QString& msg);
+    void statusMessage(const QString& msg, bool diagnosticOnly = false);
     void errorOccurred(const QString& msg);
     void cardStatusChanged(int cardIdx, bool active);
     void cardReady(int cardIdx);            // 单张卡就绪（18字节版本号/就绪包到达）

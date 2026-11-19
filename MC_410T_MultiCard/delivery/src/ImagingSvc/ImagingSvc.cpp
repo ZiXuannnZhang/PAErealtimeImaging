@@ -157,7 +157,8 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
             m_ringExpectedSeq = 0; m_ringSequenceIncomplete = false;
             resetRingRecon();
         }
-        if (admission != Admission::Stale && admission != Admission::Invalid) {
+        const bool applied = admission != Admission::Stale && admission != Admission::Invalid;
+        if (applied) {
             m_ringSequenceIncomplete = true;
             if (terminal.toBool()) {
                 m_ringRound.close();
@@ -166,6 +167,7 @@ void ImagingSvc::processMessage(const QJsonObject &msg)
         }
         QJsonObject extra = msg;
         extra.remove("cmd");
+        extra[QStringLiteral("rejection_applied")] = applied;
         extra[QStringLiteral("reconstruction_complete")] = false;
         sendRingObservation("capacity_rejected", m_ringObs.snapshot(), extra);
     } else if (cmd == "ring_reset") {

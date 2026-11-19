@@ -373,7 +373,7 @@ bool NetworkController::startPaimage(const AcqConfig& config,std::function<void(
          {"startupIdleMsRequested",m_config.startupIdleMs>0?1000:0},
          {"startupIdleMsEffective",m_config.startupIdleMs},
          {"startupTrialId",QString::fromStdString(startupTrialId())}});
-    emit statusMessage(QStringLiteral("PAimage-derived：单接收线程及两个源输出线程已启动"));if(onStarted)onStarted();return true;
+    emit statusMessage(QStringLiteral("PAimage-derived：单接收线程及两个源输出线程已启动"), /*diagnosticOnly=*/true);if(onStarted)onStarted();return true;
 }
 
 void NetworkController::recordPaimageSnapshot(){

@@ -146,7 +146,7 @@ void FileSaver::startSaving(const QString& directory, int triggersPerFile,
     // 不保证从 000 开始，只保证不覆盖：复用一个已有数据的目录时让号到空闲序号。
     resolveFreeSequence();
     m_saving.store(true, std::memory_order_release);
-    emit statusMessage(QString("Card%1: 开始保存到 %2").arg(m_cardId + 1).arg(directory));
+    emit statusMessage(QString("Card%1: 开始保存到 %2").arg(m_cardId + 1).arg(directory), /*diagnosticOnly=*/true);
 }
 
 FileSaver::SaveResult FileSaver::stopSaving() {
@@ -163,9 +163,10 @@ FileSaver::SaveResult FileSaver::stopSaving() {
     const auto confirmed = savedCount() - m_requestSavedAtStart;
     const SaveResult result{m_cardId, confirmed, m_requestReceived - buffered,
                             buffered - confirmed, m_writeFaulted};
+    const bool cleanStop = !result.discarded && !result.failed && !result.ioFault;
     emit statusMessage(QStringLiteral("Card%1: 停写确认 %2，丢弃 %3，写入未确认 %4")
                        .arg(m_cardId + 1).arg(result.confirmed)
-                       .arg(result.discarded).arg(result.failed));
+                       .arg(result.discarded).arg(result.failed), /*diagnosticOnly=*/cleanStop);
     return result;
 }
 
@@ -565,7 +566,9 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
             handleWriteFault(QStringLiteral("迟到帧保存")); return false;
         }
         m_savedCount.fetch_add(1,std::memory_order_relaxed);
-        emit statusMessage(QStringLiteral("Card%1: 隔离迟到帧 session=%2 round=%3 trigger=%4").arg(m_cardId+1).arg(identity.measurementSession).arg(identity.roundGeneration).arg(group->triggerSeq));
+        emit statusMessage(QStringLiteral("Card%1: 隔离迟到帧 session=%2 round=%3 trigger=%4")
+                           .arg(m_cardId+1).arg(identity.measurementSession).arg(identity.roundGeneration).arg(group->triggerSeq),
+                           /*diagnosticOnly=*/true);
         return true;
     }
     // 自动保存会话代切换：边界处刷盘并关闭上一会话文件，
@@ -730,7 +733,10 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     // 扣减，只有当本触发也已入账时扣减才与文件里的实际记录数完全对齐。
     ++m_currentFileTriggers;
     m_acceptedCount.fetch_add(1, std::memory_order_relaxed);
-    if(group->saveTailCandidate)emit statusMessage(QStringLiteral("Card%1: 旧轮尾帧已接收 session=%2 round=%3 trigger=%4").arg(m_cardId+1).arg(identity.measurementSession).arg(identity.roundGeneration).arg(group->triggerSeq));
+    if (group->saveTailCandidate)
+        emit statusMessage(QStringLiteral("Card%1: 旧轮尾帧已接收 session=%2 round=%3 trigger=%4")
+                           .arg(m_cardId+1).arg(identity.measurementSession).arg(identity.roundGeneration).arg(group->triggerSeq),
+                           /*diagnosticOnly=*/true);
 
     // 达到合并阈値时一次性写盘（WRITE_BUFFER_TRIGGERS 个触发合并为一条大 I/O）
     if (m_accumTriggers >= WRITE_BUFFER_TRIGGERS && !flushWriteBuffers()) {

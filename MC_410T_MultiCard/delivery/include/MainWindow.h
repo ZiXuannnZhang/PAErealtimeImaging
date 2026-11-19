@@ -142,6 +142,7 @@ private:
                             const QVector<double> &magnitude,
                             bool doReplot = true);
     void logMessage(const QString &message);
+    void logDiagnosticMessage(const QString &message);
     void recordDiagnosticAction(const QString &action,
                                 const QJsonObject &fields = QJsonObject());
     void recordAcquisitionSnapshot(const QVector<QString> &targetIPs,
@@ -335,12 +336,13 @@ private:
     paimage::RingRoundUiState m_roundUi;
     paimage::RoundIdentity m_lastPresentedRingRound;
     quint64 m_lastPresentedRingSubmit = 0;
+    paimage::RoundIdentity m_lastTerminalWarning;
     struct PendingTerminalPng {
         paimage::TimeoutPresentation::Target target;
         qint64 expiryNs;
     };
     std::map<paimage::RoundIdentity, PendingTerminalPng> m_terminalPngTargets;
-    void rejectTerminalPng(paimage::RoundIdentity, quint64 submitIndex, const QString& reason);
+    bool rejectTerminalPng(paimage::RoundIdentity, quint64 submitIndex, const QString& reason);
     void settlePendingTerminalPngs(const QString& cancellation = {});
     enum class RingPngKind { Terminal, Timeout };
     struct RingPngTask {

@@ -95,7 +95,7 @@ bool ImagingController::startSvc()
         const auto layout = m_pendingRingLayout;
         emit svcStatus(QString("环形共享内存 %1 MB, blockSize=%2 frameSize=%3")
                            .arg(layout.bytes.mappingBytes / 1048576.0, 0, 'f', 1)
-                           .arg(layout.blockSize).arg(layout.frameSize), 0);
+                           .arg(layout.blockSize).arg(layout.frameSize), 0, /*diagnosticOnly=*/true);
         if (!setupRingSharedMemory(layout)) {
             finishStopSvc(); return false;
         }
@@ -104,13 +104,13 @@ bool ImagingController::startSvc()
         emit svcStatus(QString("[诊断] startSvc: pulseSize=%1 frameSize=%2 nx=%3 ny=%4 depth=%5")
                        .arg(pulseSize).arg(frameSize)
                        .arg(m_scanParams.nx).arg(m_scanParams.ny)
-                       .arg(m_generalParams.depth), 0);
+                       .arg(m_generalParams.depth), 0, /*diagnosticOnly=*/true);
         size_t totalSize = sizeof(ImagingShmHeader)
                            + static_cast<size_t>(pulseSize + frameSize) * sizeof(float);
 
         emit svcStatus(QString("共享内存 %1 MB, pulseSize=%2 frameSize=%3")
                            .arg(totalSize / 1048576.0, 0, 'f', 1)
-                           .arg(pulseSize).arg(frameSize), 0);
+                           .arg(pulseSize).arg(frameSize), 0, /*diagnosticOnly=*/true);
 
         setupSharedMemory(pulseSize, frameSize);
     }
@@ -172,7 +172,7 @@ bool ImagingController::startSvc()
         finishStopSvc(); return false;
     }
 
-    emit svcStatus(QString("启动 ImagingSvc: %1").arg(svcPath), 0);
+    emit svcStatus(QString("启动 ImagingSvc: %1").arg(svcPath), 0, /*diagnosticOnly=*/true);
 
     connect(m_svcProcess, &QProcess::started,
             this, &ImagingController::onSvcStarted);
@@ -263,7 +263,7 @@ void ImagingController::finishStopSvc()
     if (m_ringMode && m_zmqSocket) {
         const QJsonDocument doc(makeRingObservation("final", m_ringObs.snapshot()));
         emit svcStatus(QStringLiteral("[RingSHMObs] ")
-                           + QString::fromUtf8(doc.toJson(QJsonDocument::Compact)), 0);
+                           + QString::fromUtf8(doc.toJson(QJsonDocument::Compact)), 0, /*diagnosticOnly=*/true);
     }
 
     delete m_zmqSocket;  m_zmqSocket = nullptr;
@@ -308,7 +308,7 @@ void ImagingController::configure(const GeneralParams &general,
     emit svcStatus(QString("[诊断] configure: nx=%1 ny=%2 depth=%3 cardNum=%4 phyCh=%5")
                    .arg(scan.nx).arg(scan.ny)
                    .arg(general.depth).arg(general.cardNum)
-                   .arg(general.physicalChannels), 0);
+                   .arg(general.physicalChannels), 0, /*diagnosticOnly=*/true);
 
     // 每脉冲数据量 = 物理通道数 × depth（8 通道 × depth）
     int pulseSize = general.physicalChannels * general.depth;
@@ -394,7 +394,7 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
     emit svcStatus(QString("[诊断] configureRing: sampDepth=%1 block=%2 nx=%3")
                        .arg(m_ringConfig.sampDepth)
                        .arg(m_ringConfig.alinesPerBlock)
-                       .arg(nx), 0);
+                       .arg(nx), 0, /*diagnosticOnly=*/true);
     if (calibrationFallback)
         emit svcStatus(QStringLiteral("FBP 标定未应用，使用本次基础参数。文件 %1。原因 %2")
             .arg(fbp.calibrationFile, fbpError), 0);
@@ -587,7 +587,7 @@ void ImagingController::pumpRingInput()
       acceptedCount = m_ringAcceptedCount; rejectedCount = m_ringRejectedCount; }
     if (acceptedCount != m_ringReportedAccepted || rejectedCount != m_ringReportedRejected) {
         emit svcStatus(QStringLiteral("[RingInput] enqueued_total=%1 dropped_total=%2")
-                           .arg(acceptedCount).arg(rejectedCount), 0);
+                           .arg(acceptedCount).arg(rejectedCount), 0, /*diagnosticOnly=*/true);
         m_ringReportedAccepted = acceptedCount; m_ringReportedRejected = rejectedCount;
     }
     retired.clear();
@@ -611,7 +611,7 @@ void ImagingController::pumpRingInput()
             {"first_block_index", static_cast<qint64>(marker.first)},
             {"last_block_index", static_cast<qint64>(marker.last)}, {"source_terminal", marker.terminal}};
         emit svcStatus(QStringLiteral("[RingSHMObs] ")
-            + QString::fromUtf8(QJsonDocument(evidence).toJson(QJsonDocument::Compact)), 0);
+            + QString::fromUtf8(QJsonDocument(evidence).toJson(QJsonDocument::Compact)), 0, /*diagnosticOnly=*/true);
     }
     auto fail = [this, requested, failed](const QString &reason) {
         if (failed) { emit svcError(QStringLiteral("环形输入撤回失败：") + reason); stopSvc(); return; }
@@ -652,7 +652,7 @@ void ImagingController::pumpRingInput()
         m_ringNextNotify = now + std::chrono::milliseconds(100);
         const bool sent = sendCommand({{"cmd", "ring_reset"}, {"input_epoch", QString::number(m_ringActiveEpoch)}});
         emit svcStatus(QStringLiteral("[RingInput] reset_notification_%1 epoch=%2")
-            .arg(sent ? QStringLiteral("sent") : QStringLiteral("failed")).arg(m_ringActiveEpoch), 0);
+            .arg(sent ? QStringLiteral("sent") : QStringLiteral("failed")).arg(m_ringActiveEpoch), 0, /*diagnosticOnly=*/true);
         if (!sent) return;
         m_ringResetPending = false;
     }
@@ -713,7 +713,7 @@ void ImagingController::pumpRingInput()
         if (event.periodicDue) {
             const QJsonDocument doc(makeRingObservation("periodic", m_ringObs.snapshot()));
             emit svcStatus(QStringLiteral("[RingSHMObs] ")
-                               + QString::fromUtf8(doc.toJson(QJsonDocument::Compact)), 0);
+                               + QString::fromUtf8(doc.toJson(QJsonDocument::Compact)), 0, /*diagnosticOnly=*/true);
         }
     }
     // A delayed owner-thread tick may arrive after the deadline even though
@@ -735,7 +735,7 @@ void ImagingController::pumpRingInput()
               m_ringPendingBytes -= size_t(m_ringLayout.blockSize) * sizeof(float)
                   + size_t(m_ringLayout.alines) * (sizeof(float) + 1);
           } }
-        emit svcStatus(QStringLiteral("[RingInput] acknowledged id=%1").arg(m_ringInFlight.index), 0);
+        emit svcStatus(QStringLiteral("[RingInput] acknowledged id=%1").arg(m_ringInFlight.index), 0, /*diagnosticOnly=*/true);
         m_ringInFlight = RingBlock{}; m_ringHasInFlight = false; m_ringPublished = false; return;
     }
     if (expired) { fail(QStringLiteral("块消费确认超时")); return; }
@@ -752,7 +752,7 @@ void ImagingController::pumpRingInput()
     const bool sent = sendCommand(ready);
 #endif
     emit svcStatus(QStringLiteral("[RingInput] notification_%1 id=%2")
-        .arg(sent ? QStringLiteral("sent") : QStringLiteral("failed")).arg(m_ringInFlight.index), 0);
+        .arg(sent ? QStringLiteral("sent") : QStringLiteral("failed")).arg(m_ringInFlight.index), 0, /*diagnosticOnly=*/true);
 }
 
 void ImagingController::processRingMessage(const QJsonObject &msg)
@@ -961,7 +961,8 @@ void ImagingController::processRingFrame(int seq,
     if (copied != ring_snapshot::CopyResult::Copied) {
         m_dispConsumed[target].store(true, std::memory_order_release);
         emit svcStatus(QStringLiteral("[RingSnapshot] copy rejected result=%1 notify_seq=%2 shm_seq=%3")
-            .arg(static_cast<int>(copied)).arg(seq).arg(observedSeq), 0);
+            .arg(static_cast<int>(copied)).arg(seq).arg(observedSeq), 0,
+            /*diagnosticOnly=*/copied != ring_snapshot::CopyResult::InvalidBounds);
         return;
     }
 
@@ -1129,7 +1130,7 @@ std::uint64_t ImagingController::ringLastSubmitIndex() const
 void ImagingController::onSvcStarted()
 {
     emit svcStatus(QString("ImagingSvc 进程已启动, PID=%1")
-                       .arg(m_svcProcess ? m_svcProcess->processId() : 0), 0);
+                       .arg(m_svcProcess ? m_svcProcess->processId() : 0), 0, /*diagnosticOnly=*/true);
 }
 
 void ImagingController::onSvcFinished(int exitCode, QProcess::ExitStatus status)
@@ -1203,17 +1204,27 @@ void ImagingController::processMessage(const QJsonObject &msg)
         });
     } else if (cmd == "ring_shm_observation") {
         const auto kind = msg.value(QStringLiteral("kind")).toString();
-        if (kind == QStringLiteral("terminal_delivery_failed") ||
-            kind == QStringLiteral("round_block_count_mismatch")) {
+        const bool terminalDeliveryFailed = kind == QStringLiteral("terminal_delivery_failed");
+        std::uint64_t rejectedEpoch = 0;
+        const bool terminalRejected = kind == QStringLiteral("capacity_rejected") &&
+            msg.value(QStringLiteral("source_terminal")).toBool() &&
+            msg.value(QStringLiteral("rejection_applied")).toBool() &&
+            ring_round_identity::parseDecimalUint64(msg.value(QStringLiteral("input_epoch")), rejectedEpoch) &&
+            rejectedEpoch != 0 && rejectedEpoch == m_ringActiveEpoch && m_ringAdmission.load();
+        if (terminalDeliveryFailed || terminalRejected || kind == QStringLiteral("round_block_count_mismatch")) {
             const auto round = ring_round_identity::parse(msg);
-            if (round.valid)
+            if (round.valid) {
+                QString reason = QStringLiteral("coverage_incomplete");
+                if (terminalDeliveryFailed)
+                    reason = msg.value(QStringLiteral("reason")).toString(QStringLiteral("terminal_delivery_failed"));
+                if (terminalRejected)
+                    reason = QStringLiteral("terminal_input_rejected");
                 emit ringTerminalUnavailable(round.identity.measurementSession, round.identity.roundGeneration,
-                    msg.value(QStringLiteral("submit_index")).toString().toULongLong(),
-                    kind == QStringLiteral("terminal_delivery_failed") ? msg.value(QStringLiteral("reason")).toString()
-                                                                       : QStringLiteral("coverage_incomplete"));
+                    msg.value(QStringLiteral("submit_index")).toString().toULongLong(), reason);
+            }
         }
         emit svcStatus(QStringLiteral("[RingSHMObs] ")
-                           + QString::fromUtf8(QJsonDocument(msg).toJson(QJsonDocument::Compact)), 0);
+                           + QString::fromUtf8(QJsonDocument(msg).toJson(QJsonDocument::Compact)), 0, /*diagnosticOnly=*/true);
     } else if (cmd == "ring_snapshot_ready") {
         processRingMessage(msg);
     } else if (cmd == "frame_ready") {

@@ -231,6 +231,76 @@ public:
         std::cout << "PASS both PNG pairs and budgets completed during the GUI pause" << std::endl;
     }
 
+    static void operatorLog() {
+        check(QCoreApplication::applicationDirPath().endsWith("startup-isolated"), "isolated settings");
+        QTemporaryDir output, logs;
+        check(output.isValid() && logs.isValid(), "operator log fixture directories");
+        DiagnosticRecorder::Options options;
+        options.rootDirectory = logs.path();
+        auto* recorder = DiagnosticRecorder::initialize(options);
+        check(recorder != nullptr, "operator log recorder");
+        const auto recorderLifetime = std::shared_ptr<void>(nullptr, [](void*) { DiagnosticRecorder::shutdown(); });
+        MainWindow window;
+        auto* log = widget<QTextEdit>(window, "txtLog");
+        auto& controller = *window.m_imagingController;
+        window.prepareRingMeasurement(51);
+        window.m_imagingEnabled = true;
+        window.m_imagingServiceReady.store(true);
+        {
+            QSignalBlocker blocker(window.m_chkRealtimeImaging);
+            window.m_chkRealtimeImaging->setChecked(true);
+        }
+        controller.m_ringAdmission.store(true);
+        controller.m_ringActiveEpoch = 73;
+        controller.m_ringAcceptedCount = 9;
+        controller.m_ringRejectedCount = 1;
+        const auto initial = log->toPlainText();
+        controller.pumpRingInput();
+        const auto observe = [&](QString kind, quint64 generation, QJsonObject fields = {}) {
+            fields.insert("cmd", "ring_shm_observation");
+            fields.insert("kind", kind);
+            if (!fields.contains("measurement_session")) fields.insert("measurement_session", "51");
+            fields.insert("round_generation", QString::number(generation));
+            controller.processMessage(fields);
+        };
+        observe("periodic", 1, {{"tag", "diagnostic_probe"}});
+        observe("capacity_rejected", 1, {{"input_epoch", "73"}, {"source_terminal", false}, {"rejection_applied", true}});
+        observe("capacity_rejected", 1, {{"input_epoch", "73"}, {"source_terminal", true}, {"rejection_applied", false}});
+        observe("capacity_rejected", 1, {{"input_epoch", "72"}, {"source_terminal", true}, {"rejection_applied", true}});
+        observe("round_block_count_mismatch", 1, {{"measurement_session", "50"}});
+        check(log->toPlainText() == initial, "normal counters and stale or provisional observations stay off-screen");
+
+        observe("round_block_count_mismatch", 1);
+        observe("round_block_count_mismatch", 1);
+        observe("terminal_delivery_failed", 2, {{"reason", "terminal_slots_full"}});
+        const auto withoutPng = log->toPlainText();
+        check(withoutPng.count(QStringLiteral("环形重建缺块")) == 1 &&
+              withoutPng.count(QStringLiteral("成像服务终帧槽已满")) == 1,
+              "missing reconstruction or terminal is visible once without PNG saving");
+
+        window.m_terminalPngTargets.emplace(paimage::RoundIdentity{51, 3},
+            MainWindow::PendingTerminalPng{{output.path(), "operator", 543}, 0});
+        const QJsonObject applied{{"input_epoch", "73"}, {"source_terminal", true}, {"rejection_applied", true}};
+        observe("capacity_rejected", 3, applied);
+        observe("capacity_rejected", 3, applied);
+        pump(10);
+        check(log->toPlainText().count(QStringLiteral("末块被拒收")) == 1 &&
+              log->toPlainText().contains(QStringLiteral("环形终帧未交付")) &&
+              window.m_terminalPngTargets.empty(), "actual terminal rejection settles the pending PNG with one display notice");
+        check(window.m_imagingEnabled && window.m_imagingServiceReady.load() &&
+              window.m_chkRealtimeImaging->isChecked(), "operator notice does not stop real-time imaging");
+
+        check(recorder->flush(), "flush operator log diagnostics");
+        QFile events(QDir(recorder->runDirectory()).filePath("events.jsonl"));
+        check(events.open(QIODevice::ReadOnly), "open operator log diagnostics");
+        const auto recorded = events.readAll();
+        check(recorded.contains("[RingInput] enqueued_total=9 dropped_total=1") &&
+              recorded.contains("diagnostic_probe") &&
+              recorded.contains("round_block_count_mismatch") && recorded.contains("terminal_input_rejected"),
+              "retain the raw observations and structured PNG result in diagnostics");
+        std::cout << "PASS diagnostic-only counters, missing terminal with or without PNG, and one warning per affected round\n";
+    }
+
     static void previewPressure() {
         check(QCoreApplication::applicationDirPath().endsWith("startup-isolated"), "isolated settings");
         QFile::remove(paimageSettingsPath());
@@ -1443,6 +1513,8 @@ int main(int argc, char** argv) {
             MainWindowStartIntegrationTest::listenerRestartPng();
         else if (app.arguments().contains("--preview-pressure"))
             MainWindowStartIntegrationTest::previewPressure();
+        else if (app.arguments().contains("--operator-log"))
+            MainWindowStartIntegrationTest::operatorLog();
         else
             MainWindowStartIntegrationTest::run();
         return 0;

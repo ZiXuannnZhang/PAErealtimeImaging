@@ -123,7 +123,7 @@ signals:
                            quint64 measurementSession,
                            quint64 roundGeneration,
                            bool roundComplete, int bufferIndex);  // 每块显示快照（UI 线程槽）
-    void svcStatus(const QString &status, float fps);
+    void svcStatus(const QString &status, float fps, bool diagnosticOnly = false);
     void svcError(const QString &error);
     void ringInputFailed(); // queued onto the owner thread before delivery
     void svcReady();                   // 子进程就绪（配置已下发）

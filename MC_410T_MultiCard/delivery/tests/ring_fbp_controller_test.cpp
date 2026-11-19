@@ -98,6 +98,12 @@ static int burstTest(QCoreApplication &app)
         SetEvent(release); blocker.join(); CloseHandle(held); CloseHandle(release);
         if (!admissionOk) fail("queue admission/full contract failed");
     });
+    std::vector<quint64> refusedTerminals;
+    QObject::connect(&controller, &ImagingController::ringTerminalUnavailable, &app,
+        [&](quint64 session, quint64 round, quint64, const QString& reason) {
+            if (session == 10 && reason == QStringLiteral("terminal_input_rejected"))
+                refusedTerminals.push_back(round);
+        });
     QObject::connect(&controller,&ImagingController::svcStatus,&app,[&](const QString &s,float) {
         const QString obsPrefix=QStringLiteral("[RingSHMObs] ");
         if (s.startsWith(obsPrefix)) {
@@ -108,7 +114,8 @@ static int burstTest(QCoreApplication &app)
                     || obj.value("measurement_session").toString()!="10"
                     || !obj.value("reconstruction_complete").isBool()
                     || obj.value("reconstruction_complete").toBool()
-                    || !obj.value("source_terminal").toBool()) { fail("invalid capacity evidence"); return; }
+                    || !obj.value("source_terminal").toBool()
+                    || !obj.value("rejection_applied").toBool()) { fail("invalid capacity evidence"); return; }
                 evidenceEpoch=epoch;
                 const QString round=obj.value("round_generation").toString();
                 const int first=obj.value("first_block_index").toInt(-1);
@@ -149,8 +156,9 @@ static int burstTest(QCoreApplication &app)
     if (!controller.configureRing(c,tv,nullptr,fbp) || !controller.startSvc()) return 2;
     QTimer::singleShot(50000,&app,[&] { fail("burst integration timed out"); });
     app.exec();
-    if (!failed && done && acknowledgements.size()==14 && terminalEvidence && wholeRoundEvidence) {
-        std::cout << "PASS real service burst, queue full, ordered acknowledgements, next-round recovery and reset\n";
+    if (!failed && done && acknowledgements.size()==14 && terminalEvidence && wholeRoundEvidence &&
+        refusedTerminals == std::vector<quint64>{1, 2}) {
+        std::cout << "PASS real service burst, terminal capacity rejection, ordered acknowledgements, next-round recovery and reset\n";
         return 0;
     }
     return 1;

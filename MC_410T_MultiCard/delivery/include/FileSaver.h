@@ -118,7 +118,7 @@ public:
     uint64_t currentPhysicalRoundGeneration() const { return m_fileRound ? m_fileRound->roundGeneration : 0; }
 
 signals:
-    void statusMessage(const QString& message);
+    void statusMessage(const QString& message, bool diagnosticOnly = false);
     void errorOccurred(const QString& error);
     // Emitted on every file rollover (capacity or physical round). Bridged to
     // the diagnostic recorder by the owner; tests may connect directly.
