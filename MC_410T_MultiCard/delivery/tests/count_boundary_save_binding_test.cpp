@@ -726,7 +726,7 @@ int main(int argc, char** argv)
         const auto initial = coordinator.beginSession(0);
         coordinator.setDirectoryPreparer([](const QString&) { return false; });
         FileSaver a(0), b(1);
-        for (auto* saver : {&a, &b}) saver->setRawAcquisitionEvidence(32, 4);
+        for (auto* saver : {&a, &b}) saver->setRawAcquisitionEvidence(32, 4, /*writeSidecar=*/true);
         AcqConfig config;
         constexpr int samples = 200;
         config.acqTimeNs = samples * 4;

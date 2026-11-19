@@ -90,9 +90,10 @@ public:
     SaveResult suspendForSourceRestart();
     void failSaveCallback();
     void resumeAfterSourceRestart();
-    void setRawAcquisitionEvidence(int sourceBits, double sampleIntervalNs) {
+    void setRawAcquisitionEvidence(int sourceBits, double sampleIntervalNs, bool writeSidecar) {
         m_sourceBits = sourceBits;
         m_sampleIntervalNs = sampleIntervalNs;
+        m_writeRawSidecar = writeSidecar;
     }
 
     // 自动保存会话代目录解析：按触发组携带的 sessionGen 查询保存目录。
@@ -220,7 +221,10 @@ private:
     double m_sampleIntervalNs = 0.0;
     std::unique_ptr<QFile> m_rawMetadata;
     std::shared_ptr<const std::string> m_rawFileCaptureId;
+    // Identity of this A/B pair. File rollover owns it independently of
+    // whether the optional evidence file could be written.
     paimage::RoundIdentity m_rawFileRound;
+    bool m_writeRawSidecar = false;
     QByteArray m_rawMetadataBatch;
     // 首次写盘故障只告警一次（磁盘满通常是持续性的，不要每段刷一条）。
     // startSaving() 开新会话时复位。

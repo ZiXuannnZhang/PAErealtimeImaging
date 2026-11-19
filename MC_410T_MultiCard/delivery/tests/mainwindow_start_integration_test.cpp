@@ -35,6 +35,7 @@
 #include <QTemporaryDir>
 #include <QSemaphore>
 #include <QUuid>
+#include <qfloat16.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -688,22 +689,22 @@ public:
                 const auto pair = raw.entryList({"Card1_*.dat"}, QDir::Files);
                 check(pair.size() == 2 && QFileInfo(raw.filePath(pair[0])).size() == 3000 &&
                       QFileInfo(raw.filePath(pair[1])).size() == 3000, "close drains one A/B waveform column");
-                const auto sidecars = raw.entryList({"Card1_ChA*.jsonl"}, QDir::Files);
-                check(sidecars.size() == 1, "close retains the paired raw sidecar");
-                QFile evidence(raw.filePath(sidecars.front()));
-                check(evidence.open(QIODevice::ReadOnly), "read settled raw sidecar");
-                const auto records = evidence.readAll().trimmed().split('\n');
-                const auto end = QJsonDocument::fromJson(records.back()).object();
-                check(records.size() == 3 && end.value("type").toString() == "end" &&
-                      end.value("confirmedColumns").toInt() == 1, "raw sidecar sealed during close");
+                check(raw.entryList({"*.dat.jsonl"}, QDir::Files).isEmpty(),
+                      "closing with auto-save active does not create a raw sidecar");
             }
 
             QFile events(QDir(info.value("runDirectory").toString()).filePath("events.jsonl"));
             check(events.open(QIODevice::ReadOnly), "closed receiver flushed diagnostic events");
             int matched = 0;
+            int rawConfirmations = 0;
             while (!events.atEnd()) {
                 const auto event = QJsonDocument::fromJson(events.readLine()).object();
                 const auto fields = event.value("fields").toObject();
+                if (event.value("message") == QStringLiteral("save_request_settled") &&
+                    fields.value("confirmed") == QStringLiteral("1") &&
+                    fields.value("failed") == QStringLiteral("0") &&
+                    fields.value("discarded") == QStringLiteral("0"))
+                    ++rawConfirmations;
                 if (fields.value("requestId").toString() != "782") continue;
                 ++matched;
                 check(fields.value("result").toString() == expected, "PNG has expected terminal outcome");
@@ -714,6 +715,8 @@ public:
                 }
             }
             check(matched == 1, "one PNG settlement despite competing callbacks and repeat close");
+            if (scenario == "timeout-blocked")
+                check(rawConfirmations == 1, "close confirms the A/B pair in the save receipt");
             const auto pngs = QDir(output.path()).entryList({"*.png"}, QDir::Files);
             check(pngs.size() == (expected == "saved" ? 2 : expected == "writer_exited_unconfirmed" ? 1 : 0),
                   "published files match the receipt");
@@ -954,6 +957,8 @@ public:
                     throw std::runtime_error("loopback listener starts with an FBP request");
                 }
                 window.m_netController->setStartupFilterTriggerCount(0);
+                if (!window.m_autoSaveEnabled && !window.m_netController->isSaving())
+                    window.onToggleSaveClicked();
                 waitFor([&] { return window.m_netController->isSaving(); }, "raw writer armed");
                 const QDir pngDirectory(window.m_reconSaveDir);
                 const auto delayA = widget<QLineEdit>(window, "edtADelay")->text().toInt();
@@ -968,7 +973,10 @@ public:
                 card.expectCommand(paimage::startCommand());
                 return pngDirectory;
             };
-            const auto deliver = [&](int acquisitionNs, int columns) {
+            const auto waveform = [](int sample, int trigger, int fixture) {
+                return ((sample / 19 + trigger * 3) % 31 - 15) * 30 * fixture;
+            };
+            const auto deliver = [&](int acquisitionNs, int columns, int fixture) {
                 for (int trigger = 0; trigger < columns; ++trigger) {
                     for (int offset = 0; offset < acquisitionNs * 2; offset += 1440) {
                         const auto size = std::min(1440, acquisitionNs * 2 - offset);
@@ -977,7 +985,7 @@ public:
                         bytes[2] = trigger;
                         for (int i = 0; i < size; i += 8) {
                             const int sample = (offset + i) / 8;
-                            const std::int32_t a = ((sample / 19 + trigger * 3) % 31 - 15) * 30;
+                            const std::int32_t a = waveform(sample, trigger, fixture);
                             const std::int32_t b = -a;
                             std::memcpy(bytes.data() + 4 + i, &b, sizeof(b));
                             std::memcpy(bytes.data() + 8 + i, &a, sizeof(a));
@@ -987,36 +995,38 @@ public:
                     pump(8);
                 }
             };
-            const auto stopAndCheckRaw = [&](QDir directory, int acquisitionNs, int columns,
+            const auto stopAndCheckRaw = [&](QDir directory, int acquisitionNs, int columns, int fixture,
                                              paimage::RoundIdentity expectedRound = {}) {
+                if (expectedRound.valid()) {
+                    const std::lock_guard<std::mutex> lock(window.m_ringAssemblerMutex);
+                    check(expectedRound.measurementSession == window.m_ringAdmissionSession,
+                          "the formal PNG belongs to the measurement writing this raw directory");
+                }
                 window.onStartListenClicked();
                 card.expectCommand(paimage::stopCommand());
                 waitFor([&] { return !window.m_netController; }, "real listener and raw writer stopped");
-                check(directory.cdUp(), "resolve raw round for FBP fixture");
-                for (const auto* pattern : {"Card1_ChA_*.dat", "Card1_ChB_*.dat"}) {
+                check(directory.cdUp(), "resolve raw output directory");
+                const int samples = acquisitionNs / 4;
+                static_assert(sizeof(qfloat16) == 2);
+                for (int channel : {1, -1}) {
+                    const auto pattern = channel == 1 ? "Card1_ChA_*.dat" : "Card1_ChB_*.dat";
                     const auto files = directory.entryList({QString::fromLatin1(pattern)}, QDir::Files);
-                    check(files.size() == 1 && QFileInfo(directory.filePath(files.front())).size() ==
-                          qint64(columns) * (acquisitionNs / 4) * 2, "raw A/B sizes match FBP capture");
-                }
-                const auto sidecars = directory.entryList({"Card1_ChA_*.jsonl"}, QDir::Files);
-                check(sidecars.size() == 1, "one raw paired sidecar for the FBP capture");
-                QFile evidence(directory.filePath(sidecars.front()));
-                check(evidence.open(QIODevice::ReadOnly), "open raw paired sidecar");
-                const auto rows = evidence.readAll().trimmed().split('\n');
-                check(rows.size() == columns + 2, "raw sidecar has each column plus layout and seal");
-                const auto header = QJsonDocument::fromJson(rows.front()).object();
-                check(!header.value("captureId").toString().isEmpty(), "raw capture ID present");
-                if (expectedRound.valid()) {
-                    for (int i = 0; i < columns; ++i) {
-                        const auto row = QJsonDocument::fromJson(rows[i+1]).object();
-                        check(row.value("session").toString() == QString::number(expectedRound.measurementSession) &&
-                              row.value("round").toString() == QString::number(expectedRound.roundGeneration) &&
-                              row.value("logicalIndex").toInt(-1) == i, "raw column belongs to the actual FBP round");
+                    check(files.size() == 1, "one file per raw channel");
+                    QFile data(directory.filePath(files.front()));
+                    check(data.open(QIODevice::ReadOnly), "read confirmed waveform");
+                    const auto bytes = data.readAll();
+                    check(bytes.size() == qint64(columns) * samples * 2, "raw A/B sizes match capture");
+                    for (int trigger = 0; trigger < columns; ++trigger) {
+                        for (int sample = 0; sample < samples; ++sample) {
+                            qfloat16 value;
+                            std::memcpy(&value, bytes.constData() + 2 * (trigger * samples + sample), 2);
+                            check(float(value) == channel * waveform(sample, trigger, fixture),
+                                  "raw A/B contents match the packet fixture and column order");
+                        }
                     }
                 }
-                const auto seal = QJsonDocument::fromJson(rows.back()).object();
-                check(seal.value("type").toString() == "end" &&
-                      seal.value("confirmedColumns").toInt() == columns, "raw A/B sidecar sealed");
+                check(directory.entryList({"*.dat.jsonl"}, QDir::Files).isEmpty(),
+                      "no raw sidecar is created by the production save path");
             };
 
             // Empty, valid and then deleted calibration on real START entries.
@@ -1060,7 +1070,7 @@ public:
                         window.m_terminalRenderPool.start([renderGate] { renderGate->acquire(); });
                 }
                 controller.m_testLastRingAlgorithm.clear();
-                deliver(durationNs, triggers);
+                deliver(durationNs, triggers, pass + 1);
                 try {
                     waitFor([&] { return completed.size() == oldRounds + 1 &&
                                           controller.m_testLastRingAlgorithm == "exact_fbp"; },
@@ -1090,30 +1100,37 @@ public:
                     check(png.size() == 1 && QImage(pngDirectory.filePath(png.front())).size() ==
                           QSize(ring_png::kEdge, ring_png::kEdge), "one decodable terminal PNG per wavelength in this FBP round");
                 }
-                stopAndCheckRaw(pngDirectory, durationNs, triggers, round);
+                stopAndCheckRaw(pngDirectory, durationNs, triggers, pass + 1, round);
                 check(window.m_chkRealtimeImaging->isChecked() && !window.m_btnImagingConfig->isEnabled(),
                       "stopping acquisition alone must not unlock resident real-time imaging");
                 constexpr const char* scenarios[]{"empty", "valid with offsets", "removed before START"};
-                std::cout << "PASS " << scenarios[pass] << ": exact_fbp, raw A/B, sealed sidecar and PNG pair\n";
+                std::cout << "PASS " << scenarios[pass] << ": exact_fbp, raw A/B without sidecars and PNG pair\n";
             }
 
-            // Keep a known-good draft, then shorten the acquisition at START so
-            // its base FBP sample window becomes invalid before any file lookup.
+            // Repeat with manual saving and an invalid base FBP window.
+            widget<QCheckBox>(window, "chkAutoSave")->setChecked(false);
+            widget<QLineEdit>(window, "edtSaveDir")->setText(save.filePath("manual"));
             stage(calibrationFile);
             const auto oldRounds = completed.size();
             // 400 acquired samples permit raw saving and DelayCut, but
             // the retained FBP window is too short for either wavelength.
             constexpr int shortAcquisition = 1600;
             const auto rawOnly = start(shortAcquisition);
+            check(rawOnly == QDir(save.filePath("manual/recon_png")) && !window.m_autoSaveEnabled,
+                  "the final capture uses the selected manual save directory");
             check(!window.m_measurementRingImagingAvailable.load() && fallback.size() == 1 &&
                   configurationErrors.size() == 1 &&
                   configurationErrors.front().contains("FBP effective samples"),
                   "invalid base is reported and does not claim fallback success");
-            deliver(shortAcquisition, 1);
+            deliver(shortAcquisition, 1, 4);
             waitFor([&] { return window.m_netController->physicalRoundSnapshot().logicalDistinctAccepted == 1; },
                     "raw acquisition continues on invalid base FBP");
-            stopAndCheckRaw(rawOnly, shortAcquisition, 1);
+            stopAndCheckRaw(rawOnly, shortAcquisition, 1, 4);
             check(completed.size() == oldRounds, "invalid base never produced a formal FBP terminal");
+            const auto operatorLog = widget<QTextEdit>(window, "txtLog")->toPlainText();
+            check(!operatorLog.contains("[RingInput]") && !operatorLog.contains("[RingSHMObs]") &&
+                  !operatorLog.contains(QStringLiteral("自动保存会话目录")),
+                  "real listener, save and reconstruction counters stay out of the operator log");
         }
         QFile::remove(paimageSettingsPath());
         std::cout << "PASS listener restart, exact FBP with optional calibration and raw/PNG delivery during GUI pause\n";

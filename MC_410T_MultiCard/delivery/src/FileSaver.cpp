@@ -370,9 +370,7 @@ void FileSaver::recordRawColumn(const TriggerGroup& group)
             {"sampleCount", group.sampleCount}, {"sampleIntervalNs", m_sampleIntervalNs},
             {"sourceBits", m_sourceBits}, {"sourceIPv4", qint64(group.sourceIPv4)},
             {"packetAnchor", "first-arrival"}, {"physicalPhase", "unverified"}};
-        if (group.normalizationApplied && group.physicalDecision == paimage::PhysicalTriggerDecision::LogicalScan &&
-            group.measurementSession != 0) {
-            m_rawFileRound = {group.measurementSession, group.roundGeneration};
+        if (m_rawFileRound.valid()) {
             layout.insert("fileSession", QString::number(m_rawFileRound.measurementSession));
             layout.insert("fileRound", QString::number(m_rawFileRound.roundGeneration));
         }
@@ -545,7 +543,7 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
         const QString root=group->sessionGen ? (m_dirResolver ? m_dirResolver(group->sessionGen) : QString()) : m_saveDirectory;
         if(root.isEmpty()){emit errorOccurred(QStringLiteral("迟到帧保存目录不可用"));return false;}
         FileSaver late(m_cardId);late.m_isLateWriter=true;
-        late.setRawAcquisitionEvidence(m_sourceBits, m_sampleIntervalNs);
+        late.setRawAcquisitionEvidence(m_sourceBits, m_sampleIntervalNs, m_writeRawSidecar);
         const QString dir=QDir(root).filePath(QStringLiteral("_late/session-%1-round-%2").arg(identity.measurementSession).arg(identity.roundGeneration));
         late.startSaving(dir,1,m_fileSuffix);
         auto copy=std::make_shared<TriggerGroup>(*group);copy->sessionGen=0;
@@ -641,8 +639,8 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
             info.newFileSequence = m_fileSequence;
             info.manualMode = (m_currentGen == 0);
         }
-        // A sidecar declaration is a property of the entire pair, even
-        // if closure is interrupted. An untagged group therefore rolls too.
+        // A declared round belongs to the entire A/B pair. An untagged
+        // group must start a new pair even if its numeric round is the same.
         if (!logical)
             m_fileRound.reset();
         else if (!m_fileRound || roundChanged || identity.valid())
@@ -724,10 +722,14 @@ bool FileSaver::consumeTriggerGroup(const TriggerGroupPtr& group) {
     }
 
     ++m_accumTriggers;
-    try {
-        recordRawColumn(*group);
-    } catch (const std::bad_alloc&) {
-        abandonRawMetadata(QStringLiteral("旁车缓冲分配失败"));
+    if (m_sourceBits != 0 && m_currentFileTriggers == 0 && group->captureId && logical && identity.valid())
+        m_rawFileRound = identity;
+    if (m_writeRawSidecar) {
+        try {
+            recordRawColumn(*group);
+        } catch (const std::bad_alloc&) {
+            abandonRawMetadata(QStringLiteral("旁车缓冲分配失败"));
+        }
     }
     // 记账在周期性 flush 之前完成：flushWriteBuffers 的失败回退按 m_accumTriggers
     // 扣减，只有当本触发也已入账时扣减才与文件里的实际记录数完全对齐。

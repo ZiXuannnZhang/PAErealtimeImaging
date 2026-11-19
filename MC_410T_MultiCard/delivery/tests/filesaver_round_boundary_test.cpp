@@ -1024,16 +1024,19 @@ int main(int argc, char** argv)
     for (int side=1; side<=2; ++side) {
         QTemporaryDir dir(QDir::currentPath()+"/r3-large-XXXXXX");
         FileSaver saver(0); int errors=0;
-        saver.setRawAcquisitionEvidence(32, 4.0);
+        saver.setRawAcquisitionEvidence(32, 4.0, /*writeSidecar=*/true);
         QObject::connect(&saver, &FileSaver::errorOccurred, &app, [&](const QString&) { ++errors; }, Qt::DirectConnection);
         saver.startSaving(dir.path(),100,"large");
         auto g=makeGroup(1,1,1); g->sampleCount=10000; g->freqA.assign(10000,1); g->freqB.assign(10000,-1);
         g->captureId = std::make_shared<const std::string>("12345678-1234-4321-a123-1234567890ab");
         saver.consumeTriggerGroup(g);
         saver.setFlushFaultForTest(side);
+        bool stopWasVisible = false;
+        QObject::connect(&saver, &FileSaver::statusMessage, &app,
+                         [&](const QString&, bool diagnosticOnly) { stopWasVisible = !diagnosticOnly; });
         const auto result = saver.stopSaving();
-        check(result.confirmed == 0 && result.discarded == 0 && result.failed == 1 && result.ioFault,
-              "stop outcome reports an unconfirmed paired batch");
+        check(result.confirmed == 0 && result.discarded == 0 && result.failed == 1 && result.ioFault && stopWasVisible,
+              "stop outcome reports an unconfirmed paired batch to the operator");
         check(errors==1 && saver.savedCount()==0 && !saver.isSaving() &&
               fileSizeOf(dir.path()+"/Card1_ChA_large_000.dat")==0 &&
               fileSizeOf(dir.path()+"/Card1_ChB_large_000.dat")==0,
@@ -1045,7 +1048,7 @@ int main(int argc, char** argv)
     {
         QTemporaryDir dir;
         FileSaver saver(0);
-        saver.setRawAcquisitionEvidence(32, 4.0);
+        saver.setRawAcquisitionEvidence(32, 4.0, /*writeSidecar=*/true);
         saver.startSaving(dir.path(), 100, "columns");
         auto group = makeGroup(1, 1, 301);
         group->measurementSession = 600;
@@ -1073,26 +1076,53 @@ int main(int argc, char** argv)
               end.value("confirmedColumns").toInt() == 1 && metadata.atEnd(),
               "raw sidecar records exact column, relative slots and paired confirmation");
     }
-    {
+    for (const bool writeSidecar : {true, false}) {
         QTemporaryDir dir;
+        require(dir.isValid(), "raw pair policy directory");
         FileSaver saver(0);
-        saver.setRawAcquisitionEvidence(32, 4.0);
+        saver.setRawAcquisitionEvidence(32, 4.0, writeSidecar);
+        const QString orphanPath = dir.filePath("Card1_ChA_declared_000.dat.jsonl");
+        if (!writeSidecar) {
+            QFile orphan(orphanPath);
+            require(orphan.open(QIODevice::WriteOnly) && orphan.write("old evidence") == 12,
+                    "leave a historical sidecar without its A/B files");
+        }
         saver.startSaving(dir.path(), 2, "declared");
+        const auto captureId = std::make_shared<const std::string>("12345678-1234-4321-a123-1234567890ab");
         for (int i = 0; i < 5; ++i) {
             auto group = makeGroup(i, i < 3 ? 4 : 5, i + 1, 0, 0x0100007f, 601);
-            group->captureId = std::make_shared<const std::string>("12345678-1234-4321-a123-1234567890ab");
+            group->captureId = captureId;
             if (i == 4) group->normalizationApplied = false;
-            check(saver.consumeTriggerGroup(group), "raw file header cannot mix declared and untagged columns");
+            check(saver.consumeTriggerGroup(group), "declared and untagged columns accepted");
         }
-        check(saver.stopSaving().confirmed == 5, "rollovers keep raw columns confirmed");
+        auto late = makeGroup(5, 4, 6, 0, 0x0100007f, 601);
+        late->captureId = captureId;
+        late->saveForceLate = true;
+        check(saver.consumeTriggerGroup(late), "late waveform still has its own file pair");
+        bool stopWasDiagnosticOnly = false;
+        QObject::connect(&saver, &FileSaver::statusMessage, &app,
+                         [&](const QString&, bool diagnosticOnly) { stopWasDiagnosticOnly = diagnosticOnly; });
+        const auto result = saver.stopSaving();
+        check(result.confirmed == 6 && !result.discarded && !result.failed && stopWasDiagnosticOnly,
+              "normal stop confirms all pairs and keeps the per-card count in diagnostics");
         const std::array<QString, 4> rounds{"4", "4", "5", ""};
         const std::array<int, 4> counts{2, 1, 1, 1};
+        int firstValue = 1;
         for (int i = 0; i < 4; ++i) {
             const QString prefix = QStringLiteral("Card1_Ch%1_declared_%2.dat");
-            const QString seq = QStringLiteral("%1").arg(i, 3, 10, QLatin1Char('0'));
-            const QString path = dir.filePath(prefix.arg("A", seq));
-            QFile metadata(path + ".jsonl");
-            check(metadata.open(QIODevice::ReadOnly), "declared pair metadata available");
+            const QString seq = QStringLiteral("%1").arg(i + (writeSidecar ? 0 : 1), 3, 10, QLatin1Char('0'));
+            const QString pathA = dir.filePath(prefix.arg("A", seq));
+            const QString pathB = dir.filePath(prefix.arg("B", seq));
+            check(verifyFile(pathA, halvesOfRange(firstValue, counts[i])) &&
+                  verifyFile(pathB, negHalvesOfRange(firstValue, counts[i])),
+                  "A/B contents and capacity, physical-round and untagged segmentation match");
+            firstValue += counts[i];
+            QFile metadata(pathA + ".jsonl");
+            if (!writeSidecar) {
+                check(!metadata.exists(), "disabled sidecar is absent for each raw pair");
+                continue;
+            }
+            require(metadata.open(QIODevice::ReadOnly), "declared pair metadata available");
             const auto layout = QJsonDocument::fromJson(metadata.readLine()).object();
             check(layout.value("fileRound").toString() == rounds[i] &&
                   layout.value("fileSession").toString() == (i == 3 ? "" : "601"),
@@ -1101,9 +1131,19 @@ int main(int argc, char** argv)
                 check(QJsonDocument::fromJson(metadata.readLine()).object().value("round").toString() ==
                       (i == 3 ? "5" : rounds[i]), "declared round matches column");
             check(QJsonDocument::fromJson(metadata.readLine()).object().value("confirmedColumns").toInt() ==
-                    counts[i] && metadata.atEnd() && fileSizeOf(path) == counts[i] * kSamples * 2 &&
-                  fileSizeOf(dir.filePath(prefix.arg("B", seq))) == counts[i] * kSamples * 2,
-                  "paired output lengths, file sequence and seal agree");
+                    counts[i] && metadata.atEnd(), "sidecar seal and pair counts agree");
+        }
+        const auto latePrefix = dir.filePath("_late/session-601-round-4/Card1_Ch%1_declared_000.dat");
+        check(verifyFile(latePrefix.arg("A"), halvesOf({6})) &&
+              verifyFile(latePrefix.arg("B"), halvesOf({-6})) &&
+              QFile::exists(latePrefix.arg("A") + ".jsonl") == writeSidecar,
+              "late writer inherits the sidecar policy and preserves waveform bytes");
+        if (!writeSidecar) {
+            QFile orphan(orphanPath);
+            check(!QFile::exists(dir.filePath("Card1_ChA_declared_000.dat")) &&
+                  !QFile::exists(dir.filePath("Card1_ChB_declared_000.dat")) &&
+                  orphan.open(QIODevice::ReadOnly) && orphan.readAll() == "old evidence",
+                  "historical orphan sidecar reserves the sequence without being modified");
         }
     }
     {
