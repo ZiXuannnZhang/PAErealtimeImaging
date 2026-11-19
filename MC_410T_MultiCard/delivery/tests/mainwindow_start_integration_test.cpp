@@ -31,6 +31,7 @@
 #include <QSpinBox>
 #include <QThread>
 #include <QTemporaryDir>
+#include <QSemaphore>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -127,6 +128,28 @@ public:
             widget<QLineEdit>(window, "edtFileSuffix")->setText("restart");
             widget<QCheckBox>(window, "chkAutoSave")->setChecked(true);
 
+            {
+                QTemporaryDir queueTarget;
+                const auto blocker = std::make_shared<QSemaphore>();
+                auto release = std::shared_ptr<void>(nullptr, [blocker](void*) { blocker->release(); });
+                window.m_terminalWritePool.start([blocker] { blocker->acquire(); });
+                const paimage::TimeoutPresentation::Target target{queueTarget.path(), "bounded", 91};
+                const auto render = [] {
+                    QImage image(8, 8, QImage::Format_ARGB32);
+                    image.fill(Qt::white);
+                    return std::array<QImage, 2>{image, image};
+                };
+                for (quint64 round = 0; round < 3; ++round)
+                    window.queueTerminalPng({999, round}, target, round + 1, int(round), 64, render);
+                {
+                    const std::lock_guard<std::mutex> lock(window.m_terminalPngBudgetMutex);
+                    check(window.m_terminalPngJobs == 2, "slow PNG writer bounds the number of pending jobs");
+                }
+                release.reset();
+                waitFor([&] { return QDir(queueTarget.path()).entryList({"*.png"}, QDir::Files).size() == 4; },
+                    "admitted PNG pairs finish after the writer resumes");
+            }
+
             std::vector<paimage::RoundIdentity> completed;
             const std::array<int, 5> samplePoints{0, 400, 800, 1200, 1599};
             std::array<std::vector<int>, 2> expectedGray;
@@ -157,7 +180,7 @@ public:
                 auto& network = *window.m_netController;
                 network.setStartupFilterTriggerCount(0);
                 waitFor([&]{ return network.isSaving(); }, "auto-save armed");
-                const QDir pngDir(window.m_reconSaveDir);
+                QDir pngDir(window.m_reconSaveDir);
                 check(pngDir.absolutePath() != previousDirectory, "new listener has a new save directory");
                 previousDirectory = pngDir.absolutePath();
                 // A stale display request and the old UI save flag must not own a Count target.
@@ -170,7 +193,9 @@ public:
                 waitFor([&]{ return window.m_isMeasuring; }, "card START accepted");
                 expectCommand(paimage::startCommand());
 
-                for (int trigger = 0; trigger < triggers; ++trigger) {
+                if (pass) window.m_imagingServiceReady.store(false);
+                const int requestedRounds = pass ? 2 : 1;
+                for (int trigger = 0; trigger < triggers * requestedRounds; ++trigger) {
                     for (int offset = 0; offset < durationNs*2; offset += 1440) {
                         const int size = std::min(1440,durationNs*2-offset);
                         std::vector<unsigned char> bytes(size+4);
@@ -186,14 +211,24 @@ public:
                         send(8001,bytes);
                     }
                     pump(8);
+                    if (pass && trigger == triggers - 1) {
+                        const QString skippedDirectory = pngDir.absolutePath();
+                        waitFor([&] { return window.m_reconSaveDir != skippedDirectory; },
+                            "Count boundary proceeds while imaging is unready");
+                        check(completed.size() == 1 && pngDir.entryList({"*.png"}, QDir::Files).isEmpty(),
+                              "unready imaging skips the first physical round");
+                        pngDir = QDir(window.m_reconSaveDir);
+                        window.m_imagingServiceReady.store(true);
+                    }
                 }
                 waitFor([&]{ return completed.size() == std::size_t(pass+1); }, "first complete round after listening");
-                check(completed.back().roundGeneration == 0, "first round generation");
+                check(completed.back().roundGeneration == quint64(pass), "first eligible round generation");
                 if (pass) check(completed[0] < completed[1], "round identity advances across listeners");
                 const std::array<const char*, 2> wavelengths{"532","1064"};
                 for (int wl = 0; wl < 2; ++wl) {
-                    const QString filter = QStringLiteral("*_session%1_round0_frame*_%2nm.png")
-                        .arg(completed.back().measurementSession).arg(QString::fromLatin1(wavelengths[wl]));
+                    const QString filter = QStringLiteral("*_session%1_round%2_frame*_%3nm.png")
+                        .arg(completed.back().measurementSession).arg(completed.back().roundGeneration)
+                        .arg(QString::fromLatin1(wavelengths[wl]));
                     QImage png;
                     waitFor([&]{
                         const auto files = pngDir.entryList({filter},QDir::Files);

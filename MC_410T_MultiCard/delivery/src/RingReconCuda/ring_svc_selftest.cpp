@@ -6,6 +6,7 @@
 #include "ImagingSharedMemory.h"
 #include "RingShmObservability.h"
 #include "RingNativeMapping.h"
+#include "RingTerminalSnapshot.h"
 #include "RingBlockAssembler.h"
 
 #include <QCoreApplication>
@@ -225,7 +226,10 @@ int main(int argc, char** argv) {
 
     ring_input::NativeMapping shm;
     ring_input::Mutex inputMutex, outputMutex(ring_input::kOutputMutexName);
-    const size_t shmBytes = ringImagingShmTotalSizeV3(blockSize, frameSize, alines, frameSize);
+    ring_input::Mutex terminalMutex(ring_terminal::kMutexName);
+    ring_snapshot::Layout terminalLayout;
+    if (!ring_snapshot::checkedLayout(blockSize, alines, frameSize, terminalLayout)) return 2;
+    const size_t shmBytes = ring_terminal::mappingSize(terminalLayout);
     if (shm.create(shmBytes) != ring_input::Result::Ok) { std::fprintf(stderr, "ring shm create failed\n"); return 2; }
     std::memset(shm.data(), 0, shmBytes);
     auto* hdr = static_cast<RingImagingShmHeader*>(shm.data());
@@ -240,7 +244,7 @@ int main(int argc, char** argv) {
     hdr->display_ny = static_cast<uint16_t>(nx);
     hdr->display_frame_size = static_cast<uint32_t>(frameSize);
     hdr->snapshot_step = 1;
-    hdr->flags = 0;
+    hdr->flags = ring_terminal::kFlag;
     uint64_t epoch = 1, publication = 0;
     if (ring_input::initialize(inputMutex, shm.data(), shm.capacity(), epoch, 20) != ring_input::Result::Ok) return 2;
 
@@ -548,13 +552,28 @@ int main(int argc, char** argv) {
         }
 
         std::vector<float> wl1(frameSize), wl2(frameSize);
-        if (outputMutex.lock(20) != ring_input::Result::Ok) { std::fprintf(stderr,"output lock failed\n"); exitWithCleanup(2); }
-        auto* h = static_cast<RingImagingShmHeader*>(shm.data());
-        auto* fb = reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(h + 1) +
-                                           ringFramesOffset(blockSize, alines));
-        std::memcpy(wl1.data(), fb, static_cast<size_t>(frameSize) * sizeof(float));
-        std::memcpy(wl2.data(), fb + frameSize, static_cast<size_t>(frameSize) * sizeof(float));
-        outputMutex.unlock();
+        if (expectedComplete) {
+            if (terminalMutex.lock(20) != ring_input::Result::Ok) exitWithCleanup(2);
+            auto* slot = ring_terminal::oldest(shm.data(), shm.capacity(), terminalLayout);
+            if (!slot || slot->submitIndex != producerEvent.submitIndex || slot->round != round) {
+                terminalMutex.unlock();
+                std::fprintf(stderr, "terminal slot does not own the reported round\n");
+                exitWithCleanup(2);
+            }
+            const auto* pixels = reinterpret_cast<const float*>(slot + 1);
+            std::copy_n(pixels, frameSize, wl1.data());
+            std::copy_n(pixels + frameSize, frameSize, wl2.data());
+            slot->submitIndex = 0;
+            terminalMutex.unlock();
+        } else {
+            if (outputMutex.lock(20) != ring_input::Result::Ok) exitWithCleanup(2);
+            auto* h = static_cast<RingImagingShmHeader*>(shm.data());
+            const auto* pixels = reinterpret_cast<const float*>(reinterpret_cast<uint8_t*>(h + 1) +
+                                                               ringFramesOffset(blockSize, alines));
+            std::copy_n(pixels, frameSize, wl1.data());
+            std::copy_n(pixels + frameSize, frameSize, wl2.data());
+            outputMutex.unlock();
+        }
 
         if (blockSeq > 0) {
             const size_t n = static_cast<size_t>(frameSize);
@@ -718,7 +737,9 @@ int main(int argc, char** argv) {
             mismatchObservation.value(QStringLiteral("blocks_consumed")).toInt() == nBlocks - 1 &&
             mismatchObservation.value(QStringLiteral("expected_blocks")).toInt() == nBlocks &&
             mismatchObservation.value(QStringLiteral("source_round_complete")).toBool() &&
-            !mismatchObservation.value(QStringLiteral("reconstruction_complete")).toBool();
+            !mismatchObservation.value(QStringLiteral("reconstruction_complete")).toBool() &&
+            mismatchObservation.value(QStringLiteral("physical_phase")).toString() ==
+                QStringLiteral("unverified");
         if (!fieldsOk) {
             std::fprintf(stderr,
                 "[completion-test] missing/incorrect round_block_count_mismatch: %s\n",

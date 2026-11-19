@@ -26,6 +26,8 @@
 #include <QSettings>
 #include <QImage>
 #include <QDateTime>
+#include <QSaveFile>
+#include <QFileInfo>
 #include <QDir>
 
 ImagingDisplayWindow::ImagingDisplayWindow(QWidget *parent)
@@ -424,7 +426,16 @@ ImagingDisplayWindow::PngWriter ImagingDisplayWindow::makePngWriter(
     if (srcN <= 0 || !frame || frame->size() < static_cast<size_t>(srcN) * srcN * 2)
         return {};
     return [frame, range1, range2, mask, srcN, tag](const QString& dir, const QString& suffix) {
-    constexpr int kOut = 1600;
+        return writePngPair(renderPngPair(*frame, srcN, range1, range2, mask), dir, suffix, tag).saved();
+    };
+}
+
+ImagingDisplayWindow::PngPair ImagingDisplayWindow::renderPngPair(
+    const std::vector<float>& frame, int srcN, RingImageWidget::Range range1,
+    RingImageWidget::Range range2, std::shared_ptr<const DisplayMask> mask)
+{
+    if (srcN <= 0 || frame.size() < static_cast<std::size_t>(srcN) * srcN * 2) return {};
+    constexpr int kOut = kPngEdge;
 
     // 与窗口渲染一致的映射：当前手动/自适应色标范围（m_range1/2），块平均降采样到 1600²；
     // 方向与 renderFrame 相同（列=x、行自顶向下 y 由小到大，顺时针展开）。
@@ -432,6 +443,7 @@ ImagingDisplayWindow::PngWriter ImagingDisplayWindow::makePngWriter(
     // （环内块全掩 → 输出 0；环外不变；掩膜关闭时与基线逐位一致）。
     auto render = [srcN, mask](const float *buf, const RingImageWidget::Range &r) {
         QImage img(kOut, kOut, QImage::Format_ARGB32);
+        if (img.isNull()) return img;
         const double lo = r.lower;
         const double span = r.upper - r.lower;
         const ringdisplay::RowSpan *rows =
@@ -471,18 +483,37 @@ ImagingDisplayWindow::PngWriter ImagingDisplayWindow::makePngWriter(
         return img;
     };
 
-    const QImage img1 = render(frame->data(), range1);
-    const QImage img2 = render(frame->data() + static_cast<size_t>(srcN) * srcN, range2);
-    if (img1.isNull() || img2.isNull()) return false;
+    return {render(frame.data(), range1),
+            render(frame.data() + static_cast<std::size_t>(srcN) * srcN, range2)};
+}
 
-    const QString ts = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
-    const QString stem = suffix.trimmed();
-    const QString base = stem.isEmpty() ? ts : stem + "_" + ts;
-    bool ok = true;
-    ok = img1.save(QDir(dir).filePath(base + tag + "_532nm.png"), "PNG") && ok;
-    ok = img2.save(QDir(dir).filePath(base + tag + "_1064nm.png"), "PNG") && ok;
-    return ok;
-    };
+ImagingDisplayWindow::PngResult ImagingDisplayWindow::writePngPair(
+    const PngPair& pair, const QString& dir, const QString& suffix, const QString& tag)
+{
+    if (dir.isEmpty() || !QDir().mkpath(dir)) return {QStringLiteral("directory_failed"), {}};
+    const QString time = QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
+    const QString name = suffix.trimmed();
+    const QString base = (name.isEmpty() ? time : name + "_" + time) + tag;
+    return commitPngPair(pair, QDir(dir).filePath(base + "_532nm.png"),
+                         QDir(dir).filePath(base + "_1064nm.png"));
+}
+
+ImagingDisplayWindow::PngResult ImagingDisplayWindow::commitPngPair(
+    const PngPair& pair, const QString& firstPath, const QString& secondPath)
+{
+    if (pair[0].isNull() || pair[1].isNull()) return {QStringLiteral("render_failed"), {}};
+    if (firstPath == secondPath || QFileInfo::exists(firstPath) || QFileInfo::exists(secondPath))
+        return {QStringLiteral("path_collision"), {}};
+
+    QSaveFile first(firstPath), second(secondPath);
+    if (!first.open(QIODevice::WriteOnly) || !pair[0].save(&first, "PNG"))
+        return {QStringLiteral("first_png_failed"), {}};
+    if (!second.open(QIODevice::WriteOnly) || !pair[1].save(&second, "PNG"))
+        return {QStringLiteral("second_png_failed"), {}};
+    if (!first.commit()) return {QStringLiteral("first_png_failed"), {}};
+    if (second.commit()) return {QStringLiteral("saved"), {}};
+    if (QFile::remove(firstPath)) return {QStringLiteral("second_png_failed"), {}};
+    return {QStringLiteral("partial_png"), firstPath};
 }
 
 void ImagingDisplayWindow::showImage(const QVector<float> &, int, int, int)

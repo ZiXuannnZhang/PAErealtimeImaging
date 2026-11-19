@@ -357,6 +357,12 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_imagingController, &ImagingController::imageReady,
             this, &MainWindow::onImagingImageReady);
     // 每块显示快照：固定双缓冲 → 显示窗口（方案A：全分辨率 3600²）
+    m_terminalRenderPool.setMaxThreadCount(2);
+    m_terminalWritePool.setMaxThreadCount(1);
+    connect(m_imagingController, &ImagingController::ringTerminalUnavailable, this,
+        [this](quint64 session, quint64 round, quint64 submit, const QString& reason) {
+            rejectTerminalPng({session, round}, submit, reason);
+        });
     connect(m_imagingController, &ImagingController::ringSnapshotReady,
             this, [this](int seq, quint64 submitIndex, bool hasSubmitIndex,
                          quint64 measurementSession, quint64 roundGeneration,
@@ -379,7 +385,7 @@ MainWindow::MainWindow(QWidget *parent)
         if (terminal) {
             const std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
             auto node = m_terminalPngTargets.extract(round);
-            if (!node.empty()) target = std::move(node.mapped());
+            if (!node.empty()) target = std::move(node.mapped().target);
             m_ringPresentation.completeSnapshot(round);
         }
 
@@ -409,6 +415,7 @@ MainWindow::MainWindow(QWidget *parent)
         }
         const int nx = controller->ringDisplayNx();
         if ((!display && !target) || nx <= 0 || (roundComplete && !terminal)) {
+            if (target) reportTerminalPng(round, target, submitIndex, QStringLiteral("invalid_terminal"));
             release();
             return;
         }
@@ -427,24 +434,10 @@ MainWindow::MainWindow(QWidget *parent)
         const auto mask = m_imagingDisplayWindow->displayMaskForFrame(nx);
         const QPointer<MainWindow> owner(this);
         if (target) {
-            const auto tag = QStringLiteral("_session%1_round%2_frame%3")
-                .arg(measurementSession).arg(roundGeneration).arg(seq);
-            const auto writer = ImagingDisplayWindow::makePngWriter(terminal, nx, r1, r2, mask, tag);
-            const QJsonObject details{
-                {"measurementSession", QString::number(measurementSession)},
-                {"roundGeneration", QString::number(roundGeneration)},
-                {"submitIndex", QString::number(submitIndex)}, {"seq", seq},
-                {"requestId", QString::number(target.requestId)}, {"directory", target.directory}};
-            QThreadPool::globalInstance()->start([writer, target, details, owner] {
-                const bool written = writer && QDir().mkpath(target.directory) && writer(target.directory, target.suffix);
-                QMetaObject::invokeMethod(qApp, [owner, details, written] {
-                    if (!owner) return;
-                    owner->recordDiagnosticAction(written ? QStringLiteral("ring_final_png_saved")
-                        : QStringLiteral("ring_final_png_write_failed"), details);
-                    if (!written) owner->logMessage(QStringLiteral("环形终帧 PNG 保存失败：%1")
-                        .arg(details.value(QStringLiteral("directory")).toString()));
-                }, Qt::QueuedConnection);
-            });
+            queueTerminalPng(round, target, submitIndex, seq, terminal->size() * sizeof(float),
+                [terminal, nx, r1, r2, mask] {
+                    return ImagingDisplayWindow::renderPngPair(*terminal, nx, r1, r2, mask);
+                });
         }
         if (terminal || !display) release();
         if (!display) return;
@@ -453,19 +446,13 @@ MainWindow::MainWindow(QWidget *parent)
         const auto presentationEpoch = m_roundUi.snapshot().epoch;
         const QPointer<ImagingController> ctrl(controller);
         const QPointer<ImagingDisplayWindow> win(m_imagingDisplayWindow);
-        QThreadPool::globalInstance()->start([=] {
-            const float* pixels = terminal ? terminal->data()
-                : (ctrl ? ctrl->snapshotBuffer(bufferIndex) : nullptr);
-            if (!pixels) {
-                if (ctrl && !terminal) ctrl->releaseSnapshotBuffer(bufferIndex);
-                return;
-            }
+        const auto renderDisplay = [=](std::shared_ptr<std::vector<float>> frame,
+                                        const std::shared_ptr<void>& lease) {
             const auto count = std::size_t(nx) * nx;
-            auto frame = std::make_shared<std::vector<float>>(pixels, pixels + count * 2);
-            if (ctrl && !terminal) ctrl->releaseSnapshotBuffer(bufferIndex);
             const auto image1 = ImagingDisplayWindow::renderFrame(frame->data(), nx, r1.lower, r1.upper, mask);
             const auto image2 = ImagingDisplayWindow::renderFrame(frame->data() + count, nx, r2.lower, r2.upper, mask);
             QMetaObject::invokeMethod(qApp, [=] {
+                (void)lease; // Retain the one detached terminal display until publication.
                 if (!owner || !win || !ctrl || ctrl->serviceLifecycleToken() != lifecycle) return;
                 {
                     const std::lock_guard<std::mutex> lock(owner->m_ringAssemblerMutex);
@@ -498,10 +485,37 @@ MainWindow::MainWindow(QWidget *parent)
                 if (roundComplete)
                     owner->m_lblImagingStatus->setText(QStringLiteral("软件覆盖完整 · 物理相位未验证"));
             }, Qt::QueuedConnection);
-        });
+        };
+        if (terminal) {
+            if (m_terminalPreviewLease->exchange(true)) return;
+            auto lease = std::shared_ptr<void>(nullptr, [busy = m_terminalPreviewLease](void*) {
+                busy->store(false);
+            });
+            m_terminalRenderPool.start([terminal = std::move(terminal), renderDisplay, lease]() mutable {
+                std::shared_ptr<std::vector<float>> pixels;
+                try { pixels = std::make_shared<std::vector<float>>(*terminal); }
+                catch (...) { return; }
+                terminal.reset();
+                QThreadPool::globalInstance()->start([=] { renderDisplay(pixels, lease); });
+            });
+        } else {
+            m_terminalRenderPool.start([=] {
+                const float* source = ctrl ? ctrl->snapshotBuffer(bufferIndex) : nullptr;
+                std::shared_ptr<std::vector<float>> pixels;
+                if (source) {
+                    const auto count = std::size_t(nx) * nx * 2;
+                    try { pixels = std::make_shared<std::vector<float>>(source, source + count); }
+                    catch (...) {}
+                }
+                if (ctrl) ctrl->releaseSnapshotBuffer(bufferIndex);
+                if (pixels) QThreadPool::globalInstance()->start([=] { renderDisplay(pixels, {}); });
+            });
+        }
     });
     connect(m_imagingController, &ImagingController::ringInputFailed, this, [this] {
         m_ringSnapshotAdmissionBlocked.store(true, std::memory_order_release);
+        m_imagingServiceReady.store(false, std::memory_order_release);
+        settlePendingTerminalPngs(QStringLiteral("input_failed"));
     });
     connect(m_imagingController, &ImagingController::svcError,
             this, &MainWindow::onImagingError);
@@ -632,6 +646,7 @@ MainWindow::MainWindow(QWidget *parent)
     });
     connect(m_imagingController, &ImagingController::svcStopped, this, [this]() {
         m_imagingServiceReady.store(false, std::memory_order_release);
+        settlePendingTerminalPngs(QStringLiteral("service_cancelled"));
         m_pendingRingDirectionRevision = 0;
         m_ringDirectionTarget = {};
         m_ringSnapshotAdmissionBlocked.store(true, std::memory_order_release);
@@ -741,6 +756,10 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    m_imagingServiceReady.store(false, std::memory_order_release);
+    settlePendingTerminalPngs(QStringLiteral("application_closed"));
+    m_terminalRenderPool.waitForDone();
+    m_terminalWritePool.waitForDone();
     if (m_imagingBypass) m_imagingBypass->stop();
 
     // 关闭成像子进程
@@ -2094,11 +2113,21 @@ void MainWindow::startListeningWithIPs(const QVector<QString>& onlineIPs,
                             autoCommit, transition)) {
                         registration = m_ringPresentation.registerTransition(transition);
                     }
-                    if (target && event.roundGeneration > 0) {
-                        m_terminalPngTargets.try_emplace(
-                            paimage::RoundIdentity{event.measurementSession, event.roundGeneration - 1}, target);
-                        if (m_terminalPngTargets.size() > paimage::RingRoundPresentationState::kMaxRememberedTransitions)
-                            m_terminalPngTargets.erase(m_terminalPngTargets.begin());
+                    if (target && event.roundGeneration > 0 && m_imagingServiceReady.load() &&
+                        m_measurementRingImagingAvailable.load()) {
+                        const paimage::RoundIdentity old{event.measurementSession, event.roundGeneration - 1};
+                        if (!m_ringAdmissionSession || (m_ringReadyFromRound.valid() && m_ringReadyFromRound <= old)) {
+                            constexpr qint64 kTerminalWaitNs = 30'000'000'000LL;
+                            m_terminalPngTargets.try_emplace(old, PendingTerminalPng{
+                                target, paimage::SocketReceiver::now() + kTerminalWaitNs});
+                            if (m_terminalPngTargets.size() > paimage::RingRoundPresentationState::kMaxRememberedTransitions) {
+                                auto dropped = m_terminalPngTargets.extract(m_terminalPngTargets.begin());
+                                QMetaObject::invokeMethod(this, [this, round = dropped.key(),
+                                    intent = dropped.mapped().target] {
+                                    reportTerminalPng(round, intent, 0, QStringLiteral("intent_capacity"));
+                                }, Qt::QueuedConnection);
+                            }
+                        }
                     }
                     pendingTransitions = m_ringPresentation.pendingCount();
                 }
@@ -3408,6 +3437,7 @@ void MainWindow::recordAcquisitionSnapshot(const QVector<QString> &targetIPs,
 
 void MainWindow::onDiagnosticStatusTick()
 {
+    settlePendingTerminalPngs();
     auto *recorder = DiagnosticRecorder::instance();
     if (!recorder) return;
 
@@ -4913,6 +4943,7 @@ void MainWindow::onImagingImageReady(const QImage &image, int seq)
 void MainWindow::onImagingError(const QString &error)
 {
     m_imagingServiceReady.store(false, std::memory_order_release);
+    settlePendingTerminalPngs(QStringLiteral("service_error"));
     if (m_imagingBypass) m_imagingBypass->setServiceReady(false);
     logMessage(QString("成像错误: %1").arg(error));
     m_imagingTimer->stop();
@@ -5445,6 +5476,112 @@ void MainWindow::updateRingImagingStatus()
         .arg(displayPulses).arg(perBlock)
         .arg(roundUi.frameCount));
     m_lblImagingStatus->setStyleSheet(amberStyle);
+}
+
+void MainWindow::reportTerminalPng(const paimage::RoundIdentity& round,
+                                   const paimage::TimeoutPresentation::Target& target, quint64 submitIndex,
+                                   const QString& status, const QString& retained)
+{
+    const bool saved = status == QStringLiteral("saved");
+    QJsonObject fields{{"measurementSession", QString::number(round.measurementSession)},
+        {"roundGeneration", QString::number(round.roundGeneration)}, {"requestId", QString::number(target.requestId)},
+        {"submitIndex", QString::number(submitIndex)}, {"directory", target.directory}, {"result", status}};
+    if (!retained.isEmpty()) fields.insert(QStringLiteral("retainedFile"), retained);
+    if (auto* recorder = DiagnosticRecorder::instance()) {
+        recorder->recordEvent(QStringLiteral("ui.action"), saved ? QStringLiteral("ring_final_png_saved")
+            : QStringLiteral("ring_final_png_write_failed"),
+            saved ? DiagnosticRecorder::Severity::Info : DiagnosticRecorder::Severity::Warning, fields);
+    }
+    if (!saved) {
+        QMetaObject::invokeMethod(this, [this, round, status] {
+            logMessage(QStringLiteral("环形终帧未交付 · 会话 %1 轮次 %2 · %3")
+                .arg(round.measurementSession).arg(round.roundGeneration).arg(status));
+        }, Qt::QueuedConnection);
+    }
+}
+
+void MainWindow::rejectTerminalPng(paimage::RoundIdentity round, quint64 submitIndex, const QString& reason)
+{
+    decltype(m_terminalPngTargets)::node_type node;
+    {
+        const std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+        node = m_terminalPngTargets.extract(round);
+    }
+    if (!node.empty()) reportTerminalPng(round, node.mapped().target, submitIndex, reason);
+}
+
+void MainWindow::settlePendingTerminalPngs(const QString& cancellation)
+{
+    std::vector<std::pair<paimage::RoundIdentity, paimage::TimeoutPresentation::Target>> settled;
+    const auto now = paimage::SocketReceiver::now();
+    {
+        const std::lock_guard<std::mutex> lock(m_ringAssemblerMutex);
+        for (auto it = m_terminalPngTargets.begin(); it != m_terminalPngTargets.end();) {
+            if (!cancellation.isEmpty() || now >= it->second.expiryNs) {
+                settled.emplace_back(it->first, std::move(it->second.target));
+                it = m_terminalPngTargets.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    const auto reason = cancellation.isEmpty() ? QStringLiteral("terminal_timeout") : cancellation;
+    for (const auto& terminal : settled) reportTerminalPng(terminal.first, terminal.second, 0, reason);
+}
+
+void MainWindow::queueTerminalPng(const paimage::RoundIdentity& round,
+                                  const paimage::TimeoutPresentation::Target& target,
+                                  quint64 submitIndex, int sequence, std::size_t frameBytes,
+                                  TerminalPngRender render)
+{
+    // Budget two 3600-square float pairs plus the paired PNG staging images.
+    constexpr unsigned kMaxJobs = 2;
+    constexpr std::size_t kMaxPngBytes = 256u * 1024u * 1024u;
+    constexpr std::size_t kRenderedBytes = 2 * ImagingDisplayWindow::kPngEdge *
+        ImagingDisplayWindow::kPngEdge * sizeof(QRgb);
+    const auto bytes = frameBytes + kRenderedBytes;
+    bool reserved = false;
+    {
+        const std::lock_guard<std::mutex> lock(m_terminalPngBudgetMutex);
+        if (m_terminalPngJobs < kMaxJobs && bytes <= kMaxPngBytes - m_terminalPngBytes) {
+            ++m_terminalPngJobs;
+            m_terminalPngBytes += bytes;
+            reserved = true;
+        }
+    }
+    if (!reserved) {
+        reportTerminalPng(round, target, submitIndex, QStringLiteral("png_queue_full"));
+        return;
+    }
+    auto settle = [this, round, target, submitIndex, bytes](const ImagingDisplayWindow::PngResult& result) {
+        {
+            const std::lock_guard<std::mutex> lock(m_terminalPngBudgetMutex);
+            --m_terminalPngJobs;
+            m_terminalPngBytes -= bytes;
+        }
+        reportTerminalPng(round, target, submitIndex, result.status, result.retainedFile);
+    };
+    const auto tag = QStringLiteral("_session%1_round%2_frame%3")
+        .arg(round.measurementSession).arg(round.roundGeneration).arg(sequence);
+    try {
+        m_terminalRenderPool.start([this, target, tag, settle, render = std::move(render)]() mutable {
+            try {
+                auto images = render();
+                render = {}; // Slow disk I/O must never retain a terminal transport buffer.
+                m_terminalWritePool.start([target, tag, settle, images = std::move(images)] {
+                    ImagingDisplayWindow::PngResult result{QStringLiteral("write_exception"), {}};
+                    try {
+                        result = ImagingDisplayWindow::writePngPair(images, target.directory, target.suffix, tag);
+                    } catch (...) {}
+                    settle(result);
+                });
+            } catch (...) {
+                settle({QStringLiteral("render_exception"), {}});
+            }
+        });
+    } catch (...) {
+        settle({QStringLiteral("render_admission_failed"), {}});
+    }
 }
 
 void MainWindow::prepareRingMeasurement(quint64 session)

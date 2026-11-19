@@ -979,13 +979,15 @@ void ImagingSvc::processRingPulse(uint64_t epoch, uint64_t publicationId)
     // 源轮结束即关闭并复位：不完整轮绝不等下一轮数据“补齐”，下一轮从干净
     // 重建状态开始。最终图业务动作只由 reconstructionComplete 触发。
     if (completion.sourceRoundComplete) {
-        if (completion.blockCountMismatch) {
-            roundDiagnostic[QStringLiteral("blocks_consumed")] = completion.blocksConsumed;
-            roundDiagnostic[QStringLiteral("expected_blocks")] = completion.expectedBlocks;
-            roundDiagnostic[QStringLiteral("source_round_complete")] = true;
-            roundDiagnostic[QStringLiteral("reconstruction_complete")] = false;
-            sendRingObservation("round_block_count_mismatch", m_ringObs.snapshot(), roundDiagnostic);
-        }
+        roundDiagnostic[QStringLiteral("blocks_consumed")] = completion.blocksConsumed;
+        roundDiagnostic[QStringLiteral("expected_blocks")] = completion.expectedBlocks;
+        roundDiagnostic[QStringLiteral("source_round_complete")] = true;
+        roundDiagnostic[QStringLiteral("reconstruction_complete")] = completion.reconstructionComplete;
+        // Software coverage cannot establish the hardware's angle or excitation phase.
+        roundDiagnostic[QStringLiteral("physical_phase")] = QStringLiteral("unverified");
+        sendRingObservation(completion.blockCountMismatch
+                                ? "round_block_count_mismatch" : "round_reconstruction_complete",
+                            m_ringObs.snapshot(), roundDiagnostic);
         m_ringRound.close();
         resetRingRecon();
     }

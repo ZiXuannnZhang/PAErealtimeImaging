@@ -4,6 +4,7 @@
 #include <QVector>
 #include <QEvent>
 #include <vector>
+#include <array>
 #include <memory>
 #include <functional>
 #include "RingDisplayMapping.h"
@@ -66,6 +67,18 @@ public:
     bool saveWindowPngs(const QString &dir, const QString &suffix, int seq) const;
     // UI-thread capture only; the returned writer owns immutable pixels and
     // ranges and can render/save on a worker after Ring/CUDA reset.
+    static constexpr int kPngEdge = 1600;
+    using PngPair = std::array<QImage, 2>;
+    struct PngResult {
+        QString status;
+        QString retainedFile;
+        bool saved() const { return status == QStringLiteral("saved"); }
+    };
+    static PngPair renderPngPair(const std::vector<float>& frame, int srcN,
+                                 RingImageWidget::Range range1, RingImageWidget::Range range2,
+                                 std::shared_ptr<const DisplayMask> mask);
+    static PngResult writePngPair(const PngPair&, const QString& dir, const QString& suffix, const QString& tag);
+    static PngResult commitPngPair(const PngPair&, const QString& firstPath, const QString& secondPath);
     using PngWriter = std::function<bool(const QString&, const QString&)>;
     PngWriter capturePngWriter(int seq) const;
     static PngWriter makePngWriter(std::shared_ptr<const std::vector<float>> frame, int srcN,

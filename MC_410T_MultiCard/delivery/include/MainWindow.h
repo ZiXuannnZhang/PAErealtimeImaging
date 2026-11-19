@@ -23,6 +23,8 @@
 #include <cmath>
 #include <memory>
 #include <map>
+#include <array>
+#include <QThreadPool>
 #include "qcustomplot.h"
 #include "DataTypes.h"
 #include "CardStatusFormatting.h"
@@ -331,7 +333,24 @@ private:
     paimage::RingRoundUiState m_roundUi;
     paimage::RoundIdentity m_lastPresentedRingRound;
     quint64 m_lastPresentedRingSubmit = 0;
-    std::map<paimage::RoundIdentity, paimage::TimeoutPresentation::Target> m_terminalPngTargets;
+    struct PendingTerminalPng {
+        paimage::TimeoutPresentation::Target target;
+        qint64 expiryNs;
+    };
+    std::map<paimage::RoundIdentity, PendingTerminalPng> m_terminalPngTargets;
+    void rejectTerminalPng(paimage::RoundIdentity, quint64 submitIndex, const QString& reason);
+    void settlePendingTerminalPngs(const QString& cancellation = {});
+    void reportTerminalPng(const paimage::RoundIdentity&, const paimage::TimeoutPresentation::Target&,
+                           quint64 submitIndex, const QString& status, const QString& retained = {});
+    using TerminalPngRender = std::function<std::array<QImage, 2>()>;
+    void queueTerminalPng(const paimage::RoundIdentity&, const paimage::TimeoutPresentation::Target&,
+                          quint64 submitIndex, int sequence, std::size_t frameBytes, TerminalPngRender);
+    QThreadPool m_terminalRenderPool;
+    QThreadPool m_terminalWritePool;
+    std::mutex m_terminalPngBudgetMutex;
+    unsigned m_terminalPngJobs = 0;
+    std::size_t m_terminalPngBytes = 0;
+    std::shared_ptr<std::atomic_bool> m_terminalPreviewLease{std::make_shared<std::atomic_bool>(false)};
     quint64 m_firstRingMeasurementSession = 0;
     void prepareRingMeasurement(quint64 session);
     std::atomic<bool> m_measurementRingImagingAvailable{true};

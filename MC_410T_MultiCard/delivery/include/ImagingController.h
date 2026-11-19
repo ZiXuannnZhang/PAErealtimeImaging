@@ -116,6 +116,7 @@ public:
 
 signals:
     void imageReady(const QImage &image, int seq);
+    void ringTerminalUnavailable(quint64 measurement, quint64 round, quint64 submitIndex, QString reason);
     void ringSnapshotReady(int seq,
                            quint64 submitIndex,
                            bool hasSubmitIndex,

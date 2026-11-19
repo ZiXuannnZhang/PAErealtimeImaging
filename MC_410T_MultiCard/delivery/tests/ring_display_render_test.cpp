@@ -356,6 +356,16 @@ int main(int argc, char **argv)
         }
     }
 
+    {
+        QTemporaryDir root;
+        const QImage image(8, 8, QImage::Format_ARGB32);
+        const ImagingDisplayWindow::PngPair pair{image, image};
+        const auto first = root.filePath("532nm.png");
+        const auto missingSecondParent = root.filePath("missing/1064nm.png");
+        const auto result = ImagingDisplayWindow::commitPngPair(pair, first, missingSecondParent);
+        check(result.status == QStringLiteral("second_png_failed") && !QFileInfo::exists(first),
+              "second side failure leaves no apparently successful first PNG");
+    }
     if (g_failures == 0) {
         std::printf("ring_display_render_test: PASS\n");
         return 0;

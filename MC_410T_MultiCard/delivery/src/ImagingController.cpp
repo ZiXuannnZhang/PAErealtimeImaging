@@ -871,9 +871,8 @@ void ImagingController::processRingTerminal(quint64 lifecycle, const RingLayout 
         const int index = i + 2;
         QMetaObject::invokeMethod(this, [this, meta, index, lifecycle] {
             if (lifecycle != m_svcLifecycleToken || !m_ringAdmission.load()) {
-                emit svcStatus(QStringLiteral("[RingFinal] 未交付：session=%1 round=%2 submit=%3 seq=%4")
-                    .arg(meta.round.measurementSession).arg(meta.round.roundGeneration)
-                    .arg(meta.submitIndex).arg(meta.seq), 0);
+                emit ringTerminalUnavailable(meta.round.measurementSession, meta.round.roundGeneration,
+                                             meta.submitIndex, QStringLiteral("service_cancelled"));
                 releaseSnapshotBuffer(index);
                 return;
             }
@@ -1174,6 +1173,16 @@ void ImagingController::processMessage(const QJsonObject &msg)
             emit svcReady();
         });
     } else if (cmd == "ring_shm_observation") {
+        const auto kind = msg.value(QStringLiteral("kind")).toString();
+        if (kind == QStringLiteral("terminal_delivery_failed") ||
+            kind == QStringLiteral("round_block_count_mismatch")) {
+            const auto round = ring_round_identity::parse(msg);
+            if (round.valid)
+                emit ringTerminalUnavailable(round.identity.measurementSession, round.identity.roundGeneration,
+                    msg.value(QStringLiteral("submit_index")).toString().toULongLong(),
+                    kind == QStringLiteral("terminal_delivery_failed") ? msg.value(QStringLiteral("reason")).toString()
+                                                                       : QStringLiteral("coverage_incomplete"));
+        }
         emit svcStatus(QStringLiteral("[RingSHMObs] ")
                            + QString::fromUtf8(QJsonDocument(msg).toJson(QJsonDocument::Compact)), 0);
     } else if (cmd == "ring_snapshot_ready") {
