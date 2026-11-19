@@ -141,7 +141,7 @@ private:
     bool waitingForFailedBoundary() const;
     void closeFailedCountCard(int);
     void reportSaveTail(RoundIdentity, std::uint16_t, int, SaveTailOutcome);
-    void noteFailedCountCrossing(const Frame&, const PhysicalRoundClassification&);
+    bool waitingForFailedCount(std::size_t card, RoundIdentity round) const;
     void pushSaveFrame(const Frame&, const PhysicalRoundClassification&, bool timeoutEligible = false);
     struct SaveRequest {
         struct Card {

@@ -109,6 +109,9 @@ void HostOutput::beginTailSeals(const PhysicalRoundEvent& event){
     const RoundIdentity old{event.measurementSession,event.roundGeneration-1};
     const Time cutoff=preBoundarySnapshot_.lastDistinctTriggerTimeNs+preBoundarySnapshot_.timeoutResetNs;
     for(std::size_t c=0;c<tails_.size();++c){
+        // A newer Timeout seal would advance FileSaver's watermark past
+        // the failed Count round before its final column is delivered.
+        if (waitingForFailedCount(c, old)) continue;
         if(tails_[c].waiting)sealCard(int(c),tails_[c].round);
         auto& t=tails_[c];t={};const auto& a=activeAssemblies_[c];
         t.round=old;t.deadline=cutoff+kSaveTailGraceNs;
@@ -207,28 +210,18 @@ void HostOutput::expireFailedBoundary(Time now, const std::vector<Time>* cardWat
             const bool fault = sourceSaveRequest_->cards[card].fault.load();
             if (!fault && now <= failure.deadline && watermark <= failure.deadline) continue;
             reportSaveTail(failure.round, failure.trigger, int(card),
-                           fault ? SaveTailOutcome::WriterFault : SaveTailOutcome::SourceMissing);
+                           fault ? SaveTailOutcome::WriterFault : SaveTailOutcome::Expired);
             closeFailedCountCard(int(card));
         }
     }
     finishFailedBoundary();
 }
 
-void HostOutput::noteFailedCountCrossing(const Frame& frame, const PhysicalRoundClassification& classification)
+bool HostOutput::waitingForFailedCount(std::size_t card, RoundIdentity round) const
 {
-    if (!failedBoundary_ || !failedBoundary_->count) return;
-    const auto& failure = *failedBoundary_;
-    if (!failure.cards[frame->card].waiting ||
-        classification.measurementSession != failure.round.measurementSession ||
-        classification.roundGeneration <= failure.round.roundGeneration ||
-        (classification.newDistinct && frame->first <= failure.observed)) return;
-
-    // The source has a single assembly per card. A later classified round on
-    // this card leaves no old assembly to finish. A pre-boundary cache miss
-    // alone cannot prove that the card has advanced past the old round.
-    reportSaveTail(failure.round, failure.trigger, frame->card, SaveTailOutcome::SourceMissing);
-    closeFailedCountCard(frame->card);
-    finishFailedBoundary();
+    return failedBoundary_ && failedBoundary_->count && failedBoundary_->cards[card].waiting &&
+           round.measurementSession == failedBoundary_->round.measurementSession &&
+           round.roundGeneration >= failedBoundary_->round.roundGeneration;
 }
 
 void HostOutput::pushSaveFrame(const Frame& frame, const PhysicalRoundClassification& classification,
@@ -280,7 +273,7 @@ void HostOutput::pushSaveFrame(const Frame& frame, const PhysicalRoundClassifica
         outcome = enqueueSaveFrame(frame, true);
     }
     reportSaveTail(failure.round, frame->trigger, frame->card, outcome);
-    if (final || outcome == SaveTailOutcome::Expired || outcome == SaveTailOutcome::WriterFault) {
+    if (final || outcome == SaveTailOutcome::WriterFault) {
         closeFailedCountCard(frame->card);
         finishFailedBoundary();
     }
@@ -308,7 +301,6 @@ void HostOutput::card(Frame f){
         classification=normalizer_->classify(f->measurementSession,f->trigger,
                                               normalizationTime(f));
         converter_.tagNormalization(f,classification);
-        noteFailedCountCrossing(f, classification);
         const auto& t=tails_.at(f->card);
         const bool token=t.round.valid() && t.active.session==f->measurementSession && t.active.ingress &&
                          t.active.ingress==f->firstIngressId && t.active.first==f->first;
@@ -345,7 +337,10 @@ void HostOutput::card(Frame f){
         f->first>preBoundarySnapshot_.lastDistinctTriggerTimeNs &&
         f->first-preBoundarySnapshot_.lastDistinctTriggerTimeNs>preBoundarySnapshot_.timeoutResetNs &&
         !classification.newDistinct && classification.roundGeneration==preBoundarySnapshot_.roundGeneration;
-    if(token){
+    // Count recovery owns saving for this card while the old request is
+    // draining. Keep the normalized index and avoid Timeout's late/tail tags.
+    const bool recoveringCount = waitingForFailedCount(card, {session, classification.roundGeneration});
+    if(token && !recoveringCount){
         const bool accept=tail.waiting && f->closed>0 && f->closed<=tail.deadline;
         converter_.tagSaveOverride(f,session,tail.round.roundGeneration,tail.generation,!accept);
         if (tail.waiting) {
@@ -360,10 +355,11 @@ void HostOutput::card(Frame f){
             finishFailedBoundary();
             return;
         }
-    }else if(staleCached || (classification.measurementSession==timeoutSession_ && classification.roundGeneration<timeoutGeneration_)){
+    }else if(!recoveringCount && (staleCached || (classification.measurementSession==timeoutSession_ && classification.roundGeneration<timeoutGeneration_))){
         converter_.tagSaveOverride(f,session,classification.roundGeneration,saveGeneration,true);
     }
     if(tail.waiting && classification.roundGeneration>tail.round.roundGeneration &&
+       !recoveringCount &&
        !(failedBoundary_ && !failedBoundary_->count && failedBoundary_->round == tail.round)){
         tail.waiting=false;sealCard(card,tail.round);
     }

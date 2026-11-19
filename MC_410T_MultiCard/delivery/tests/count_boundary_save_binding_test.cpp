@@ -714,8 +714,11 @@ int main(int argc, char** argv)
 
     // Drive packet assembly as well as classification. Each trigger spans
     // two datagrams, and the final trigger wraps from 65535 to 0.
-    enum class TailCase { Complete, EarlyNext, Expired, Partial };
-    for (const auto mode : {TailCase::Complete, TailCase::EarlyNext, TailCase::Expired, TailCase::Partial}) {
+    enum class TailCase { Complete, EarlyNext, Expired, Partial, AdjacentTimeout, TimeoutSplit };
+    for (const auto mode : {TailCase::Complete, TailCase::EarlyNext, TailCase::Expired, TailCase::Partial,
+                            TailCase::AdjacentTimeout, TailCase::TimeoutSplit}) {
+        const bool adjacentTimeout = mode == TailCase::AdjacentTimeout || mode == TailCase::TimeoutSplit;
+        const bool split = mode == TailCase::TimeoutSplit;
         using Outcome = HostOutput::SaveTailOutcome;
         QTemporaryDir root, newRoot;
         AutoSaveRoundCoordinator coordinator;
@@ -729,13 +732,17 @@ int main(int argc, char** argv)
         config.acqTimeNs = samples * 4;
         DataProcessor pa(0, nullptr, nullptr, config), pb(1, nullptr, nullptr, config);
         std::vector<std::tuple<int, std::uint16_t, Outcome>> outcomes;
-        std::array<FileSaver::SaveResult, 2> settled;
+        std::array<FileSaver::SaveResult, 2> settled, nextSettled;
         HostOutput output(32, 50, {&pa, &pb}, {&a, &b}, nullptr, nullptr, 3,
             [&](const PhysicalRoundEvent& event) {
                 if (event.kind == PhysicalRoundEvent::Kind::CountBoundary)
                     coordinator.commitBoundary(event.measurementSession, event.roundGeneration,
                         AutoSaveBoundaryKind::Count, "count-tail");
-            }, 0.0, 0);
+            }, adjacentTimeout ? 0.1 : 0.0, 0);
+        RoundIdentity frontendBarrier;
+        output.setFrontendBarrierSink([&](auto session, auto generation) {
+            frontendBarrier = {session, generation};
+        });
         output.setSaveBoundaryFaultProbe([&] { return coordinator.faulted(); });
         output.setMeasurementSessionBinder([&](auto session) {
             return coordinator.bindMeasurementSession(session).newSessionGen;
@@ -749,7 +756,7 @@ int main(int argc, char** argv)
         });
         output.beginSession(778);
         output.start();
-        const auto started = output.startSaving(initial.directory, 100, "wrap", coordinator.directoryResolver(),
+        const auto started = output.startSaving(initial.directory, split ? 2 : 100, "wrap", coordinator.directoryResolver(),
             [&](const auto& result) { settled.at(result.cardId) = result; });
         check(until([&] { return output.savingApplied(started); }), "source Count request ready");
         SourceCore source({2, samples, 32, 0}, [&](Frame frame) { output.card(frame); },
@@ -783,22 +790,34 @@ int main(int argc, char** argv)
             send(1, 65535, 1, 1006);
             send(1, 1, 0, 1007);
         }
-        whole(0, 0, 1010);
+        if (adjacentTimeout) {
+            send(1, 65535, 1, 1006);
+            send(1, 1, 0, 1020);
+        }
+        whole(0, 0, adjacentTimeout ? 1039 : 1010);
         check(coordinator.faulted(), "Count directory creation refused");
         const auto stopped = output.stopSaving();
         coordinator.selectManualSave();
-        const auto restarted = output.startSaving(newRoot.path(), 100, "next");
+        const auto restarted = output.startSaving(newRoot.path(), 100, "next", {},
+            [&](const auto& result) { nextSettled.at(result.cardId) = result; });
         check(!output.savingApplied(stopped), "old request drains before queued restart");
 
         if (mode == TailCase::Complete) {
             send(1, 65535, 1, 1012);
             whole(1, 0, 1013);
             check(send(1, 65535, 1, 1015) == Decision::RecentTrigger, "duplicate tail packet stays deduplicated");
+        } else if (mode == TailCase::EarlyNext) {
+            send(1, 1, 1, 1012);
+            whole(1, 0, 1013);
+        } else if (adjacentTimeout) {
+            send(1, 1, 1, 1050);
+            check(output.pollPhysicalRoundTimeout(1125 * ms), "adjacent physical Timeout reached");
+            check(frontendBarrier == RoundIdentity{778, 2}, "adjacent Timeout advances the frontend");
+            whole(1, 0, 1138);
         } else if (mode == TailCase::Partial) {
             whole(1, 0, 1013); // switches off the incomplete previous assembly
             check(send(1, 65535, 1, 1015) == Decision::RecentTrigger, "source rejected the missing packet");
         } else {
-            if (mode == TailCase::EarlyNext) send(1, 1, 1, 1012);
             const std::vector<Time> stalledWatermarks{1005 * ms, 1005 * ms};
             output.pollPhysicalRoundTimeout(1005 * ms, &stalledWatermarks, 1112 * ms);
         }
@@ -807,7 +826,7 @@ int main(int argc, char** argv)
             send(1, 65535, 1, 1113);
             whole(1, 0, 1114);
         }
-        whole(1, 2, 1116);
+        whole(1, 2, adjacentTimeout ? 1141 : 1116);
         const auto done = output.stopSaving();
         check(until([&] { return output.savingApplied(done); }), "new request settles");
         output.stop();
@@ -815,26 +834,53 @@ int main(int argc, char** argv)
         const auto contains = [&](int card, std::uint16_t trigger, Outcome why) {
             return std::find(outcomes.begin(), outcomes.end(), std::make_tuple(card, trigger, why)) != outcomes.end();
         };
-        const auto oldCount = mode == TailCase::Expired ? 1 : mode == TailCase::EarlyNext ? 2 : 3;
+        const auto oldCount = mode == TailCase::Expired ? 1 : 3;
         check(settled[0].confirmed == 3 && settled[1].confirmed == std::uint64_t(oldCount),
               "old request confirms just its own columns");
+        check(settled[0].admitted == 3 && settled[0].rejected == 0 &&
+              settled[1].admitted == std::uint64_t(oldCount) &&
+              settled[1].rejected == (mode == TailCase::EarlyNext || adjacentTimeout ? 1u : 0u),
+              "old save counts follow the frame admission decisions");
+        check(nextSettled[1].admitted == 1 && nextSettled[1].rejected == 0 && nextSettled[1].confirmed == 1,
+              "reopened request owns only its next-round frame");
+        check(std::count_if(outcomes.begin(), outcomes.end(), [](const auto& outcome) {
+            return std::get<0>(outcome) == 1 && std::get<1>(outcome) == 0;
+        }) == 1, "slow card final has exactly one receipt");
         for (const auto lane : {'A', 'B'}) {
             const auto oldPath = QDir(initial.directory).filePath(QString("Card2_Ch%1_wrap_000.dat").arg(QChar(lane)));
             const auto newPath = QDir(newRoot.path()).filePath(QString("Card2_Ch%1_next_000.dat").arg(QChar(lane)));
-            check(hasSize(oldPath, oldCount * samples * 2), "old paired lanes match expected Count tail");
+            check(hasSize(oldPath, (split ? 2 : oldCount) * samples * 2), "old paired lanes match expected Count tail");
+            const auto finalPath = split ? QDir(initial.directory).filePath(
+                QString("Card2_Ch%1_wrap_001.dat").arg(QChar(lane))) : oldPath;
+            if (mode != TailCase::Expired) {
+                QFile finalFile(finalPath);
+                QByteArray lastColumn(samples * 2, '\0'), expected(samples * 2, '\0');
+                for (int sample = 0; sample < samples; ++sample) expected[2 * sample + 1] = 0x3c;
+                check(finalFile.open(QIODevice::ReadOnly) && finalFile.seek(split ? 0 : 4 * samples) &&
+                      finalFile.read(lastColumn.data(), lastColumn.size()) == lastColumn.size() &&
+                      lastColumn == expected, "official Count pair carries the exact last waveform");
+            }
             check(allHalfValues(newPath, 0x4200, samples), "restart contains only its own next-round waveform");
         }
         QFile sidecar(dataFile(initial.directory, 1, "wrap") + ".jsonl");
         check(sidecar.open(QIODevice::ReadOnly), "old slow-card evidence sealed");
         sidecar.readLine();
         for (int col = 0; col < oldCount; ++col) {
+            if (split && col == 2) {
+                check(QJsonDocument::fromJson(sidecar.readLine()).object().value("confirmedColumns").toInt(-1) == 2,
+                      "capacity split seals the preceding pair");
+                sidecar.close();
+                sidecar.setFileName(QDir(initial.directory).filePath("Card2_ChA_wrap_001.dat.jsonl"));
+                check(sidecar.open(QIODevice::ReadOnly), "split pair has evidence");
+                sidecar.readLine();
+            }
             const auto row = QJsonDocument::fromJson(sidecar.readLine()).object();
-            check(row.value("logicalIndex").toInt(-1) == col &&
+            check(!row.value("late").toBool(true) && row.value("logicalIndex").toInt(-1) == col &&
                   row.value("triggerSeq").toInt(-1) == (65534 + col) % 65536 &&
                   row.value("complete").toBool() == !(mode == TailCase::Partial && col == 1),
                   "logical indices, wrap and source completeness stay truthful");
         }
-        check(QJsonDocument::fromJson(sidecar.readLine()).object().value("confirmedColumns").toInt(-1) == oldCount,
+        check(QJsonDocument::fromJson(sidecar.readLine()).object().value("confirmedColumns").toInt(-1) == (split ? 1 : oldCount),
               "old slow-card seal follows admitted source frames");
         if (mode == TailCase::Complete) {
             check(contains(1, 65535, Outcome::Admitted) && contains(1, 0, Outcome::Admitted),
@@ -842,8 +888,10 @@ int main(int argc, char** argv)
         } else if (mode == TailCase::Partial) {
             check(contains(1, 65535, Outcome::SourceIncomplete), "partial source distinguished from save rejection");
         } else {
-            check(contains(1, 0, Outcome::SourceMissing), "missing source settled without an idle watermark");
-            if (mode == TailCase::EarlyNext)
+            check(mode == TailCase::Expired ? contains(1, 0, Outcome::Expired) :
+                  contains(1, 0, Outcome::Admitted), "old final has a single admission or expiry");
+            check(!contains(1, 0, Outcome::SourceMissing), "new-round source does not prove a missing old final");
+            if (mode == TailCase::EarlyNext || adjacentTimeout)
                 check(contains(1, 1, Outcome::UnverifiedRound), "early next assembly cannot qualify merely by ingress time");
         }
     }
