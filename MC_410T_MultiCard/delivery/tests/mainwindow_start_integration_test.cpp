@@ -889,6 +889,9 @@ public:
                 const auto delayA = widget<QLineEdit>(window, "edtADelay")->text().toInt();
                 const auto delayB = widget<QLineEdit>(window, "edtBDelay")->text().toInt();
                 window.onStartMeasureClicked();
+                if (acquisitionNs == durationNs)
+                    check(window.m_chkRealtimeImaging->isChecked() && !window.m_btnImagingConfig->isEnabled(),
+                          "measurement freeze must not unlock the imaging parameters during service restart");
                 card.expectCommand(paimage::configCommand(acquisitionNs, delayA, delayB));
                 card.send(8000, std::vector<unsigned char>(60));
                 waitFor([&] { return window.m_isMeasuring; }, "measurement really started");
@@ -969,6 +972,8 @@ public:
                 check(window.m_measurementRingImagingAvailable.load(), "optional calibration leaves FBP available");
                 waitFor([&] { return controller.m_testSvcStarts > starts && window.m_imagingServiceReady.load(); },
                         "reconfigured FBP service becomes ready before the next round");
+                check(window.m_chkRealtimeImaging->isChecked() && !window.m_btnImagingConfig->isEnabled(),
+                      "imaging configuration stays locked after service readiness");
                 const auto& effective = controller.m_fbpSettings;
                 check(effective.enabled && effective.angleOffset[0] == (pass == 1 ? 1.5 : 0.) &&
                       effective.delayOffset[0][1] == (pass == 1 ? .25 : 0.) && effective.artifact.isEmpty(),
@@ -1016,6 +1021,8 @@ public:
                           QSize(ring_png::kEdge, ring_png::kEdge), "one decodable terminal PNG per wavelength in this FBP round");
                 }
                 stopAndCheckRaw(pngDirectory, durationNs, triggers, round);
+                check(window.m_chkRealtimeImaging->isChecked() && !window.m_btnImagingConfig->isEnabled(),
+                      "stopping acquisition alone must not unlock resident real-time imaging");
                 constexpr const char* scenarios[]{"empty", "valid with offsets", "removed before START"};
                 std::cout << "PASS " << scenarios[pass] << ": exact_fbp, raw A/B, sealed sidecar and PNG pair\n";
             }
@@ -1098,6 +1105,7 @@ public:
             auto start = [&] {
                 // Actual UI signal -> production MainWindow::onRealtimeImagingToggled.
                 checkbox->setChecked(true);
+                check(!window.m_btnImagingConfig->isEnabled(), "imaging parameters lock on the initial check");
                 try {
                     waitFor([&] { return controller.isRunning() && window.m_imagingEnabled
                         && window.m_imagingServiceReady.load() && checkbox->isEnabled(); }, "valid startup did not become ready");
@@ -1105,14 +1113,24 @@ public:
                     std::cerr << logView->toPlainText().toStdString() << '\n';
                     throw;
                 }
-                check(checkbox->isChecked() && !depth->isEnabled(), "running UI not locked");
+                check(checkbox->isChecked() && !depth->isEnabled() && !window.m_btnImagingConfig->isEnabled(),
+                      "running UI not locked");
             };
             auto stop = [&] {
                 checkbox->setChecked(false);
+                if (controller.hasActiveService()) {
+                    window.freezeMeasurementConfig(false);
+                    check(!window.m_btnImagingConfig->isEnabled(), "imaging parameters unlock only after service stops");
+                }
                 waitFor([&] { return !controller.isRunning() && !window.m_imagingEnabled
                     && controlsAvailable() && !controller.m_ringMapping.data(); }, "normal stop failed");
                 check(!checkbox->isChecked(), "stop left checkbox checked");
             };
+            check(controlsAvailable(), "imaging parameters are editable before enabling imaging");
+            window.freezeMeasurementConfig(true);
+            check(window.m_btnImagingConfig->isEnabled() && !depth->isEnabled(),
+                  "raw-only measurement may stage Ring settings for the next measurement");
+            window.freezeMeasurementConfig(false);
             start();
             check(controller.ringTimevarConfig().enabled && controller.ringConfig().sampDepth == 5000,
                   "enabled configuration not accepted through MainWindow");

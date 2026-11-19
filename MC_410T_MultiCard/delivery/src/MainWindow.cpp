@@ -741,7 +741,9 @@ MainWindow::MainWindow(QWidget *parent)
         m_imagingServiceReady.store(true, std::memory_order_release);
         if (m_chkRealtimeImaging) {
             QSignalBlocker blocker(m_chkRealtimeImaging);
-            m_chkRealtimeImaging->setChecked(m_imagingController->isRunning());
+            const bool running = m_imagingController->isRunning();
+            m_chkRealtimeImaging->setChecked(running);
+            if (running) setImagingParamControlsEnabled(false);
         }
         updateRingImagingStatus();
     });
@@ -2907,8 +2909,10 @@ void MainWindow::onRealtimeImagingToggled(bool checked)
             recordDiagnosticAction(QStringLiteral("imaging_start_failed"),
                 {{"monotonicNs", QString::number(paimage::SocketReceiver::now())}});
             stopRingFeedWorker();
+            const QSignalBlocker blocker(m_chkRealtimeImaging);
+            m_chkRealtimeImaging->setChecked(false);
             m_chkRealtimeImaging->setEnabled(true);
-            setImagingParamControlsEnabled(true);   // 启动失败：立即恢复
+            setImagingParamControlsEnabled(!m_imagingController->hasActiveService());
         }
     } else {
         // 停止成像
@@ -2948,16 +2952,15 @@ void MainWindow::freezeMeasurementConfig(bool frozen)
     }
     if (m_ringConfigDialog) m_ringConfigDialog->setMeasurementConfigFrozen(frozen);
     if (m_cmbImagingMode) m_cmbImagingMode->setEnabled(!frozen);
-    const bool serviceActive = (m_imagingController && m_imagingController->isRunning()) ||
+    const bool serviceActive = (m_imagingController && m_imagingController->hasActiveService()) ||
         (m_chkRealtimeImaging && m_chkRealtimeImaging->isChecked());
     setImagingParamControlsEnabled(!serviceActive);
 }
 
 void MainWindow::setImagingParamControlsEnabled(bool enable)
 {
-    const bool canStageRingConfig = m_measurementConfigFrozen && m_cmbImagingMode &&
-        m_cmbImagingMode->currentIndex() == 1;
-    if (m_btnImagingConfig) m_btnImagingConfig->setEnabled(enable || canStageRingConfig);
+    if (m_btnImagingConfig)
+        m_btnImagingConfig->setEnabled(enable && (!m_chkRealtimeImaging || !m_chkRealtimeImaging->isChecked()));
     enable = enable && !m_measurementConfigFrozen;
     if (ui->edtDataTime)    ui->edtDataTime->setEnabled(enable);
     if (ui->edtADelay)      ui->edtADelay->setEnabled(enable);
@@ -5013,12 +5016,12 @@ void MainWindow::onImagingError(const QString &error)
     logMessage(QString("成像错误: %1").arg(error));
     m_imagingTimer->stop();
     m_imagingEnabled = false;
-    setImagingParamControlsEnabled(true);   // 启动失败等场景不会经过 svcStopped，直接恢复控件
     if (m_chkRealtimeImaging) {
         m_chkRealtimeImaging->setEnabled(true);
         QSignalBlocker blocker(m_chkRealtimeImaging);
         m_chkRealtimeImaging->setChecked(false);
     }
+    setImagingParamControlsEnabled(true);   // 启动失败等场景不会经过 svcStopped，直接恢复控件
     if (m_lblImagingStatus) {
         m_lblImagingStatus->setText("成像错误");
         m_lblImagingStatus->setStyleSheet(
