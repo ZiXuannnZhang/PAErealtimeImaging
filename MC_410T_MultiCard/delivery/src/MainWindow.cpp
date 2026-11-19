@@ -5620,17 +5620,16 @@ void MainWindow::queueTerminalPng(const paimage::RoundIdentity& round,
 
 void MainWindow::queueTimeoutPng(paimage::RoundIdentity round, paimage::TimeoutPresentation::Job job)
 {
-    constexpr std::size_t kMaxBytes = 128u * 1024u * 1024u;
-    constexpr std::size_t kPngBytes = 2 * ImagingDisplayWindow::kPngEdge *
-        ImagingDisplayWindow::kPngEdge * sizeof(QRgb);
     const auto target = job.target;
     auto report = [this, round, target](const QString& status, const QString& retained = {}) {
         reportRingPng(round, target, 0, status, retained, RingPngKind::Timeout);
     };
     const std::lock_guard<std::mutex> lock(m_timeoutPngMutex);
     if (m_timeoutPngClosed || !job) return;
-    if (m_timeoutPngBusy || job.capture.frameBytes > kMaxBytes - kPngBytes) {
-        report(m_timeoutPngBusy ? QStringLiteral("png_queue_full") : QStringLiteral("png_byte_budget"));
+    const auto bytes = job.capture.frameBytes;
+    if (m_timeoutPngBusy || bytes == 0 || bytes != paimage::TimeoutPresentation::Capture::checkedFrameBytes(
+            job.capture.nx, bytes / sizeof(float))) {
+        report(m_timeoutPngBusy ? QStringLiteral("png_queue_full") : QStringLiteral("invalid_capture_layout"));
         return;
     }
     m_timeoutPngBusy = true;

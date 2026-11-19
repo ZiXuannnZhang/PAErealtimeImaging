@@ -6,6 +6,14 @@
 void check(bool b,const char* message){if(!b)throw std::runtime_error(message);}
 int main(){
     using namespace paimage;
+    using Capture = TimeoutPresentation::Capture;
+    for (int nx : {3600, 3770, 3771, 4000}) {
+        const auto floats = std::size_t(nx) * nx * 2;
+        check(Capture::checkedFrameBytes(nx, floats) == floats * sizeof(float), "valid paired capture size");
+        check(Capture::checkedFrameBytes(nx, floats - 1) == 0, "invalid paired pixel count");
+    }
+    check(Capture::checkedFrameBytes((std::numeric_limits<int>::max)(),
+          (std::numeric_limits<std::size_t>::max)()) == 0, "oversized grid rejected before multiplication");
     TimeoutPresentation presentation;
     presentation.configure(true,"new-ui-directory/recon_png","suffix");
     auto pixels=std::make_shared<int>(42);

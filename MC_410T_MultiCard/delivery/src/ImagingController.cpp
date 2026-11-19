@@ -345,7 +345,7 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
     const auto alines = std::int64_t(ringCfg.enabledChannelCount) * ringCfg.alinesPerChannelPerBlock;
     constexpr auto maxInt = (std::numeric_limits<int>::max)();
     if (!(ringCfg.fov > 0 && ringCfg.gridSize > 0 && grid >= 1 &&
-          grid <= (std::numeric_limits<std::uint16_t>::max)() && grid * grid <= maxInt) ||
+          grid <= (std::numeric_limits<std::uint16_t>::max)()) ||
         ringCfg.enabledChannelCount < 1 || ringCfg.enabledChannelCount > 8 ||
         alines <= 0 || alines > maxInt || ringCfg.sampDepth <= 0 ||
         ringCfg.sampDepth > maxInt / alines) {
@@ -353,7 +353,8 @@ bool ImagingController::configureRing(const RingReconCudaConfig &ringCfg,
         return false;
     }
     const int nx = static_cast<int>(grid);
-    RingLayout layout{nx, int(ringCfg.sampDepth * alines), int(alines), nx * nx, {}, 0};
+    RingLayout layout{nx, int(ringCfg.sampDepth * alines), int(alines),
+                      int(ring_snapshot::checkedSquareFrameSize(nx)), {}, 0};
     if (!ring_snapshot::checkedLayout(layout.blockSize, layout.alines, layout.frameSize, layout.bytes)) {
         emit svcError(QStringLiteral("Ring shared memory layout exceeds addressable size"));
         return false;

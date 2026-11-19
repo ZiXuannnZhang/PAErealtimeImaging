@@ -442,12 +442,11 @@ paimage::TimeoutPresentation::Capture ImagingDisplayWindow::makePngCapture(
     RingImageWidget::Range range1, RingImageWidget::Range range2,
     std::shared_ptr<const DisplayMask> mask, QString tag)
 {
-    if (srcN <= 0 || !frame || frame->size() < static_cast<size_t>(srcN) * srcN * 2)
-        return {};
-    const auto bytes = frame->size() * sizeof(float);
+    const auto bytes = frame ? paimage::TimeoutPresentation::Capture::checkedFrameBytes(srcN, frame->size()) : 0;
+    if (!bytes) return {};
     return {bytes, std::move(tag), [frame = std::move(frame), range1, range2, mask = std::move(mask), srcN] {
         return renderPngPair(*frame, srcN, range1, range2, mask);
-    }};
+    }, srcN};
 }
 
 ImagingDisplayWindow::PngPair ImagingDisplayWindow::renderPngPair(

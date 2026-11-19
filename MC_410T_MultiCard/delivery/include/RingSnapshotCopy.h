@@ -13,6 +13,13 @@ struct Layout {
     std::size_t mappingBytes = 0;
 };
 
+inline std::size_t checkedSquareFrameSize(std::size_t nx) {
+    constexpr auto maxPixels = (std::numeric_limits<int>::max)();
+    if (!nx || nx > (std::numeric_limits<std::uint16_t>::max)() || nx > maxPixels / nx)
+        return 0;
+    return nx * nx;
+}
+
 inline bool checkedLayout(std::size_t blockSize, std::size_t alines,
                           std::size_t frameSize, Layout &layout) {
     constexpr auto max = (std::numeric_limits<std::size_t>::max)();

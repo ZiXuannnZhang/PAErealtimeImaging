@@ -1,5 +1,6 @@
 #pragma once
 #include "RingRoundUiState.h"
+#include "RingSnapshotCopy.h"
 #include <QDir>
 #include <QImage>
 #include <array>
@@ -15,9 +16,18 @@ namespace paimage {
 class TimeoutPresentation {
 public:
     struct Capture {
+        static std::size_t checkedFrameBytes(int nx, std::size_t floats) {
+            if (nx <= 0) return 0;
+            const auto pixels = ring_snapshot::checkedSquareFrameSize(std::size_t(nx));
+            ring_snapshot::Layout layout;
+            if (!ring_snapshot::checkedLayout(0, 0, pixels, layout) ||
+                floats != layout.frameBytes / sizeof(float)) return 0;
+            return layout.frameBytes;
+        }
         std::size_t frameBytes = 0;
         QString tag;
         std::function<std::array<QImage, 2>()> render;
+        int nx = 0;
         explicit operator bool() const { return bool(render); }
     };
     struct Target {
